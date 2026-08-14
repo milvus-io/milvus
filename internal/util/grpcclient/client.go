@@ -97,8 +97,9 @@ type GrpcClient[T GrpcComponent] interface {
 type ClientBase[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 }] struct {
-	getAddrFunc   func() (string, error)
-	newGrpcClient func(cc *grpc.ClientConn) T
+	getAddrFunc            func() (string, error)
+	getAddrFuncWithContext func(context.Context) (string, error)
+	newGrpcClient          func(cc *grpc.ClientConn) T
 
 	// grpcClient             T
 	grpcClient            *clientConnWrapper[T]
@@ -186,6 +187,14 @@ func (c *ClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
 	c.getAddrFunc = f
 }
 
+// SetGetAddrFuncWithContext installs an address resolver that observes the
+// current RPC context. Coordinators backed by service discovery should prefer
+// this form so a blocked etcd lookup cannot outlive the request deadline.
+// SetGetAddrFunc remains available for clients whose address is purely local.
+func (c *ClientBase[T]) SetGetAddrFuncWithContext(f func(context.Context) (string, error)) {
+	c.getAddrFuncWithContext = f
+}
+
 func (c *ClientBase[T]) EnableEncryption() {
 	c.encryption = true
 }
@@ -254,7 +263,15 @@ func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T], forceRese
 }
 
 func (c *ClientBase[T]) connect(ctx context.Context) error {
-	addr, err := c.getAddrFunc()
+	var (
+		addr string
+		err  error
+	)
+	if c.getAddrFuncWithContext != nil {
+		addr, err = c.getAddrFuncWithContext(ctx)
+	} else {
+		addr, err = c.getAddrFunc()
+	}
 	if err != nil {
 		mlog.Warn(ctx, "failed to get client address", mlog.Err(err))
 		return err

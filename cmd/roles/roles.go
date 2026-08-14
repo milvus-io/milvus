@@ -483,6 +483,7 @@ func (mr *MilvusRoles) Run() {
 	rootCredentialVerifier := adminauth.NewRootCredentialVerifier(ctx, mix.NewClient)
 	http.RegisterFallbackPasswordVerifyFunc(rootCredentialVerifier.Verify)
 	defer func() {
+		http.RegisterFallbackPasswordVerifyFunc(nil)
 		if err := rootCredentialVerifier.Close(); err != nil {
 			mlog.Warn(ctx, "close root credential verifier failed", mlog.Err(err))
 		}

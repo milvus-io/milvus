@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -60,9 +61,7 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.ReplicaLoadConfigCompliancePath, s.HandleReplicaLoadConfigCompliance},
 		}
 
-		// All /management/* routes are gated by common.security.adminAuthEnabled.
-		// When the flag is true, requests must present HTTP Basic Auth with the
-		// milvus root user's credentials.
+		// Loop through the slice and register each route.
 		for _, route := range routes {
 			management.Register(&management.Handler{
 				Path:        route.path,
@@ -1310,16 +1309,28 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Check for duplicate keys
-		if _, exists := seen[config.Key]; exists {
+		// Resolve the external key before any mutation. ParamItems use their
+		// historical separator-free identity; ParamGroup members retain dots so
+		// they remain visible to prefix readers and cannot collide with env
+		// aliases. Alias-equivalent request keys must count as duplicates.
+		canonicalKey, registeredKind := paramMgr.ResolveRegisteredConfigKey(config.Key)
+		if registeredKind == pkgconfig.RegisteredConfigUnknown {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify unregistered config",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// Check for duplicate keys after canonicalization.
+		if _, exists := seen[canonicalKey]; exists {
 			logger.Info(request.Context(), "HandleAlterConfig duplicate key found", mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
-		seen[config.Key] = struct{}{}
+		seen[canonicalKey] = struct{}{}
 
 		// Check if it's mqtype configuration
-		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
+		normalizedKey := strings.ToLower(strings.ReplaceAll(canonicalKey, "/", "."))
 		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype",
 				mlog.String("key", config.Key))
@@ -1328,17 +1339,33 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		}
 
 		// Check if the configuration is immutable - immutable keys cannot be modified
-		if paramMgr.IsImmutable(config.Key) {
+		if paramMgr.IsImmutable(canonicalKey) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
 		}
 
+		// Never write or delete credentials through the generic config endpoint.
+		// Secrets have their own lifecycle and must not be copied into etcd in
+		// cleartext, even when the caller is root.
+		if paramMgr.IsSensitive(canonicalKey) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify sensitive config",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+		if registeredKind == pkgconfig.RegisteredConfigGroup {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a dynamic ParamGroup key",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("dynamic ParamGroup configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
 		if config.Value != nil {
-			configsToUpdate[config.Key] = *config.Value
+			configsToUpdate[canonicalKey] = *config.Value
 		} else {
-			keysToDelete = append(keysToDelete, config.Key)
+			keysToDelete = append(keysToDelete, canonicalKey)
 		}
 	}
 
@@ -1407,20 +1434,16 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Deny declared sensitive ParamItems/ParamGroups and secret-like source
-		// keys before looking them up.
-		if paramMgr.IsSensitive(key) {
-			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
-			continue
-		}
-		// EnvSource imports the whole process environment. Only declared Milvus
-		// keys may cross this API boundary; name matching cannot identify opaque
-		// secrets such as DATABASE_URL or vendor-specific credentials.
-		if !paramMgr.IsConfigRegistered(key) {
+		canonicalKey, registeredKind := paramMgr.ResolveRegisteredConfigKey(key)
+		if registeredKind == pkgconfig.RegisteredConfigUnknown {
 			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
 			continue
 		}
-		source, value, err := paramMgr.GetConfig(key)
+		if paramMgr.IsSensitive(canonicalKey) {
+			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
+			continue
+		}
+		source, value, err := paramMgr.GetRegisteredConfig(canonicalKey)
 		if err != nil {
 			results = append(results, configResult{Key: key, Error: err.Error()})
 		} else {

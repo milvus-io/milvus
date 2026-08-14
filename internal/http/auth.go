@@ -20,6 +20,10 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/cockroachdb/errors"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -27,13 +31,10 @@ import (
 // authenticate the caller. Returning false invokes the handler as if no
 // wrapper were present.
 //
-// The two predefined policies cover all current call sites:
-//   - AuthAlways: endpoints whose mere existence implies authentication.
-//   - AuthByAdminFlag: endpoints gated by common.security.adminAuthEnabled.
+// AuthByAdminFlag is the production policy used by endpoints gated by
+// common.security.adminAuthEnabled. Tests can supply an always-true policy
+// directly when exercising the wrapper independently of configuration.
 type AuthPolicy func() bool
-
-// AuthAlways forces authentication on every request regardless of any flag.
-var AuthAlways AuthPolicy = func() bool { return true }
 
 // AuthByAdminFlag enables authentication when common.security.adminAuthEnabled
 // is true. Used by /management/*, /log/level, /eventlog and /debug/pprof/* —
@@ -62,16 +63,33 @@ func CheckAdminAuth(ctx context.Context, req *http.Request) error {
 	return CheckRootAuth(ctx, req, req.URL.Path)
 }
 
+// VerifyStoredRootPassword compares a plaintext password with the stored
+// bcrypt hash while preserving the distinction between caller error and
+// credential-store corruption. Only ErrMismatchedHashAndPassword means the
+// supplied password is wrong; malformed hashes are system failures and must
+// surface as 503 at the management boundary, not as a misleading 401.
+func VerifyStoredRootPassword(storedHash, password string) error {
+	err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+		return NewAuthenticationError("invalid root password")
+	}
+	return merr.WrapErrServiceInternalErr(err, "stored root credential hash is invalid")
+}
+
 // wrapAdminAuth wraps next with the management-plane authentication check. The
 // policy callback decides whether the check fires; a nil policy leaves the
 // handler untouched, which is how open endpoints (/healthz, /livez, /metrics,
 // /management/check/ready) stay reachable by k8s probes and Prometheus.
 //
 // Failures are rendered from the typed errors in rbac.go, so callers see 401
-// for bad credentials, 403 for a valid non-root user, and 503 on a node with no
-// credential verifier. No WWW-Authenticate header is emitted by design: callers
-// are API clients, and the header would make browsers pop a login dialog on
-// what is an API surface.
+// for missing credentials or a wrong root password, 403 for any non-root
+// username (rejected before password verification), and 503 when the root
+// credential cannot be checked. No WWW-Authenticate header is emitted by
+// design: callers are API clients, and the header would make browsers pop a
+// login dialog on what is an API surface.
 func wrapAdminAuth(next http.Handler, policy AuthPolicy) http.Handler {
 	if policy == nil {
 		return next

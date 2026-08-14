@@ -219,6 +219,22 @@ func TestGrpcListenAddress(t *testing.T) {
 	})
 }
 
+func TestListenerClientNotifyAfterStop(t *testing.T) {
+	client := newListenerClient()
+	client.Stop()
+	client.Stop()
+
+	// A logger Record may already hold the client after Listen has removed it
+	// and called Stop. Notification after that point must be a no-op, not a
+	// send-on-closed-channel panic.
+	client.Notify(NewRawEvt(Level_Info, "after-stop"))
+	select {
+	case <-client.closed:
+	default:
+		t.Fatal("client stop signal was not closed")
+	}
+}
+
 func resetGrpcLogger() {
 	grpcLogMu.Lock()
 	defer grpcLogMu.Unlock()
@@ -226,6 +242,39 @@ func resetGrpcLogger() {
 		logger.Close()
 	}
 	grpcLog.Store(nil)
+	grpcListenerModeSet = false
+	grpcListenerModeIsLocal = false
+}
+
+func TestConfiguredListenerModeWinsOverStaleDiscovery(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		configuredMode bool
+		staleMode      bool
+	}{
+		{name: "enable auth", configuredMode: true, staleMode: false},
+		{name: "disable auth", configuredMode: false, staleMode: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resetGrpcLogger()
+			t.Cleanup(resetGrpcLogger)
+
+			if err := EnsureListenerMode(test.configuredMode); err != nil {
+				t.Fatalf("configure eventlog listener mode: %v", err)
+			}
+			if grpcLog.Load() != nil {
+				t.Fatal("configuring listener mode must not open an unused port")
+			}
+
+			if _, err := getGrpcLoggerWithLocalOnly(test.staleMode); err != nil {
+				t.Fatalf("start eventlog listener: %v", err)
+			}
+			logger := grpcLog.Load()
+			if logger == nil || logger.localOnly != test.configuredMode {
+				t.Fatalf("listener localOnly = %v, want configured mode %v", logger != nil && logger.localOnly, test.configuredMode)
+			}
+		})
+	}
 }
 
 func TestGrpcLoggerUpgradesToLoopback(t *testing.T) {
@@ -307,6 +356,33 @@ func TestGrpcLoggerConcurrentUpgradeStaysLoopbackOnly(t *testing.T) {
 	}
 	if !secured.lis.Addr().(*net.TCPAddr).IP.IsLoopback() {
 		t.Fatalf("secured eventlog listener bound to %s, want loopback", secured.lis.Addr())
+	}
+}
+
+func TestGrpcLoggerDowngradesToWildcard(t *testing.T) {
+	resetGrpcLogger()
+	t.Cleanup(resetGrpcLogger)
+
+	if _, err := getGrpcLoggerWithLocalOnly(true); err != nil {
+		t.Fatalf("start secured eventlog listener: %v", err)
+	}
+	secured := grpcLog.Load()
+	if secured == nil || !secured.localOnly {
+		t.Fatal("expected loopback listener")
+	}
+
+	if err := EnsureListenerMode(false); err != nil {
+		t.Fatalf("downgrade eventlog listener: %v", err)
+	}
+	legacy := grpcLog.Load()
+	if legacy == nil || legacy.localOnly {
+		t.Fatal("expected wildcard listener after disabling admin auth")
+	}
+	if legacy == secured {
+		t.Fatal("changing listener mode must replace the listener")
+	}
+	if legacy.lis.Addr().(*net.TCPAddr).IP.IsLoopback() {
+		t.Fatal("wildcard listener unexpectedly remained loopback-only")
 	}
 }
 

@@ -39,6 +39,19 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	// Mark some keys as immutable for testing
 	mgr.ImmutableUpdate("test.immutable.key1")
+	for _, key := range []string{
+		"test.alter.config.key1",
+		"test.alter.config.legacy",
+		"test.alter.config.empty",
+		"test.alter.config.reset_me",
+		"test.alter.mixed.keep",
+		"test.alter.mixed.remove",
+		"test.alter.config.key2",
+		"test.alter.config.key3",
+		"test.immutable.key1",
+	} {
+		mgr.RegisterConfigKey(key)
+	}
 
 	coord := &mixCoordImpl{}
 
@@ -278,6 +291,30 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
 	})
 
+	t.Run("sensitive config should fail before etcd access", func(t *testing.T) {
+		const key = "test.alter.sensitive"
+		mgr.RegisterConfigKey(key)
+		mgr.RegisterSensitiveKey(key)
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "secret"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {
+		const key = "test.alter.unregistered"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "value"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "unregistered configuration")
+	})
+
 	t.Run("kafka producer message max bytes should be immutable", func(t *testing.T) {
 		key := paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key
 		require.True(t, mgr.IsImmutable(key))
@@ -328,14 +365,16 @@ func TestHandleGetConfig(t *testing.T) {
 	mgr.SetConfig("test.getconfig.key1", "val1")
 	mgr.SetConfig("test.getconfig.key2", "val2")
 	mgr.SetConfig("test.getconfig.key3", "val3")
+	mgr.SetConfig("test.getconfig.opaque", "opaque-secret")
 	mgr.SetConfig("credential.aksk1.secret_access_key", "param-group-secret")
 	mgr.SetConfig("kafka.consumer.ssl.key.pem", "inline-private-key")
 	mgr.SetConfig("function.analyzer.lindera.download_urls.ipadic", "https://example.invalid/dict?signature=secret")
 	mgr.SetConfig("pulsar.authParams", "token:broker-secret")
 	mgr.SetConfig("AWS_SECRET_ACCESS_KEY", "environment-secret")
-	for _, key := range []string{"test.getconfig.key1", "test.getconfig.key2", "test.getconfig.key3"} {
+	for _, key := range []string{"test.getconfig.key1", "test.getconfig.key2", "test.getconfig.key3", "test.getconfig.opaque"} {
 		mgr.RegisterConfigKey(key)
 	}
+	mgr.RegisterSensitiveKey("test.getconfig.opaque")
 
 	type configResult struct {
 		Key    string `json:"key"`
@@ -436,19 +475,21 @@ func TestHandleGetConfig(t *testing.T) {
 	})
 
 	t.Run("sensitive keys are redacted", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password", nil)
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password,test.getconfig.opaque", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		configs := parseResponse(t, w)
-		require.Len(t, configs, 3)
+		require.Len(t, configs, 4)
 		assert.Contains(t, configs[0].Error, "sensitive")
 		assert.Equal(t, "val1", configs[1].Value)
 		assert.Contains(t, configs[2].Error, "sensitive")
+		assert.Contains(t, configs[3].Error, "sensitive")
+		assert.NotContains(t, w.Body.String(), "opaque-secret")
 	})
 
-	t.Run("sensitive ParamGroup and unknown environment keys are redacted", func(t *testing.T) {
+	t.Run("sensitive ParamGroup and unknown environment keys are denied", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=credential.aksk1.secret_access_key,kafka.consumer.ssl.key.pem,function.analyzer.lindera.download_urls.ipadic,pulsar.authParams,AWS_SECRET_ACCESS_KEY", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
@@ -456,9 +497,10 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		configs := parseResponse(t, w)
 		require.Len(t, configs, 5)
-		for _, config := range configs {
-			assert.Contains(t, config.Error, "sensitive")
+		for _, result := range configs[:4] {
+			assert.Contains(t, result.Error, "sensitive")
 		}
+		assert.Contains(t, configs[4].Error, "unregistered")
 		assert.NotContains(t, w.Body.String(), "param-group-secret")
 		assert.NotContains(t, w.Body.String(), "inline-private-key")
 		assert.NotContains(t, w.Body.String(), "signature=secret")
@@ -466,9 +508,9 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.NotContains(t, w.Body.String(), "environment-secret")
 	})
 
-	t.Run("unknown environment keys are never exposed", func(t *testing.T) {
-		mgr.SetConfig("OPAQUE_RUNTIME_VALUE", "must-not-be-exposed")
-		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=OPAQUE_RUNTIME_VALUE", nil)
+	t.Run("unregistered keys are denied", func(t *testing.T) {
+		mgr.SetConfig("test.getconfig.unknown", "unknown-secret")
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.unknown", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
 
@@ -476,7 +518,7 @@ func TestHandleGetConfig(t *testing.T) {
 		configs := parseResponse(t, w)
 		require.Len(t, configs, 1)
 		assert.Contains(t, configs[0].Error, "unregistered")
-		assert.NotContains(t, w.Body.String(), "must-not-be-exposed")
+		assert.NotContains(t, w.Body.String(), "unknown-secret")
 	})
 
 	t.Run("all empty keys should fail", func(t *testing.T) {
@@ -496,4 +538,24 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 		assert.Contains(t, w.Body.String(), "Method not allowed")
 	})
+}
+
+func TestHandleAlterConfigRejectsDynamicParamGroup(t *testing.T) {
+	paramtable.Init()
+	mgr := paramtable.GetBaseTable().Manager()
+	mgr.RegisterConfigPrefix("test.dynamic.group.")
+
+	body, err := json.Marshal(map[string]interface{}{
+		"configs": []map[string]interface{}{
+			{"key": "test/dynamic/group/option", "value": "value"},
+		},
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/management/config/alter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	(&mixCoordImpl{}).HandleAlterConfig(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "dynamic ParamGroup configuration cannot be modified")
 }

@@ -106,6 +106,7 @@ func TestRegisterRestRouterProtectsOperatorRoutes(t *testing.T) {
 		{method: http.MethodGet, path: "/_telemetry/clients/client-1/history"},
 		{method: http.MethodPost, path: mhttp.TelemetryCommandsPath},
 		{method: http.MethodDelete, path: mhttp.TelemetryCommandsPath + "/command-1"},
+		{method: http.MethodGet, path: "/_telemetry/commands/command-1/reply"},
 	}
 
 	for _, test := range tests {

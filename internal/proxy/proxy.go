@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
@@ -316,6 +317,9 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
+	internalhttp.RegisterProxyCredentialVerifyFunc(nil)
+	internalhttp.RegisterPasswordVerifyFunc(nil)
+
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))

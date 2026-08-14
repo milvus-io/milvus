@@ -12,7 +12,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -187,7 +186,7 @@ func (s *mixCoordImpl) initInternal() error {
 	// registered), so without this the auth wrapper returns
 	// "password verification is not available on this node" when adminAuthEnabled=true.
 	// We bind directly to rootcoord's credential RPC to avoid an extra cache layer.
-	internalhttp.RegisterPasswordVerifyFunc(s.verifyRootCredential)
+	internalhttp.RegisterCoordinatorCredentialVerifyFunc(s.verifyRootCredential)
 
 	// DataCoord and QueryCoord are independent of each other;
 	// both only depend on RootCoord being ready. Initialize and start them in parallel.
@@ -267,29 +266,30 @@ func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 //
 // Only the root user is permitted: the management endpoints are administrative
 // and should not be reachable by non-root users even if their credentials are
-// valid. The username==root check is also enforced in checkBasicRootAuth, so
+// valid. The username==root check is also enforced in CheckRootAuth, so
 // this is defense-in-depth.
-func (s *mixCoordImpl) verifyRootCredential(ctx context.Context, username, password string) bool {
+func (s *mixCoordImpl) verifyRootCredential(ctx context.Context, username, password string) error {
 	if username != util.UserRoot {
-		return false
+		return internalhttp.NewAuthenticationError("invalid root password")
 	}
 	resp, err := s.rootcoordServer.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
 		Username: username,
 	})
 	if err != nil {
 		mlog.Warn(ctx, "verifyRootCredential: GetCredential failed", mlog.Err(err))
-		return false
+		return merr.Wrap(err, "GetCredential failed")
+	}
+	if resp == nil {
+		return merr.WrapErrServiceInternal("GetCredential returned an empty response")
 	}
 	if err := merr.Error(resp.GetStatus()); err != nil {
 		mlog.Warn(ctx, "verifyRootCredential: GetCredential returned error", mlog.Err(err))
-		return false
+		return merr.Wrap(err, "GetCredential returned error")
 	}
-	if bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) != nil {
-		// Don't log the failure here; the caller logs at the wrapper level
-		// with the request path, which is more useful for triage.
-		return false
+	if resp.GetPassword() == "" {
+		return merr.WrapErrServiceInternal("credential store returned an empty hash")
 	}
-	return true
+	return internalhttp.VerifyStoredRootPassword(resp.GetPassword(), password)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
@@ -380,6 +380,7 @@ func (s *mixCoordImpl) posixCleanupLoop(ctx context.Context) {
 
 func (s *mixCoordImpl) Stop() error {
 	mlog.Info(s.ctx, "graceful stop")
+	internalhttp.RegisterCoordinatorCredentialVerifyFunc(nil)
 
 	s.stopPosixCleanupTask()
 

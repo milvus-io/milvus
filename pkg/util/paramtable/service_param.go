@@ -1204,7 +1204,8 @@ Environment variable: PULSAR_ADDRESS
 pulsar.address and pulsar.port together generate the valid access to Pulsar.
 Pulsar preferentially acquires the valid IP address from the environment variable PULSAR_ADDRESS when Milvus is started.
 Default value applies when Pulsar is running on the same network with Milvus.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1221,6 +1222,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
+		Sensitive:    true,
 		Formatter: func(add string) string {
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
@@ -1349,6 +1351,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "localhost:9092",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	k.Address.Init(base.mgr)
 

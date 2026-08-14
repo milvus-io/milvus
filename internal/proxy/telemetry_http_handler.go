@@ -38,6 +38,16 @@ import (
 // It checks if authentication is enabled and validates username/password.
 func TelemetryAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// adminAuthMiddleware performs the root-only management check when its
+		// flag is enabled. Do not run the legacy RBAC verifier first: in a
+		// standalone process the management verifier may be the only available
+		// checker, and a nil privilege cache would otherwise panic or turn a
+		// credential-store outage into a misleading 401.
+		if Params.CommonCfg.AdminAuthEnabled.GetAsBool() {
+			c.Next()
+			return
+		}
+
 		// Check if authorization is enabled
 		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 			c.Next()

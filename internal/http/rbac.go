@@ -117,9 +117,9 @@ func checkExprRootAuth(ctx context.Context, req *http.Request) error {
 // The returned error carries the intended HTTP status via the typed errors in
 // this file, so callers should render it with HTTPStatusFromPrivilegeError:
 //
-//   - missing/blank credentials or wrong password -> ErrAuthentication  (401)
-//   - a non-root user's valid credentials         -> ErrPermissionDenied (403)
-//   - no credential verifier on this node         -> ErrServiceUnavailable (503)
+//   - missing/blank credentials or wrong root password -> ErrAuthentication  (401)
+//   - any non-root username (password is not checked)  -> ErrPermissionDenied (403)
+//   - no credential verifier on this node              -> ErrServiceUnavailable (503)
 //
 // The 503 case matters operationally: nodes that do not host credential
 // metadata cannot verify a password, and reporting that as 401 would send
@@ -159,11 +159,13 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 		return &ErrAuthentication{msg: "authentication required"}
 	}
 
-	// Verify password
-	if err := verifyPassword(ctx, username, password, req.URL.Path); err != nil {
+	// Verify password with the proxy-owned RBAC verifier. Management-plane
+	// root verification is intentionally separate: MixCoord may register a
+	// root-only typed verifier in the same process, and it must not reject
+	// otherwise valid non-root RBAC users.
+	if err := verifyRBACPassword(ctx, username, password); err != nil {
 		if IsAuthenticationError(err) {
 			mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
-			return &ErrAuthentication{msg: "invalid credentials"}
 		}
 		return err
 	}

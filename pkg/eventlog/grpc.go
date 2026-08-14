@@ -29,9 +29,11 @@ import (
 )
 
 var (
-	grpcLog        atomic.Pointer[grpcLogger]
-	grpcLogMu      sync.Mutex
-	grpcListenFunc = net.Listen
+	grpcLog                 atomic.Pointer[grpcLogger]
+	grpcLogMu               sync.Mutex
+	grpcListenerModeSet     bool
+	grpcListenerModeIsLocal bool
+	grpcListenFunc          = net.Listen
 )
 
 // grpcLogger is a Logger with dispatches streaming Evt to client listeners.
@@ -101,6 +103,7 @@ func (l *grpcLogger) Listen(req *ListenRequest, svr EventLogService_ListenServer
 		case <-svr.Context().Done():
 			return nil
 		case <-client.closed:
+			return nil
 		}
 	}
 }
@@ -139,7 +142,23 @@ func getGrpcLogger() (int, error) {
 // runtime so a previously discovered eventlog port cannot remain remotely
 // reachable until the next HTTP discovery request.
 func EnsureLocalOnly() error {
-	_, err := getGrpcLoggerWithLocalOnly(true)
+	return EnsureListenerMode(true)
+}
+
+// EnsureListenerMode records the configured listener mode and switches an
+// already-created listener when necessary. Recording the mode even before
+// discovery prevents a request that observed stale configuration from opening
+// a wildcard listener after management authentication has been enabled.
+func EnsureListenerMode(localOnly bool) error {
+	grpcLogMu.Lock()
+	defer grpcLogMu.Unlock()
+
+	grpcListenerModeSet = true
+	grpcListenerModeIsLocal = localOnly
+	if grpcLog.Load() == nil {
+		return nil
+	}
+	_, err := getGrpcLoggerLocked(localOnly)
 	return err
 }
 
@@ -153,16 +172,19 @@ func getGrpcLoggerWithLocalOnly(localOnly bool) (int, error) {
 	// success while the listener remains remotely reachable.
 	grpcLogMu.Lock()
 	defer grpcLogMu.Unlock()
+	if grpcListenerModeSet {
+		localOnly = grpcListenerModeIsLocal
+	}
+	return getGrpcLoggerLocked(localOnly)
+}
 
+func getGrpcLoggerLocked(localOnly bool) (int, error) {
 	if current := grpcLog.Load(); current != nil {
-		// Enabling the gate at runtime must not leave a listener that was
-		// previously opened on all interfaces. A loopback listener is still safe
-		// if the flag is later disabled, so no downgrade/rebind is needed.
-		if !localOnly || current.localOnly {
+		if current.localOnly == localOnly {
 			return current.port, nil
 		}
-		// Stop existing streams as well as the wildcard listener before
-		// publishing the secured replacement.
+		// Stop existing streams and replace the listener so dynamic transitions
+		// match the configured mode in both directions.
 		current.Close()
 		grpcLog.Store(nil)
 	}
@@ -208,6 +230,8 @@ func newListenerClient() *listenerClient {
 
 func (c *listenerClient) Notify(l Evt) {
 	select {
+	case <-c.closed:
+		return
 	case c.ch <- l:
 	default:
 	}
@@ -215,6 +239,11 @@ func (c *listenerClient) Notify(l Evt) {
 
 func (c *listenerClient) Stop() {
 	c.once.Do(func() {
-		close(c.ch)
+		// Keep ch open: Record may already have loaded this client from the
+		// concurrent map and be about to Notify it. Closing the send channel
+		// would turn a normal listener shutdown or mode switch into a
+		// send-on-closed-channel panic. closed is the ownership signal; queued
+		// events may be discarded once the listener exits.
+		close(c.closed)
 	})
 }

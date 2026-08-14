@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -1250,6 +1251,22 @@ func TestPasswordVerify(t *testing.T) {
 	// Sha256Password already exists within cache
 	assert.True(t, passwordVerify(ctx, username, password, privilegeCache))
 	assert.Equal(t, 2, invokedCount)
+}
+
+func TestPasswordVerifyForHTTPRejectsMalformedStoredHashAsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	privilege.ResetPrivilegeCacheForTest()
+	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	require.NoError(t, privilege.InitPrivilegeCache(ctx, NewMixCoordMock()))
+
+	privilege.GetPrivilegeCache().UpdateCredential(&internalpb.CredentialInfo{
+		Username:          util.UserRoot,
+		EncryptedPassword: "malformed-bcrypt-hash",
+	})
+	err := PasswordVerifyForHTTP(ctx, util.UserRoot, "correct-password")
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err),
+		"a corrupt stored hash must render 503, not 401")
 }
 
 func BenchmarkPasswordVerifyCacheHit(b *testing.B) {

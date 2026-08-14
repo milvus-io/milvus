@@ -49,12 +49,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
@@ -1442,6 +1444,84 @@ func TestHttpAuthenticate(t *testing.T) {
 		authenticate(ctx)
 		ctxName, _ := ctx.Get(httpserver.ContextUsername)
 		assert.Equal(t, "foo", ctxName)
+	}
+}
+
+func TestHttpAuthenticatePreservesManagementStoreFailure(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		mhttp.RegisterProxyCredentialVerifyFunc(nil)
+		hookutil.SetMockAPIHook("", nil)
+	})
+
+	const internalCause = "credential backend sentinel must stay private"
+	mhttp.RegisterProxyCredentialVerifyFunc(func(context.Context, string, string) error {
+		return errors.New(internalCause)
+	})
+	hookutil.SetMockAPIHook("root", nil)
+
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodGet, apiPathPrefix+mhttp.ClusterConfigsPath, nil)
+	ctx.Request.SetBasicAuth(util.UserRoot, "correct-password")
+	authenticate(ctx)
+
+	assert.True(t, ctx.IsAborted())
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.NotContains(t, w.Body.String(), internalCause)
+	assert.Contains(t, w.Body.String(), "credential store is unreachable")
+	assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+}
+
+func TestHttpAuthenticateRejectsAnyNonRootAdminUserBeforePasswordVerification(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	verifierCalls := 0
+	mhttp.RegisterProxyCredentialVerifyFunc(func(context.Context, string, string) error {
+		verifierCalls++
+		return nil
+	})
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		mhttp.RegisterProxyCredentialVerifyFunc(nil)
+	})
+
+	for _, password := range []string{"wrong-password", "otherwise-valid-password"} {
+		w := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(w)
+		ctx.Request = httptest.NewRequest(http.MethodGet, apiPathPrefix+mhttp.ClusterConfigsPath, nil)
+		ctx.Request.SetBasicAuth("alice", password)
+		authenticate(ctx)
+
+		assert.True(t, ctx.IsAborted())
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "only root user")
+		assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+	}
+	assert.Zero(t, verifierCalls)
+}
+
+func TestIsAdminAPIPath(t *testing.T) {
+	for _, path := range []string{
+		apiPathPrefix + mhttp.ClusterConfigsPath,
+		apiPathPrefix + mhttp.HookConfigsPath,
+		apiPathPrefix + mhttp.TelemetryClientsPath,
+		apiPathPrefix + mhttp.TelemetryClientsPath + "/client-1/config",
+		apiPathPrefix + mhttp.TelemetryCommandsPath,
+		apiPathPrefix + mhttp.TelemetryCommandsPath + "/command-1/reply",
+	} {
+		assert.True(t, isAdminAPIPath(path), path)
+	}
+	for _, path := range []string{
+		apiPathPrefix + mhttp.ClusterInfoPath,
+		apiPathPrefix + mhttp.TelemetryClientsPath + "-public",
+		"/unrelated",
+	} {
+		assert.False(t, isAdminAPIPath(path), path)
 	}
 }
 

@@ -26,26 +26,49 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// setVerifyFunc swaps the package-level passwordVerifyFunc for a test, returning
-// a cleanup that restores the previous value. Sequential tests must use this
-// to avoid leaking verifier state between cases.
+var alwaysAuth AuthPolicy = func() bool { return true }
+
+// setVerifyFunc swaps the package-level verifiers for a test and restores them
+// during cleanup. Sequential tests must use this to avoid leaking verifier
+// state between cases.
 func setVerifyFunc(t *testing.T, fn func(ctx context.Context, username, password string) bool) {
 	t.Helper()
-	prevPrimary, prevFallback := passwordVerifyFunc, fallbackPasswordVerifyFunc
+	passwordVerifyMu.Lock()
+	prevTyped, prevCoordinator, prevPrimary, prevFallback := credentialVerifyFunc, coordinatorCredentialVerifyFunc, passwordVerifyFunc, fallbackPasswordVerifyFunc
+	credentialVerifyFunc = nil
+	coordinatorCredentialVerifyFunc = nil
 	passwordVerifyFunc = fn
 	// Clear the fallback too: getPasswordVerifyFunc falls through to it, so a
 	// leftover fallback from another test would mask a nil primary and turn the
 	// "no verifier on this node" case into a silent pass.
 	fallbackPasswordVerifyFunc = nil
+	passwordVerifyMu.Unlock()
 	t.Cleanup(func() {
-		passwordVerifyFunc, fallbackPasswordVerifyFunc = prevPrimary, prevFallback
+		passwordVerifyMu.Lock()
+		defer passwordVerifyMu.Unlock()
+		credentialVerifyFunc, coordinatorCredentialVerifyFunc, passwordVerifyFunc, fallbackPasswordVerifyFunc = prevTyped, prevCoordinator, prevPrimary, prevFallback
 	})
 }
 
 // invoked records whether the wrapped handler was reached.
 type invoked struct{ called bool }
+
+func TestVerifyStoredRootPassword(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	assert.NoError(t, VerifyStoredRootPassword(string(hash), "correct-password"))
+	assert.True(t, IsAuthenticationError(VerifyStoredRootPassword(string(hash), "wrong-password")))
+
+	err = VerifyStoredRootPassword("malformed-bcrypt-hash", "correct-password")
+	assert.Error(t, err)
+	assert.False(t, IsAuthenticationError(err),
+		"a corrupt stored hash is a credential-store failure, not a bad password")
+}
 
 func (i *invoked) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +114,7 @@ func TestWrapAdminAuth_PolicyFalseSkipsCheck(t *testing.T) {
 
 func TestWrapAdminAuth_NoCredentialsReturns401(t *testing.T) {
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -117,7 +140,7 @@ func TestWrapAdminAuth_NonRootUserReturns403(t *testing.T) {
 	})
 
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -135,7 +158,7 @@ func TestWrapAdminAuth_WrongPasswordReturns401(t *testing.T) {
 	})
 
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -153,7 +176,7 @@ func TestWrapAdminAuth_ValidRootCredentialsPass(t *testing.T) {
 	})
 
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -172,7 +195,7 @@ func TestWrapAdminAuth_VerifierUnavailableReturns503(t *testing.T) {
 	setVerifyFunc(t, nil)
 
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -189,7 +212,7 @@ func TestWrapAdminAuth_NoWWWAuthenticateHeader(t *testing.T) {
 	// callers are API clients, not browsers, and we don't want to trigger
 	// the browser's basic-auth login prompt.
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -203,7 +226,7 @@ func TestWrapAdminAuth_JSONBodyShape(t *testing.T) {
 	// The 401 body shape is part of the contract with API clients — keep it
 	// as a JSON object with a single "msg" string field so clients can parse.
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -242,7 +265,7 @@ func TestGetPasswordVerifyFunc_FallbackUsedWhenNoPrimary(t *testing.T) {
 		if password == "fallback-accepts" {
 			return nil
 		}
-		return ErrInvalidCredential
+		return NewAuthenticationError("invalid root password")
 	})
 
 	assert.NoError(t, verifyPassword(context.Background(), "root", "fallback-accepts", "/test"))
@@ -260,11 +283,11 @@ func TestWrapAdminAuth_FallbackVerifierAuthenticates(t *testing.T) {
 		if username == "root" && password == "correct-horse" {
 			return nil
 		}
-		return ErrInvalidCredential
+		return NewAuthenticationError("invalid root password")
 	})
 
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/management/stop", nil)
@@ -290,7 +313,7 @@ func TestWrapAdminAuth_UnreachableCredentialStoreReturns503(t *testing.T) {
 	})
 
 	inv := &invoked{}
-	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+	wrapped := wrapAdminAuth(inv.handler(), alwaysAuth)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
@@ -317,7 +340,7 @@ func TestWrapAdminAuth_ErrorBodyLeaksNoInternals(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	req.SetBasicAuth("root", "correct-horse")
-	wrapAdminAuth((&invoked{}).handler(), AuthAlways).ServeHTTP(rec, req)
+	wrapAdminAuth((&invoked{}).handler(), alwaysAuth).ServeHTTP(rec, req)
 
 	body := rec.Body.String()
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)

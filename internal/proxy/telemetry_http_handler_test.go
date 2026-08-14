@@ -41,6 +41,10 @@ func init() {
 
 func TestTelemetryAuthMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	originalAdminAuth := Params.CommonCfg.AdminAuthEnabled.GetValue()
+	t.Cleanup(func() {
+		_ = Params.Save(Params.CommonCfg.AdminAuthEnabled.Key, originalAdminAuth)
+	})
 
 	t.Run("auth disabled - allows request", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
@@ -172,6 +176,31 @@ func TestTelemetryAuthMiddleware(t *testing.T) {
 	// initializing the privilege cache which is complex to set up. The password verification
 	// logic is tested elsewhere in the codebase (util_test.go, authentication_interceptor_test.go).
 	// The tests above cover all the middleware's input validation before password verification.
+}
+
+func TestTelemetryAuthMiddleware_SkipsLegacyVerifierWhenAdminAuthEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	Params.Save(Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() {
+		Params.Reset(Params.CommonCfg.AdminAuthEnabled.Key)
+		Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	})
+
+	called := false
+	router := gin.New()
+	router.Use(TelemetryAuthMiddleware())
+	router.GET("/", func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.True(t, called, "admin auth middleware must be allowed to perform the management check")
+	assert.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestGetTelemetryClientsHandler(t *testing.T) {

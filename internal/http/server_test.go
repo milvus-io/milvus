@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
@@ -45,6 +46,28 @@ import (
 
 type HTTPServerTestSuite struct {
 	suite.Suite
+}
+
+func TestConfigureEventlogListenerModeHandlesFormattedCreate(t *testing.T) {
+	manager := config.NewManager()
+	adminAuth := &paramtable.ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		DefaultValue: "false",
+	}
+	adminAuth.Init(manager)
+
+	var modes []bool
+	configureEventlogListenerMode(adminAuth, func(localOnly bool) error {
+		modes = append(modes, localOnly)
+		return nil
+	})
+	manager.Dispatcher.Dispatch(&config.Event{
+		EventType: config.CreateType,
+		Key:       "commonsecurityadminauthenabled",
+		Value:     "true",
+	})
+
+	assert.Equal(t, []bool{false, true}, modes)
 }
 
 func (suite *HTTPServerTestSuite) SetupSuite() {
@@ -627,13 +650,19 @@ func (suite *HTTPServerTestSuite) TestAdminAuthGatesManagementPlane() {
 	suite.NoError(params.Save(params.CommonCfg.AdminAuthEnabled.Key, "true"))
 	defer params.Reset(params.CommonCfg.AdminAuthEnabled.Key)
 
-	prevPrimary, prevFallback := passwordVerifyFunc, fallbackPasswordVerifyFunc
+	passwordVerifyMu.Lock()
+	prevTyped, prevCoordinator, prevPrimary, prevFallback := credentialVerifyFunc, coordinatorCredentialVerifyFunc, passwordVerifyFunc, fallbackPasswordVerifyFunc
+	credentialVerifyFunc = nil
+	coordinatorCredentialVerifyFunc = nil
 	passwordVerifyFunc = func(_ context.Context, username, password string) bool {
 		return username == util.UserRoot && password == "s3cr3t"
 	}
 	fallbackPasswordVerifyFunc = nil
+	passwordVerifyMu.Unlock()
 	defer func() {
-		passwordVerifyFunc, fallbackPasswordVerifyFunc = prevPrimary, prevFallback
+		passwordVerifyMu.Lock()
+		defer passwordVerifyMu.Unlock()
+		credentialVerifyFunc, coordinatorCredentialVerifyFunc, passwordVerifyFunc, fallbackPasswordVerifyFunc = prevTyped, prevCoordinator, prevPrimary, prevFallback
 	}()
 
 	base := "http://localhost:" + DefaultListenPort

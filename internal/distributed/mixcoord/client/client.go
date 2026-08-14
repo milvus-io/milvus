@@ -57,7 +57,6 @@ type MixCoordClient struct {
 type Client struct {
 	grpcClient grpcclient.GrpcClient[MixCoordClient]
 	sess       *sessionutil.Session
-	ctx        context.Context
 }
 
 // NewClient create root coordinator client with specified etcd info and timeout
@@ -73,13 +72,13 @@ func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 		return nil, err
 	}
 	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
 	client := &Client{
-		grpcClient: grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord"),
+		grpcClient: grpcClient,
 		sess:       sess,
-		ctx:        ctx,
 	}
 	client.grpcClient.SetRole(typeutil.MixCoordRole)
-	client.grpcClient.SetGetAddrFunc(client.getMixCoordAddr)
+	grpcClient.SetGetAddrFuncWithContext(client.getMixCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
 
@@ -105,23 +104,23 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) MixCoordClient {
 	}
 }
 
-func (c *Client) getMixCoordAddr() (string, error) {
+func (c *Client) getMixCoordAddr(ctx context.Context) (string, error) {
 	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(c.ctx, key)
+	msess, _, err := c.sess.GetSessions(ctx, key)
 	if err != nil {
-		mlog.Debug(context.TODO(), "MixCoordClient GetSessions failed", mlog.Any("key", key))
+		mlog.Debug(ctx, "MixCoordClient GetSessions failed", mlog.String("key", key), mlog.Err(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
 		if paramtable.GetRole() == typeutil.StandaloneRole {
-			return c.getCompatibleMixCoordAddr()
+			return c.getCompatibleMixCoordAddr(ctx)
 		} else {
-			mlog.Warn(context.TODO(), "MixCoordClient mess key not exist", mlog.Any("key", key))
+			mlog.Warn(ctx, "MixCoordClient mess key not exist", mlog.String("key", key))
 			return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 		}
 	}
-	mlog.Debug(context.TODO(), "MixCoordClient GetSessions success",
+	mlog.Debug(ctx, "MixCoordClient GetSessions success",
 		mlog.String("address", ms.Address),
 		mlog.Int64("serverID", ms.ServerID),
 		mlog.String("role", key))
@@ -130,18 +129,18 @@ func (c *Client) getMixCoordAddr() (string, error) {
 }
 
 // compatible with standalone mode upgrade from 2.5, shoule be removed in 3.0
-func (c *Client) getCompatibleMixCoordAddr() (string, error) {
-	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
+func (c *Client) getCompatibleMixCoordAddr(ctx context.Context) (string, error) {
+	msess, _, err := c.sess.GetSessions(ctx, typeutil.RootCoordRole)
 	if err != nil {
-		mlog.Debug(context.TODO(), "mixCoordClient getSessions failed", mlog.Any("key", typeutil.RootCoordRole), mlog.Err(err))
+		mlog.Debug(ctx, "mixCoordClient getSessions failed", mlog.String("key", typeutil.RootCoordRole), mlog.Err(err))
 		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
 	ms, ok := msess[typeutil.RootCoordRole]
 	if !ok {
-		mlog.Warn(context.TODO(), "MixCoordClient mess key not exist", mlog.Any("key", typeutil.RootCoordRole))
+		mlog.Warn(ctx, "MixCoordClient mess key not exist", mlog.String("key", typeutil.RootCoordRole))
 		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
-	mlog.Debug(context.TODO(), "MixCoordClient GetSessions use rootCoord", mlog.Any("key", typeutil.RootCoordRole))
+	mlog.Debug(ctx, "MixCoordClient GetSessions use rootCoord", mlog.String("key", typeutil.RootCoordRole))
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }

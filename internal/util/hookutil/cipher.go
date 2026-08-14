@@ -471,7 +471,7 @@ func registerCallback() {
 	mlog.Info(context.TODO(), "cipher config callbacks registered")
 }
 
-func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
+func reloadCipherConfig(ctx context.Context, key, _, _ string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		mlog.Warn(ctx, "cipher plugin not loaded, skip config reload", mlog.String("key", key))

@@ -86,5 +86,5 @@ func (c *cipherConfig) Save(key string, value string) error {
 }
 
 func (c *cipherConfig) GetAll() map[string]string {
-	return c.cipherBase.mgr.GetConfigs()
+	return c.cipherBase.mgr.GetConfigsRaw()
 }

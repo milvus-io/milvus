@@ -86,9 +86,18 @@ func TestVerifier_RejectsWrongPassword(t *testing.T) {
 		return clientReturning(t, hashed(t, testPassword)), nil
 	}).Verify
 	err := verify(context.Background(), "root", "not-the-password")
-	assert.ErrorIs(t, err, internalhttp.ErrInvalidCredential)
 	assert.True(t, internalhttp.IsAuthenticationError(err),
 		"a genuine mismatch must be reported as an authentication failure (401), not as unavailable")
+}
+
+func TestVerifier_RejectsMalformedStoredHashAsUnavailable(t *testing.T) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		return clientReturning(t, "malformed-bcrypt-hash"), nil
+	}).Verify
+	err := verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err),
+		"a corrupt stored hash must render 503, not 401")
 }
 
 func TestVerifier_RejectsNonRootWithoutDialing(t *testing.T) {
@@ -101,7 +110,7 @@ func TestVerifier_RejectsNonRootWithoutDialing(t *testing.T) {
 		return clientReturning(t, hashed(t, testPassword)), nil
 	}).Verify
 
-	assert.ErrorIs(t, verify(context.Background(), "alice", testPassword), internalhttp.ErrInvalidCredential)
+	assert.True(t, internalhttp.IsAuthenticationError(verify(context.Background(), "alice", testPassword)))
 	assert.Zero(t, atomic.LoadInt32(&dials), "must not dial mix coord for a non-root user")
 }
 
@@ -141,6 +150,19 @@ func TestVerifier_FailedDialIsNotCached(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&dials))
 }
 
+func TestVerifier_NilClientIsNotCached(t *testing.T) {
+	var dials int32
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		atomic.AddInt32(&dials, 1)
+		return nil, nil
+	}).Verify
+
+	assert.Error(t, verify(context.Background(), "root", testPassword))
+	assert.Error(t, verify(context.Background(), "root", testPassword))
+	assert.Equal(t, int32(2), atomic.LoadInt32(&dials),
+		"a nil client must be treated as a failed construction and retried")
+}
+
 func TestVerifier_RejectsOnRPCError(t *testing.T) {
 	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		cli := mocks.NewMockMixCoordClient(t)
@@ -153,6 +175,20 @@ func TestVerifier_RejectsOnRPCError(t *testing.T) {
 	assert.Error(t, err)
 	assert.False(t, internalhttp.IsAuthenticationError(err),
 		"an RPC failure must render 503, not 401")
+}
+
+func TestVerifier_RejectsNilResponse(t *testing.T) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		cli := mocks.NewMockMixCoordClient(t)
+		cli.EXPECT().Close().Return(nil).Maybe()
+		cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
+			Return(nil, nil).Maybe()
+		return cli, nil
+	}).Verify
+	err := verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err),
+		"an empty RPC response is a credential-store failure, not a bad password")
 }
 
 func TestVerifier_RejectsOnErrorStatus(t *testing.T) {

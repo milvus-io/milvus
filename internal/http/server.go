@@ -50,35 +50,43 @@ var (
 	// This is set by the proxy package to avoid circular dependency.
 	passwordVerifyFunc func(ctx context.Context, username, password string) bool
 
+	// credentialVerifyFunc is the typed primary verifier used by the
+	// management plane. It preserves the distinction between a credential
+	// mismatch and an unavailable credential store. New primary registrations
+	// prefer this slot; the bool slot remains for data-plane compatibility.
+	credentialVerifyFunc CredentialVerifier
+
+	// coordinatorCredentialVerifyFunc is MixCoord's authoritative in-process
+	// verifier. Standalone also hosts a Proxy, so this must not share the slot
+	// whose winner otherwise depends on component startup order.
+	coordinatorCredentialVerifyFunc CredentialVerifier
+
 	// fallbackPasswordVerifyFunc backs credential checks on nodes that do not
 	// host credential metadata themselves (querynode, datanode, streamingnode).
-	// It is consulted only when passwordVerifyFunc is unset.
-	//
-	// Two slots rather than one because standalone runs every role in a single
-	// process: proxy, mix coord and the worker nodes would all register into a
-	// single global and the winner would depend on goroutine scheduling. Keeping
-	// the in-process verifiers (proxy, mix coord) in the primary slot and the
-	// RPC-backed worker verifier in the fallback slot makes the outcome
-	// deterministic and always prefers the cheaper local check.
-	fallbackPasswordVerifyFunc FallbackVerifier
+	// It is consulted only when neither typed verifier nor the legacy Proxy
+	// verifier is available. A separate slot is needed because standalone runs
+	// every role in one process: worker registrations must not overwrite a local
+	// verifier merely due to goroutine scheduling.
+	fallbackPasswordVerifyFunc CredentialVerifier
 
 	passwordVerifyMu sync.RWMutex
 )
 
-// FallbackVerifier checks a credential on a node that has to consult a remote
-// credential store. A nil error means authenticated.
+// CredentialVerifier checks a credential and returns nil only on a match.
 //
 // It returns an error rather than a bool so that "the credential is wrong" and
 // "the credential could not be checked" stay distinguishable. Collapsing them
 // tells an operator whose cluster is half-down that their correct password is
 // invalid, which is the worst possible message at that moment. Return
-// ErrInvalidCredential for a genuine mismatch; any other error is reported as
-// 503.
-type FallbackVerifier func(ctx context.Context, username, password string) error
+// NewAuthenticationError for a genuine mismatch; any other error is
+// reported as 503 by the management-plane boundary.
+type CredentialVerifier func(ctx context.Context, username, password string) error
 
-// ErrInvalidCredential is what a FallbackVerifier returns when it successfully
-// reached the credential store and the password did not match.
-var ErrInvalidCredential error = &ErrAuthentication{msg: "invalid root password"}
+// NewAuthenticationError constructs the typed result a credential verifier
+// returns after it successfully checked a password and found a mismatch.
+func NewAuthenticationError(msg string) error {
+	return &ErrAuthentication{msg: msg}
+}
 
 // RegisterPasswordVerifyFunc registers a function to verify user password.
 // This should be called by the proxy package during initialization.
@@ -88,43 +96,71 @@ func RegisterPasswordVerifyFunc(fn func(ctx context.Context, username, password 
 	passwordVerifyFunc = fn
 }
 
+// RegisterProxyCredentialVerifyFunc registers the Proxy-owned typed verifier
+// for the management plane. It takes precedence over the legacy bool verifier.
+func RegisterProxyCredentialVerifyFunc(fn CredentialVerifier) {
+	passwordVerifyMu.Lock()
+	defer passwordVerifyMu.Unlock()
+	credentialVerifyFunc = fn
+}
+
+// RegisterCoordinatorCredentialVerifyFunc registers MixCoord's authoritative
+// root verifier without overwriting the Proxy verifier in standalone. Passing
+// nil unregisters a coordinator that is stopping.
+func RegisterCoordinatorCredentialVerifyFunc(fn CredentialVerifier) {
+	passwordVerifyMu.Lock()
+	defer passwordVerifyMu.Unlock()
+	coordinatorCredentialVerifyFunc = fn
+}
+
 // RegisterFallbackPasswordVerifyFunc registers a credential verifier used only
 // when no primary verifier is available on this node. Worker nodes call this so
 // that the management plane and pprof remain reachable to root once
 // common.security.adminAuthEnabled is turned on; without it those endpoints
 // would fail closed with 503 on every worker.
-func RegisterFallbackPasswordVerifyFunc(fn FallbackVerifier) {
+func RegisterFallbackPasswordVerifyFunc(fn CredentialVerifier) {
 	passwordVerifyMu.Lock()
 	defer passwordVerifyMu.Unlock()
 	fallbackPasswordVerifyFunc = fn
 }
 
-// getVerifiers returns the credential verifiers registered on this node. The
-// primary (in-process) one is preferred; the fallback is used only when there
-// is no primary. Both nil means this node cannot verify credentials at all.
-func getVerifiers() (func(ctx context.Context, username, password string) bool, FallbackVerifier) {
+// getManagementVerifiers returns the credential verifiers used by the
+// management plane. The Proxy typed verifier is preferred, followed by the
+// MixCoord verifier. The legacy bool verifier and worker fallback are
+// compatibility paths for nodes that have no typed verifier.
+func getManagementVerifiers() (CredentialVerifier, CredentialVerifier, func(ctx context.Context, username, password string) bool, CredentialVerifier) {
 	passwordVerifyMu.RLock()
 	defer passwordVerifyMu.RUnlock()
-	if passwordVerifyFunc != nil {
-		return passwordVerifyFunc, nil
+	if coordinatorCredentialVerifyFunc != nil || credentialVerifyFunc != nil {
+		return credentialVerifyFunc, coordinatorCredentialVerifyFunc, nil, nil
 	}
-	return nil, fallbackPasswordVerifyFunc
+	if passwordVerifyFunc != nil {
+		return nil, nil, passwordVerifyFunc, nil
+	}
+	return nil, nil, nil, fallbackPasswordVerifyFunc
 }
 
-// hasPasswordVerifier reports whether this node can check a credential at all.
-func hasPasswordVerifier() bool {
-	primary, fallback := getVerifiers()
-	return primary != nil || fallback != nil
+// hasRBACPasswordVerifier reports whether the Proxy-owned verifier required by
+// /expr is registered. Management-plane verifiers must not make /expr appear
+// available on coordinator or worker nodes.
+func hasRBACPasswordVerifier() bool {
+	passwordVerifyMu.RLock()
+	defer passwordVerifyMu.RUnlock()
+	return passwordVerifyFunc != nil
 }
 
 // verifyPassword checks the credential with whichever verifier this node has.
 // It returns nil on success, an ErrAuthentication for a genuine mismatch, and
 // an ErrServiceUnavailable when the credential could not be checked at all.
 func verifyPassword(ctx context.Context, username, password, endpoint string) error {
-	primary, fallback := getVerifiers()
+	typedPrimary, coordinator, legacyPrimary, fallback := getManagementVerifiers()
 	switch {
-	case primary != nil:
-		if !primary(ctx, username, password) {
+	case typedPrimary != nil:
+		return normalizeCredentialVerificationError(ctx, typedPrimary(ctx, username, password), endpoint)
+	case coordinator != nil:
+		return normalizeCredentialVerificationError(ctx, coordinator(ctx, username, password), endpoint)
+	case legacyPrimary != nil:
+		if !legacyPrimary(ctx, username, password) {
 			return &ErrAuthentication{msg: "invalid root password"}
 		}
 		return nil
@@ -154,6 +190,39 @@ func verifyPassword(ctx context.Context, username, password, endpoint string) er
 	}
 }
 
+func normalizeCredentialVerificationError(ctx context.Context, err error, endpoint string) error {
+	switch {
+	case err == nil:
+		return nil
+	case IsAuthenticationError(err):
+		return err
+	default:
+		mlog.Warn(ctx, "cannot verify credential on this node",
+			mlog.String("endpoint", endpoint), mlog.Err(err))
+		return &ErrServiceUnavailable{
+			msg: "cannot verify credentials on this node; the credential store is unreachable",
+		}
+	}
+}
+
+// verifyRBACPassword verifies credentials for ordinary HTTP RBAC. This path
+// intentionally uses only the original proxy-owned bool verifier. The typed
+// verifier is a root-only management-plane hook; allowing it to replace the
+// RBAC verifier would make a MixCoord registration reject valid non-root
+// users in a standalone process.
+func verifyRBACPassword(ctx context.Context, username, password string) error {
+	passwordVerifyMu.RLock()
+	verifier := passwordVerifyFunc
+	passwordVerifyMu.RUnlock()
+	if verifier == nil {
+		return &ErrServiceUnavailable{msg: "password verification not available"}
+	}
+	if !verifier(ctx, username, password) {
+		return &ErrAuthentication{msg: "invalid credentials"}
+	}
+	return nil
+}
+
 // Embedding all static files of webui folder to binary
 //
 //go:embed webui
@@ -176,8 +245,7 @@ type Handler struct {
 	// handler unauthenticated — appropriate for /healthz, /metrics, k8s probes,
 	// and other endpoints that must remain reachable without credentials.
 	//
-	// See AuthAlways (e.g. /expr) and AuthByAdminFlag (e.g. /management/*)
-	// in auth.go for the predefined policies.
+	// See AuthByAdminFlag in auth.go for the production policy.
 	AuthPolicy AuthPolicy
 }
 
@@ -234,7 +302,7 @@ func registerDefaults() {
 			var auth string
 
 			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || !hasPasswordVerifier() {
+			if !expr.HasRegistered("proxy") || !hasRBACPasswordVerifier() {
 				w.WriteHeader(http.StatusForbidden)
 				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
 				return
@@ -476,21 +544,7 @@ func Register(h *Handler) {
 func ServeHTTP() {
 	registerDefaults()
 	adminAuth := &paramtable.Get().CommonCfg.AdminAuthEnabled
-	adminAuth.RegisterCallback(func(_ context.Context, _, _, newValue string) error {
-		enabled, err := strconv.ParseBool(newValue)
-		if err != nil {
-			return err
-		}
-		if enabled {
-			return eventlog.EnsureLocalOnly()
-		}
-		return nil
-	})
-	if adminAuth.GetAsBool() {
-		if err := eventlog.EnsureLocalOnly(); err != nil {
-			mlog.Warn(context.TODO(), "restrict eventlog listener to loopback failed", mlog.Err(err))
-		}
-	}
+	configureEventlogListenerMode(adminAuth, eventlog.EnsureListenerMode)
 	go func() {
 		bindAddr := getHTTPAddr()
 		mlog.Info(context.TODO(), "management listen", mlog.String("addr", bindAddr))
@@ -506,6 +560,19 @@ func ServeHTTP() {
 			mlog.Error(context.TODO(), "handle metrics failed", mlog.Err(err))
 		}
 	}()
+}
+
+func configureEventlogListenerMode(adminAuth *paramtable.ParamItem, ensureMode func(bool) error) {
+	adminAuth.RegisterCallback(func(_ context.Context, _, _, newValue string) error {
+		enabled, err := strconv.ParseBool(newValue)
+		if err != nil {
+			return err
+		}
+		return ensureMode(enabled)
+	})
+	if err := ensureMode(adminAuth.GetAsBool()); err != nil {
+		mlog.Warn(context.TODO(), "configure eventlog listener mode failed", mlog.Err(err))
+	}
 }
 
 func getHTTPAddr() string {

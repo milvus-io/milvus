@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -39,8 +37,8 @@ const verifyTimeout = 5 * time.Second
 
 // RootCredentialVerifier verifies management-plane credentials on nodes that
 // do not own credential metadata. The MixCoord client is created lazily and is
-// bound to the component lifetime, while each credential lookup is bounded by
-// the HTTP request context.
+// cached for the component lifetime, while each credential lookup and any
+// address discovery it triggers are bounded by the HTTP request context.
 type RootCredentialVerifier struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -61,10 +59,10 @@ type RootCredentialVerifier struct {
 // the boot path of every node: with
 // common.security.adminAuthEnabled at its default of false the client is never
 // created at all. A failed constructor call is not cached. Once constructed,
-// the MixCoord client owns reconnect and address-discovery behavior, so it is
-// deliberately created with lifetimeCtx rather than a short-lived HTTP request
-// context. This lets a cached client recover after MixCoord becomes available
-// or moves to a new address.
+// the MixCoord client remains cached across HTTP requests so it can reconnect
+// after MixCoord becomes available or moves. Reconnect address discovery uses
+// the current RPC context, so a blocked etcd lookup is still bounded by the
+// request's five-second timeout without shortening the cached client's life.
 //
 // Register the result's Verify method with
 // http.RegisterFallbackPasswordVerifyFunc. It occupies the fallback slot, so
@@ -107,6 +105,9 @@ func (v *RootCredentialVerifier) getClient() (types.MixCoordClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	if created == nil {
+		return nil, merr.WrapErrServiceUnavailable("mix coord client is unavailable")
+	}
 	v.client = created
 	return v.client, nil
 }
@@ -116,7 +117,7 @@ func (v *RootCredentialVerifier) getClient() (types.MixCoordClient, error) {
 // service-discovery context.
 func (v *RootCredentialVerifier) Verify(ctx context.Context, username, password string) error {
 	if username != util.UserRoot {
-		return internalhttp.ErrInvalidCredential
+		return internalhttp.NewAuthenticationError("invalid root password")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
@@ -137,6 +138,9 @@ func (v *RootCredentialVerifier) Verify(ctx context.Context, username, password 
 	if err != nil {
 		return merr.Wrap(err, "GetCredential failed")
 	}
+	if resp == nil {
+		return merr.WrapErrServiceInternal("GetCredential returned an empty response")
+	}
 	if err := merr.Error(resp.GetStatus()); err != nil {
 		return merr.Wrap(err, "GetCredential returned error")
 	}
@@ -147,12 +151,7 @@ func (v *RootCredentialVerifier) Verify(ctx context.Context, username, password 
 		return merr.WrapErrServiceInternal("credential store returned an empty hash for root")
 	}
 
-	if bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) != nil {
-		// Don't log here; the caller logs the mismatch together with the
-		// request path, which is more useful for triage.
-		return internalhttp.ErrInvalidCredential
-	}
-	return nil
+	return internalhttp.VerifyStoredRootPassword(resp.GetPassword(), password)
 }
 
 // Close releases the cached MixCoord client and prevents new credential

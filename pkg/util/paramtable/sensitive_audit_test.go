@@ -35,6 +35,12 @@ var sensitivePatterns = []string{
 	"credential",
 	"token",
 	"accesskey",
+	"apikey",
+	"privatekey",
+	"authparams",
+	"saslusername",
+	"address",
+	"brokerlist",
 	"endpoint",
 	"rootpath",
 	"superuser",
@@ -44,10 +50,7 @@ var sensitivePatterns = []string{
 // sensitive pattern but are confirmed non-sensitive after review. Adding to
 // this list requires explicit reviewer sign-off — it bypasses redaction.
 var sensitiveAuditAllowlist = map[string]string{
-	"proxy.minpasswordlength":                             "password length constraint, not a password",
-	"proxy.maxpasswordlength":                             "password length constraint, not a password",
-	"datacoord.compaction.storageversion.ratelimittokens": "rate limit token count, not auth token",
-	"log.file.rootpath":                                   "log directory path; reveals neither credential nor infrastructure topology",
+	"log.file.rootpath": "log directory path; reveals neither credential nor infrastructure topology",
 }
 
 // knownSensitive enumerates ParamItem keys that MUST be marked Sensitive: true
@@ -58,9 +61,12 @@ var sensitiveAuditAllowlist = map[string]string{
 // This list is the positive complement to sensitivePatterns.
 var knownSensitive = []string{
 	"kafka.saslusername",
+	"kafka.brokerlist",
+	"indexcoord.bindindexnodemode.address",
 	"minio.address",
 	"minio.bucketname",
 	"pulsar.authparams",
+	"pulsar.webaddress",
 	"common.security.tlsmode",
 	"common.security.internaltlsenabled",
 	"trace.jaeger.url",
@@ -77,13 +83,30 @@ var knownSensitiveParamGroupPrefixes = []string{
 	"kafka.producer.",
 }
 
-func TestSensitiveParamItemsMarked(t *testing.T) {
+func newSensitiveAuditParams(t *testing.T) *ComponentParam {
+	t.Helper()
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	if err := base.Save("localStorage.path", t.TempDir()); err != nil {
+		t.Fatalf("set local storage path: %v", err)
+	}
 	params := &ComponentParam{}
-	params.Init(NewBaseTable(SkipRemote(true)))
+	params.Init(base)
+	return params
+}
+
+func TestSensitiveParamItemsMarked(t *testing.T) {
+	params := newSensitiveAuditParams(t)
 
 	violations := make([]string, 0)
 	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
 		lowerKey := strings.ToLower(item.Key)
+		if item.Sensitive && item.NonSensitive {
+			violations = append(violations, item.Key+" (cannot be both Sensitive and NonSensitive)")
+			return
+		}
+		if item.NonSensitive {
+			return
+		}
 
 		// Skip if explicitly allowlisted.
 		if _, ok := sensitiveAuditAllowlist[lowerKey]; ok {
@@ -260,8 +283,7 @@ var credentialImmutableAllowlist = map[string]string{
 // refreshable:"false", so runtime mutation was never a live rotation path to
 // begin with.
 func TestNoCredentialIsImmutable(t *testing.T) {
-	params := &ComponentParam{}
-	params.Init(NewBaseTable(SkipRemote(true)))
+	params := newSensitiveAuditParams(t)
 
 	violations := make([]string, 0)
 	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
