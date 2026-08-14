@@ -32,7 +32,7 @@ type RecoverySnapshot struct {
 	// plain data: the idempotency interceptor is today's only consumer and turns
 	// them into its dedup window, but nothing here is specific to that use. Rebuilt
 	// from the pchannel summary store during recovery, never persisted to etcd.
-	SummarySnapshots map[string]*streamingpb.SummarySnapshot
+	SummarySnapshots map[string]*VChannelSummarySnapshot
 	// pchannelSummaryRecords are pending physical summary records grouped by vchannel.
 	// They are written to pchannelSummaryChunk before advancing the pchannel consume checkpoint.
 	pchannelSummaryRecords map[string][]*streamingpb.SummaryEntry

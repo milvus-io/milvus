@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -93,33 +92,6 @@ func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoin
 	return state
 }
 
-func newVChannelSummaryFromSnapshot(snapshot *streamingpb.SummarySnapshot) (*vchannelSummary, error) {
-	if snapshot == nil {
-		return nil, merr.WrapErrServiceInternalMsg("nil idempotency summary snapshot")
-	}
-	state := &vchannelSummary{
-		pchannel:                   snapshot.GetPchannel(),
-		vchannel:                   snapshot.GetVchannel(),
-		snapshotCheckpointTimetick: snapshot.GetSnapshotCheckpointTimetick(),
-		evictedWatermarkTimetick:   snapshot.GetEvictedWatermarkTimetick(),
-		entries:                    make(map[string]*summaryEntry, len(snapshot.GetEntries())),
-		pendingEntries:             make(map[string]*streamingpb.SummaryEntry),
-		pendingRecords:             make([]*streamingpb.SummaryEntry, 0),
-		commitOrder:                make([]string, 0, len(snapshot.GetEntries())),
-		generationStats:            make(map[uint64]*summaryGenerationStat),
-	}
-	sortedEntries := append([]*streamingpb.SummaryEntry(nil), snapshot.GetEntries()...)
-	sortSummaryEntries(sortedEntries)
-	for _, entry := range sortedEntries {
-		state.entries[entry.GetIdempotency().GetKey()] = &summaryEntry{entry: entry}
-		state.entryBytes += proto.Size(entry)
-		state.commitOrder = append(state.commitOrder, entry.GetIdempotency().GetKey())
-	}
-	state.refreshEvictedWatermark()
-	state.refreshMinRequiredGeneration()
-	return state, nil
-}
-
 func (s *vchannelSummary) observeMessage(msg message.ImmutableMessage) {
 	if msg == nil {
 		return
@@ -175,24 +147,42 @@ func (s *vchannelSummary) consumePendingSummaryEntries() ([]*streamingpb.Summary
 	return records, update
 }
 
-func (s *vchannelSummary) snapshot() *streamingpb.SummarySnapshot {
+// VChannelSummarySnapshot is what recovery hands an application view once it
+// has replayed the chunks: one vchannel's retained summary entries, plus the
+// retention state that decides which of them may still be served.
+//
+// It is NOT a snapshot of a VChannelSummaryChunk, and must not be named as if
+// it were. A chunk is one generation's delta, keyless bookkeeping entries
+// included, written durably. This is the accumulation across every replayed
+// generation, deduplicated by key and narrowed by TTL / byte eviction, keyed
+// entries only.
+//
+// It never leaves the process: built once at WAL open, consumed once by the
+// view, never stored or sent. That is why it is a plain Go struct rather than a
+// message in streaming.proto — a proto here would advertise a wire contract
+// that does not exist. The entries themselves stay proto: they come out of the
+// chunks as-is and go into the view as-is, with nothing converted in between.
+type VChannelSummarySnapshot struct {
+	PChannel                   string
+	VChannel                   string
+	EvictedWatermarkTimetick   uint64
+	SnapshotCheckpointTimetick uint64
+	Entries                    []*streamingpb.SummaryEntry
+}
+
+func (s *vchannelSummary) snapshot() *VChannelSummarySnapshot {
 	entries := make([]*streamingpb.SummaryEntry, 0, len(s.entries))
 	for _, e := range s.entries {
 		entries = append(entries, e.entry)
 	}
 	sortSummaryEntries(entries)
-	return s.snapshotWithEntries(entries)
-}
-
-func (s *vchannelSummary) snapshotWithEntries(entries []*streamingpb.SummaryEntry) *streamingpb.SummarySnapshot {
-	snapshot := &streamingpb.SummarySnapshot{
-		Pchannel:                   s.pchannel,
-		Vchannel:                   s.vchannel,
+	return &VChannelSummarySnapshot{
+		PChannel:                   s.pchannel,
+		VChannel:                   s.vchannel,
 		EvictedWatermarkTimetick:   s.evictedWatermarkTimetick,
 		SnapshotCheckpointTimetick: s.snapshotCheckpointTimetick,
 		Entries:                    entries,
 	}
-	return snapshot
 }
 
 func (s *vchannelSummary) applySummaryEntriesAtGeneration(records []*streamingpb.SummaryEntry, generation uint64) error {

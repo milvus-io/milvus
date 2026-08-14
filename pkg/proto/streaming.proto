@@ -700,11 +700,16 @@ enum VChannelSchemaState {
 // The idempotency interceptor is today's only view — it turns these facts into
 // a write-dedup window — and a primary-key index is the second planned one.
 //
-// Three layers, defined in that order below:
+// Two layers are defined here, in that order below:
 //
 //   1. metadata, in etcd: what exists and how far each view has got.
 //   2. chunk payloads, in object storage: the facts themselves.
-//   3. the in-memory materialization handed to a view at recovery.
+//
+// A third layer -- the in-memory materialization recovery hands a view once it
+// has replayed the chunks -- is deliberately NOT in this file. It is built at
+// WAL open, consumed once in the same process, and never stored or sent, so it
+// is a plain Go struct (recovery.VChannelSummarySnapshot). Only what crosses a
+// storage or process boundary earns a message here.
 //
 // A physical WAL position is recorded only at pchannel level. Everything below
 // it is addressed by timetick, and which chunk generation to open is decided by
@@ -727,16 +732,14 @@ message PChannelSummaryMeta {
     // use and is required to rebuild active summary views on recovery.
     uint64 min_available_generation = 5;
     uint64 min_in_use_generation = 6;
-    // Physical chunk codec version.
-    uint32 codec_version = 7;
     // The WAL assignment term of the owner that last persisted this meta.
     // Split-brain fencing: writers publish this meta through catalog CAS and
     // refuse to update a meta carrying a newer term than their own assignment.
-    int64 term = 8;
+    int64 term = 7;
     // Manifest mapping generation ranges to WAL assignment terms. Chunk object
     // keys include both generation and term; recovery must only read chunks
     // published through this manifest.
-    PChannelSummaryChunkManifest chunk_manifest = 9;
+    PChannelSummaryChunkManifest chunk_manifest = 8;
 }
 
 message PChannelSummaryChunkManifest {
@@ -800,20 +803,22 @@ message VChannelSummaryMeta {
 // PChannelSummaryChunkFooter is the chunk object's index. Recovery reads it
 // first, from the object's tail.
 message PChannelSummaryChunkFooter {
-    uint32 codec_version                            = 1;
-    string pchannel                                 = 2;
-    uint64 generation                               = 3;
+    string pchannel                                 = 1;
+    uint64 generation                               = 2;
     // The WAL assignment term of the writer. Used to arbitrate a same-generation
     // write conflict between two owners (split-brain): the newer term wins, the
     // older term is fenced.
-    int64 term                                      = 4;
+    int64 term                                      = 3;
     // The pchannel WAL position this chunk covers. This is the one physical
     // position the summary store records, and recovery resumes consuming from it.
-    common.MessageID source_checkpoint_message_id   = 5;
-    uint64 source_checkpoint_timetick               = 6;
-    uint64 source_start_timetick                    = 7;
-    uint64 source_end_timetick                      = 8;
-    repeated VChannelSummaryChunkIndex chunks       = 9;
+    common.MessageID source_checkpoint_message_id   = 4;
+    uint64 source_checkpoint_timetick               = 5;
+    // The span covered by the whole object: the earliest and latest source
+    // timetick across every vchannel in it. Each chunk index below carries the
+    // same span narrowed to its own vchannel.
+    uint64 source_start_timetick                    = 6;
+    uint64 source_end_timetick                      = 7;
+    repeated VChannelSummaryChunkIndex chunks       = 8;
 }
 
 // VChannelSummaryChunkIndex locates one vchannel's payload inside the chunk
@@ -825,6 +830,7 @@ message VChannelSummaryChunkIndex {
     uint64 length              = 3;
     bytes checksum             = 4;
     uint64 record_count        = 5;
+    // This vchannel's own span inside the object.
     uint64 source_start_timetick = 6;
     uint64 source_end_timetick   = 7;
 }
@@ -867,23 +873,6 @@ message SummaryEntry {
     // column on the entry, and views stay independent: an entry may carry
     // content for several of them at once.
     IdempotencyContent idempotency             = 4;
-}
-
-///
-/// Summary store materialization
-///
-// What recovery hands a view once it has replayed the chunks: the entries that
-// survived retention, per vchannel. They are the same SummaryEntry the chunks
-// store, filtered by retention rather than converted into another shape.
-
-// SummarySnapshot is the in-memory materialization of one vchannel's retained
-// summary entries, handed to whichever application view consumes them.
-message SummarySnapshot {
-    string pchannel = 1;
-    string vchannel = 2;
-    uint64 evicted_watermark_timetick = 3;
-    uint64 snapshot_checkpoint_timetick = 4;
-    repeated SummaryEntry entries = 5;
 }
 
 ///

@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -90,7 +91,7 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 	}
 }
 
-func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[string]*streamingpb.SummarySnapshot, param *interceptors.InterceptorBuildParam) *idempotencyInterceptor {
+func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[string]*recovery.VChannelSummarySnapshot, param *interceptors.InterceptorBuildParam) *idempotencyInterceptor {
 	interceptor := newIdempotencyInterceptorWithParam(config, param)
 	for vchannel, snapshot := range snapshots {
 		interceptor.windows.Insert(vchannel, NewWindowFromSnapshot(config, snapshot))

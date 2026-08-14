@@ -89,7 +89,7 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	// lock keeps this correct if the call ever moves.
 	r.summaryManager.mu.Lock()
 	runtimeSummaries := r.summaryManager.summaries()
-	summaries := make(map[string]*streamingpb.SummarySnapshot, len(runtimeSummaries))
+	summaries := make(map[string]*VChannelSummarySnapshot, len(runtimeSummaries))
 	for channelName, summary := range runtimeSummaries {
 		summaries[channelName] = summary.snapshot()
 	}

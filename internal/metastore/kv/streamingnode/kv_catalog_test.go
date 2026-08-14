@@ -308,7 +308,6 @@ func TestCatalogPChannelSummaryMeta(t *testing.T) {
 				Id:      "120",
 			},
 			MinInUseGeneration: 2,
-			CodecVersion:       1,
 		}
 		data, err := proto.Marshal(meta)
 		assert.NoError(t, err)
@@ -326,7 +325,6 @@ func TestCatalogPChannelSummaryMeta(t *testing.T) {
 		assert.Equal(t, meta.GetLatestGeneration(), got.GetLatestGeneration())
 		assert.Equal(t, meta.GetSourceCheckpointMessageId().GetId(), got.GetSourceCheckpointMessageId().GetId())
 		assert.Equal(t, meta.GetMinInUseGeneration(), got.GetMinInUseGeneration())
-		assert.Equal(t, meta.GetCodecVersion(), got.GetCodecVersion())
 	})
 
 	t.Run("save_rejects_pchannel_mismatch", func(t *testing.T) {

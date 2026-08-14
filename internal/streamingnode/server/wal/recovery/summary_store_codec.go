@@ -15,8 +15,12 @@ import (
 )
 
 const (
-	// pchannelSummaryCodecVersion is the on-disk chunk format version. A chunk
-	// whose version does not match is rejected rather than parsed on a guess.
+	// pchannelSummaryCodecVersion is the on-disk chunk format version. It is
+	// written once, into the object's fixed binary header, and checked there
+	// before anything else is parsed — a chunk whose version does not match is
+	// rejected rather than parsed on a guess. Neither the footer nor the etcd
+	// meta repeats it: a second copy could only ever agree with the first, and
+	// the version has to be readable before any proto in the object is trusted.
 	pchannelSummaryCodecVersion      = 1
 	pchannelSummaryChunkHeaderSize   = 16
 	pchannelSummaryChunkChecksumSize = sha256.Size
@@ -70,11 +74,10 @@ func marshalPChannelSummaryChunk(
 	sort.Strings(vchannels)
 
 	footer := &streamingpb.PChannelSummaryChunkFooter{
-		CodecVersion: uint32(pchannelSummaryCodecVersion),
-		Pchannel:     pchannel,
-		Generation:   generation,
-		Term:         term,
-		Chunks:       make([]*streamingpb.VChannelSummaryChunkIndex, 0, len(vchannels)),
+		Pchannel:   pchannel,
+		Generation: generation,
+		Term:       term,
+		Chunks:     make([]*streamingpb.VChannelSummaryChunkIndex, 0, len(vchannels)),
 	}
 	if checkpoint := newPChannelSummarySourceCheckpoint(sourceCheckpoint); checkpoint != nil {
 		footer.SourceCheckpointMessageId = cloneMessageIDProto(checkpoint.MessageID)
@@ -231,7 +234,6 @@ func marshalPChannelSummaryChunkFooter(footer *streamingpb.PChannelSummaryChunkF
 	if footer == nil {
 		return nil, merr.WrapErrServiceInternalMsg("nil pchannel summary chunk footer")
 	}
-	footer.CodecVersion = uint32(pchannelSummaryCodecVersion)
 	sort.Slice(footer.Chunks, func(i, j int) bool {
 		return footer.Chunks[i].Vchannel < footer.Chunks[j].Vchannel
 	})
@@ -244,9 +246,6 @@ func unmarshalPChannelSummaryChunkFooter(payload []byte) (*streamingpb.PChannelS
 	pb := &streamingpb.PChannelSummaryChunkFooter{}
 	if err := proto.Unmarshal(payload, pb); err != nil {
 		return nil, markPChannelSummaryStoreCorrupted(err)
-	}
-	if pb.GetCodecVersion() != pchannelSummaryCodecVersion {
-		return nil, pchannelSummaryStoreCorruptedf("unsupported pchannel summary chunk footer version %d", pb.GetCodecVersion())
 	}
 	return pb, nil
 }

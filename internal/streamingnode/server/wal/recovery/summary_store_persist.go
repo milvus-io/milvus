@@ -74,7 +74,6 @@ func (m *summaryManager) persistPChannelSummaryChunk(
 		if checkpointCovers(meta.SourceCheckpoint, sourceCheckpoint) {
 			return &persistedPChannelSummaryChunk{
 				footer: &streamingpb.PChannelSummaryChunkFooter{
-					CodecVersion:              uint32(pchannelSummaryCodecVersion),
 					Pchannel:                  m.pchannel,
 					Generation:                meta.LatestGeneration,
 					SourceCheckpointMessageId: cloneMessageIDProto(metaPB.GetSourceCheckpointMessageId()),
@@ -133,7 +132,6 @@ func (meta *pchannelSummaryStoreMeta) intoCatalogMeta() *streamingpb.PChannelSum
 		LatestGeneration:         meta.LatestGeneration,
 		MinAvailableGeneration:   meta.MinAvailableGeneration,
 		MinInUseGeneration:       meta.MinInUseGeneration,
-		CodecVersion:             uint32(pchannelSummaryCodecVersion),
 		Term:                     meta.Term,
 		ChunkManifest:            clonePChannelSummaryChunkManifest(meta.ChunkManifest),
 	}

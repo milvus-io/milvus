@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -119,13 +120,13 @@ func NewWindow(config WindowConfig) *Window {
 	}
 }
 
-func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.SummarySnapshot) *Window {
+func NewWindowFromSnapshot(config WindowConfig, snapshot *recovery.VChannelSummarySnapshot) *Window {
 	window := NewWindow(config)
 	if snapshot == nil {
 		return window
 	}
-	window.snapshotCheckpointTT = snapshot.GetSnapshotCheckpointTimetick()
-	window.evictedWatermarkTT = snapshot.GetEvictedWatermarkTimetick()
+	window.snapshotCheckpointTT = snapshot.SnapshotCheckpointTimetick
+	window.evictedWatermarkTT = snapshot.EvictedWatermarkTimetick
 	// The recovery-side store deliberately retains past-TTL entries (minEntries
 	// floor), so a restored window may hold entries that must no longer answer
 	// duplicates. Seed the TTL visibility bound from the snapshot checkpoint
@@ -136,7 +137,7 @@ func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.SummarySna
 	if config.WindowTTL > 0 {
 		window.ttlEvictBoundTT = evictBeforeCommitTT(window.snapshotCheckpointTT, config.WindowTTL)
 	}
-	for _, snapshotEntry := range snapshot.GetEntries() {
+	for _, snapshotEntry := range snapshot.Entries {
 		if snapshotEntry == nil {
 			continue
 		}

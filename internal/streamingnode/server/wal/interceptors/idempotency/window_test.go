@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -374,7 +375,7 @@ func TestIdempotencyWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.
 	expiredTT := tsoutil.ComposeTS((30 * time.Minute).Milliseconds(), 0)
 	freshTT := tsoutil.ComposeTS((59 * time.Minute).Milliseconds(), 0)
 
-	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &streamingpb.SummarySnapshot{
+	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &recovery.VChannelSummarySnapshot{
 		SnapshotCheckpointTimetick: checkpointTT,
 		Entries: []*streamingpb.SummaryEntry{
 			{SourceTimetick: expiredTT, Idempotency: &streamingpb.IdempotencyContent{Key: "expired"}},
@@ -393,7 +394,7 @@ func TestIdempotencyWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.
 }
 
 func TestIdempotencyWindowRestoreFromSnapshot(t *testing.T) {
-	window := NewWindowFromSnapshot(WindowConfig{}, &streamingpb.SummarySnapshot{
+	window := NewWindowFromSnapshot(WindowConfig{}, &recovery.VChannelSummarySnapshot{
 		SnapshotCheckpointTimetick: 100,
 		EvictedWatermarkTimetick:   90,
 		Entries: []*streamingpb.SummaryEntry{

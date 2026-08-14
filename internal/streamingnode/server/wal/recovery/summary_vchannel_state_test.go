@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
@@ -365,58 +364,6 @@ func TestPersistPChannelSummaryRetriesTransientMetaLoad(t *testing.T) {
 	require.NotNil(t, state.storeMeta)
 }
 
-func TestSummarySnapshotSerdeRoundTrip(t *testing.T) {
-	snapshot := &streamingpb.SummarySnapshot{
-		Pchannel:                   "p1",
-		Vchannel:                   "v1",
-		SnapshotCheckpointTimetick: 100,
-		EvictedWatermarkTimetick:   90,
-		Entries: []*streamingpb.SummaryEntry{
-			{SourceMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "95"}, SourceTimetick: 95, Idempotency: &streamingpb.IdempotencyContent{Key: "key-2", InsertResult: &messagespb.IdempotentInsertResult{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11}}},
-				},
-			}}},
-			{SourceMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "91"}, SourceTimetick: 91, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1", InsertResult: &messagespb.IdempotentInsertResult{
-				RowOffsets: []uint32{2, 0},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{12, 10}}},
-				},
-			}}},
-		},
-	}
-
-	payload, err := proto.Marshal(snapshot)
-	require.NoError(t, err)
-
-	decoded := &streamingpb.SummarySnapshot{}
-	require.NoError(t, proto.Unmarshal(payload, decoded))
-	require.Equal(t, snapshot.GetPchannel(), decoded.GetPchannel())
-	require.Equal(t, snapshot.GetVchannel(), decoded.GetVchannel())
-	require.Equal(t, snapshot.GetSnapshotCheckpointTimetick(), decoded.GetSnapshotCheckpointTimetick())
-	require.Len(t, decoded.GetEntries(), 2)
-}
-
-func TestSummaryRecoveryStateFromSnapshot(t *testing.T) {
-	snapshot := &streamingpb.SummarySnapshot{
-		Pchannel:                   "p1",
-		Vchannel:                   "v1",
-		SnapshotCheckpointTimetick: 100,
-		Entries: []*streamingpb.SummaryEntry{
-			{SourceTimetick: 95, Idempotency: &streamingpb.IdempotencyContent{Key: "key-2"}},
-			{SourceTimetick: 90, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}},
-		},
-	}
-
-	state, err := newVChannelSummaryFromSnapshot(snapshot)
-	require.NoError(t, err)
-	roundTrip := state.snapshot()
-	require.Equal(t, uint64(100), roundTrip.GetSnapshotCheckpointTimetick())
-	require.Equal(t, uint64(90), roundTrip.GetEvictedWatermarkTimetick())
-	require.Equal(t, "key-1", roundTrip.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, "key-2", roundTrip.GetEntries()[1].GetIdempotency().GetKey())
-}
-
 func TestSummaryEntryFromMessageWithIdempotency(t *testing.T) {
 	extra := &messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{2, 0},
@@ -752,10 +699,10 @@ func TestSummaryMaterializerApplyEntries(t *testing.T) {
 	require.Empty(t, state.pendingEntries)
 
 	snapshot := state.snapshot()
-	require.Len(t, snapshot.GetEntries(), 1)
-	require.Equal(t, "key-1", snapshot.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, []int64{10}, snapshot.GetEntries()[0].GetIdempotency().GetInsertResult().GetIds().GetIntId().GetData())
-	require.Equal(t, uint64(112), snapshot.GetSnapshotCheckpointTimetick())
+	require.Len(t, snapshot.Entries, 1)
+	require.Equal(t, "key-1", snapshot.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, []int64{10}, snapshot.Entries[0].GetIdempotency().GetInsertResult().GetIds().GetIntId().GetData())
+	require.Equal(t, uint64(112), snapshot.SnapshotCheckpointTimetick)
 }
 
 func TestSummaryConsumesPendingEntries(t *testing.T) {
@@ -806,9 +753,9 @@ func TestSummaryMaterializerApplyEntryDuplicate(t *testing.T) {
 	require.NoError(t, err)
 
 	snapshot := state.snapshot()
-	require.Len(t, snapshot.GetEntries(), 1)
-	require.Equal(t, uint64(100), snapshot.GetEntries()[0].GetSourceTimetick())
-	require.Equal(t, uint64(101), snapshot.GetSnapshotCheckpointTimetick())
+	require.Len(t, snapshot.Entries, 1)
+	require.Equal(t, uint64(100), snapshot.Entries[0].GetSourceTimetick())
+	require.Equal(t, uint64(101), snapshot.SnapshotCheckpointTimetick)
 }
 
 func TestSummaryMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
@@ -823,8 +770,8 @@ func TestSummaryMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
 	require.NoError(t, state.applySummaryEntriesAtGeneration([]*streamingpb.SummaryEntry{reused}, 1))
 
 	snapshot := state.snapshot()
-	require.Len(t, snapshot.GetEntries(), 1)
-	require.Equal(t, reusedTT, snapshot.GetEntries()[0].GetSourceTimetick())
+	require.Len(t, snapshot.Entries, 1)
+	require.Equal(t, reusedTT, snapshot.Entries[0].GetSourceTimetick())
 	require.Equal(t, uint64(1), state.latestAppliedGeneration)
 	_, oldGenerationPinned := state.generationStats[0]
 	require.False(t, oldGenerationPinned)
@@ -1070,12 +1017,12 @@ func TestPChannelSummaryPersistRecover(t *testing.T) {
 	recoverTestSummaries(ctx, t, recovered, "p1", false)
 	require.Len(t, recovered.summaryManager.summaries(), 2)
 	v1 := recovered.summaryManager.summaries()["v1"].snapshot()
-	require.Len(t, v1.GetEntries(), 1)
-	require.Equal(t, "key-1", v1.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, uint64(120), v1.GetSnapshotCheckpointTimetick())
+	require.Len(t, v1.Entries, 1)
+	require.Equal(t, "key-1", v1.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, uint64(120), v1.SnapshotCheckpointTimetick)
 	v2 := recovered.summaryManager.summaries()["v2"].snapshot()
-	require.Empty(t, v2.GetEntries())
-	require.Equal(t, uint64(120), v2.GetSnapshotCheckpointTimetick())
+	require.Empty(t, v2.Entries)
+	require.Equal(t, uint64(120), v2.SnapshotCheckpointTimetick)
 }
 
 func TestPChannelSummaryRecoverWithContinuousChunks(t *testing.T) {
@@ -1116,10 +1063,10 @@ func TestPChannelSummaryRecoverWithContinuousChunks(t *testing.T) {
 	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
 	summary := recovered.summaryManager.summaries()["v1"].snapshot()
-	require.Len(t, summary.GetEntries(), 2)
-	require.Equal(t, "key-from-generation-0", summary.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, "key-from-generation-1", summary.GetEntries()[1].GetIdempotency().GetKey())
-	require.Equal(t, uint64(140), summary.GetSnapshotCheckpointTimetick())
+	require.Len(t, summary.Entries, 2)
+	require.Equal(t, "key-from-generation-0", summary.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, "key-from-generation-1", summary.Entries[1].GetIdempotency().GetKey())
+	require.Equal(t, uint64(140), summary.SnapshotCheckpointTimetick)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetMinAvailableGeneration())
 }
 
@@ -1169,9 +1116,9 @@ func TestPChannelSummaryRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
 	summary := recovered.summaryManager.summaries()["v1"].snapshot()
-	require.Len(t, summary.GetEntries(), 2)
-	require.Equal(t, "key-evicted", summary.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, "key-retained", summary.GetEntries()[1].GetIdempotency().GetKey())
+	require.Len(t, summary.Entries, 2)
+	require.Equal(t, "key-evicted", summary.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, "key-retained", summary.Entries[1].GetIdempotency().GetKey())
 	require.Equal(t, uint64(0), recovered.summaryManager.summaries()["v1"].minRequiredGeneration)
 }
 
@@ -1215,7 +1162,6 @@ func TestPChannelSummaryRecoverFailsWhenChunkMissing(t *testing.T) {
 		MinAvailableGeneration:    0,
 		SourceCheckpointMessageId: rmq.NewRmqID(120).IntoProto(),
 		SourceCheckpointTimetick:  120,
-		CodecVersion:              uint32(pchannelSummaryCodecVersion),
 	}
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1271,9 +1217,9 @@ func TestPChannelSummaryRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
 	summary := recovered.summaryManager.summaries()["v1"].snapshot()
-	require.Len(t, summary.GetEntries(), 1)
-	require.Equal(t, "key-orphan", summary.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, uint64(120), summary.GetSnapshotCheckpointTimetick())
+	require.Len(t, summary.Entries, 1)
+	require.Equal(t, "key-orphan", summary.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, uint64(120), summary.SnapshotCheckpointTimetick)
 	require.Equal(t, uint64(1), catalogState.storeMeta.GetLatestGeneration())
 	require.Equal(t, uint64(120), catalogState.storeMeta.GetSourceCheckpointTimetick())
 }
@@ -1445,10 +1391,10 @@ func TestPChannelSummaryRecoveryReplayTailIdempotently(t *testing.T) {
 
 	summary := snapshot.SummarySnapshots["v1"]
 	require.NotNil(t, summary)
-	require.Len(t, summary.GetEntries(), 2)
-	require.Equal(t, "key-1", summary.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, "key-2", summary.GetEntries()[1].GetIdempotency().GetKey())
-	require.Equal(t, uint64(130), summary.GetSnapshotCheckpointTimetick())
+	require.Len(t, summary.Entries, 2)
+	require.Equal(t, "key-1", summary.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, "key-2", summary.Entries[1].GetIdempotency().GetKey())
+	require.Equal(t, uint64(130), summary.SnapshotCheckpointTimetick)
 }
 
 func TestPChannelSummaryCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
@@ -1484,8 +1430,8 @@ func TestPChannelSummaryCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
 	require.NotNil(t, snapshot)
 	summary := snapshot.SummarySnapshots["v1"]
 	require.NotNil(t, summary)
-	require.Len(t, summary.GetEntries(), 1)
-	require.Equal(t, "key-from-wal", summary.GetEntries()[0].GetIdempotency().GetKey())
+	require.Len(t, summary.Entries, 1)
+	require.Equal(t, "key-from-wal", summary.Entries[0].GetIdempotency().GetKey())
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
 }
 
@@ -1535,9 +1481,9 @@ func TestPChannelSummaryCrashAfterConsumeCheckpointRecoversFromChunkWithoutRepla
 	require.NotNil(t, snapshot)
 	summary := snapshot.SummarySnapshots["v1"]
 	require.NotNil(t, summary)
-	require.Len(t, summary.GetEntries(), 1)
-	require.Equal(t, "key-from-chunk", summary.GetEntries()[0].GetIdempotency().GetKey())
-	require.Equal(t, uint64(120), summary.GetSnapshotCheckpointTimetick())
+	require.Len(t, summary.Entries, 1)
+	require.Equal(t, "key-from-chunk", summary.Entries[0].GetIdempotency().GetKey())
+	require.Equal(t, uint64(120), summary.SnapshotCheckpointTimetick)
 }
 
 func newTestIdempotentCommittedInsertMessage(t *testing.T, vchannel string, key string, id int64) message.ImmutableMessage {

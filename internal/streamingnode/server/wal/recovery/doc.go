@@ -29,11 +29,17 @@
 // it is addressed by timetick, and which chunk generation to open is decided by
 // min_required_generation.
 //
-// The generated protobuf types ARE the model here — there is no parallel set of
-// Go structs mirroring them. A record read out of a chunk is the same
-// *streamingpb.SummaryEntry the chunk stored, so nothing is copied
-// between shapes and the two cannot drift. Add fields to the proto, not to a
-// wrapper.
+// For everything that crosses a storage or process boundary, the generated
+// protobuf types ARE the model — there is no parallel set of Go structs
+// mirroring them. A record read out of a chunk is the same
+// *streamingpb.SummaryEntry the chunk stored, so nothing is copied between
+// shapes and the two cannot drift. Add fields to the proto, not to a wrapper.
+//
+// The converse also holds: what never crosses such a boundary does NOT get a
+// message in streaming.proto. VChannelSummarySnapshot — what recovery hands a
+// view at WAL open — is built, consumed once in-process, and dropped; it is a
+// plain Go struct, and a proto there would advertise a wire contract that does
+// not exist. It still carries *streamingpb.SummaryEntry values, unconverted.
 //
 // Naming convention in this package: "summary" is the durable, application-
 // neutral data; "window" belongs to the idempotency interceptor, which is the

@@ -211,7 +211,6 @@ func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 		LatestGeneration:          1,
 		MinAvailableGeneration:    1,
 		MinInUseGeneration:        1,
-		CodecVersion:              uint32(pchannelSummaryCodecVersion),
 		Term:                      2,
 		ChunkManifest: &streamingpb.PChannelSummaryChunkManifest{
 			Ranges: []*streamingpb.PChannelSummaryChunkTermRange{
@@ -256,7 +255,6 @@ func TestRecoverSummariesRejectsManifestFooterTermMismatch(t *testing.T) {
 		LatestGeneration:          0,
 		MinAvailableGeneration:    0,
 		MinInUseGeneration:        0,
-		CodecVersion:              uint32(pchannelSummaryCodecVersion),
 		Term:                      2,
 		ChunkManifest: &streamingpb.PChannelSummaryChunkManifest{
 			Ranges: []*streamingpb.PChannelSummaryChunkTermRange{
@@ -298,7 +296,6 @@ func TestRecoverSummariesSealsPreviousTermByScanningChunks(t *testing.T) {
 		LatestGeneration:          0,
 		MinAvailableGeneration:    0,
 		MinInUseGeneration:        0,
-		CodecVersion:              uint32(pchannelSummaryCodecVersion),
 		Term:                      4,
 		ChunkManifest: &streamingpb.PChannelSummaryChunkManifest{
 			Ranges: []*streamingpb.PChannelSummaryChunkTermRange{
