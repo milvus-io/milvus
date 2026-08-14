@@ -186,6 +186,48 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
+ScalarRowMaskResidentBytes(
+    DataType field_type,
+    const std::string& index_type,
+    const std::map<std::string, std::string>& index_params,
+    int64_t num_rows) {
+    uint64_t mask_count = 0;
+    uint64_t dense_bitmap_count = 0;
+    if (index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE) {
+        // Tantivy does not retain null rows, so the C++ wrapper keeps one
+        // CRoaring row set beside the mmap'd index.
+        mask_count = 1;
+    }
+
+    const auto is_json_path =
+        field_type == DataType::JSON &&
+        index_params.find(JSON_PATH) != index_params.end();
+    if (is_json_path && index_type != NGRAM_INDEX_TYPE) {
+        // Typed JSON path indexes additionally keep the non-existing rows for
+        // EXISTS semantics. An unresolved HYBRID may select INVERTED, so use
+        // two masks there as a conservative bound.
+        auto cast_type_it = index_params.find(JSON_CAST_TYPE);
+        auto is_flat_json = cast_type_it == index_params.end() ||
+                            cast_type_it->second == "JSON";
+        if (!is_flat_json) {
+            mask_count += 1;
+            dense_bitmap_count = 1;
+            if (index_type == HYBRID_INDEX_TYPE) {
+                mask_count += 1;
+            }
+        }
+    }
+
+    // A CRoaring container is at most roughly one dense bitset plus container
+    // metadata. Reserve 2x the dense bytes per row set to cover that overhead.
+    auto roaring_bytes =
+        SaturatingMul(SaturatingMul(BitsetBytes(num_rows), 2), mask_count);
+    auto dense_bitmap_bytes =
+        SaturatingMul(BitsetBytes(num_rows), dense_bitmap_count);
+    return SaturatingAdd(roaring_bytes, dense_bitmap_bytes);
+}
+
+uint64_t
 IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
@@ -860,6 +902,12 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             index_type);
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
+    auto row_mask_resident_bytes = ScalarRowMaskResidentBytes(
+        field_type, index_type, index_params, num_rows);
+    request.final_memory_cost =
+        SaturatingAdd(request.final_memory_cost, row_mask_resident_bytes);
+    request.max_memory_cost =
+        SaturatingAdd(request.max_memory_cost, row_mask_resident_bytes);
     request.has_raw_data =
         CanUseIndexRawDataForField(field_type, request.has_raw_data);
     return request;
