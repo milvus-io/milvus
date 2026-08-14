@@ -5788,6 +5788,7 @@ type dataCoordConfig struct {
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 
 	// Task resource estimation
+	ResourceEnable                ParamItem `refreshable:"true"`
 	ResourceMixCompactionV3Factor ParamItem `refreshable:"true"`
 	ResourceClusteringFactor      ParamItem `refreshable:"true"`
 	ResourceClusteringMinMemory   ParamItem `refreshable:"true"`
@@ -7482,6 +7483,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
+
+	p.ResourceEnable = ParamItem{
+		Key:          "dataCoord.resource.enable",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: "whether DataCoord sizes compaction tasks from their input data. When false, mix and sort " +
+			"compaction fall back to the flat dataCoord.slot.* constants they used before resource " +
+			"estimation existed. Turn it off during a partial rollout or a rollback: the estimate is " +
+			"folded onto the same scalar slot field on the wire but with a different scale, so a new " +
+			"DataCoord talking to a DataNode that has not restarted yet reads that node as full far too " +
+			"early and cluster-wide compaction throughput collapses",
+		Export: true,
+	}
+	p.ResourceEnable.Init(base.mgr)
 
 	p.ResourceMixCompactionV3Factor = ParamItem{
 		Key:          "dataCoord.resource.mixCompactionV3MemoryFactor",
