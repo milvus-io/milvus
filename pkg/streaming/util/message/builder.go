@@ -299,6 +299,12 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 // The key is a property rather than a per-message-type header field so that every
 // producer and consumer reads it the same way (see `IdempotencyKeyOf`), and so
 // that a broadcast message carries it without any per-type schema change.
+//
+// Before setting this on a NEW message type, audit that type's broadcast callers:
+// a deduplicated broadcast returns no per-channel append results, so any caller
+// that dereferences `BroadcastAppendResult.GetAppendResult(...)` without first
+// checking `Duplicated` will nil-panic on the duplicate path — a branch no
+// success-path test reaches.
 func (b *mutableMesasgeBuilder[H, B]) WithIdempotencyKey(key string) *mutableMesasgeBuilder[H, B] {
 	if key != "" {
 		b.properties.Set(messageIdempotencyKey, key)
