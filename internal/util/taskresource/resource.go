@@ -78,6 +78,10 @@ func (r Requirement) String() string {
 	return fmt.Sprintf("{cpu=%.2f mem=%dMiB}", r.CPU, r.Memory>>20)
 }
 
+func (c Capacity) String() string {
+	return fmt.Sprintf("{cpu=%.2f mem=%dMiB}", c.CPU, c.Memory>>20)
+}
+
 // NodeCapacity reports the raw two-dimensional budget of this node, before the
 // non-task memory correction applied by the guard.
 func NodeCapacity() Capacity {

@@ -446,15 +446,26 @@ func TestNonTaskMemoryShrinksTheBudget(t *testing.T) {
 
 	assert.Equal(t, int64(600), g.Snapshot().Total.Memory)
 
-	// 700 fits the node but not what is left of it, so it waits. The node is
-	// empty here, which is what makes this discriminating: were oversizedness
-	// judged against the reduced budget instead of the node's capacity, this
-	// request would be admitted for *exclusive* execution, and a passing spike
-	// in non-task memory would serialize the whole node.
+	// Something is running, so the ledger is not empty and a Release can still
+	// change the answer. 700 fits the node but not what is left of it, so it
+	// waits. That is what makes this discriminating: were oversizedness judged
+	// against the reduced budget instead of the node's capacity, this request
+	// would be classified as oversized -- taking the exclusive path outright,
+	// and holding the line against every other task from anywhere in the queue
+	// (hasOversizedWaiterLocked) -- and a passing spike in non-task memory
+	// would serialize the whole node.
+	//
+	// (On an EMPTY node the same request is admitted exclusively instead, but
+	// for a different reason and only as a last resort: nothing is left to
+	// release, so deferring again would be permanent. See
+	// TestBandBetweenBudgetAndCapacityIsAdmittedNotStalled.)
+	mustAcquire(t, g, 9, taskcommon.Compaction, taskresource.Requirement{Memory: 100})
+
 	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 700})
 	assert.False(t, ok, "700 no longer fits once 400 is spoken for")
 	assert.Zero(t, g.Snapshot().ExclusiveTaskID,
-		"a task that fits the node must never be treated as oversized, however tight the budget")
+		"a task that fits the node must never be classified as oversized, however tight the budget")
+	g.Release(9)
 
 	// More non-task memory than the node has must floor the budget at zero, not
 	// wrap negative and let everything in.
@@ -764,20 +775,14 @@ func TestOversizedLatecomerDoesNotPreemptAnOrdinaryHead(t *testing.T) {
 	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "true")
 	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
 
-	// The node is empty but its budget is not: 70 fits the node and not the
-	// budget, so the head stays parked without holding anything itself.
+	// This is the exact window the queue rule exists for: the node has just
+	// drained, the head would now fit, and the head's goroutine has not woken
+	// up to claim it yet. The waiter is injected rather than run in a goroutine
+	// so that window is deterministic -- a real head would otherwise race the
+	// latecomer for the node and the test would pass or fail by scheduling.
+	head := &waiter{taskID: 1, req: taskresource.Requirement{Memory: 70}, ch: make(chan struct{}, 1)}
 	g.mu.Lock()
-	g.nonTask = 50
-	g.mu.Unlock()
-
-	waiting := make(chan error, 1)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		waiting <- g.Acquire(ctx, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 70})
-	}()
-	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 5*time.Millisecond)
-	g.mu.Lock()
+	g.waiters = append(g.waiters, head)
 	require.Empty(t, g.ledger, "the node really is empty; only the queue is not")
 	g.mu.Unlock()
 
@@ -785,13 +790,12 @@ func TestOversizedLatecomerDoesNotPreemptAnOrdinaryHead(t *testing.T) {
 	assert.False(t, ok, "an oversized latecomer must not take the node from the head it is reserved for")
 	assert.Zero(t, g.Snapshot().ExclusiveTaskID)
 
-	// And the head still gets what it was held out for.
-	g.mu.Lock()
-	g.nonTask = 0
-	g.mu.Unlock()
-	g.wakeWaiters()
-	require.NoError(t, <-waiting)
+	// And the head still gets what it was held out for -- as an ordinary
+	// admission, not an exclusive one: it fits.
+	ok, _ = g.TryAcquire(1, taskcommon.Compaction, head.req)
+	require.True(t, ok)
 	assert.Equal(t, int64(70), g.Snapshot().Reserved.Memory)
+	assert.Zero(t, g.Snapshot().ExclusiveTaskID)
 }
 
 // An oversized task holds the line from wherever it is queued, not only from
@@ -930,6 +934,12 @@ func TestTwoOversizedTasksRunOneAfterTheOther(t *testing.T) {
 
 func TestGetGuardIsProcessWideSingleton(t *testing.T) {
 	paramtable.Init()
+	// The singleton starts a sampling goroutine that outlives this test and
+	// keeps calling hardware.GetUsedMemoryCount. Other tests in this package
+	// patch that function and assert on who calls it, so the loop has to be
+	// stopped here rather than left to run for the rest of the binary.
+	t.Cleanup(stopGlobalGuardForTest)
+
 	a := GetGuard()
 	b := GetGuard()
 	require.NotNil(t, a)
