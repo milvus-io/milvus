@@ -193,7 +193,10 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 
 	snap := resource.GetGuard().Snapshot()
 	legacyTotal := index.CalculateNodeSlots()
-	available := legacyAvailableSlots(snap, legacyTotal)
+	indexStatsUsed, compactionUsed, importUsed := node.queuedSlots()
+	// Same fold as QuerySlot: the ledger alone cannot see queued-but-unadmitted
+	// work, so a node with a full index queue would report itself free here too.
+	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
 	// A sustained watermark freeze can leave tasks parked in Acquire
 	// indefinitely (Acquire only returns on ctx cancellation), reporting
