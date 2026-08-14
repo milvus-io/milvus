@@ -148,7 +148,14 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		})
 
 	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
+		schema, err := readerSchema(t.GetSchema(), t.options)
+		if err != nil {
+			mlog.Warn(t.ctx, "build reader schema failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
+			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			return err
+		}
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, schema, file, t.options, bufferSize, t.req.GetStorageConfig())
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -185,6 +192,15 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
+// readerSchema returns the schema the file reader validates against. A delete-key file carries
+// only the primary key column, so it is read through a primary-key projection.
+func readerSchema(schema *schemapb.CollectionSchema, options []*commonpb.KeyValuePair) (*schemapb.CollectionSchema, error) {
+	if !importutilv2.IsDeleteMode(options) {
+		return schema, nil
+	}
+	return importutilv2.BuildDeleteKeySchema(schema)
+}
+
 func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) error {
 	fileSize, err := reader.Size()
 	if err != nil {
@@ -215,6 +231,26 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 		err = CheckStructArrayConsistency(t.GetSchema(), data)
 		if err != nil {
 			return err
+		}
+		if importutilv2.IsDeleteMode(t.req.GetOptions()) {
+			pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
+			if err != nil {
+				return err
+			}
+			// ts is unused by GetDeleteStats, which only counts and hashes rows by primary key.
+			delData, err := ExtractDeleteData(data, pkField, 0)
+			if err != nil {
+				return err
+			}
+			stats, err := GetDeleteStats(t, delData)
+			if err != nil {
+				return err
+			}
+			MergeHashedStats(stats, hashedStats)
+			totalRows += int(delData.RowCount)
+			totalSize += int(delData.Size())
+			mlog.Info(t.ctx, "reading file stat...", WrapLogFields(t, mlog.Int("readRows", int(delData.RowCount)), mlog.Int("readSize", int(delData.Size())))...)
+			continue
 		}
 		rowsCount, err := GetRowsStats(t, data)
 		if err != nil {
