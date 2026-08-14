@@ -233,6 +233,16 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
 	}
 
+	underlyingROWALImplsOpener := s.underlyingROWALImplsOpener
+	if s.recovery {
+		// AlterWAL recovery must keep scanning the current WAL past the AlterWAL
+		// marker until a following TimeTick releases the marker from the reorder
+		// buffer. Switching to the target WAL here would wait for a WAL that is
+		// created only after the flusher checkpoint reaches the marker, causing a
+		// circular wait.
+		underlyingROWALImplsOpener = nil
+	}
+
 	scanner := newSwitchableScanner(
 		s.Name(),
 		s.logger,
@@ -240,7 +250,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		wb,
 		s.readOption.DeliverPolicy,
 		msgChan,
-		s.underlyingROWALImplsOpener,
+		underlyingROWALImplsOpener,
 		func(walName message.WALName) {
 			s.metrics.SetReaderWALName(walName)
 		},

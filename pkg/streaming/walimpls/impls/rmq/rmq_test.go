@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
@@ -90,6 +91,38 @@ func TestReadOnlyOpenRejectsMissingTopic(t *testing.T) {
 		},
 	})
 	require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
+}
+
+func TestRWClosePreservesTopicForHistoricalRead(t *testing.T) {
+	opener, err := (&builderImpl{}).Build()
+	require.NoError(t, err)
+	defer opener.Close()
+
+	channel := types.PChannelInfo{
+		Name:       "historical-read-after-rw-close",
+		AccessMode: types.AccessModeRW,
+	}
+	w, err := opener.Open(context.Background(), &walimpls.OpenOption{Channel: channel})
+	require.NoError(t, err)
+	msgID, err := w.Append(context.Background(), message.CreateTestEmptyInsertMesage(1, map[string]string{"id": "1"}))
+	require.NoError(t, err)
+	w.Close()
+
+	channel.AccessMode = types.AccessModeRO
+	roWAL, err := opener.Open(context.Background(), &walimpls.OpenOption{Channel: channel})
+	require.NoError(t, err)
+	defer roWAL.Close()
+
+	scanner, err := roWAL.Read(context.Background(), walimpls.ReadOption{
+		Name:          "historical-read-after-rw-close",
+		DeliverPolicy: options.DeliverPolicyAll(),
+	})
+	require.NoError(t, err)
+	defer scanner.Close()
+
+	msg := <-scanner.Chan()
+	require.NotNil(t, msg)
+	require.True(t, msgID.EQ(msg.MessageID()))
 }
 
 func TestWAL(t *testing.T) {

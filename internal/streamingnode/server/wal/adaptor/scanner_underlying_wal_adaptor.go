@@ -58,11 +58,12 @@ type underlyingWALScannerAdaptor struct {
 	underlyingROWALImplsOpener underlyingROWALImplsOpener
 	onUnderlyingScannerChanged func(message.WALName)
 
-	underlyingWALName    message.WALName
-	underlyingReadOption walimpls.ReadOption
-	cutTs                uint64
-	excludedMessageID    message.MessageID
-	messageCh            chan message.ImmutableMessage
+	underlyingWALName      message.WALName
+	underlyingReadOption   walimpls.ReadOption
+	cutTs                  uint64
+	excludedMessageID      message.MessageID
+	waitingForSwitchTarget bool
+	messageCh              chan message.ImmutableMessage
 }
 
 func newUnderlyingWALScannerAdaptor(
@@ -133,10 +134,26 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 
 		underlyingWAL, err := a.openUnderlyingWAL(a.Context())
 		if err != nil {
-			if isReadWALUnavailable(err) {
+			if a.isUnderlyingWALUnavailable(err) {
 				return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
 			}
-			return err
+			if !a.shouldRetrySwitchTarget(err) {
+				return err
+			}
+			if a.Context().Err() != nil {
+				return a.Context().Err()
+			}
+			waker, nextInterval := backoffTimer.NextTimer()
+			a.logger.Warn(a.Context(), "open underlying WAL failed, start a backoff",
+				mlog.Stringer("walName", a.underlyingWALName),
+				mlog.Duration("nextInterval", nextInterval),
+				mlog.Err(err))
+			select {
+			case <-a.Context().Done():
+				return a.Context().Err()
+			case <-waker:
+			}
+			continue
 		}
 
 		err = a.consumeUnderlying(a.Context(), underlyingWAL)
@@ -145,7 +162,7 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 			backoffTimer = newScannerReadBackoffTimer()
 			continue
 		}
-		if isReadWALUnavailable(err) {
+		if a.isUnderlyingWALUnavailable(err) {
 			return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
 		}
 		if status.AsStreamingError(err).IsUnrecoverable() {
@@ -175,6 +192,7 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 	if err != nil {
 		return err
 	}
+	a.waitingForSwitchTarget = false
 	defer underlyingScanner.Close()
 	if a.onUnderlyingScannerChanged != nil {
 		a.onUnderlyingScannerChanged(a.underlyingWALName)
@@ -257,6 +275,7 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 			a.underlyingReadOption.DeliverPolicy = options.DeliverPolicyAll()
 			a.cutTs = messageTimeTick
 			a.excludedMessageID = nil
+			a.waitingForSwitchTarget = true
 			return nil
 		}
 	}
@@ -330,6 +349,17 @@ func normalizeUnderlyingWALDeliverPolicy(
 
 func isReadWALUnavailable(err error) bool {
 	return status.AsStreamingError(err).IsWALNameMismatch() || errors.Is(err, merr.ErrMqTopicNotFound)
+}
+
+func (a *underlyingWALScannerAdaptor) isUnderlyingWALUnavailable(err error) bool {
+	if status.AsStreamingError(err).IsWALNameMismatch() {
+		return true
+	}
+	return !a.waitingForSwitchTarget && errors.Is(err, merr.ErrMqTopicNotFound)
+}
+
+func (a *underlyingWALScannerAdaptor) shouldRetrySwitchTarget(err error) bool {
+	return a.waitingForSwitchTarget && errors.Is(err, merr.ErrMqTopicNotFound)
 }
 
 func newUnderlyingWALUnavailableError(walName message.WALName, err error) error {

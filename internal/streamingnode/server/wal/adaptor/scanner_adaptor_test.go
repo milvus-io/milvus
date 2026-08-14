@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -124,6 +125,57 @@ func TestScannerAdaptorFailsWhenMigrationChainIsUnavailable(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("scanner did not fail after the migration chain became unavailable")
 	}
+}
+
+func TestScannerAdaptorRecoveryKeepsReadingCurrentWALAfterAlterWAL(t *testing.T) {
+	resource.InitForTest(t)
+	channel := types.PChannelInfo{Name: "alter-wal-recovery", AccessMode: types.AccessModeRW}
+	marker := newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	timeTick := newTestTimeTickMessage(101, rmq.NewRmqID(3), rmq.NewRmqID(2))
+
+	messageCh := make(chan message.ImmutableMessage, 2)
+	messageCh <- marker
+	messageCh <- timeTick
+	innerScanner := mock_walimpls.NewMockScannerImpls(t)
+	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
+	innerScanner.EXPECT().Close().Return(nil).Once()
+
+	currentWAL := mock_walimpls.NewMockWALImpls(t)
+	currentWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
+		return ok
+	})).Return(innerScanner, nil).Once()
+
+	openerCalled := atomic.NewBool(false)
+	scanner := newScannerAdaptor(
+		"alter-wal-recovery",
+		currentWAL,
+		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1))},
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			openerCalled.Store(true)
+			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
+		},
+		metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
+		func() {},
+		true,
+	)
+
+	select {
+	case msg := <-scanner.Chan():
+		require.Equal(t, marker, msg)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for AlterWAL marker")
+	}
+	select {
+	case msg := <-scanner.Chan():
+		require.Equal(t, timeTick, msg)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for TimeTick after AlterWAL marker")
+	}
+	require.False(t, openerCalled.Load())
+	require.NoError(t, scanner.Close())
 }
 
 func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
