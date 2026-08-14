@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -327,6 +329,127 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	s.NotNil(resp)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
 	s.Equal("1000", resp.GetJobID())
+}
+
+// newDuplicatedImportBroadcastResult builds the result the broadcaster returns on an
+// idempotency-key hit: no append results, plus the original broadcast message from
+// which the original jobID is recovered.
+func newDuplicatedImportBroadcastResult(originalJobID int64) *types.BroadcastAppendResult {
+	duplicated := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: originalJobID}).
+		WithIdempotencyKey("import/100/run-1").
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+	return &types.BroadcastAppendResult{
+		BroadcastID: 12345,
+		Duplicated:  duplicated,
+	}
+}
+
+// setupImportV2DuplicateBroadcast wires the mocks ImportV2 needs so that the broadcast
+// comes back deduplicated, and returns the server under test. importMeta is supplied by
+// the caller so it can decide whether the original job still exists.
+func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta) *Server {
+	mockBalancerInst := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancerInst, nil
+	}).Build()
+	s.T().Cleanup(func() { mockBalance.UnPatch() })
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	s.T().Cleanup(func() { mockAssignment.UnPatch() })
+
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(4242)
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
+
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil).Times(2)
+
+	server := &Server{
+		importMeta: importMeta,
+		broker:     mockBroker,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
+	server.allocator = mockAllocator
+	return server
+}
+
+func newImportV2IdempotentRequest() *internalpb.ImportRequestInternal {
+	return &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		PartitionIDs:   []int64{1},
+		ChannelNames:   []string{"v1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			DbName: "test_db",
+		},
+		Files: []*internalpb.ImportFile{
+			{Id: 1, Paths: []string{"/test/file.json"}},
+		},
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+		},
+		IdempotencyKey: "run-1",
+	}
+}
+
+// A retry whose idempotency key still resolves must get the ORIGINAL jobID back,
+// not the freshly allocated one (1000 here, which stays unused).
+func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
+	ctx := context.Background()
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
+		ImportJob: &datapb.ImportJob{JobID: 4242},
+	})
+
+	server := s.setupImportV2DuplicateBroadcast(importMeta)
+
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal("4242", resp.GetJobID())
+}
+
+// The key outlived its job, so returning the original jobID would hand the client an
+// id GetImportProgress cannot resolve; ImportV2 must fail instead of returning a jobID.
+func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError() {
+	ctx := context.Background()
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil)
+
+	server := s.setupImportV2DuplicateBroadcast(importMeta)
+
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	s.Contains(resp.GetStatus().GetReason(), "past its retention")
+	s.Empty(resp.GetJobID())
 }
 
 func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {

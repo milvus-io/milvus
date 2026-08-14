@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -170,6 +171,33 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
 }
 
+// importIdempotencyScopedKey scopes a client-supplied idempotency key to the
+// target collection. The broadcaster stores it as an opaque string, so the scope
+// has to be baked in here — that also keeps the same client key usable on
+// different collections without colliding.
+func importIdempotencyScopedKey(collectionID int64, clientKey string) string {
+	if clientKey == "" {
+		return ""
+	}
+	return fmt.Sprintf("import/%d/%s", collectionID, clientKey)
+}
+
+// jobIDFromDuplicatedBroadcast recovers the original import jobID from the
+// broadcast message the broadcaster returned on an idempotency hit. The
+// broadcaster does not know about import-specific structures, so the decode
+// happens here.
+func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage) (int64, error) {
+	importMsg, err := message.AsBroadcastImportMessageV1(msg)
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
+	}
+	body, err := importMsg.Body()
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
+	}
+	return body.GetJobID(), nil
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
@@ -181,7 +209,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
-) error {
+	idempotencyKey string,
+) (duplicatedJobID int64, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -192,7 +221,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return merr.Wrap(err, "failed to validate import request")
+		return 0, merr.Wrap(err, "failed to validate import request")
 	}
 
 	// Per-file PK ranges are the default path for every autoID import. The
@@ -226,7 +255,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return merr.Wrap(err, "failed to start broadcast with collection id")
+		return 0, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
@@ -242,7 +271,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return err
+		return 0, err
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
@@ -261,12 +290,30 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
+		WithIdempotencyKey(importIdempotencyScopedKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	// Broadcast the message
-	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	result, err := broadcaster.Broadcast(ctx, msg)
+	if err != nil {
+		return 0, err
+	}
+	if result.Duplicated == nil {
+		return 0, nil
+	}
+	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
+	// new job was created; recover the jobID that broadcast carried.
+	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated)
+	if err != nil {
+		return 0, err
+	}
+	mlog.Info(ctx, "import broadcast deduplicated by idempotency key",
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldJobID(originalJobID),
+		// Never log the raw key: it is client-controlled and may carry sensitive data.
+		mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey)))
+	return originalJobID, nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

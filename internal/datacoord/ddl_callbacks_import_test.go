@@ -296,7 +296,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		importMeta: &importMeta{},
 	}
 
-	err := server.broadcastImport(
+	_, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -306,6 +306,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -344,7 +345,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -354,6 +355,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -402,7 +404,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -412,6 +414,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -465,7 +468,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -475,6 +478,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -526,7 +530,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -536,6 +540,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -586,7 +591,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -596,6 +601,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.NoError(err)
@@ -1256,4 +1262,29 @@ func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
 
 func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func TestImportIdempotencyScopedKey(t *testing.T) {
+	// No client key means no scoped key at all, so the broadcast carries no
+	// property and is never deduplicated.
+	assert.Equal(t, "", importIdempotencyScopedKey(100, ""))
+	assert.Equal(t, "import/100/run-1", importIdempotencyScopedKey(100, "run-1"))
+	// The key is scoped to the collection: the same client key on a different
+	// collection is a different logical request.
+	assert.NotEqual(t,
+		importIdempotencyScopedKey(100, "run-1"),
+		importIdempotencyScopedKey(101, "run-1"))
+}
+
+func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242}).
+		WithIdempotencyKey("import/100/run-1").
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	jobID, err := jobIDFromDuplicatedBroadcast(msg)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4242), jobID)
 }

@@ -1957,7 +1957,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Broadcast the import message
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
-	err = s.broadcastImport(
+	duplicatedJobID, err := s.broadcastImport(
 		ctx,
 		in.GetCollectionName(),
 		in.GetCollectionID(),
@@ -1967,10 +1967,26 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		in.GetSchema(),
 		jobID,
 		in.GetChannelNames(),
+		in.GetIdempotencyKey(),
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast import message", mlog.Err(err))
 		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
+		return resp, nil
+	}
+	if duplicatedJobID != 0 {
+		// The idempotency window still holds this key, so the original job is the
+		// answer. Verify it is still queryable first: tombstone retention can
+		// outlive a job when restarts keep resetting the tombstone clock, and
+		// handing back a jobID GetImportProgress cannot resolve would leave the
+		// client unable to tell "already imported" from "never imported".
+		if s.importMeta.GetJob(ctx, duplicatedJobID) == nil {
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+				"the import job for this idempotency key is past its retention; resubmit with a new key"))
+			return resp, nil
+		}
+		resp.JobID = fmt.Sprint(duplicatedJobID)
+		mlog.Info(ctx, "import request resolved to an existing job", mlog.String("jobID", resp.JobID))
 		return resp, nil
 	}
 
