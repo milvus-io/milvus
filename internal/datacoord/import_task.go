@@ -17,6 +17,8 @@
 package datacoord
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -154,6 +156,36 @@ func UpdateV3Result(ref string, digest []byte) UpdateAction {
 			task.ResultRef = ref
 			task.ResultDigest = append([]byte(nil), digest...)
 		}
+	}
+}
+
+func updateReshardRun(runID int64, outputPrefix string) UpdateAction {
+	return func(t ImportTask) {
+		task := t.(*reshardTask).task.Load()
+		task.RunId = runID
+		task.OutputPrefix = outputPrefix
+		task.NodeId = NullNodeID
+		task.State = datapb.ReshardTask_Pending
+		task.ResultRef = ""
+		task.ResultDigest = nil
+		task.Reason = ""
+		task.FailureCode = 0
+	}
+}
+
+func updateImportV3Run(runID int64, outputPrefix string, outputSegmentIDs []int64, logIDRange *datapb.IDRange) UpdateAction {
+	return func(t ImportTask) {
+		task := t.(*importTaskV3).task.Load()
+		task.RunId = runID
+		task.OutputPrefix = outputPrefix
+		task.OutputSegmentIds = append([]int64(nil), outputSegmentIDs...)
+		task.LogIdRange = proto.Clone(logIDRange).(*datapb.IDRange)
+		task.NodeId = NullNodeID
+		task.State = datapb.ImportTaskV3_Pending
+		task.ResultRef = ""
+		task.ResultDigest = nil
+		task.Reason = ""
+		task.FailureCode = 0
 	}
 }
 

@@ -5585,6 +5585,7 @@ type dataCoordConfig struct {
 	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	ImportV3FragmentSizeInMB        ParamItem `refreshable:"true"`
 	ImportMaxMergeFanIn             ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
@@ -6983,6 +6984,19 @@ raise this for files written with small row groups, many columns, or untruncated
 		},
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
+
+	p.ImportV3FragmentSizeInMB = ParamItem{
+		Key:          "dataCoord.import.v3FragmentSizeInMB",
+		Version:      "3.0.0",
+		Doc:          "Target logical size in MiB for one sorted ImportTaskV3 fragment.",
+		DefaultValue: "128",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportV3FragmentSizeInMB.Init(base.mgr)
+	if p.ImportV3FragmentSizeInMB.GetAsInt64() <= 0 {
+		panic("dataCoord.import.v3FragmentSizeInMB must be positive")
+	}
 
 	p.ImportMaxMergeFanIn = ParamItem{
 		Key:          "dataCoord.import.maxImportMergeFanIn",

@@ -8,12 +8,14 @@ package datacoord
 // Drop treats a missing worker as ownership loss.
 
 import (
+	"bytes"
 	"context"
 	"time"
 
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -21,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -97,13 +100,17 @@ type reshardTask struct {
 	task       atomic.Pointer[datapb.ReshardTask]
 	importMeta ImportMeta
 	meta       *meta
+	alloc      allocator.Allocator
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
 	retryTimes int64
 }
 
-func newReshardTask(p *datapb.ReshardTask, importMeta ImportMeta, meta *meta) *reshardTask {
+func newReshardTask(p *datapb.ReshardTask, importMeta ImportMeta, meta *meta, alloc ...allocator.Allocator) *reshardTask {
 	t := &reshardTask{importMeta: importMeta, meta: meta, tr: timerecord.NewTimeRecorder("reshard task"), times: taskcommon.NewTimes()}
+	if len(alloc) > 0 {
+		t.alloc = alloc[0]
+	}
 	t.task.Store(p)
 	return t
 }
@@ -141,13 +148,24 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 		t.fail("reshard task has no persisted plan or run", merr.Code(merr.ErrImportSysFailed))
 		return
 	}
-	err := cluster.CreateReshard(nodeID, &datapb.ReshardTaskRequest{
+	job := t.importMeta.GetJob(context.TODO(), p.GetJobId())
+	if job == nil {
+		t.fail("reshard task job is missing", merr.Code(merr.ErrImportSysFailed))
+		return
+	}
+	req := &datapb.ReshardTaskRequest{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(),
 		TaskPlanRef: p.GetTaskPlanRef(), TaskPlanDigest: p.GetTaskPlanDigest(),
 		OutputPrefix: p.GetOutputPrefix(), TaskSlot: p.GetTaskSlot(), StorageConfig: createStorageConfig(),
-	}, t.GetCollectionID())
+		PluginContext: GetReadPluginContext(job.GetOptions()),
+	}
+	WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	err := cluster.CreateReshard(nodeID, req, t.GetCollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "create reshard task failed", WrapTaskLog(t, mlog.Err(err))...)
+		if isImportTerminalError(err) {
+			t.fail(err.Error(), importFailureCode(err))
+		}
 		return
 	}
 	if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress), UpdateNodeID(nodeID)); err != nil {
@@ -160,11 +178,11 @@ func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 	resp, err := cluster.QueryReshard(t.GetNodeID(), &datapb.QueryReshardTaskRequest{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
 	if err != nil {
 		if isImportOwnershipLost(err) {
-			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending), UpdateNodeID(NullNodeID))
+			t.prepareRetry(cluster)
 		} else if isImportTerminalError(err) {
 			t.fail(err.Error(), importFailureCode(err))
 		} else {
-			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+			t.prepareRetry(cluster)
 		}
 		return
 	}
@@ -173,7 +191,7 @@ func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 			t.fail(resp.GetReason(), resp.GetFailureCode())
 			return
 		}
-		_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+		t.prepareRetry(cluster)
 		return
 	}
 	if resp.GetState() == datapb.ReshardTask_Failed {
@@ -192,6 +210,16 @@ func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 			mlog.Warn(context.TODO(), "persist accepted reshard result marker failed", WrapTaskLog(t, mlog.Err(err))...)
 		}
 	}
+}
+
+func (t *reshardTask) prepareRetry(cluster session.Cluster) {
+	p := t.task.Load()
+	if t.GetNodeID() != NullNodeID {
+		_ = cluster.DropReshard(t.GetNodeID(), &datapb.DropReshardTaskRequest{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
+	}
+	newRun := p.GetRunId() + 1
+	prefix := metautil.BuildImportV3ReshardOutputPath(p.GetJobId(), p.GetTaskId())
+	_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), updateReshardRun(newRun, prefix))
 }
 
 func (t *reshardTask) acceptResult(ref string, digest []byte) error {
@@ -222,7 +250,7 @@ func (t *reshardTask) fail(reason string, code int32) {
 	_ = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason), UpdateJobFailureCode(code))
 }
 func (t *reshardTask) Clone() ImportTask {
-	c := newReshardTask(proto.Clone(t.task.Load()).(*datapb.ReshardTask), t.importMeta, t.meta)
+	c := newReshardTask(proto.Clone(t.task.Load()).(*datapb.ReshardTask), t.importMeta, t.meta, t.alloc)
 	c.tr, c.times = t.tr, t.times
 	return c
 }
@@ -234,13 +262,17 @@ type importTaskV3 struct {
 	task       atomic.Pointer[datapb.ImportTaskV3]
 	importMeta ImportMeta
 	meta       *meta
+	alloc      allocator.Allocator
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
 	retryTimes int64
 }
 
-func newImportTaskV3(p *datapb.ImportTaskV3, importMeta ImportMeta, meta *meta) *importTaskV3 {
+func newImportTaskV3(p *datapb.ImportTaskV3, importMeta ImportMeta, meta *meta, alloc ...allocator.Allocator) *importTaskV3 {
 	t := &importTaskV3{importMeta: importMeta, meta: meta, tr: timerecord.NewTimeRecorder("import v3 task"), times: taskcommon.NewTimes()}
+	if len(alloc) > 0 {
+		t.alloc = alloc[0]
+	}
 	t.task.Store(p)
 	return t
 }
@@ -284,15 +316,26 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		t.fail("import v3 task has no persisted planning snapshot", merr.Code(merr.ErrImportSysFailed))
 		return
 	}
-	err := cluster.CreateImportV3(nodeID, &datapb.ImportTaskV3Request{
+	plan, err := t.loadPlanForDispatch()
+	if err != nil {
+		t.fail(err.Error(), merr.Code(err))
+		return
+	}
+	req := &datapb.ImportTaskV3Request{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), TaskPlanRef: p.GetTaskPlanRef(),
 		TaskPlanDigest: p.GetTaskPlanDigest(), OutputPrefix: p.GetOutputPrefix(), OutputSegmentIds: p.GetOutputSegmentIds(),
 		LogIdRange: p.GetLogIdRange(), TaskSlot: p.GetTaskSlot(), PlanningGeneration: p.GetPlanningGeneration(),
-		StorageConfig: createStorageConfig(), MergeFanIn: int32(Params.DataCoordCfg.ImportMaxMergeFanIn.GetAsInt()),
+		StorageConfig: createStorageConfig(), MergeFanIn: plan.GetMergeFanIn(),
 		PlanningSnapshotRef: job.GetPlanningSnapshotRef(), PlanningSnapshotDigest: job.GetPlanningSnapshotDigest(),
-	}, t.GetCollectionID())
+		PluginContext: GetReadPluginContext(job.GetOptions()),
+	}
+	WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "create import v3 task failed", WrapTaskLog(t, mlog.Err(err))...)
+		if isImportTerminalError(err) {
+			t.fail(err.Error(), importFailureCode(err))
+		}
 		return
 	}
 	if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress), UpdateNodeID(nodeID)); err != nil {
@@ -300,16 +343,40 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	}
 }
 
+func (t *importTaskV3) loadPlanForDispatch() (*datapb.ImportTaskPlan, error) {
+	p := t.task.Load()
+	if t.meta == nil || t.meta.chunkManager == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("import v3 task plan storage is unavailable")
+	}
+	payload, err := t.meta.chunkManager.Read(context.TODO(), p.GetTaskPlanRef())
+	if err != nil {
+		return nil, merr.Wrap(err, "read import v3 task plan")
+	}
+	if !bytes.Equal(importV3Digest(payload), p.GetTaskPlanDigest()) {
+		return nil, merr.WrapErrDataIntegrityMsg("import v3 task plan digest mismatch")
+	}
+	plan := &datapb.ImportTaskPlan{}
+	if err := proto.Unmarshal(payload, plan); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal import v3 task plan")
+	}
+	if plan.GetJobId() != p.GetJobId() || plan.GetTaskId() != p.GetTaskId() ||
+		plan.GetPlanningGeneration() != p.GetPlanningGeneration() || plan.GetMergeFanIn() < 2 || plan.GetMergeFanIn() > 1024 ||
+		plan.GetRequiredLogIds() != p.GetLogIdRange().GetEnd()-p.GetLogIdRange().GetBegin() {
+		return nil, merr.WrapErrDataIntegrityMsg("import v3 task plan dispatch contract mismatch")
+	}
+	return plan, nil
+}
+
 func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 	p := t.task.Load()
 	resp, err := cluster.QueryImportV3(t.GetNodeID(), &datapb.QueryImportTaskV3Request{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
 	if err != nil {
 		if isImportOwnershipLost(err) {
-			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending), UpdateNodeID(NullNodeID))
+			t.prepareRetry(cluster)
 		} else if isImportTerminalError(err) {
 			t.fail(err.Error(), importFailureCode(err))
 		} else {
-			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+			t.prepareRetry(cluster)
 		}
 		return
 	}
@@ -318,7 +385,7 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 			t.fail(resp.GetReason(), resp.GetFailureCode())
 			return
 		}
-		_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+		t.prepareRetry(cluster)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskV3_Failed {
@@ -336,6 +403,94 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 		if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateV3Result(resp.GetResultRef(), resp.GetResultDigest()), UpdateState(datapb.ImportTaskStateV2_Completed)); err != nil {
 			mlog.Warn(context.TODO(), "persist accepted import v3 result marker failed", WrapTaskLog(t, mlog.Err(err))...)
 		}
+	}
+}
+
+func (t *importTaskV3) prepareRetry(cluster session.Cluster) {
+	p := t.task.Load()
+	if t.alloc == nil || t.meta == nil || p.GetLogIdRange() == nil {
+		t.fail("import v3 retry resources are unavailable", merr.Code(merr.ErrImportSysFailed))
+		return
+	}
+	type skeletonIdentity struct {
+		partitionID, storageVersion int64
+		schemaVersion               int32
+		vchannel                    string
+	}
+	identities := make([]skeletonIdentity, len(p.GetOutputSegmentIds()))
+	for i, segmentID := range p.GetOutputSegmentIds() {
+		segment := t.meta.GetSegment(context.TODO(), segmentID)
+		if segment == nil {
+			t.fail("import v3 retry skeleton is missing", merr.Code(merr.ErrDataIntegrity))
+			return
+		}
+		identities[i] = skeletonIdentity{
+			partitionID: segment.GetPartitionID(), vchannel: segment.GetInsertChannel(),
+			schemaVersion: segment.GetSchemaVersion(), storageVersion: segment.GetStorageVersion(),
+		}
+	}
+	if t.GetNodeID() != NullNodeID {
+		_ = cluster.DropImportV3(t.GetNodeID(), &datapb.DropImportTaskV3Request{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
+	}
+	oldSegments := append([]int64(nil), p.GetOutputSegmentIds()...)
+	job := t.importMeta.GetJob(context.TODO(), p.GetJobId())
+	if job == nil {
+		t.fail("import v3 retry job is missing", merr.Code(merr.ErrImportSysFailed))
+		return
+	}
+	newSegments := make([]int64, len(oldSegments))
+	cleanupNewSegments := func() {
+		if len(newSegments) > 0 {
+			_ = t.meta.UpdateSegmentsInfo(context.TODO(), dropImportV3Skeletons(newSegments, false))
+		}
+	}
+	for i, identity := range identities {
+		segment, err := AllocImportSegment(context.TODO(), t.alloc, t.meta,
+			p.GetJobId(), p.GetTaskId(), p.GetCollectionId(), identity.partitionID,
+			identity.vchannel, job.GetDataTs(), datapb.SegmentLevel_L1, identity.storageVersion)
+		if err != nil {
+			cleanupNewSegments()
+			t.fail(err.Error(), merr.Code(merr.ErrImportSysFailed))
+			return
+		}
+		newSegments[i] = segment.GetID()
+		if err := t.meta.UpdateSegmentsInfo(context.TODO(), prepareImportV3Skeleton(segment.GetID(), identity.schemaVersion)); err != nil {
+			cleanupNewSegments()
+			t.fail(err.Error(), merr.Code(merr.ErrImportSysFailed))
+			return
+		}
+	}
+	// The existing log range is fixed for a plan. A retried run gets a fresh
+	// range so a late old writer cannot reuse current segment log IDs.
+	begin, end, err := t.alloc.AllocN(p.GetLogIdRange().GetEnd() - p.GetLogIdRange().GetBegin())
+	if err != nil {
+		cleanupNewSegments()
+		t.fail(err.Error(), merr.Code(merr.ErrImportSysFailed))
+		return
+	}
+	newRun := p.GetRunId() + 1
+	prefix := metautil.BuildImportV3ImportOutputPath(p.GetJobId(), p.GetTaskId())
+	if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), updateImportV3Run(newRun, prefix, newSegments, &datapb.IDRange{Begin: begin, End: end})); err != nil {
+		cleanupNewSegments()
+		t.fail(err.Error(), merr.Code(merr.ErrImportSysFailed))
+		return
+	}
+	if len(oldSegments) > 0 {
+		if err := t.meta.UpdateSegmentsInfo(context.TODO(), dropImportV3Skeletons(oldSegments, false)); err != nil {
+			mlog.Warn(context.TODO(), "drop old import v3 retry skeletons failed", WrapTaskLog(t, mlog.Err(err))...)
+		}
+	}
+}
+
+func prepareImportV3Skeleton(segmentID int64, schemaVersion int32) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrImportSysFailedMsg("import v3 skeleton %d is missing", segmentID))
+		}
+		segment.SchemaVersion = schemaVersion
+		segment.IsInvisible = true
+		return true
 	}
 }
 
@@ -384,7 +539,7 @@ func (t *importTaskV3) fail(reason string, code int32) {
 	_ = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason), UpdateJobFailureCode(code))
 }
 func (t *importTaskV3) Clone() ImportTask {
-	c := newImportTaskV3(proto.Clone(t.task.Load()).(*datapb.ImportTaskV3), t.importMeta, t.meta)
+	c := newImportTaskV3(proto.Clone(t.task.Load()).(*datapb.ImportTaskV3), t.importMeta, t.meta, t.alloc)
 	c.tr, c.times = t.tr, t.times
 	return c
 }

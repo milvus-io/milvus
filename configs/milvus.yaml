@@ -877,6 +877,7 @@ dataCoord:
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    v3FragmentSizeInMB: 128 # Target logical size in MiB for one sorted ImportTaskV3 fragment.
     maxImportMergeFanIn: 16 # Direct merge fan-in for ImportTaskV3. Basic valid range is [2,1024].
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop

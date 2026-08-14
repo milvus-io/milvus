@@ -121,7 +121,7 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 			return nil, err
 		}
 		for _, task := range restoredReshardTasks {
-			t := newReshardTask(task, importMeta, meta)
+			t := newReshardTask(task, importMeta, meta, alloc)
 			tasks.add(t)
 		}
 		restoredImportTasksV3, err := v3Catalog.ListImportTasksV3(ctx)
@@ -129,7 +129,7 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 			return nil, err
 		}
 		for _, task := range restoredImportTasksV3 {
-			t := newImportTaskV3(task, importMeta, meta)
+			t := newImportTaskV3(task, importMeta, meta, alloc)
 			tasks.add(t)
 		}
 	}

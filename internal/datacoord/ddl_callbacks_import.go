@@ -202,10 +202,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Freeze one literal AutoID range per ordinary source file before the WAL
-	// message is published. Backup/L0 imports keep their existing behavior.
+	// Freeze one literal ID range per ordinary V3 source file before the WAL
+	// message is published. V3 uses it for RowID even with an explicit PK; AutoID
+	// collections also derive the PK from the same range. V2 keeps its old rule.
 	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
-		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		(pkField.GetAutoID() || importTaskVersion == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3) &&
+		!importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
 		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
 			s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64()); err != nil {
 			return merr.Wrap(err, "failed to assign per-file PK ranges")

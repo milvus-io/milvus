@@ -12,7 +12,6 @@ import (
 	"math"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -22,14 +21,16 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	importbinlog "github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const importV3Root = "import_v3"
+const importV3Root = metautil.ImportV3RootPath
 
 func importV3Digest(data []byte) []byte {
 	v := crc64.Checksum(data, crc64.MakeTable(crc64.ECMA))
@@ -87,6 +88,10 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 	if err != nil {
 		return err
 	}
+	sortSpec, err := v3DefaultSortSpec(job.GetSchema())
+	if err != nil {
+		return err
+	}
 	if existing := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID())); len(existing) > 0 {
 		if len(existing) == len(bins) {
 			if err := c.validateV3ReshardTaskSet(job, existing, bins); err != nil {
@@ -116,12 +121,11 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 		taskID := start + int64(i)
 		sources := make([]*datapb.SourceFileSpec, 0, len(bin.sources))
 		for _, source := range bin.sources {
-			sources = append(sources, &datapb.SourceFileSpec{
-				SourceOrdinal: int32(source.ordinal),
-				File:          proto.Clone(source.file).(*internalpb.ImportFile),
-				Format:        importV3SourceFormat(source.file),
-				IsBackup:      importutilv2.IsBackup(job.GetOptions()),
-			})
+			spec, err := c.buildV3SourceFileSpec(job, source)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, spec)
 		}
 		plan := &datapb.ReshardTaskPlan{
 			FormatVersion: 1,
@@ -130,21 +134,76 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 			TemporarySchema:            buildImportV3TemporarySchema(job.GetSchema(), importutilv2.IsBackup(job.GetOptions())),
 			Vchannels:                  append([]string(nil), job.GetVchannels()...),
 			PartitionIds:               append([]int64(nil), job.GetPartitionIDs()...),
-			SortSpec:                   v3DefaultSortSpec(job.GetSchema()),
-			FragmentTargetLogicalBytes: 128 * 1024 * 1024,
+			SortSpec:                   proto.Clone(sortSpec).(*datapb.SortSpec),
+			FragmentTargetLogicalBytes: Params.DataCoordCfg.ImportV3FragmentSizeInMB.GetAsInt64() * 1024 * 1024,
 			Sources:                    sources,
 		}
-		prefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "reshard", strconv.FormatInt(taskID, 10))
+		prefix := metautil.BuildImportV3ReshardPlanPath(job.GetJobID(), taskID)
 		ref, digest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, prefix, "plan", plan)
 		if err != nil {
 			return err
 		}
-		task := newReshardTask(&datapb.ReshardTask{JobId: job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(), State: datapb.ReshardTask_Pending, TaskPlanRef: ref, TaskPlanDigest: digest, RunId: 1, NodeId: NullNodeID, OutputPrefix: path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "reshard", strconv.FormatInt(taskID, 10), "run", "1"), TaskSlot: 1}, c.importMeta, c.meta)
+		task := newReshardTask(&datapb.ReshardTask{JobId: job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(), State: datapb.ReshardTask_Pending, TaskPlanRef: ref, TaskPlanDigest: digest, RunId: 1, NodeId: NullNodeID, OutputPrefix: metautil.BuildImportV3ReshardOutputPath(job.GetJobID(), taskID), TaskSlot: 1}, c.importMeta, c.meta, c.alloc)
 		if err := c.importMeta.AddTask(c.ctx, task); err != nil {
 			return err
 		}
 	}
 	return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+}
+
+func (c *importChecker) buildV3SourceFileSpec(job ImportJob, source v3ReshardSource) (*datapb.SourceFileSpec, error) {
+	format := importV3SourceFormat(source.file)
+	spec := &datapb.SourceFileSpec{
+		SourceOrdinal:        int32(source.ordinal),
+		File:                 proto.Clone(source.file).(*internalpb.ImportFile),
+		EstimatedSourceBytes: source.size,
+		Format:               format,
+		IsBackup:             importutilv2.IsBackup(job.GetOptions()),
+		ReaderOptions:        &datapb.ReaderOptions{},
+	}
+	if format == datapb.ImportSourceFormat_IMPORT_SOURCE_FORMAT_CSV {
+		separator, err := importutilv2.GetCSVSep(job.GetOptions())
+		if err != nil {
+			return nil, err
+		}
+		nullKey, err := importutilv2.GetCSVNullKey(job.GetOptions())
+		if err != nil {
+			return nil, err
+		}
+		spec.ReaderOptions.CsvSeparator = string(separator)
+		spec.ReaderOptions.CsvNullKey = nullKey
+	}
+	if !spec.GetIsBackup() {
+		return spec, nil
+	}
+	startTS, endTS, err := importutilv2.ParseTimeRange(job.GetOptions())
+	if err != nil {
+		return nil, err
+	}
+	storageVersion, err := importutilv2.GetStorageVersion(job.GetOptions())
+	if err != nil {
+		return nil, err
+	}
+	insertObjects, deltaObjects, err := importbinlog.ExpandObjects(c.ctx, c.meta.chunkManager, source.file.GetPaths())
+	if err != nil {
+		return nil, err
+	}
+	fieldIDs := make([]int64, 0, len(insertObjects))
+	for fieldID := range insertObjects {
+		fieldIDs = append(fieldIDs, fieldID)
+	}
+	sort.Slice(fieldIDs, func(i, j int) bool { return fieldIDs[i] < fieldIDs[j] })
+	for _, fieldID := range fieldIDs {
+		spec.ExpandedInsertFields = append(spec.ExpandedInsertFields, &datapb.ExpandedBinlogField{
+			FieldOrGroupId: fieldID,
+			Paths:          append([]string(nil), insertObjects[fieldID]...),
+		})
+	}
+	spec.ExpandedDeltaObjects = append([]string(nil), deltaObjects...)
+	spec.ReaderOptions.BackupStartTs = startTS
+	spec.ReaderOptions.BackupEndTs = endTS
+	spec.ReaderOptions.SourceStorageVersion = storageVersion
+	return spec, nil
 }
 
 func (c *importChecker) validateV3ReshardTaskSet(job ImportJob, tasks []ImportTask, bins []v3ReshardBin) error {
@@ -165,7 +224,7 @@ func (c *importChecker) validateV3ReshardTaskSet(job ImportJob, tasks []ImportTa
 		}
 		p := task.task.Load()
 		plan := &datapb.ReshardTaskPlan{}
-		prefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "reshard", strconv.FormatInt(p.GetTaskId(), 10))
+		prefix := metautil.BuildImportV3ReshardPlanPath(job.GetJobID(), p.GetTaskId())
 		if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, p.GetTaskPlanRef(), prefix, p.GetTaskPlanDigest(), plan); err != nil {
 			return err
 		}
@@ -253,16 +312,41 @@ func (c *importChecker) groupV3ReshardSources(files []*internalpb.ImportFile) ([
 	return bins, nil
 }
 
-func v3DefaultSortSpec(schema *schemapb.CollectionSchema) *datapb.SortSpec {
+func v3DefaultSortSpec(schema *schemapb.CollectionSchema) (*datapb.SortSpec, error) {
 	pk, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		return &datapb.SortSpec{FormatVersion: 1}
+		return nil, merr.Wrap(err, "import v3 schema has no primary key")
 	}
-	keyType := datapb.SortKeyType_SORT_KEY_TYPE_INT64
-	if pk.GetDataType() == schemapb.DataType_VarChar {
-		keyType = datapb.SortKeyType_SORT_KEY_TYPE_STRING
+	toSpec := func(field *schemapb.FieldSchema) (*datapb.SortFieldSpec, error) {
+		var keyType datapb.SortKeyType
+		switch field.GetDataType() {
+		case schemapb.DataType_Int64:
+			keyType = datapb.SortKeyType_SORT_KEY_TYPE_INT64
+		case schemapb.DataType_VarChar:
+			keyType = datapb.SortKeyType_SORT_KEY_TYPE_STRING
+		default:
+			return nil, merr.WrapErrImportSysFailedMsg("import v3 sort field %d has unsupported type %s", field.GetFieldID(), field.GetDataType())
+		}
+		return &datapb.SortFieldSpec{FieldId: field.GetFieldID(), KeyType: keyType}, nil
 	}
-	return &datapb.SortSpec{FormatVersion: 1, Fields: []*datapb.SortFieldSpec{{FieldId: pk.GetFieldID(), KeyType: keyType}}}
+	spec := &datapb.SortSpec{FormatVersion: 1}
+	if schema.GetEnableNamespace() {
+		partitionKey, err := typeutil.GetPartitionKeyFieldSchema(schema)
+		if err != nil {
+			return nil, merr.Wrap(err, "import v3 namespace schema has no partition key")
+		}
+		field, err := toSpec(partitionKey)
+		if err != nil {
+			return nil, err
+		}
+		spec.Fields = append(spec.Fields, field)
+	}
+	field, err := toSpec(pk)
+	if err != nil {
+		return nil, err
+	}
+	spec.Fields = append(spec.Fields, field)
+	return spec, nil
 }
 
 // buildImportV3TemporarySchema describes the fields physically present in
@@ -362,7 +446,7 @@ func (c *importChecker) validatePublishedV3Plan(job ImportJob) error {
 		job.GetImportPlanIndexRef() == "" || len(job.GetImportPlanIndexDigest()) == 0 {
 		return merr.WrapErrImportSysFailedMsg("import v3 published planning marker is incomplete")
 	}
-	prefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(job.GetPlanningGeneration(), 10))
+	prefix := metautil.BuildImportV3PlanningPath(job.GetJobID(), job.GetPlanningGeneration())
 	snapshot := &datapb.PlanningSnapshot{}
 	if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, job.GetPlanningSnapshotRef(), prefix, job.GetPlanningSnapshotDigest(), snapshot); err != nil {
 		return err
@@ -408,7 +492,7 @@ func (c *importChecker) validatePublishedV3Plan(job ImportJob) error {
 			return merr.WrapErrDataIntegrityMsg("import v3 task %d does not match plan index", entry.GetTaskId())
 		}
 		plan := &datapb.ImportTaskPlan{}
-		if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, entry.GetPlanRef(), path.Join(prefix, "tasks"), entry.GetPlanDigest(), plan); err != nil {
+		if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, entry.GetPlanRef(), metautil.BuildImportV3ImportPlanPath(job.GetJobID(), entry.GetTaskId()), entry.GetPlanDigest(), plan); err != nil {
 			return err
 		}
 		if plan.GetJobId() != job.GetJobID() || plan.GetTaskId() != entry.GetTaskId() || plan.GetPlanningGeneration() != job.GetPlanningGeneration() ||
@@ -433,6 +517,10 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 	if err := c.cleanupUnpublishedV3ImportTasks(job); err != nil {
 		return err
 	}
+	sortSpec, err := v3DefaultSortSpec(job.GetSchema())
+	if err != nil {
+		return err
+	}
 	reshards := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID()))
 	if len(reshards) == 0 {
 		return merr.WrapErrImportSysFailedMsg("import v3 planning has no completed reshard tasks")
@@ -455,7 +543,7 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 			return err
 		}
 		for _, f := range manifest.GetFragments() {
-			fragments = append(fragments, v3PlanningFragment{ref: &datapb.FragmentRef{SourceTaskId: p.GetTaskId(), SourceManifestDigest: append([]byte(nil), p.GetResultDigest()...), VchannelOrdinal: f.GetVchannelOrdinal(), Vchannel: f.GetVchannel(), PartitionOrdinal: f.GetPartitionOrdinal(), PartitionId: f.GetPartitionId(), FragmentSeq: f.GetFragmentSeq(), Path: f.GetPath(), Rows: f.GetRows(), LogicalBytes: f.GetLogicalBytes(), EstimatedFinalBytes: f.GetEstimatedFinalBytes(), PhysicalBytes: f.GetPhysicalBytes(), FirstSortKey: cloneSortKey(f.GetFirstSortKey()), LastSortKey: cloneSortKey(f.GetLastSortKey()), Format: f.GetFormat(), ColumnSizeStats: cloneColumnSizeStats(f.GetColumnSizeStats())}, bytes: f.GetEstimatedFinalBytes()})
+			fragments = append(fragments, v3PlanningFragment{ref: &datapb.FragmentRef{SourceTaskId: p.GetTaskId(), SourceManifestDigest: append([]byte(nil), p.GetResultDigest()...), VchannelOrdinal: f.GetVchannelOrdinal(), Vchannel: f.GetVchannel(), PartitionOrdinal: f.GetPartitionOrdinal(), PartitionId: f.GetPartitionId(), FragmentSeq: f.GetFragmentSeq(), Path: f.GetPath(), Rows: f.GetRows(), StartRow: 0, EndRow: f.GetRows(), LogicalBytes: f.GetLogicalBytes(), EstimatedFinalBytes: f.GetEstimatedFinalBytes(), PhysicalBytes: f.GetPhysicalBytes(), FirstSortKey: cloneSortKey(f.GetFirstSortKey()), LastSortKey: cloneSortKey(f.GetLastSortKey()), Format: f.GetFormat(), ColumnSizeStats: cloneColumnSizeStats(f.GetColumnSizeStats())}, bytes: f.GetEstimatedFinalBytes()})
 		}
 	}
 	sort.Slice(fragments, func(i, j int) bool {
@@ -477,8 +565,8 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 	}
 	targetSchema := typeutil.AppendSystemFields(job.GetSchema())
 	temporarySchema := buildImportV3TemporarySchema(job.GetSchema(), importutilv2.IsBackup(job.GetOptions()))
-	snapshot := &datapb.PlanningSnapshot{FormatVersion: 1, JobId: job.GetJobID(), Generation: gen, SortSpec: v3DefaultSortSpec(job.GetSchema()), MergeFanInCap: int32(Params.DataCoordCfg.ImportMaxMergeFanIn.GetAsInt()), TargetSchema: targetSchema, TemporarySchema: temporarySchema, DataTs: job.GetDataTs(), CollectionId: job.GetCollectionID(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue()}
-	target := int64(128 * 1024 * 1024)
+	snapshot := &datapb.PlanningSnapshot{FormatVersion: 1, JobId: job.GetJobID(), Generation: gen, SortSpec: sortSpec, MergeFanInCap: int32(Params.DataCoordCfg.ImportMaxMergeFanIn.GetAsInt()), TargetSchema: targetSchema, TemporarySchema: temporarySchema, DataTs: job.GetDataTs(), CollectionId: job.GetCollectionID(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue()}
+	target := getExpectedSegmentSize(c.meta, job.GetCollectionID(), job.GetSchema())
 	var current *datapb.SegmentPlan
 	var currentBytes int64
 	for _, f := range fragments {
@@ -539,7 +627,7 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 	}
 	snapshot.SchemaDigest = importV3Digest(mustMarshalProto(job.GetSchema()))
 	writerSpecsDigest := importV3Digest(mustMarshalProto(&datapb.PlanningSnapshot{WriterSpecs: snapshot.GetWriterSpecs()}))
-	planningPrefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(gen, 10))
+	planningPrefix := metautil.BuildImportV3PlanningPath(job.GetJobID(), gen)
 	snapshotRef, snapshotDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, planningPrefix, "snapshot", snapshot)
 	if err != nil {
 		return err
@@ -584,11 +672,11 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 		taskOrdinal++
 		outputIDs := make([]int64, len(taskSegments))
 		for j, segment := range taskSegments {
-			seg, err := AllocImportSegment(c.ctx, c.alloc, c.meta, job.GetJobID(), taskID, job.GetCollectionID(), segment.GetPartitionId(), segment.GetVchannel(), job.GetDataTs(), datapb.SegmentLevel_L1, importStorageVersion(importutilv2.IsL0Import(job.GetOptions())))
+			seg, err := AllocImportSegment(c.ctx, c.alloc, c.meta, job.GetJobID(), taskID, job.GetCollectionID(), segment.GetPartitionId(), segment.GetVchannel(), job.GetDataTs(), datapb.SegmentLevel_L1, writerSpec.GetTargetStorageVersion())
 			if err != nil {
 				return err
 			}
-			if err := c.meta.UpdateSegmentsInfo(c.ctx, SetSegmentIsInvisible(seg.GetID(), true)); err != nil {
+			if err := c.meta.UpdateSegmentsInfo(c.ctx, prepareImportV3Skeleton(seg.GetID(), int32(writerSpec.GetTargetSchemaVersion()))); err != nil {
 				return err
 			}
 			outputIDs[j] = seg.GetID()
@@ -606,12 +694,12 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 			return err
 		}
 		plan := &datapb.ImportTaskPlan{FormatVersion: 1, JobId: job.GetJobID(), TaskId: taskID, PlanningGeneration: gen, PlanningSnapshotDigest: snapshotDigest, SortSpec: proto.Clone(snapshot.GetSortSpec()).(*datapb.SortSpec), SegmentPlans: taskSegments, MergeFanIn: int32(snapshot.GetMergeFanInCap()), RequiredLogIds: required, WriterSpecsDigest: writerSpecsDigest, TaskSlot: 1, PlanningSnapshotRef: snapshotRef}
-		planRef, planDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, path.Join(planningPrefix, "tasks"), strconv.FormatInt(taskID, 10), plan)
+		planRef, planDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, metautil.BuildImportV3ImportPlanPath(job.GetJobID(), taskID), "plan", plan)
 		if err != nil {
 			return err
 		}
 		planIndex.Tasks = append(planIndex.Tasks, &datapb.ImportPlanIndexEntry{TaskId: taskID, PlanRef: planRef, PlanDigest: planDigest})
-		task := newImportTaskV3(&datapb.ImportTaskV3{JobId: job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(), State: datapb.ImportTaskV3_Pending, TaskPlanRef: planRef, TaskPlanDigest: planDigest, RunId: 1, NodeId: NullNodeID, OutputPrefix: path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "import", strconv.FormatInt(taskID, 10), "run", "1"), OutputSegmentIds: outputIDs, LogIdRange: &datapb.IDRange{Begin: logBegin, End: logEnd}, PlanningGeneration: gen, TaskSlot: 1}, c.importMeta, c.meta)
+		task := newImportTaskV3(&datapb.ImportTaskV3{JobId: job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(), State: datapb.ImportTaskV3_Pending, TaskPlanRef: planRef, TaskPlanDigest: planDigest, RunId: 1, NodeId: NullNodeID, OutputPrefix: metautil.BuildImportV3ImportOutputPath(job.GetJobID(), taskID), OutputSegmentIds: outputIDs, LogIdRange: &datapb.IDRange{Begin: logBegin, End: logEnd}, PlanningGeneration: gen, TaskSlot: 1}, c.importMeta, c.meta, c.alloc)
 		if err := c.importMeta.AddTask(c.ctx, task); err != nil {
 			return err
 		}
