@@ -114,6 +114,18 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 	req.Options = normalizedOptions
 
+	if importutilv2.IsUpsertMode(req.GetOptions()) {
+		pkField, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if pkField.GetAutoID() {
+			return merr.WrapErrImportFailedMsg(
+				"write_mode=Upsert is not supported on collection %s: the primary key is auto-generated, "+
+					"so the import file carries no primary keys to overwrite", req.GetCollectionName())
+		}
+	}
+
 	channels, err := node.chMgr.GetVChannels(collectionID)
 	if err != nil {
 		return err

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,6 +74,63 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	return res, nil
+}
+
+// HashedDeleteData is delete data grouped by vchannel index and partition index.
+type HashedDeleteData [][]*storage.DeleteData // [vchannelIndex][partitionIndex]*storage.DeleteData
+
+// HashDeleteDataForUpsert builds the companion delete records for an upsert batch's rows
+// (data, before AppendSystemFieldsData runs), stamped with ts, and groups them by vchannel
+// and partition with the same hashByVChannel/hashByPartition functions HashData uses for
+// the rows themselves.
+func HashDeleteDataForUpsert(task Task, data *storage.InsertData, ts uint64) (HashedDeleteData, error) {
+	var (
+		schema       = typeutil.AppendSystemFields(task.GetSchema())
+		channelNum   = len(task.GetVchannels())
+		partitionNum = len(task.GetPartitionIDs())
+	)
+
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
+
+	pkData, ok := data.Data[pkField.GetFieldID()]
+	if !ok {
+		return nil, merr.WrapErrImportFailedMsg("primary key field %s not found in import file", pkField.GetName())
+	}
+	var partKeyData storage.FieldData
+	if partKeyField != nil {
+		partKeyData = data.Data[partKeyField.GetFieldID()]
+	}
+
+	f1 := hashByVChannel(int64(channelNum), pkField)
+	f2 := hashByPartition(int64(partitionNum), partKeyField)
+
+	res := make(HashedDeleteData, channelNum)
+	for i := 0; i < channelNum; i++ {
+		res[i] = make([]*storage.DeleteData, partitionNum)
+		for j := 0; j < partitionNum; j++ {
+			res[i][j] = storage.NewDeleteData(nil, nil)
+		}
+	}
+
+	rowNum := pkData.RowNum()
+	for i := 0; i < rowNum; i++ {
+		rawPk := pkData.GetRow(i)
+		pk, err := storage.GenPrimaryKeyByRawData(rawPk, pkField.GetDataType())
+		if err != nil {
+			return nil, err
+		}
+		var rawPartKey any
+		if partKeyData != nil {
+			rawPartKey = partKeyData.GetRow(i)
+		}
+		p1, p2 := f1(rawPk), f2(rawPartKey)
+		res[p1][p2].Append(pk, ts)
 	}
 	return res, nil
 }
