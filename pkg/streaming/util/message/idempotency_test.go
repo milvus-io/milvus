@@ -11,7 +11,8 @@ import (
 func TestIdempotencyKeyProperty(t *testing.T) {
 	require.Empty(t, IdempotencyKeyOf(nil))
 
-	// 携带 key 的广播消息，通过统一 accessor 读出。
+	// A broadcast message carrying a key is read back through the same accessor
+	// that serves every other message type and stage.
 	msg := NewImportMessageBuilderV1().
 		WithHeader(&ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{}).
@@ -20,7 +21,8 @@ func TestIdempotencyKeyProperty(t *testing.T) {
 		MustBuildBroadcast()
 	require.Equal(t, "import/1/key-1", IdempotencyKeyOf(msg))
 
-	// 空 key 必须完全不产生 property，非幂等广播的属性集合与本特性出现前一致。
+	// An empty key must not materialize the property at all, so a non-idempotent
+	// broadcast carries exactly the properties it carried before this feature.
 	keyless := NewImportMessageBuilderV1().
 		WithHeader(&ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{}).
@@ -32,8 +34,9 @@ func TestIdempotencyKeyProperty(t *testing.T) {
 }
 
 func TestIdempotencyKeySurvivesSplit(t *testing.T) {
-	// SplitIntoMutableMessage 拆出的每条 per-vchannel 消息都必须仍带着 key，
-	// 否则 WAL 侧和恢复侧都读不到它。
+	// Every per-vchannel message that SplitIntoMutableMessage produces must still
+	// carry the key: neither the WAL append path nor the recovery side can read it
+	// otherwise, which would silently disable deduplication.
 	msg := NewImportMessageBuilderV1().
 		WithHeader(&ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{}).
