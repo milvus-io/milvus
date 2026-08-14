@@ -865,8 +865,12 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	return nil
 }
 
-func publishCopiedIndexesToManifest(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta) (string, error) {
+func publishCopiedIndexesToManifest(
+	ctx context.Context,
+	result *datapb.CopySegmentResult,
+	task CopySegmentTask,
+	meta *meta,
+) (string, error) {
 	manifestPath := result.GetManifestPath()
 	if manifestPath == "" || len(result.GetIndexInfos()) == 0 {
 		return manifestPath, nil
@@ -925,8 +929,8 @@ func publishCopiedIndexesToManifest(ctx context.Context, result *datapb.CopySegm
 		manifestIndexes = append(manifestIndexes, packed.ManifestIndexInfo{
 			ColumnName: fieldName(fieldID), IndexName: info.GetIndexName(), IndexType: indexType,
 			Path: relPath, FieldID: fieldID, IndexID: indexID, BuildID: info.GetBuildId(),
-			IndexVersion: info.GetVersion(), NumRows: result.GetImportedRows(), SerializedSize: int64(info.GetIndexSize()),
-			MemSize: int64(info.GetIndexSize()), CurrentIndexVersion: info.GetCurrentIndexVersion(),
+			IndexVersion: info.GetVersion(), NumRows: result.GetImportedRows(), SerializedSize: info.GetIndexSize(),
+			MemSize: info.GetIndexSize(), CurrentIndexVersion: info.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(), IndexStorePathVersion: info.GetIndexStorePathVersion(),
 			IndexFileKeys: info.GetIndexFilePaths(), Properties: properties,
 		})
