@@ -869,8 +869,8 @@ func importRetentionCoversTombstone(taskRetention, tombstoneMaxLifetime time.Dur
 // number of seconds, the tombstone lifetime is a parsed duration string — so the reads
 // live here rather than at each use site.
 func importIdempotencyWindowDurations() (taskRetention, tombstoneMaxLifetime time.Duration) {
-	return paramtable.Get().DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
-		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse()
+	return Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
+		Params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse()
 }
 
 // warnOnImportIdempotencyWindowMisconfig logs a warning when the configured import job

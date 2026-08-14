@@ -23,6 +23,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -331,13 +332,22 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	s.Equal("1000", resp.GetJobID())
 }
 
+// importV2RequestFilePath is the single file newImportV2IdempotentRequest asks to
+// import. A duplicate hit is only honoured when the original job covers the same files.
+const importV2RequestFilePath = "/test/file.json"
+
 // newDuplicatedImportBroadcastResult builds the result the broadcaster returns on an
-// idempotency-key hit: no append results, plus the original broadcast message from
-// which the original jobID is recovered.
-func newDuplicatedImportBroadcastResult(originalJobID int64) *types.BroadcastAppendResult {
+// idempotency-key hit: no append results, plus the original broadcast message, which
+// carries the original jobID and the files that job was created from.
+func newDuplicatedImportBroadcastResult(originalJobID int64, originalPaths ...string) *types.BroadcastAppendResult {
 	duplicated := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{JobID: originalJobID}).
+		WithBody(&msgpb.ImportMsg{
+			JobID: originalJobID,
+			Files: lo.Map(originalPaths, func(path string, _ int) *msgpb.ImportFile {
+				return &msgpb.ImportFile{Paths: []string{path}}
+			}),
+		}).
 		WithIdempotencyKey("import/100/run-1").
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
@@ -350,7 +360,7 @@ func newDuplicatedImportBroadcastResult(originalJobID int64) *types.BroadcastApp
 // setupImportV2DuplicateBroadcast wires the mocks ImportV2 needs so that the broadcast
 // comes back deduplicated, and returns the server under test. importMeta is supplied by
 // the caller so it can decide whether the original job still exists.
-func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64) *Server {
+func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64, originalPaths ...string) *Server {
 	mockBalancerInst := &mockBalancerImpl{}
 	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
 		return mockBalancerInst, nil
@@ -366,7 +376,7 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	s.T().Cleanup(func() { mockAssignment.UnPatch() })
 
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID)
+	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
@@ -402,7 +412,7 @@ func newImportV2IdempotentRequest() *internalpb.ImportRequestInternal {
 			DbName: "test_db",
 		},
 		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
+			{Id: 1, Paths: []string{importV2RequestFilePath}},
 		},
 		Options: []*commonpb.KeyValuePair{
 			{Key: "timeout", Value: "300s"},
@@ -422,7 +432,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 		ImportJob: &datapb.ImportJob{JobID: 4242},
 	})
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242)
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
@@ -430,6 +440,32 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	s.NotNil(resp)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
 	s.Equal("4242", resp.GetJobID())
+}
+
+// Reusing a key for a DIFFERENT file set must not silently drop those files: the
+// caller would get a success plus a jobID that never imports them. ImportV2 refuses
+// and keeps the original job.
+func (s *ImportServicesSuite) TestImportV2_DuplicateWithDifferentFilesReturnsError() {
+	ctx := context.Background()
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+	// The mismatch is decided from the duplicated message alone, so the original job
+	// is never looked up: no GetJob expectation is registered, and mockery fails the
+	// test if the branch calls it anyway.
+
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242, "/test/other-file.json")
+
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.NotNil(resp)
+	// Reusing a key with different content is caller-caused, so this is an
+	// InputError, unlike the expired-job case above.
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.Contains(resp.GetStatus().GetReason(), "reused with a different file set")
+	s.Contains(resp.GetStatus().GetReason(), "4242")
+	s.Empty(resp.GetJobID())
 }
 
 // A duplicate is reported by an explicit flag, never by a non-zero jobID, so a
@@ -444,7 +480,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 		ImportJob: &datapb.ImportJob{JobID: 0},
 	})
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 0)
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 0, importV2RequestFilePath)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
@@ -464,13 +500,15 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError()
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil)
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242)
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
 	s.NoError(err)
 	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	// Server-side state (GC timing, or a misconfigured retention) forces this branch,
+	// not the request content, so it stays in the System family.
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportSysFailed))
 	s.Contains(resp.GetStatus().GetReason(), "past its retention")
 	s.Empty(resp.GetJobID())
 }
