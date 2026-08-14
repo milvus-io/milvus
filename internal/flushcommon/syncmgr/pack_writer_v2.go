@@ -210,13 +210,19 @@ func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64)
 }
 
 func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {
-	if len(pack.insertData) == 0 {
+	if len(pack.insertData) == 0 || !hasInsertRows(pack.insertData) {
 		return make(map[int64]*datapb.FieldBinlog), "", nil
 	}
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
 		return nil, "", err
+	}
+	if rec == nil || rec.Len() == 0 {
+		if rec != nil {
+			rec.Release()
+		}
+		return make(map[int64]*datapb.FieldBinlog), "", nil
 	}
 	defer rec.Release()
 
@@ -241,6 +247,15 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		return nil, "", err
 	}
 	return logs, manifestPath, nil
+}
+
+func hasInsertRows(insertData []*storage.InsertData) bool {
+	for _, data := range insertData {
+		if data.GetRowNum() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
