@@ -107,6 +107,11 @@ func (e *StreamingError) IsRateLimitRejected() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED
 }
 
+// IsPartialUpdateRetryableCAS returns true if the partial update CAS error is retryable.
+func (e *StreamingError) IsPartialUpdateRetryableCAS() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE
+}
+
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, format, args...)
@@ -191,6 +196,11 @@ func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
 // NewRateLimitRejected creates a new StreamingError with code STREAMING_CODE_RATE_LIMIT_REJECTED.
 func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED, format, args...)
+}
+
+// NewPartialUpdateRetryable creates a retryable partial update CAS error.
+func NewPartialUpdateRetryable(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

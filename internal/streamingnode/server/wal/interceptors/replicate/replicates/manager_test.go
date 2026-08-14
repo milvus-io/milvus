@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -378,6 +379,73 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 			assert.Nil(t, g)
 		}
 	}
+}
+
+func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *testing.T) {
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	recovered := newReplicateTxnMessage("test1", "test2", 2)
+	for _, msg := range []message.MutableMessage{recovered[0], recovered[2]} {
+		immutableMsg := msg.WithTimeTick(3).IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		txnBuffer.HandleImmutableMessages([]message.ImmutableMessage{immutableMsg}, msg.TimeTick())
+	}
+
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  1,
+				},
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+			},
+			TxnBuffer: txnBuffer,
+		},
+	})
+	require.NoError(t, err)
+
+	firstReplay := newReplicateTxnMessage("test1", "test2", 2)
+	for _, msg := range firstReplay {
+		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
+			require.NoError(t, appendErr)
+			acker.Ack(status.NewTransactionExpired("recovered transaction"))
+			continue
+		}
+		require.Nil(t, acker)
+		require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+	}
+	checkpoint, err := rm.GetReplicateCheckpoint()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, checkpoint.TimeTick)
+
+	accepted := make([]message.MessageType, 0, 3)
+	for _, msg := range newReplicateTxnMessage("test1", "test2", 2) {
+		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		if acker == nil {
+			require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+			continue
+		}
+		require.NoError(t, appendErr)
+		accepted = append(accepted, msg.MessageType())
+		acker.Ack(nil)
+	}
+	require.Equal(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeCreateDatabase,
+		message.MessageTypeCommitTxn,
+	}, accepted)
+	checkpoint, err = rm.GetReplicateCheckpoint()
+	require.NoError(t, err)
+	require.EqualValues(t, 2, checkpoint.TimeTick)
 }
 
 func TestSecondaryReplicateManagerIgnoreStaleTxnBody(t *testing.T) {
