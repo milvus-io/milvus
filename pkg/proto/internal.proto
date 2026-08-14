@@ -419,12 +419,19 @@ message ImportRequestInternal {
   int64 jobID = 10;
 }
 
+enum ImportWriteMode {
+  Append = 0;
+  Upsert = 1;
+  Delete = 2;
+}
+
 message ImportRequest {
   string db_name = 1;
   string collection_name = 2;
   string partition_name = 3;
   repeated ImportFile files = 4;
   repeated common.KeyValuePair options = 5;
+  ImportWriteMode write_mode = 6;
 }
 
 message ImportResponse {
