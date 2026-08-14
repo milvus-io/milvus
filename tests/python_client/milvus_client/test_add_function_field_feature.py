@@ -1509,7 +1509,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_drop_function_field_combo(self):
         """
         TC-10: Add Function Field with Drop Function / Drop Field combination.
@@ -1828,7 +1828,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         client.drop_alias(reverse_alias_name)
         self.drop_collection(client, reverse_collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_after_delete_upsert_history(self):
         """
         TC-13: Delete / Upsert before add_function_field.
@@ -2034,7 +2034,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_function_field_matches_existing_bm25_and_minhash_output(self):
         """
         TC-15: BM25 / MinHash old-vs-added function output equivalence.
@@ -2899,7 +2899,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_with_multi_analyzer_by_field(self):
         """
         TC-24: Multi-analyzer / by_field BM25 input.
@@ -3041,7 +3041,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_function_field_function_type_support_matrix(self):
         """
         TC-26: FunctionType support matrix.
