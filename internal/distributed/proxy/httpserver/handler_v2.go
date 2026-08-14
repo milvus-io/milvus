@@ -4037,6 +4037,11 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}
 		ctx = c.Request.Context()
 	}
+	// Keep this after the auth block. Today either order works, because
+	// checkAuthorizationV2 re-attaches a context derived from the one it was given,
+	// so the reassignment above round-trips the injected value rather than dropping
+	// it. That is an implementation detail of the auth path, not a contract — and no
+	// test can catch it being broken, since both orders currently pass.
 	ctx = injectIdempotencyKey(ctx, c)
 	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
