@@ -330,21 +330,13 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
-	bm.idempotencyIndex.Add(message.IdempotencyKeyOf(newBroadcastTask.msg), bh.BroadcastID)
+	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyKey(), bh.BroadcastID)
 	return newBroadcastTask, true
 }
 
-// lookupIdempotency returns the broadcastID that first used the given idempotency key.
-func (bm *broadcastTaskManager) lookupIdempotency(key string) (uint64, bool) {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	return bm.idempotencyIndex.Get(key)
-}
-
-// getDuplicatedBroadcastMessage returns the original broadcast message that owns
+// getOriginalBroadcastMessage returns the original broadcast message that owns
 // the given idempotency key, so the caller can recover its own response payload.
-func (bm *broadcastTaskManager) getDuplicatedBroadcastMessage(key string) (message.BroadcastMutableMessage, bool) {
+func (bm *broadcastTaskManager) getOriginalBroadcastMessage(key string) (message.BroadcastMutableMessage, bool) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -358,7 +350,7 @@ func (bm *broadcastTaskManager) getDuplicatedBroadcastMessage(key string) (messa
 		// unreachable; treat it as a miss rather than trusting a dangling entry.
 		return nil, false
 	}
-	return t.msg, true
+	return t.BroadcastMessage(), true
 }
 
 // getBroadcastTaskByID return the task by the broadcastID.
@@ -376,7 +368,7 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	defer bm.mu.Unlock()
 
 	if t, ok := bm.tasks[broadcastID]; ok {
-		bm.idempotencyIndex.Remove(message.IdempotencyKeyOf(t.msg), broadcastID)
+		bm.idempotencyIndex.Remove(t.IdempotencyKey(), broadcastID)
 	}
 	delete(bm.tasks, broadcastID)
 }

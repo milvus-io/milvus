@@ -115,13 +115,13 @@ func TestIdempotencyIndexRecovery(t *testing.T) {
 	})
 	defer bm.Close()
 
-	id, ok := bm.lookupIdempotency("import/1/pending")
+	original, ok := bm.getOriginalBroadcastMessage("import/1/pending")
 	require.True(t, ok)
-	require.Equal(t, uint64(100), id)
+	require.Equal(t, uint64(100), original.BroadcastHeader().BroadcastID)
 
-	id, ok = bm.lookupIdempotency("import/1/tombstone")
+	original, ok = bm.getOriginalBroadcastMessage("import/1/tombstone")
 	require.True(t, ok)
-	require.Equal(t, uint64(200), id)
+	require.Equal(t, uint64(200), original.BroadcastHeader().BroadcastID)
 
 	// The keyless task must not occupy an entry.
 	require.Len(t, bm.idempotencyIndex.keyToBroadcastID, 2)

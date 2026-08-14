@@ -172,6 +172,22 @@ func (b *broadcastTask) header() *message.BroadcastHeader {
 	return b.msg.BroadcastHeader()
 }
 
+// IdempotencyKey returns the idempotency key carried by the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) IdempotencyKey() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return message.IdempotencyKeyOf(b.msg)
+}
+
+// BroadcastMessage returns the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) BroadcastMessage() message.BroadcastMutableMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.msg
+}
+
 // ControlChannelTimeTick returns the time tick of the control channel.
 func (b *broadcastTask) ControlChannelTimeTick() uint64 {
 	for idx, vc := range b.Header().VChannels {
