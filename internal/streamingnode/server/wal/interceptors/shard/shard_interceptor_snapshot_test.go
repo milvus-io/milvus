@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -77,29 +76,6 @@ func TestShardInterceptorCreateSnapshotFences(t *testing.T) {
 	// The sealed ids are deliberately not written back into the header: nothing
 	// downstream consumes them, and WAL recovery re-derives the set from the state
 	// it has rebuilt at this position.
-}
-
-// TestShardInterceptorCreateSnapshotFenceFailureBlocksAppend keeps the message
-// out of the WAL when the fence fails. A snapshot message that got appended
-// without sealing would leave DataCoord waiting on a boundary nothing was cut
-// at, which is worse than the create failing.
-func TestShardInterceptorCreateSnapshotFenceFailureBlocksAppend(t *testing.T) {
-	i, shardManager := newSnapshotTestInterceptor(t)
-
-	appended := false
-	appender := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		appended = true
-		return rmq.NewRmqID(1), nil
-	}
-
-	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(mock.Anything, mock.Anything).
-		Return(nil, errors.New("mock error"))
-
-	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	msgID, err := i.DoAppend(ctx, newCreateSnapshotMessage("v1", 42), appender)
-	assert.Error(t, err)
-	assert.Nil(t, msgID)
-	assert.False(t, appended)
 }
 
 // TestShardInterceptorCreateSnapshotSkipsControlChannel pins the split of

@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -76,7 +77,12 @@ func boundaryTestManager(segments ...*SegmentInfo) *snapshotManager {
 }
 
 func boundaryTestManagerAt(checkpointTs uint64, segments ...*SegmentInfo) *snapshotManager {
-	m := &meta{ctx: context.Background(), segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	m := &meta{
+		ctx:         context.Background(),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 	if checkpointTs > 0 {
 		m.channelCPs.checkpoints[boundaryTestChannelA] = &msgpb.MsgPosition{
 			ChannelName: boundaryTestChannelA,
@@ -295,6 +301,24 @@ func TestSegmentsAwaitingSort_UnknownChannel(t *testing.T) {
 	_, err := sm.segmentsAwaitingSort(context.Background(), 100, boundaryTestBoundary())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing snapshot channel seek position")
+}
+
+// TestSegmentsAwaitingSort_ExternalCollection guards against CreateSnapshot
+// hanging forever on an external collection: every compaction policy skips
+// IsExternal() collections outright, so a flushed-but-unsorted segment there
+// can never be sorted, and waiting on it would never return.
+func TestSegmentsAwaitingSort_ExternalCollection(t *testing.T) {
+	sm := boundaryTestManager(boundaryTestSegment(1))
+	sm.meta.collections.Insert(100, &collectionInfo{
+		ID: 100,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{ExternalField: "col"}},
+		},
+	})
+
+	awaiting, err := sm.segmentsAwaitingSort(context.Background(), 100, boundaryTestBoundary())
+	assert.NoError(t, err)
+	assert.Empty(t, awaiting)
 }
 
 func TestWaitForSortedBoundary(t *testing.T) {

@@ -566,6 +566,15 @@ func (sm *snapshotManager) channelsBehindBoundary(boundary *SnapshotBoundary) []
 // its input with a new id, and the replacement leaves this set on its own
 // because it is sorted, while the input leaves it because it is Dropped.
 func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) ([]int64, error) {
+	// External collections never get sort compaction: every compaction policy
+	// (single/clustering/forcemerge/storage-version) skips IsExternal() collections
+	// outright, so their segments can never leave the unsorted state. Waiting on a
+	// sort that structurally cannot happen would hang CreateSnapshot forever --
+	// there is nothing to wait for, so report the set as already empty.
+	if collection := sm.meta.GetCollection(collectionID); collection != nil && collection.IsExternal() {
+		return nil, nil
+	}
+
 	candidates := sm.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.GetState() == commonpb.SegmentState_Flushed &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
