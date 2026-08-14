@@ -169,7 +169,7 @@ func TestPublishedSeriesNameTheirNode(t *testing.T) {
 // deciding on, not an executor's private counter.
 func TestPublishedGaugesMirrorTheSnapshot(t *testing.T) {
 	resetResourceMetrics(t)
-	baseline := 6 * gib
+	baseline := 9 * gib
 	mockIncidentNode(t, baseline)
 
 	g := NewGuard()
@@ -179,8 +179,15 @@ func TestPublishedGaugesMirrorTheSnapshot(t *testing.T) {
 	g.sampleOnce()
 
 	snap := g.Snapshot()
+	// 9GiB observed minus 5GiB committed is 4GiB, well clear of the 1GiB
+	// nonTaskMemoryFloor. The earlier figures (6GiB and 5GiB) landed the
+	// difference exactly ON the floor, so this precondition held whether the
+	// subtraction had happened or the clamp had -- it asserted nothing.
 	require.Equal(t, baseline-req.Memory, snap.NonTask,
 		"setup: the sample must have produced a non-task reservation to report")
+	require.Greater(t, snap.NonTask,
+		paramtable.Get().DataNodeCfg.ResourceNonTaskMemoryFloor.GetAsInt64(),
+		"setup: the reservation must not be the floor, or the assertion above is vacuous")
 
 	assert.Equal(t, float64(snap.Reserved.Memory), gaugeValue(t, metrics.DataNodeResourceReservedMemory))
 	assert.Equal(t, snap.Reserved.CPU, gaugeValue(t, metrics.DataNodeResourceReservedCPU))
