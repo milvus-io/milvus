@@ -30,6 +30,12 @@ import (
 // metadata fallback. Callers invoke it lazily and reuse the result for every
 // missing SegmentIndex entry on the segment.
 func (s *Server) getManifestIndexesForSegment(ctx context.Context, segmentID int64) ([]packed.ManifestIndexInfo, string) {
+	// A server can briefly be partially initialized while metadata is being
+	// wired up. Treat an absent segment store as a segment without a manifest
+	// rather than dereferencing a nil SegmentsInfo during fallback.
+	if s == nil || s.meta == nil || s.meta.segments == nil {
+		return nil, ""
+	}
 	segment := s.meta.GetSegment(ctx, segmentID)
 	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
 		return nil, ""

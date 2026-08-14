@@ -65,8 +65,9 @@ type ManifestIndexInfo struct {
 }
 
 // AddIndexInfoToManifest records a completed index artifact in a segment
-// manifest. The supplied manifest path identifies the source revision; this
-// operation never implicitly rebases onto a newer revision.
+// manifest. The supplied manifest path identifies the segment manifest base
+// path; publication is rebased onto the latest revision before applying the
+// index update so concurrent index completions are preserved.
 func AddIndexInfoToManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
@@ -85,7 +86,7 @@ func AddIndexInfosToManifest(
 	if len(indexes) == 0 {
 		return manifestPath, nil
 	}
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	basePath, _, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
@@ -106,7 +107,7 @@ func AddIndexInfosToManifest(
 	result := C.loon_transaction_begin(
 		cBasePath,
 		cProperties,
-		C.int64_t(version),
+		C.int64_t(-1), // read the latest manifest revision
 		C.int32_t(C.LOON_TRANSACTION_RESOLVE_OVERWRITE),
 		getRetryLimit(),
 		&transactionHandle,
@@ -229,7 +230,7 @@ func RemoveIndexInfosFromManifest(
 	if len(indexes) == 0 {
 		return manifestPath, nil
 	}
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	basePath, _, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
@@ -241,7 +242,10 @@ func RemoveIndexInfosFromManifest(
 
 	indexManifestLocks.Lock(basePath)
 	defer indexManifestLocks.Unlock(basePath)
-	sourceIndexes, err := GetManifestIndexInfos(manifestPath, storageConfig)
+	// Validate against the latest revision. The caller's manifest path may be
+	// stale when another index task has published a newer revision; dropping by
+	// column/type without this identity check could remove that newer index.
+	sourceIndexes, err := GetManifestIndexInfos(MarshalManifestPath(basePath, -1), storageConfig)
 	if err != nil {
 		return "", merr.Wrap(err, "failed to validate source manifest index metadata")
 	}
@@ -273,7 +277,7 @@ func RemoveIndexInfosFromManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 	var transactionHandle C.LoonTransactionHandle
 	if err := HandleLoonFFIResult(C.loon_transaction_begin(
-		cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit(), &transactionHandle,
+		cBasePath, cProperties, C.int64_t(-1), C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit(), &transactionHandle,
 	)); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin index manifest transaction")
 	}

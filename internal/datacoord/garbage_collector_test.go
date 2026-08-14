@@ -4282,6 +4282,11 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	// Snapshot layer transparent: no segment is blocked.
 	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(false).Build()
 	defer mockIsSegBlocked.UnPatch()
+	// The V3 path now consults the manifest before deleting a dropped segment.
+	// This test exercises prefix cleanup (not manifest parsing), so provide an
+	// empty, successfully-read manifest through the packed-layer seam.
+	mockManifestIndexes := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{}, nil).Build()
+	defer mockManifestIndexes.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
 	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
