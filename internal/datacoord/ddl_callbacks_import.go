@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -178,20 +180,46 @@ func importIdempotencyScopedKey(collectionID int64, clientKey string) string {
 	return fmt.Sprintf("import/%d/%s", collectionID, clientKey)
 }
 
-// jobIDFromDuplicatedBroadcast recovers the original import jobID from the
-// broadcast message the broadcaster returned on an idempotency hit. The
-// broadcaster does not know about import-specific structures, so the decode
-// happens here.
-func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage) (int64, error) {
+// bodyFromDuplicatedBroadcast decodes the original import message the broadcaster
+// returned on an idempotency hit, which carries both the original jobID and the file
+// list that job was created from. The broadcaster does not know about import-specific
+// structures, so the decode happens here.
+func bodyFromDuplicatedBroadcast(msg message.BroadcastMutableMessage) (*msgpb.ImportMsg, error) {
 	importMsg, err := message.AsBroadcastImportMessageV1(msg)
 	if err != nil {
-		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
+		return nil, merr.Wrap(err, "malformed duplicated import broadcast message")
 	}
 	body, err := importMsg.Body()
 	if err != nil {
-		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
+		return nil, merr.Wrap(err, "malformed duplicated import broadcast message body")
 	}
-	return body.GetJobID(), nil
+	return body, nil
+}
+
+// importFilesEqual reports whether two import file lists describe the same data.
+//
+// Only the paths are compared. ImportFile.Id is unset at both client entry points
+// (proxy convertToV2ImportRequest and the restful handler leave it zero) and is
+// assigned later during job creation, so it carries no request identity here.
+//
+// Path order WITHIN one file entry is significant — a binlog import entry positions
+// its insert and delta prefixes — while the order of the entries themselves is a
+// presentation artifact of how the caller listed its files, so entries are compared
+// as an unordered collection.
+func importFilesEqual(a, b []*msgpb.ImportFile) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	canonical := func(files []*msgpb.ImportFile) []string {
+		keys := lo.Map(files, func(file *msgpb.ImportFile, _ int) string {
+			// NUL cannot appear in an object storage path, so it separates paths
+			// unambiguously.
+			return strings.Join(file.GetPaths(), "\x00")
+		})
+		slices.Sort(keys)
+		return keys
+	}
+	return slices.Equal(canonical(a), canonical(b))
 }
 
 // broadcastImport broadcasts the import message to all vchannels.
@@ -232,6 +260,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
+	scopedKey := importIdempotencyScopedKey(collectionID, idempotencyKey)
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -249,7 +278,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
-		WithIdempotencyKey(importIdempotencyScopedKey(collectionID, idempotencyKey)).
+		WithIdempotencyKey(scopedKey).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
@@ -262,16 +291,37 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, nil
 	}
 	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
-	// new job was created; recover the jobID that broadcast carried.
-	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated)
+	// new job was created; recover what that broadcast carried.
+	originalBody, err := bodyFromDuplicatedBroadcast(result.Duplicated)
 	if err != nil {
 		return 0, false, err
 	}
+	originalJobID := originalBody.GetJobID()
+	// Never log the raw key: it is client-controlled and may carry sensitive data. The
+	// fingerprint is taken of the scoped key, which is what the broadcaster indexed.
+	keyFingerprint := mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(scopedKey))
+
+	// Returning the original job for a request that asks for DIFFERENT files would
+	// silently drop those files: the caller gets a success and a jobID that will never
+	// import them. Refuse instead, and keep the original job untouched.
+	if !importFilesEqual(msgFiles, originalBody.GetFiles()) {
+		mlog.Warn(ctx, "import idempotency key reused with a different file set",
+			mlog.FieldCollectionID(collectionID),
+			mlog.FieldJobID(originalJobID),
+			mlog.Int("requestedFileNum", len(msgFiles)),
+			mlog.Int("originalFileNum", len(originalBody.GetFiles())),
+			keyFingerprint)
+		return 0, false, merr.WrapErrImportFailedMsg(
+			"idempotency key was reused with a different file set: it already identifies import job %d "+
+				"(%d file(s)), while this request carries %d file(s); the original job was kept, "+
+				"use a new idempotency key to import different files",
+			originalJobID, len(originalBody.GetFiles()), len(msgFiles))
+	}
+
 	mlog.Info(ctx, "import broadcast deduplicated by idempotency key",
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldJobID(originalJobID),
-		// Never log the raw key: it is client-controlled and may carry sensitive data.
-		mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey)))
+		keyFingerprint)
 	return originalJobID, true, nil
 }
 

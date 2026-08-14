@@ -1961,8 +1961,24 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		// outlive a job when restarts keep resetting the tombstone clock, and
 		// handing back a jobID GetImportProgress cannot resolve would leave the
 		// client unable to tell "already imported" from "never imported".
+		//
+		// A nil job here means genuine expiry, never "the original request has not
+		// created its job yet": broadcastImport acquires the collection resource key
+		// in startBroadcastWithCollectionID, and the broadcaster holds that guard
+		// until the ack callback that creates the job has completed
+		// (MarkAckCallbackDone releases it). A concurrent same-key retry therefore
+		// blocks on the lock until the job exists. If that lock lifetime ever
+		// shortens, this branch must be revisited — it would start telling clients to
+		// mint a new key for a job that is merely still being created, which is
+		// exactly how a duplicate import happens.
 		if s.importMeta.GetJob(ctx, duplicatedJobID) == nil {
-			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+			taskRetention, tombstoneMaxLifetime := importIdempotencyWindowDurations()
+			mlog.Warn(ctx, "idempotency key resolved to an import job that no longer exists; "+
+				"the job was garbage collected while its idempotency key was still live",
+				mlog.FieldJobID(duplicatedJobID),
+				mlog.Duration("dataCoord.import.taskRetention", taskRetention),
+				mlog.Duration("streaming.walBroadcaster.tombstone.maxLifetime", tombstoneMaxLifetime))
+			resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg(
 				"the import job for this idempotency key is past its retention; resubmit with a new key"))
 			return resp, nil
 		}

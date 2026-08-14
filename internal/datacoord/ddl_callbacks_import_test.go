@@ -25,6 +25,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -1276,15 +1277,58 @@ func TestImportIdempotencyScopedKey(t *testing.T) {
 		importIdempotencyScopedKey(101, "run-1"))
 }
 
-func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
+func TestBodyFromDuplicatedBroadcast(t *testing.T) {
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{JobID: 4242}).
+		WithBody(&msgpb.ImportMsg{
+			JobID: 4242,
+			Files: []*msgpb.ImportFile{{Paths: []string{"/a.json"}}},
+		}).
 		WithIdempotencyKey("import/100/run-1").
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
-	jobID, err := jobIDFromDuplicatedBroadcast(msg)
+	body, err := bodyFromDuplicatedBroadcast(msg)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(4242), jobID)
+	assert.Equal(t, int64(4242), body.GetJobID())
+	// The file list must survive the decode: it is what a retry is checked against.
+	assert.Equal(t, []string{"/a.json"}, body.GetFiles()[0].GetPaths())
+}
+
+func TestImportFilesEqual(t *testing.T) {
+	files := func(paths ...[]string) []*msgpb.ImportFile {
+		return lo.Map(paths, func(p []string, _ int) *msgpb.ImportFile {
+			return &msgpb.ImportFile{Paths: p}
+		})
+	}
+
+	assert.True(t, importFilesEqual(
+		files([]string{"/a.json"}, []string{"/b.json"}),
+		files([]string{"/a.json"}, []string{"/b.json"})))
+	// Entry order is a presentation artifact of how the caller listed its files.
+	assert.True(t, importFilesEqual(
+		files([]string{"/a.json"}, []string{"/b.json"}),
+		files([]string{"/b.json"}, []string{"/a.json"})))
+	// Id is unset at the client entry points and assigned later, so it must not
+	// distinguish two otherwise identical requests.
+	assert.True(t, importFilesEqual(
+		[]*msgpb.ImportFile{{Id: 7, Paths: []string{"/a.json"}}},
+		[]*msgpb.ImportFile{{Id: 9, Paths: []string{"/a.json"}}}))
+
+	assert.False(t, importFilesEqual(
+		files([]string{"/a.json"}),
+		files([]string{"/c.json"})))
+	assert.False(t, importFilesEqual(
+		files([]string{"/a.json"}),
+		files([]string{"/a.json"}, []string{"/b.json"})))
+	// Path order WITHIN one entry is significant: a binlog import entry positions its
+	// insert and delta prefixes.
+	assert.False(t, importFilesEqual(
+		files([]string{"/insert", "/delta"}),
+		files([]string{"/delta", "/insert"})))
+	// Grouping matters too: two paths in one entry is not the same request as the
+	// same two paths split across entries.
+	assert.False(t, importFilesEqual(
+		files([]string{"/a.json", "/b.json"}),
+		files([]string{"/a.json"}, []string{"/b.json"})))
 }
