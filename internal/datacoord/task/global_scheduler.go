@@ -224,15 +224,21 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // When no node can fully satisfy taskSlot it still dispatches, to that
 // most-available node, and drains its slots. That is deliberate and not the
 // defect issue #52180 named: a task larger than any worker has to run
-// somewhere, and the emptiest worker is where it will start soonest. The
-// worker admits such a task only once every other reservation has been
-// released and runs it alone (see internal/datanode/resource), so the harm in
-// #52180 -- an oversized task running *concurrently* with everything else --
-// cannot recur. Refusing to place it here would instead leave it pending
-// forever, because no node ever grows.
+// somewhere, and the emptiest worker is where it will start soonest. A worker
+// running the exclusive-admission guard (see internal/datanode/resource)
+// admits such a task only once every other reservation has been released and
+// runs it alone, so the harm in #52180 -- an oversized task running
+// *concurrently* with everything else -- cannot recur once every DataNode
+// carries that guard. That precondition is not enforced here: nothing in this
+// path checks a worker's capability, so during a partial rollout, a rollback,
+// or before a node has restarted into the new build, an oversized task
+// dispatched to a guard-less worker still behaves as it did in #52180.
+// Refusing to place it here would instead leave it pending forever, because
+// no node ever grows.
 //
-// It returns NullNodeID only when every node reports zero available slots, in
-// which case the task waits for the next scheduling round.
+// It returns NullNodeID when the heap holds no nodes at all, or when every
+// node in it reports zero available slots; either way the task waits for the
+// next scheduling round.
 //
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
