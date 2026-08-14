@@ -24,7 +24,7 @@ import (
 func TestIdempotencyIndex(t *testing.T) {
 	idx := newIdempotencyIndex()
 
-	// 空 key 不入索引。
+	// An empty key never enters the index.
 	idx.Add("", 1)
 	_, ok := idx.Get("")
 	require.False(t, ok)
@@ -34,13 +34,15 @@ func TestIdempotencyIndex(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(100), id)
 
-	// 撞 key 时保留先到的那条：幂等语义要的就是"第一次的结果"。
+	// On a key collision the first broadcastID wins: idempotency means a retry
+	// resolves to the ORIGINAL result, not to whichever retry raced in last.
 	idx.Add("import/1/k", 200)
 	id, ok = idx.Get("import/1/k")
 	require.True(t, ok)
 	require.Equal(t, uint64(100), id)
 
-	// 删除只认 broadcastID 匹配的那条，避免后来者误删先到者的条目。
+	// Removal only applies when the broadcastID matches, so a task that lost the
+	// Add race cannot evict the owner's entry when its own tombstone is GC'd.
 	idx.Remove("import/1/k", 200)
 	id, ok = idx.Get("import/1/k")
 	require.True(t, ok)
