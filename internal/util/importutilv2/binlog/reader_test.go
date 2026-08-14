@@ -835,6 +835,36 @@ func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
 
+func TestExplicitReaderDoesNotListPrefixes(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+	}}
+	insertLogs := map[int64][]string{
+		101:                   {"objects/101/1"},
+		common.RowIDField:     {"objects/0/1"},
+		100:                   {"objects/100/1"},
+		common.TimeStampField: {"objects/1/1"},
+	}
+	for _, object := range []string{"objects/0/1", "objects/1/1", "objects/100/1", "objects/101/1"} {
+		cm.EXPECT().Size(mock.Anything, object).Return(int64(10), nil).Once()
+	}
+
+	reader, err := NewExplicitReader(ctx, cm, schema, &indexpb.StorageConfig{}, storage.StorageV1,
+		insertLogs, nil, 0, math.MaxUint64, 1024, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, reader)
+	size, err := reader.Size()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(40), size)
+	reader.Close()
+}
+
 func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()

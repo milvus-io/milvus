@@ -24,8 +24,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -122,4 +126,27 @@ func TestListInsertLogs_ParseFieldIDError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrImportSysFailed), "parse-field-id IO error must be wrapped as a server-side import failure")
+}
+
+func TestVerifyPackedUsesShortColumnGroupAsCountReference(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+	}}
+	insertLogs := map[int64][]string{
+		storagecommon.DefaultShortColumnGroupID: {"objects/short/1"},
+		101:                                     {"objects/101/1"},
+	}
+
+	valid, cloned, err := verify(schema, storage.StorageV3, insertLogs)
+	assert.NoError(t, err)
+	assert.Equal(t, insertLogs, valid)
+	assert.Same(t, schema, cloned)
+}
+
+func TestCreateFieldBinlogListIsSorted(t *testing.T) {
+	binlogs := createFieldBinlogList(map[int64][]string{101: {"101"}, 0: {"0"}, 100: {"100"}})
+	assert.Equal(t, []int64{0, 100, 101}, []int64{binlogs[0].GetFieldID(), binlogs[1].GetFieldID(), binlogs[2].GetFieldID()})
 }

@@ -108,8 +108,11 @@ func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix s
 }
 
 func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog {
-	binlogFields := make([]*datapb.FieldBinlog, 0)
-	for fieldID, logs := range insertLogs {
+	fieldIDs := lo.Keys(insertLogs)
+	sort.Slice(fieldIDs, func(i, j int) bool { return fieldIDs[i] < fieldIDs[j] })
+	binlogFields := make([]*datapb.FieldBinlog, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		logs := insertLogs[fieldID]
 		binlog := &datapb.FieldBinlog{
 			FieldID: fieldID,
 			Binlogs: lo.Map(logs, func(path string, _ int) *datapb.Binlog {
@@ -125,6 +128,7 @@ func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog 
 
 func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
 	// check system fields (ts and rowID)
+	countReferenceField := int64(common.RowIDField)
 	switch storageVersion {
 	case storage.StorageV1:
 		if _, ok := insertLogs[common.TimeStampField]; !ok {
@@ -134,6 +138,7 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 			return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
 		}
 	case storage.StorageV2, storage.StorageV3:
+		countReferenceField = storagecommon.DefaultShortColumnGroupID
 		if _, ok := insertLogs[storagecommon.DefaultShortColumnGroupID]; !ok {
 			return nil, nil, merr.WrapErrImportFailed("no binlog for system fields")
 		}
@@ -141,9 +146,9 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 
 	// check binlog file count, must be equal for all fields
 	for fieldID, logs := range insertLogs {
-		if len(logs) != len(insertLogs[common.RowIDField]) {
+		if len(logs) != len(insertLogs[countReferenceField]) {
 			return nil, nil, merr.WrapErrImportFailedMsg("misaligned binlog count, field%d:%d, field%d:%d",
-				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField]))
+				fieldID, len(logs), countReferenceField, len(insertLogs[countReferenceField]))
 		}
 	}
 

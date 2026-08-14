@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -176,7 +177,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 			return nil, merr.WrapErrDataIntegrityMsg("duplicate source ordinal %d", source.GetSourceOrdinal())
 		}
 		seenSources[source.GetSourceOrdinal()] = struct{}{}
-		reader, err := newReshardSourceReader(ctx, cm, plan.GetSourceSchema(), source, bufferSize, req.GetStorageConfig())
+		reader, err := newReshardSourceReader(ctx, cm, plan.GetSourceSchema(), source, bufferSize, req.GetStorageConfig(), pluginContext)
 		if err != nil {
 			return nil, err
 		}
@@ -242,7 +243,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 	return publishReshardManifest(ctx, cm, req, manifest)
 }
 
-func newReshardSourceReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, source *datapb.SourceFileSpec, bufferSize int64, storageConfig *indexpb.StorageConfig) (importutilv2.Reader, error) {
+func newReshardSourceReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, source *datapb.SourceFileSpec, bufferSize int64, storageConfig *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext) (importutilv2.Reader, error) {
 	if source == nil || source.GetFile() == nil {
 		return nil, merr.WrapErrDataIntegrityMsg("nil ReshardTask source")
 	}
@@ -260,14 +261,19 @@ func newReshardSourceReader(ctx context.Context, cm storage.ChunkManager, schema
 		}
 	}
 	if source.GetIsBackup() {
-		appendOption(importutilv2.BackupFlag, "true")
-		appendOption(importutilv2.StartTs, strconv.FormatUint(readerOptions.GetBackupStartTs(), 10))
-		appendOption(importutilv2.EndTs, strconv.FormatUint(readerOptions.GetBackupEndTs(), 10))
-		appendOption(importutilv2.StorageVersion, strconv.FormatInt(readerOptions.GetSourceStorageVersion(), 10))
+		insertLogs := make(map[int64][]string, len(source.GetExpandedInsertFields()))
+		for _, field := range source.GetExpandedInsertFields() {
+			if field == nil || len(field.GetPaths()) == 0 {
+				return nil, merr.WrapErrDataIntegrityMsg("backup source has an empty expanded insert field")
+			}
+			if _, ok := insertLogs[field.GetFieldOrGroupId()]; ok {
+				return nil, merr.WrapErrDataIntegrityMsg("backup source has duplicate expanded field/group %d", field.GetFieldOrGroupId())
+			}
+			insertLogs[field.GetFieldOrGroupId()] = append([]string(nil), field.GetPaths()...)
+		}
+		return binlog.NewExplicitReader(ctx, cm, schema, storageConfig, readerOptions.GetSourceStorageVersion(), insertLogs,
+			append([]string(nil), source.GetExpandedDeltaObjects()...), readerOptions.GetBackupStartTs(), readerOptions.GetBackupEndTs(), int(bufferSize), pluginContext)
 	}
-	// TODO(import-v3): backup currently goes through the legacy prefix reader.
-	// The plan already contains explicit expanded objects; switch this call to
-	// the explicit-object reader when that small binlog adapter lands.
 	return importutilv2.NewReader(ctx, cm, schema, source.GetFile(), options, int(bufferSize), storageConfig)
 }
 
