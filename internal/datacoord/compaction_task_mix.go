@@ -103,7 +103,7 @@ func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, all
 		return slotUsage
 	}
 
-	if !paramtable.Get().DataCoordCfg.ResourceEnable.GetAsBool() {
+	if !paramtable.Get().DataCoordCfg.ResourceEnableCompactionEstimate.GetAsBool() {
 		return t.legacyTaskSlot(segments)
 	}
 
@@ -151,7 +151,7 @@ func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, all
 
 // legacyTaskSlot is what this task reported before resource estimation existed:
 // a flat constant for mix, and the segment-size step function for sort. It is
-// the rollback path for dataCoord.resource.enable.
+// the rollback path for dataCoord.resource.enableCompactionEstimate.
 //
 // The switch is needed because the wire protocol did not change in this phase.
 // The slot field still carries a scalar, but the estimator changed what a slot
@@ -161,6 +161,12 @@ func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, all
 // full roughly nine times too early, on every compaction rather than on rare
 // ones. That is a cluster-wide throughput collapse with no other way out, and
 // it is reachable by an ordinary partial rollout or a rollback.
+//
+// The switch is named for what it does rather than for the feature, because it
+// turns off exactly this pricing and nothing else. The DataNode's admission
+// ledger -- the half that actually prevents the OOM kills in issue #52180 --
+// keeps running, and deliberately has no switch of its own: one would be a way
+// to re-enable the outage.
 func (t *mixCompactionTask) legacyTaskSlot(segments []*SegmentInfo) int64 {
 	slotUsage := paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 	if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction && len(segments) > 0 {
