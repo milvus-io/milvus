@@ -5,9 +5,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and limitations under the License.
 
 #include <string>
@@ -31,9 +30,10 @@ bool
 ThrewWith(const std::string& index_type,
           DataType dt,
           const std::string& params_json,
-          const std::string& substr) {
+          const std::string& substr,
+          const std::string& metric = knowhere::metric::L2) {
     SearchInfo info;
-    info.metric_type_ = knowhere::metric::L2;
+    info.metric_type_ = metric;
     info.topk_ = 10;
     info.search_params_ = knowhere::Json::parse(params_json);
     try {
@@ -47,9 +47,10 @@ ThrewWith(const std::string& index_type,
 void
 NoThrow(const std::string& index_type,
         DataType dt,
-        const std::string& params_json) {
+        const std::string& params_json,
+        const std::string& metric = knowhere::metric::L2) {
     SearchInfo info;
-    info.metric_type_ = knowhere::metric::L2;
+    info.metric_type_ = metric;
     info.topk_ = 10;
     info.search_params_ = knowhere::Json::parse(params_json);
     EXPECT_NO_THROW(segcore::ValidateVectorSearchParams(info, index_type, dt))
@@ -57,14 +58,32 @@ NoThrow(const std::string& index_type,
 }
 }  // namespace
 
-// Sweep: an empty/minimal param set must still load for every common index
-// family. This is what makes routing every search through knowhere Config::Load
-// safe — no family regresses.
+// Sweep: an empty/minimal param set must still load for every CPU index
+// family milvus supports. This is what makes routing every search through
+// knowhere Config::Load safe — no family regresses.
+//
+// GPU families (GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE) are not
+// swept: IndexStaticFaced<T>::CreateConfig throws for index types not
+// registered in this build, and the catch in LoadAndCheck skips validation,
+// so an entry here would silently pass without exercising knowhere. GPU
+// builds register them, but this UT is built without them.
 TEST(ValidateVectorSearchParams, EmptyParamsLoadAllIndexTypes) {
-    const DataType dt = DataType::VECTOR_FLOAT;
+    // dense float — IVF family (incl. RaBitQ variants) + HNSW + DISKANN
     for (const auto* index_type :
-         {"IVF_FLAT", "IVF_PQ", "IVF_SQ8", "SCANN", "HNSW", "DISKANN"}) {
-        NoThrow(index_type, dt, R"({})");
+         {"IVF_FLAT", "IVF_PQ", "IVF_SQ8", "SCANN", "IVF_RABITQ",
+          "IVF_RABITQ_FASTSCAN", "HNSW", "DISKANN"}) {
+        NoThrow(index_type, DataType::VECTOR_FLOAT, R"({})");
+    }
+    // binary — flat and IVF, Hamming
+    for (const auto* index_type : {"BIN_FLAT", "BIN_IVF_FLAT"}) {
+        NoThrow(index_type, DataType::VECTOR_BINARY, R"({})",
+                knowhere::metric::HAMMING);
+    }
+    // sparse
+    for (const auto* index_type :
+         {"SPARSE_INVERTED_INDEX", "SPARSE_WAND"}) {
+        NoThrow(index_type, DataType::VECTOR_SPARSE_U32_F32, R"({})",
+                knowhere::metric::IP);
     }
 }
 
@@ -116,13 +135,19 @@ TEST(ValidateVectorSearchParams, IvfAcceptsValidNprobe) {
     NoThrow("IVF_FLAT", dt, R"({"nprobe": "32"})");
 }
 
-// Non-IVF families do not declare nprobe; a stray nprobe is ignored exactly
-// as today (no collateral damage from routing through knowhere).
+// Non-IVF families do not declare nprobe; the full invalid set from
+// IvfRejectsInvalidNprobe is ignored exactly as today (no collateral damage
+// from routing through knowhere).
 TEST(ValidateVectorSearchParams, HnswIgnoresStrayNprobe) {
     const DataType dt = DataType::VECTOR_FLOAT;
     NoThrow("HNSW", dt, R"({})");
     NoThrow("HNSW", dt, R"({"nprobe": 0})");
     NoThrow("HNSW", dt, R"({"nprobe": -1})");
+    NoThrow("HNSW", dt, R"({"nprobe": 65537})");
+    NoThrow("HNSW", dt, R"({"nprobe": "0"})");
+    NoThrow("HNSW", dt, R"({"nprobe": null})");
+    NoThrow("HNSW", dt, R"({"nprobe": true})");
+    NoThrow("HNSW", dt, R"({"nprobe": 32.0})");
     NoThrow("HNSW", dt, R"({"nprobe": 32})");
     NoThrow("HNSW", dt, R"({"ef": 64})");
 }
