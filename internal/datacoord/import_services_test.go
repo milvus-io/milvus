@@ -333,7 +333,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 }
 
 // importV2RequestFilePath is the single file newImportV2IdempotentRequest asks to
-// import. A duplicate hit is only honoured when the original job covers the same files.
+// import. A duplicate hit is only honored when the original job covers the same files.
 const importV2RequestFilePath = "/test/file.json"
 
 // newDuplicatedImportBroadcastResult builds the result the broadcaster returns on an
