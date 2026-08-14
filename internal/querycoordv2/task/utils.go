@@ -55,20 +55,24 @@ func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var err error
+	errCh := make(chan error, 1)
 	go func() {
+		var err error
 		for _, task := range tasks {
 			err = task.Wait()
 			if err != nil {
-				cancel()
 				break
 			}
 		}
-		cancel()
+		errCh <- err
 	}()
-	<-ctx.Done()
 
-	return err
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func SetPriority(priority Priority, tasks ...Task) {
