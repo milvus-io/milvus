@@ -45,7 +45,9 @@ type Guard interface {
 	// impossible, only exclusive: the coordinator places such a task on the
 	// emptiest worker on purpose, and it is admitted once every other
 	// reservation has been released, after which nothing else is admitted until
-	// it finishes.
+	// it finishes. The same answer is given to a request that merely exceeds
+	// the current budget once the ledger has emptied: at that point no Release
+	// can ever help it, so waiting longer is refusal by another name.
 	//
 	// An oversized request has one further condition, which matters to
 	// TryAcquire callers: it is admitted only from the front of the waiter queue
@@ -106,8 +108,9 @@ type guard struct {
 }
 
 var (
-	globalGuard     Guard
-	globalGuardOnce sync.Once
+	globalGuard       Guard
+	globalGuardOnce   sync.Once
+	globalGuardCancel context.CancelFunc
 )
 
 // GetGuard returns the process-wide guard shared by the compaction, index and
@@ -115,11 +118,36 @@ var (
 // them knew what the others had taken.
 func GetGuard() Guard {
 	globalGuardOnce.Do(func() {
+		// The cancel is kept in globalGuardCancel and called by
+		// stopGlobalGuardForTest; gosec's G118 does not follow a cancel stored
+		// in a variable, and the repo carries the same suppression elsewhere
+		// (e.g. distributed/cdc/service.go).
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec
+		globalGuardCancel = cancel
 		g := NewGuard()
-		g.startWatermarkLoop(context.Background())
+		g.startWatermarkLoop(ctx)
 		globalGuard = g
 	})
 	return globalGuard
+}
+
+// stopGlobalGuardForTest ends the singleton's sampling loop and lets the next
+// GetGuard build a fresh one.
+//
+// Without it, the one test that touches the singleton leaves a goroutine
+// calling hardware.GetUsedMemoryCount every three seconds for the rest of the
+// package binary's life. Any later test that mockey-patches that function --
+// TestAcquireChargesCommitmentNotObservation calls t.Errorf from inside its
+// patch -- then fails or not depending on which test ran first. Declaration
+// order happens to save it today; -shuffle, a -run filter or a file rename does
+// not.
+func stopGlobalGuardForTest() {
+	if globalGuardCancel != nil {
+		globalGuardCancel()
+		globalGuardCancel = nil
+	}
+	globalGuard = nil
+	globalGuardOnce = sync.Once{}
 }
 
 func NewGuard() *guard {
@@ -236,20 +264,43 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		if len(g.ledger) != 0 {
 			return g.deferLocked(taskType, reasonAwaitingDrain, budget)
 		}
-		g.exclusiveTaskID = taskID
-		g.reserved = g.reserved.Add(req)
-		g.ledger[taskID] = req
-		mlog.Info(context.TODO(), "oversized task admitted for exclusive execution",
-			mlog.Int64("taskID", taskID),
-			mlog.String("taskType", taskType),
-			mlog.String("requirement", req.String()))
-		return true, g.availLocked(budget)
+		return g.admitExclusiveLocked(taskID, taskType, req, budget, "larger than node capacity")
 	}
 
 	if g.blockedByHeadOfLineLocked(taskID, budget) {
 		return g.deferLocked(taskType, reasonHeadOfLine, budget)
 	}
 	if !g.reserved.Add(req).FitsIn(budget) {
+		// Nothing else is running, and the request still does not fit. No
+		// future Release can help, because there is nothing left to release:
+		// this is as much budget as the node will ever offer. Deferring again
+		// is not "try later", it is forever, and as queue head this task then
+		// blocks every other task through blockedByHeadOfLineLocked while the
+		// ledger stays empty -- so the node also reports itself completely free
+		// to DataCoord and keeps being fed work it will never start.
+		//
+		// This band exists because oversizedness is judged against node
+		// CAPACITY (deliberately -- see isOversizedLocked) while admission is
+		// judged against the BUDGET, which is capacity minus the non-task
+		// reservation. A requirement in (budget, capacity] falls between the
+		// two: never oversized, never admissible. nonTask cannot rescue it
+		// either, since with everything blocked the observed memory is just the
+		// resident baseline and the reservation relaxes only to the floor.
+		//
+		// So the invariant enforced here is progress, not classification: a
+		// request that cannot be met on an empty node is run the same way an
+		// oversized one is, alone. That is strictly safer than running it
+		// concurrently, which is what the node did before this branch.
+		if len(g.ledger) == 0 {
+			// Same queue rule as the oversized path above, for the same reason:
+			// taking the whole node must not be a way past tasks already
+			// waiting. Acquire is FIFO, so waiting carries this task to the
+			// front and the terminal case is reached from there.
+			if len(g.waiters) > 0 && g.waiters[0].taskID != taskID {
+				return g.deferLocked(taskType, reasonHeadOfLine, budget)
+			}
+			return g.admitExclusiveLocked(taskID, taskType, req, budget, "exceeds the current budget on an empty node")
+		}
 		return g.deferLocked(taskType, reasonInsufficient, budget)
 	}
 
@@ -260,6 +311,26 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		mlog.String("taskType", taskType),
 		mlog.String("requirement", req.String()),
 		mlog.String("reserved", g.reserved.String()))
+	return true, g.availLocked(budget)
+}
+
+// admitExclusiveLocked charges req and marks the node as belonging to taskID
+// alone. Both callers have already established the two things that justify it:
+// the ledger is empty, and req cannot be satisfied any other way. why names
+// which of the two routes got here, because they are worth telling apart in a
+// log -- one is a task bigger than the machine, the other a task bigger than
+// what non-task memory has left of the machine.
+func (g *guard) admitExclusiveLocked(taskID int64, taskType taskcommon.Type, req taskresource.Requirement, budget taskresource.Capacity, why string) (bool, taskresource.Capacity) {
+	g.exclusiveTaskID = taskID
+	g.reserved = g.reserved.Add(req)
+	g.ledger[taskID] = req
+	mlog.Info(context.TODO(), "task admitted for exclusive execution",
+		mlog.Int64("taskID", taskID),
+		mlog.String("taskType", taskType),
+		mlog.String("reason", why),
+		mlog.String("requirement", req.String()),
+		mlog.String("budget", budget.String()),
+		mlog.String("nodeCapacity", g.nodeCapacityLocked().String()))
 	return true, g.availLocked(budget)
 }
 

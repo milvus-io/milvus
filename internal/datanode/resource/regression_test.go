@@ -41,6 +41,7 @@ import (
 // node had 16 cores and 64GiB -- which is also what makes "taskSlot=384" and
 // "indexStatsUsed=400" the impossible figures they are.
 const (
+	mib = int64(1) << 20
 	gib = int64(1) << 30
 
 	incidentNodeCores  = 16
@@ -287,4 +288,101 @@ func TestReservedNeverExceedsBudget(t *testing.T) {
 	// ever admitted everything offered, the loop above would have proved
 	// nothing but that Snapshot returns numbers.
 	assert.Equal(t, 27, admitted)
+}
+
+// A fourth regression, found by whole-branch review rather than by an incident,
+// but of the same family and strictly worse than any of the three: the node
+// stops forever AND keeps advertising itself as completely free.
+//
+// Oversizedness is judged against node CAPACITY, deliberately -- a passing
+// spike in non-task memory must not flip an ordinary task into exclusive mode.
+// Admission is judged against the BUDGET, which is capacity minus the non-task
+// reservation. That leaves a band, (budget, capacity], where a requirement is
+// neither oversized nor admissible: it never takes the exclusive path, never
+// fits, and as queue head it holds the head-of-line reservation against every
+// other task while the ledger stays empty -- so Snapshot().Reserved is zero,
+// legacyAvailableSlots reports the full slot count, and DataCoord keeps feeding
+// a node that will never start anything.
+//
+// The band is not exotic. On the incident node it is 44GiB to 48GiB: a
+// storage-v3 mix compaction with 45GiB of input lands in it.
+func TestBandBetweenBudgetAndCapacityIsAdmittedNotStalled(t *testing.T) {
+	// 4GiB of resident memory outside the ledger, the sort of baseline a
+	// DataNode carries in flowgraph and write-path buffers.
+	const baseline = 4 * gib
+	mockIncidentNode(t, baseline)
+
+	g := NewGuard()
+
+	capacity := taskresource.NodeCapacity()
+	require.Equal(t, int64(48)*gib, capacity.Memory, "setup: 64GiB x memoryRatio 0.75")
+
+	// Drive nonTask up through the real sampling path rather than by writing
+	// the field: the whole point is that the budget shrinks the way it does in
+	// production.
+	g.sampleOnce()
+	snap := g.Snapshot()
+	require.Equal(t, baseline, snap.NonTask, "setup: the sample must have produced the reservation")
+	require.Equal(t, capacity.Memory-baseline, snap.Total.Memory, "setup: budget = capacity - nonTask")
+
+	// Priced by the production estimator, from the input size, exactly as the
+	// compaction executor would price it.
+	req := taskresource.EstimateCompaction(taskresource.CompactionInput{
+		Type:            datapb.CompactionType_MixCompaction,
+		StorageVersion:  3,
+		TotalMemorySize: 45 * gib,
+	})
+	require.Greater(t, req.Memory, snap.Total.Memory, "setup: must not fit the budget")
+	require.LessOrEqual(t, req.Memory, capacity.Memory, "setup: must NOT be oversized against capacity")
+
+	ok, _ := g.TryAcquire(1, taskcommon.Compaction, req)
+	assert.True(t, ok, "a task that no future Release can help must be admitted, not deferred forever")
+
+	after := g.Snapshot()
+	assert.Equal(t, int64(1), after.ExclusiveTaskID,
+		"it can only run alone, so it must hold the node exclusively")
+	assert.Equal(t, req.Memory, after.Reserved.Memory,
+		"the ledger must show the commitment; an empty ledger is what made the node advertise itself free")
+
+	// And it really is exclusive: nothing else joins it, however small.
+	joined, _ := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 0.1, Memory: mib})
+	assert.False(t, joined)
+
+	// ...until it finishes, at which point the node is ordinary again. This is
+	// the half that makes it a stall rather than merely a delay: before the fix
+	// nothing ever reached this line, because task 1 was never admitted and, as
+	// queue head, blocked task 2 for as long as the node lived.
+	g.Release(1)
+	joined, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 0.1, Memory: mib})
+	assert.True(t, joined)
+}
+
+// The band task must not be able to use the terminal case to jump a queue: it
+// takes the whole node, so admitting it ahead of tasks already waiting would
+// make "wait for the whole node" a privileged position. Acquire is FIFO, so
+// waiting is what carries it to the front.
+func TestBandTaskCannotClaimTheNodeFromBehindTheQueue(t *testing.T) {
+	mockIncidentNode(t, 4*gib)
+
+	g := NewGuard()
+	g.sampleOnce()
+
+	budget := g.Snapshot().Total.Memory
+	capacity := taskresource.NodeCapacity().Memory
+
+	// Someone is already queued.
+	head := &waiter{taskID: 7, req: taskresource.Requirement{CPU: 1, Memory: gib}, ch: make(chan struct{}, 1)}
+	g.mu.Lock()
+	g.waiters = append(g.waiters, head)
+	g.mu.Unlock()
+
+	band := taskresource.Requirement{CPU: 1, Memory: budget + gib}
+	require.LessOrEqual(t, band.Memory, capacity, "setup: in the band, not oversized")
+
+	ok, _ := g.TryAcquire(8, taskcommon.Compaction, band)
+	assert.False(t, ok, "a latecomer must not take the whole node ahead of a queued task")
+
+	// From the front of the queue it goes through.
+	ok, _ = g.TryAcquire(7, taskcommon.Compaction, band)
+	assert.True(t, ok)
 }
