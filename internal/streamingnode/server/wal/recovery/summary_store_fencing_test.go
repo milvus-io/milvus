@@ -69,13 +69,13 @@ func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {{
-			SourcePChannel:  "p1",
-			VChannel:        "v1",
-			SourceMessageID: rmq.NewRmqID(101).IntoProto(),
-			SourceTimeTick:  101,
-			Idempotency:     &committedWriteIdempotency{Key: "key-1"},
+			SourcePchannel:  "p1",
+			Vchannel:        "v1",
+			SourceMessageId: rmq.NewRmqID(101).IntoProto(),
+			SourceTimetick:  101,
+			IdempotencyKey:  "key-1",
 			IdempotentResult: message.NewIdempotentInsertResult(
 				[]uint32{0},
 				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
@@ -156,7 +156,7 @@ func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 
 	summary := newEmptyVChannelSummary("p1", "v1", nil)
-	record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	record := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "stale-key",
 		CommitTimetick: 210,
 		MessageId:      rmq.NewRmqID(210).IntoProto(),
@@ -171,7 +171,7 @@ func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.SetLogger(resource.Resource().Logger())
 
-	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": records,
 	}, map[string]*summaryMetaUpdate{
 		"v1": metaUpdate,
@@ -190,18 +190,18 @@ func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 	chunkManager := newTestPChannelSummaryCleanerChunkManager()
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	staleRecords := map[string][]committedWriteRecord{
+	staleRecords := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "stale-key",
 				CommitTimetick: 210,
 				MessageId:      rmq.NewRmqID(210).IntoProto(),
 			}),
 		},
 	}
-	currentRecords := map[string][]committedWriteRecord{
+	currentRecords := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "current-key",
 				CommitTimetick: 220,
 				MessageId:      rmq.NewRmqID(220).IntoProto(),

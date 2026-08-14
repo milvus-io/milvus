@@ -206,11 +206,11 @@ func (m *summaryManager) hasDirtySummaryUnsafe() bool {
 	return false
 }
 
-func (m *summaryManager) consumePendingCommittedWriteRecords() (map[string][]committedWriteRecord, map[string]*summaryMetaUpdate, *WALCheckpoint) {
+func (m *summaryManager) consumePendingCommittedWriteRecords() (map[string][]*streamingpb.CommittedWriteRecord, map[string]*summaryMetaUpdate, *WALCheckpoint) {
 	if len(m.summaries()) == 0 || !m.hasDirtySummaryUnsafe() {
 		return nil, nil, nil
 	}
-	recordsByVChannel := make(map[string][]committedWriteRecord)
+	recordsByVChannel := make(map[string][]*streamingpb.CommittedWriteRecord)
 	metaUpdates := make(map[string]*summaryMetaUpdate)
 	for _, summary := range m.summaries() {
 		records, metaUpdate := summary.consumePendingCommittedWriteRecords()
@@ -238,7 +238,7 @@ func (m *summaryManager) applyRecoveredSummaryMetas(metas []*streamingpb.VChanne
 	}
 }
 
-func (m *summaryManager) markSummariesPersisted(recordsByVChannel map[string][]committedWriteRecord, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64) {
+func (m *summaryManager) markSummariesPersisted(recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64) {
 	if generation == 0 && len(recordsByVChannel) == 0 && len(metas) == 0 {
 		return
 	}

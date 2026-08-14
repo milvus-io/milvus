@@ -23,7 +23,7 @@ import (
 func (m *summaryManager) persistPChannelSummary(
 	ctx context.Context,
 	logger *mlog.Logger,
-	recordsByVChannel map[string][]committedWriteRecord,
+	recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord,
 	summaryMetaUpdates map[string]*summaryMetaUpdate,
 	sourceCheckpoint *WALCheckpoint,
 ) (map[string]*streamingpb.VChannelSummaryMeta, uint64, error) {
@@ -44,7 +44,7 @@ func (m *summaryManager) persistPChannelSummary(
 func (m *summaryManager) persistPChannelSummaryChunk(
 	ctx context.Context,
 	logger *mlog.Logger,
-	recordsByVChannel map[string][]committedWriteRecord,
+	recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord,
 	sourceCheckpoint *WALCheckpoint,
 ) (*persistedPChannelSummaryChunk, error) {
 	if sourceCheckpoint == nil {
@@ -73,11 +73,11 @@ func (m *summaryManager) persistPChannelSummaryChunk(
 	if meta != nil {
 		if checkpointCovers(meta.SourceCheckpoint, sourceCheckpoint) {
 			return &persistedPChannelSummaryChunk{
-				footer: &pchannelSummaryChunkFooter{
-					CodecVersion:              pchannelSummaryCodecVersion,
-					PChannel:                  m.pchannel,
+				footer: &streamingpb.PChannelSummaryChunkFooter{
+					CodecVersion:              uint32(pchannelSummaryCodecVersion),
+					Pchannel:                  m.pchannel,
 					Generation:                meta.LatestGeneration,
-					SourceCheckpointMessageID: cloneMessageIDProto(metaPB.GetSourceCheckpointMessageId()),
+					SourceCheckpointMessageId: cloneMessageIDProto(metaPB.GetSourceCheckpointMessageId()),
 					SourceCheckpointTimetick:  metaPB.GetSourceCheckpointTimetick(),
 				},
 				generation:             meta.LatestGeneration,
@@ -165,7 +165,7 @@ func (m *summaryManager) persistPChannelSummaryMeta(
 				}
 				if current.LatestGeneration >= persistedChunk.generation {
 					if current.Term == m.term && checkpointCovers(current.SourceCheckpoint, pchannelSummarySourceCheckpointToWALCheckpoint(&pchannelSummarySourceCheckpoint{
-						MessageID: cloneMessageIDProto(persistedChunk.footer.SourceCheckpointMessageID),
+						MessageID: cloneMessageIDProto(persistedChunk.footer.SourceCheckpointMessageId),
 						TimeTick:  persistedChunk.footer.SourceCheckpointTimetick,
 					})) {
 						return nil, nil
@@ -210,7 +210,7 @@ func (m *summaryManager) persistSummaryMetas(ctx context.Context, logger *mlog.L
 		})
 }
 
-func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte, footer *pchannelSummaryChunkFooter, term int64) error {
+func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte, footer *streamingpb.PChannelSummaryChunkFooter, term int64) error {
 	chunkManager := resource.Resource().ChunkManager()
 	if chunkManager == nil {
 		return merr.WrapErrServiceInternalMsg("pchannel summary chunk manager is not initialized")
@@ -263,7 +263,7 @@ func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, pay
 // checksums cover the exact stored payload bytes of each vchannel chunk, so an
 // equal (vchannel, record count, checksum) list means identical records even
 // when the surrounding encodings differ.
-func pchannelSummaryChunkFooterSameContent(left, right *pchannelSummaryChunkFooter) bool {
+func pchannelSummaryChunkFooterSameContent(left, right *streamingpb.PChannelSummaryChunkFooter) bool {
 	if left == nil || right == nil {
 		return false
 	}
@@ -273,7 +273,7 @@ func pchannelSummaryChunkFooterSameContent(left, right *pchannelSummaryChunkFoot
 	if left.SourceCheckpointTimetick != right.SourceCheckpointTimetick {
 		return false
 	}
-	if !proto.Equal(left.SourceCheckpointMessageID, right.SourceCheckpointMessageID) {
+	if !proto.Equal(left.SourceCheckpointMessageId, right.SourceCheckpointMessageId) {
 		return false
 	}
 	if len(left.Chunks) != len(right.Chunks) {
@@ -284,7 +284,7 @@ func pchannelSummaryChunkFooterSameContent(left, right *pchannelSummaryChunkFoot
 		if !bytes.Equal(l.Checksum, r.Checksum) {
 			return false
 		}
-		if l.VChannel != r.VChannel || l.RecordCount != r.RecordCount {
+		if l.Vchannel != r.Vchannel || l.RecordCount != r.RecordCount {
 			return false
 		}
 	}
@@ -341,7 +341,7 @@ func sanitizeSummaryStorePathPart(value string) string {
 	return replacer.Replace(value)
 }
 
-func (m *summaryManager) markVChannelSummariesPersisted(recordsByVChannel map[string][]committedWriteRecord, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64, sourceCheckpoint *WALCheckpoint) {
+func (m *summaryManager) markVChannelSummariesPersisted(recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64, sourceCheckpoint *WALCheckpoint) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.markSummariesPersisted(recordsByVChannel, metas, generation)
@@ -351,7 +351,7 @@ func (m *summaryManager) markVChannelSummariesPersisted(recordsByVChannel map[st
 
 func newPChannelSummaryStoreMetaFromChunk(
 	pchannel string,
-	footer *pchannelSummaryChunkFooter,
+	footer *streamingpb.PChannelSummaryChunkFooter,
 	minAvailableGeneration uint64,
 	minInUseGeneration uint64,
 ) *pchannelSummaryStoreMeta {
@@ -374,7 +374,7 @@ func newPChannelSummaryStoreMetaFromChunk(
 		Term:                   footer.Term,
 		ChunkManifest:          manifest,
 		SourceCheckpoint: pchannelSummarySourceCheckpointToWALCheckpoint(&pchannelSummarySourceCheckpoint{
-			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageID),
+			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageId),
 			TimeTick:  footer.SourceCheckpointTimetick,
 		}),
 	}
@@ -418,9 +418,9 @@ func pchannelSummarySourceCheckpointToWALCheckpoint(checkpoint *pchannelSummaryS
 	})
 }
 
-func hasIdempotencyCommittedWriteRecords(records []committedWriteRecord) bool {
+func hasIdempotencyCommittedWriteRecords(records []*streamingpb.CommittedWriteRecord) bool {
 	for _, record := range records {
-		if record.Idempotency != nil {
+		if record.GetIdempotencyKey() != "" {
 			return true
 		}
 	}

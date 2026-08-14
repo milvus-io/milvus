@@ -16,13 +16,24 @@
 //
 //   - One object per generation, at pchannel level:
 //     <minio-root>/streamingnode/summary-store/<pchannel>/chunks/<generation>-<term>
-//   - Inside that object: a footer indexing N per-vchannel chunks, each holding
-//     that vchannel's committedWriteRecord list, its source message-id/timetick
-//     range, and its own checksum.
+//   - Inside that object: a footer indexing N per-vchannel chunks, each entry
+//     giving that chunk's offset, length, checksum, record count and source
+//     timetick range. The chunk itself holds committed write records, nothing
+//     else.
 //   - In etcd: one PChannelSummaryMeta per pchannel (generations, manifest,
 //     owner term) plus one VChannelSummaryMeta per (view_type, vchannel)
 //     recording that view's checkpoint hint and the oldest generation it still
 //     needs.
+//
+// A physical WAL position is recorded only at pchannel level. Everything below
+// it is addressed by timetick, and which chunk generation to open is decided by
+// min_required_generation.
+//
+// The generated protobuf types ARE the model here — there is no parallel set of
+// Go structs mirroring them. A record read out of a chunk is the same
+// *streamingpb.CommittedWriteRecord the chunk stored, so nothing is copied
+// between shapes and the two cannot drift. Add fields to the proto, not to a
+// wrapper.
 //
 // Naming convention in this package: "summary" is the durable, application-
 // neutral data; "window" belongs to the idempotency interceptor, which is the

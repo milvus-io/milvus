@@ -3,85 +3,37 @@ package recovery
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// committedWriteRecord is the internal representation of a committed write
-// fact derived from an already-landed pchannel WAL message. It is the in-memory
-// model; its durable form is streamingpb.CommittedWriteRecord, converted in
-// summary_store_codec.go.
-type committedWriteRecord struct {
-	SourcePChannel  string
-	SourceMessageID *commonpb.MessageID
-	SourceTimeTick  uint64
-	VChannel        string
-	// IdempotentResult holds the rows this write produced, in the one shape they
-	// are ever used in: the result a duplicate append hands back. It is both the
-	// persisted form and the served form, so nothing is projected back and forth.
-	IdempotentResult       *messagespb.IdempotentInsertResult
-	Idempotency            *committedWriteIdempotency
-	LastConfirmedMessageID *commonpb.MessageID
-}
-
-type committedWriteIdempotency struct {
-	Key string
-}
-
-func (record committedWriteRecord) intoProto() *streamingpb.CommittedWriteRecord {
-	pb := &streamingpb.CommittedWriteRecord{
-		SourcePchannel:         record.SourcePChannel,
-		SourceMessageId:        cloneMessageIDProto(record.SourceMessageID),
-		SourceTimetick:         record.SourceTimeTick,
-		Vchannel:               record.VChannel,
-		LastConfirmedMessageId: cloneMessageIDProto(record.LastConfirmedMessageID),
-		IdempotentResult:       record.IdempotentResult,
-	}
-	if record.Idempotency != nil {
-		pb.IdempotencyKey = record.Idempotency.Key
-	}
-	return pb
-}
-
-func newCommittedWriteRecordFromProto(pb *streamingpb.CommittedWriteRecord) committedWriteRecord {
-	record := committedWriteRecord{
-		SourcePChannel:         pb.GetSourcePchannel(),
-		SourceMessageID:        cloneMessageIDProto(pb.GetSourceMessageId()),
-		SourceTimeTick:         pb.GetSourceTimetick(),
-		VChannel:               pb.GetVchannel(),
-		LastConfirmedMessageID: cloneMessageIDProto(pb.GetLastConfirmedMessageId()),
-		IdempotentResult:       pb.GetIdempotentResult(),
-	}
-	// An absent key and an empty key are the same thing here: a record only ever
-	// carries an idempotency block when the write had a non-empty key.
-	if key := pb.GetIdempotencyKey(); key != "" {
-		record.Idempotency = &committedWriteIdempotency{Key: key}
-	}
-	return record
-}
+// A committed write fact derived from an already-landed pchannel WAL message is
+// streamingpb.CommittedWriteRecord itself — there is no separate in-memory
+// model. The generated type is the one representation: it is what the chunk
+// stores, what recovery decodes, and what callers receive, so nothing is copied
+// between shapes and the two cannot drift apart.
 
 // newCommittedWriteRecordFromMessage extracts a committed write fact from an
 // immutable WAL message. Callers should only pass messages observed after WAL
 // append/scan has completed; inflight requests must never reach this function.
-func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMessage) (*committedWriteRecord, bool) {
+func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMessage) (*streamingpb.CommittedWriteRecord, bool) {
 	if txnMsg := message.AsImmutableTxnMessage(msg); txnMsg != nil {
 		return newCommittedWriteRecordFromTxnMessage(pchannel, txnMsg)
 	}
 	if msg == nil || !msg.MessageType().IsDMLMessageType() || msg.IsPChannelLevel() {
 		return nil, false
 	}
-	record := &committedWriteRecord{
-		SourcePChannel:         pchannel,
-		SourceMessageID:        safeMessageIDProto(msg.MessageID()),
-		SourceTimeTick:         msg.TimeTick(),
-		VChannel:               msg.VChannel(),
-		LastConfirmedMessageID: safeMessageIDProto(msg.LastConfirmedMessageID()),
+	record := &streamingpb.CommittedWriteRecord{
+		SourcePchannel:         pchannel,
+		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
+		SourceTimetick:         msg.TimeTick(),
+		Vchannel:               msg.VChannel(),
+		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
 	}
-	if record.SourcePChannel == "" {
-		record.SourcePChannel = msg.PChannel()
+	if record.GetSourcePchannel() == "" {
+		record.SourcePchannel = msg.PChannel()
 	}
 
 	var decodedResult *messagespb.IdempotentInsertResult
@@ -91,28 +43,26 @@ func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMe
 	}
 
 	if key := idempotencyKeyFromImmutableMessage(msg); key != "" {
-		record.Idempotency = &committedWriteIdempotency{
-			Key: key,
-		}
+		record.IdempotencyKey = key
 	} else if decodedResult == nil {
 		record.IdempotentResult = nil
 	}
 	return record, true
 }
 
-func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.ImmutableTxnMessage) (*committedWriteRecord, bool) {
+func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.ImmutableTxnMessage) (*streamingpb.CommittedWriteRecord, bool) {
 	if msg == nil || msg.IsPChannelLevel() {
 		return nil, false
 	}
-	record := &committedWriteRecord{
-		SourcePChannel:         pchannel,
-		SourceMessageID:        safeMessageIDProto(msg.MessageID()),
-		SourceTimeTick:         msg.TimeTick(),
-		VChannel:               msg.VChannel(),
-		LastConfirmedMessageID: safeMessageIDProto(msg.LastConfirmedMessageID()),
+	record := &streamingpb.CommittedWriteRecord{
+		SourcePchannel:         pchannel,
+		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
+		SourceTimetick:         msg.TimeTick(),
+		Vchannel:               msg.VChannel(),
+		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
 	}
-	if record.SourcePChannel == "" {
-		record.SourcePChannel = msg.PChannel()
+	if record.GetSourcePchannel() == "" {
+		record.SourcePchannel = msg.PChannel()
 	}
 
 	insertResults := make([]*messagespb.IdempotentInsertResult, 0, msg.Size())
@@ -129,9 +79,7 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 	})
 
 	if key := idempotencyKeyFromImmutableMessage(msg.Commit()); key != "" {
-		record.Idempotency = &committedWriteIdempotency{
-			Key: key,
-		}
+		record.IdempotencyKey = key
 	}
 	mergedResult, hadAny, err := message.MergeIdempotentInsertResults(insertResults...)
 	if err != nil {
@@ -139,13 +87,13 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 		// instead of silently degrading to "no idempotent payload", then keep the
 		// record without a duplicate response.
 		mlog.Warn(context.TODO(), "failed to merge idempotent insert results for committed write record",
-			mlog.String("pchannel", record.SourcePChannel),
-			mlog.String("vchannel", record.VChannel),
+			mlog.String("pchannel", record.GetSourcePchannel()),
+			mlog.String("vchannel", record.GetVchannel()),
 			mlog.Err(err))
 	} else if hadAny {
 		record.IdempotentResult = mergedResult
 	}
-	if !hadAny && record.Idempotency == nil && !hasDML {
+	if !hadAny && record.GetIdempotencyKey() == "" && !hasDML {
 		return nil, false
 	}
 	return record, true
@@ -194,43 +142,33 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 	return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
 }
 
-func committedWriteRecordFromSummaryEntry(pchannel, vchannel string, entry *streamingpb.SummaryEntry) *committedWriteRecord {
+func committedWriteRecordFromSummaryEntry(pchannel, vchannel string, entry *streamingpb.SummaryEntry) *streamingpb.CommittedWriteRecord {
 	if entry == nil {
 		return nil
 	}
-	return &committedWriteRecord{
-		SourcePChannel:         pchannel,
-		SourceMessageID:        cloneMessageIDProto(entry.GetMessageId()),
-		SourceTimeTick:         entry.GetCommitTimetick(),
-		VChannel:               vchannel,
-		LastConfirmedMessageID: cloneMessageIDProto(entry.GetLastConfirmedMessageId()),
+	return &streamingpb.CommittedWriteRecord{
+		SourcePchannel:         pchannel,
+		SourceMessageId:        cloneMessageIDProto(entry.GetMessageId()),
+		SourceTimetick:         entry.GetCommitTimetick(),
+		Vchannel:               vchannel,
+		LastConfirmedMessageId: cloneMessageIDProto(entry.GetLastConfirmedMessageId()),
 		IdempotentResult:       entry.GetIdempotentResult(),
-		Idempotency: &committedWriteIdempotency{
-			Key: entry.GetKey(),
-		},
+		IdempotencyKey:         entry.GetKey(),
 	}
 }
 
-func (record *committedWriteRecord) SummaryEntry() *streamingpb.SummaryEntry {
-	if record == nil || record.Idempotency == nil {
+// summaryEntryOfCommittedWriteRecord projects a record into the summary entry an
+// application view materializes from it. A keyless record has no entry: it is
+// checkpoint bookkeeping only.
+func summaryEntryOfCommittedWriteRecord(record *streamingpb.CommittedWriteRecord) *streamingpb.SummaryEntry {
+	if record == nil || record.GetIdempotencyKey() == "" {
 		return nil
 	}
-	entry := &streamingpb.SummaryEntry{
-		Key:                    record.Idempotency.Key,
-		CommitTimetick:         record.SourceTimeTick,
-		MessageId:              cloneMessageIDProto(record.SourceMessageID),
-		LastConfirmedMessageId: cloneMessageIDProto(record.LastConfirmedMessageID),
+	return &streamingpb.SummaryEntry{
+		Key:                    record.GetIdempotencyKey(),
+		CommitTimetick:         record.GetSourceTimetick(),
+		MessageId:              cloneMessageIDProto(record.GetSourceMessageId()),
+		LastConfirmedMessageId: cloneMessageIDProto(record.GetLastConfirmedMessageId()),
+		IdempotentResult:       record.GetIdempotentResult(),
 	}
-	entry.IdempotentResult = record.IdempotentResult
-	return entry
-}
-
-func cloneCommittedWriteRecord(record committedWriteRecord) committedWriteRecord {
-	record.SourceMessageID = cloneMessageIDProto(record.SourceMessageID)
-	record.LastConfirmedMessageID = cloneMessageIDProto(record.LastConfirmedMessageID)
-	if record.Idempotency != nil {
-		idempotency := *record.Idempotency
-		record.Idempotency = &idempotency
-	}
-	return record
 }

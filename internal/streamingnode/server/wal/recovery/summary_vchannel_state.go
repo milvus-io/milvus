@@ -21,7 +21,7 @@ type vchannelSummary struct {
 	entries                    map[string]*summaryEntry
 	commitOrder                []string
 	pendingEntries             map[string]*streamingpb.SummaryEntry
-	pendingRecords             []committedWriteRecord
+	pendingRecords             []*streamingpb.CommittedWriteRecord
 	latestAppliedGeneration    uint64
 	minRequiredGeneration      uint64
 	dirty                      bool
@@ -82,7 +82,7 @@ func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoin
 		vchannel:        vchannel,
 		entries:         make(map[string]*summaryEntry),
 		pendingEntries:  make(map[string]*streamingpb.SummaryEntry),
-		pendingRecords:  make([]committedWriteRecord, 0),
+		pendingRecords:  make([]*streamingpb.CommittedWriteRecord, 0),
 		generationStats: make(map[uint64]*summaryGenerationStat),
 	}
 	if checkpoint != nil {
@@ -104,7 +104,7 @@ func newVChannelSummaryFromSnapshot(snapshot *streamingpb.SummarySnapshot) (*vch
 		evictedWatermarkTimetick:   snapshot.GetEvictedWatermarkTimetick(),
 		entries:                    make(map[string]*summaryEntry, len(snapshot.GetEntries())),
 		pendingEntries:             make(map[string]*streamingpb.SummaryEntry),
-		pendingRecords:             make([]committedWriteRecord, 0),
+		pendingRecords:             make([]*streamingpb.CommittedWriteRecord, 0),
 		commitOrder:                make([]string, 0, len(snapshot.GetEntries())),
 		generationStats:            make(map[uint64]*summaryGenerationStat),
 	}
@@ -135,7 +135,7 @@ func (s *vchannelSummary) observeMessage(msg message.ImmutableMessage) {
 		s.advanceCheckpoint(msg)
 		return
 	}
-	_ = s.applyCommittedWriteRecord(*record, true)
+	_ = s.applyCommittedWriteRecord(record, true)
 }
 
 func (s *vchannelSummary) advanceCheckpoint(msg message.ImmutableMessage) {
@@ -154,7 +154,7 @@ func (s *vchannelSummary) advanceCheckpointTo(checkpoint *WALCheckpoint) {
 	s.refreshEvictedWatermark()
 }
 
-func (s *vchannelSummary) consumePendingCommittedWriteRecords() ([]committedWriteRecord, *summaryMetaUpdate) {
+func (s *vchannelSummary) consumePendingCommittedWriteRecords() ([]*streamingpb.CommittedWriteRecord, *summaryMetaUpdate) {
 	if !s.dirty {
 		return nil, nil
 	}
@@ -195,7 +195,7 @@ func (s *vchannelSummary) snapshotWithEntries(entries []*streamingpb.SummaryEntr
 	return snapshot
 }
 
-func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []committedWriteRecord, generation uint64) error {
+func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []*streamingpb.CommittedWriteRecord, generation uint64) error {
 	records = cloneAndSortCommittedWriteRecords(s.pchannel, s.vchannel, records)
 	for _, record := range records {
 		if err := s.applyCommittedWriteRecord(record, false); err != nil {
@@ -211,36 +211,35 @@ func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []commi
 	return nil
 }
 
-func (s *vchannelSummary) applyCommittedWriteRecord(record committedWriteRecord, markDirty bool) error {
-	if record.SourcePChannel != "" && s.pchannel != "" && record.SourcePChannel != s.pchannel {
-		return merr.WrapErrServiceInternalMsg("committed write record pchannel mismatch, state %s, record %s", s.pchannel, record.SourcePChannel)
+func (s *vchannelSummary) applyCommittedWriteRecord(record *streamingpb.CommittedWriteRecord, markDirty bool) error {
+	if record.SourcePchannel != "" && s.pchannel != "" && record.SourcePchannel != s.pchannel {
+		return merr.WrapErrServiceInternalMsg("committed write record pchannel mismatch, state %s, record %s", s.pchannel, record.SourcePchannel)
 	}
-	if record.VChannel != "" && s.vchannel != "" && record.VChannel != s.vchannel {
-		return merr.WrapErrServiceInternalMsg("committed write record vchannel mismatch, state %s, record %s", s.vchannel, record.VChannel)
+	if record.Vchannel != "" && s.vchannel != "" && record.Vchannel != s.vchannel {
+		return merr.WrapErrServiceInternalMsg("committed write record vchannel mismatch, state %s, record %s", s.vchannel, record.Vchannel)
 	}
-	if record.Idempotency == nil {
+	key := record.GetIdempotencyKey()
+	if key == "" {
+		// A keyless write is checkpoint bookkeeping only: it advances the summary
+		// but materializes no entry.
 		if markDirty {
-			s.pendingRecords = append(s.pendingRecords, cloneCommittedWriteRecord(record))
+			s.pendingRecords = append(s.pendingRecords, record)
 		}
 		s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
 		return nil
 	}
-	key := record.Idempotency.Key
-	if key == "" {
-		return merr.WrapErrServiceInternalMsg("committed write record has malformed idempotency info")
-	}
 	if existing, ok := s.entries[key]; ok {
-		if s.entryTTLExpiredAt(existing.entry, record.SourceTimeTick) {
+		if s.entryTTLExpiredAt(existing.entry, record.GetSourceTimetick()) {
 			s.dropEntry(key)
 		} else {
 			if markDirty {
-				s.pendingRecords = append(s.pendingRecords, cloneCommittedWriteRecord(record))
+				s.pendingRecords = append(s.pendingRecords, record)
 			}
 			s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
 			return nil
 		}
 	}
-	entry := record.SummaryEntry()
+	entry := summaryEntryOfCommittedWriteRecord(record)
 	if entry == nil {
 		return merr.WrapErrServiceInternalMsg("committed write record cannot materialize idempotency summary entry")
 	}
@@ -249,7 +248,7 @@ func (s *vchannelSummary) applyCommittedWriteRecord(record committedWriteRecord,
 	s.commitOrder = append(s.commitOrder, key)
 	if markDirty {
 		s.pendingEntries[key] = entry
-		s.pendingRecords = append(s.pendingRecords, cloneCommittedWriteRecord(record))
+		s.pendingRecords = append(s.pendingRecords, record)
 	}
 	s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
 	s.refreshMinRequiredGeneration()
@@ -304,11 +303,11 @@ func (s *vchannelSummary) rebuildGenerationStat(generation uint64) {
 	s.generationStats[generation] = &stat
 }
 
-func (s *vchannelSummary) advanceCheckpointToCommittedWriteRecord(record committedWriteRecord, markDirty bool) {
-	if record.SourceTimeTick <= s.snapshotCheckpointTimetick {
+func (s *vchannelSummary) advanceCheckpointToCommittedWriteRecord(record *streamingpb.CommittedWriteRecord, markDirty bool) {
+	if record.SourceTimetick <= s.snapshotCheckpointTimetick {
 		return
 	}
-	s.snapshotCheckpointTimetick = record.SourceTimeTick
+	s.snapshotCheckpointTimetick = record.SourceTimetick
 	s.refreshEvictedWatermark()
 	if markDirty {
 		s.dirty = true
@@ -330,7 +329,7 @@ func (s *vchannelSummary) refreshEvictedWatermark() {
 	s.evictedWatermarkTimetick = s.snapshotCheckpointTimetick
 }
 
-func (s *vchannelSummary) markCommittedWriteRecordsPersisted(records []committedWriteRecord, generation uint64) {
+func (s *vchannelSummary) markCommittedWriteRecordsPersisted(records []*streamingpb.CommittedWriteRecord, generation uint64) {
 	for _, record := range records {
 		s.markCommittedWriteRecordGeneration(record, generation)
 	}
@@ -338,11 +337,8 @@ func (s *vchannelSummary) markCommittedWriteRecordsPersisted(records []committed
 	s.refreshMinRequiredGeneration()
 }
 
-func (s *vchannelSummary) markCommittedWriteRecordGeneration(record committedWriteRecord, generation uint64) {
-	if record.Idempotency == nil {
-		return
-	}
-	key := record.Idempotency.Key
+func (s *vchannelSummary) markCommittedWriteRecordGeneration(record *streamingpb.CommittedWriteRecord, generation uint64) {
+	key := record.GetIdempotencyKey()
 	if key == "" {
 		return
 	}

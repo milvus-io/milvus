@@ -27,7 +27,7 @@ type pchannelSummaryStoreMeta struct {
 }
 
 type persistedPChannelSummaryChunk struct {
-	footer                 *pchannelSummaryChunkFooter
+	footer                 *streamingpb.PChannelSummaryChunkFooter
 	generation             uint64
 	minAvailableGeneration uint64
 }
@@ -310,7 +310,7 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	expectedTerm int64,
-) (*pchannelSummaryChunkFooter, error) {
+) (*streamingpb.PChannelSummaryChunkFooter, error) {
 	recordsByVChannel, footer, chunkKey, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, expectedTerm)
 	if err != nil {
 		return nil, err
@@ -339,7 +339,7 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	expectedTerm int64,
-) (map[string][]committedWriteRecord, *pchannelSummaryChunkFooter, string, error) {
+) (map[string][]*streamingpb.CommittedWriteRecord, *streamingpb.PChannelSummaryChunkFooter, string, error) {
 	chunkKey := buildPChannelSummaryChunkKey(pchannel, generation, expectedTerm)
 	// Bounded retry on the raw read: a transient object-storage blip must not
 	// hard-fail the WAL open now that referenced-state corruption does — only a
@@ -357,8 +357,8 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	if err != nil {
 		return nil, nil, chunkKey, errors.Wrapf(err, "failed to unmarshal pchannel summary chunk %s", chunkKey)
 	}
-	if footer.PChannel != "" && footer.PChannel != pchannel {
-		return nil, nil, chunkKey, pchannelSummaryStoreCorruptedf("pchannel summary chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.PChannel)
+	if footer.Pchannel != "" && footer.Pchannel != pchannel {
+		return nil, nil, chunkKey, pchannelSummaryStoreCorruptedf("pchannel summary chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.Pchannel)
 	}
 	if footer.Generation != generation {
 		return nil, nil, chunkKey, pchannelSummaryStoreCorruptedf("pchannel summary chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
@@ -407,7 +407,7 @@ func (m *summaryManager) sealPreviousPChannelSummaryTerm(ctx context.Context, pc
 		actual.ChunkManifest = manifest
 		actual.LatestGeneration = generation
 		actual.SourceCheckpoint = pchannelSummarySourceCheckpointToWALCheckpoint(&pchannelSummarySourceCheckpoint{
-			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageID),
+			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageId),
 			TimeTick:  footer.SourceCheckpointTimetick,
 		})
 		scanned++

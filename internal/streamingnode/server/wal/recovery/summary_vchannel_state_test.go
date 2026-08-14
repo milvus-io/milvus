@@ -41,23 +41,23 @@ func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
 	state.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
 
 	// Generation 1 persists a keyed insert; the staging summary is then cleared.
-	keyed := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	keyed := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: tsoutil.ComposeTS(600_000, 0),
 		MessageId:      rmq.NewRmqID(600_000).IntoProto(),
 	})
 	require.NoError(t, state.applyCommittedWriteRecord(keyed, true))
-	state.markCommittedWriteRecordsPersisted([]committedWriteRecord{keyed}, 1)
+	state.markCommittedWriteRecordsPersisted([]*streamingpb.CommittedWriteRecord{keyed}, 1)
 	state.evictPersisted()
 	state.consumePendingCommittedWriteRecords()
 	require.Equal(t, uint64(1), state.minRequiredGeneration)
 
 	// The next cycle carries only a keyless committed write (delete/replicated),
 	// so the staged meta reports EntryCount == 0 while the ledger still pins 1.
-	keyless := committedWriteRecord{
-		SourcePChannel: "p1",
-		VChannel:       "v1",
-		SourceTimeTick: tsoutil.ComposeTS(660_000, 0),
+	keyless := &streamingpb.CommittedWriteRecord{
+		SourcePchannel: "p1",
+		Vchannel:       "v1",
+		SourceTimetick: tsoutil.ComposeTS(660_000, 0),
 	}
 	require.NoError(t, state.applyCommittedWriteRecord(keyless, true))
 	_, update := state.consumePendingCommittedWriteRecords()
@@ -76,8 +76,8 @@ func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
 // trimmed everything below, and a restart could rebuild only ~one snapshot
 // interval of the summary instead of a TTL's worth.
 func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
-	entryAt := func(vchannel, key string, physicalMs int64) committedWriteRecord {
-		return *committedWriteRecordFromSummaryEntry("p1", vchannel, &streamingpb.SummaryEntry{
+	entryAt := func(vchannel, key string, physicalMs int64) *streamingpb.CommittedWriteRecord {
+		return committedWriteRecordFromSummaryEntry("p1", vchannel, &streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tsoutil.ComposeTS(physicalMs, 0),
 			MessageId:      rmq.NewRmqID(physicalMs).IntoProto(),
@@ -92,7 +92,7 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	for i, gen := range []uint64{1, 2, 3} {
 		rec := entryAt("v1", fmt.Sprintf("key-%d", gen), int64(600_000+i*60_000))
 		require.NoError(t, state.applyCommittedWriteRecord(rec, true))
-		state.markCommittedWriteRecordsPersisted([]committedWriteRecord{rec}, gen)
+		state.markCommittedWriteRecordsPersisted([]*streamingpb.CommittedWriteRecord{rec}, gen)
 		state.evictPersisted()
 	}
 	require.Empty(t, state.entries)
@@ -119,11 +119,11 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	for i, gen := range []uint64{1, 2} {
 		rec := entryAt("v2", fmt.Sprintf("cap-key-%d", gen), int64(600_000+i*60_000))
 		if capBytes == 0 {
-			capBytes = proto.Size(rec.SummaryEntry())
+			capBytes = proto.Size(summaryEntryOfCommittedWriteRecord(rec))
 			capped.evictionCfg.maxBytes = capBytes
 		}
 		require.NoError(t, capped.applyCommittedWriteRecord(rec, true))
-		capped.markCommittedWriteRecordsPersisted([]committedWriteRecord{rec}, gen)
+		capped.markCommittedWriteRecordsPersisted([]*streamingpb.CommittedWriteRecord{rec}, gen)
 		capped.evictPersisted()
 	}
 	capped.snapshotCheckpointTimetick = tsoutil.ComposeTS(600_000+2*60_000, 0)
@@ -132,8 +132,8 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 }
 
 func TestMinRequiredGenerationHonorsByteOnlyRetention(t *testing.T) {
-	entryAt := func(key string, physicalMs int64) committedWriteRecord {
-		return *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	entryAt := func(key string, physicalMs int64) *streamingpb.CommittedWriteRecord {
+		return committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tsoutil.ComposeTS(physicalMs, 0),
 			MessageId:      rmq.NewRmqID(physicalMs).IntoProto(),
@@ -146,11 +146,11 @@ func TestMinRequiredGenerationHonorsByteOnlyRetention(t *testing.T) {
 	latestBytes := 0
 	for _, gen := range []uint64{1, 2} {
 		rec := entryAt(fmt.Sprintf("byte-key-%d", gen), int64(600_000+gen*60_000))
-		size := proto.Size(rec.SummaryEntry())
+		size := proto.Size(summaryEntryOfCommittedWriteRecord(rec))
 		totalBytes += size
 		latestBytes = size
 		require.NoError(t, state.applyCommittedWriteRecord(rec, true))
-		state.markCommittedWriteRecordsPersisted([]committedWriteRecord{rec}, gen)
+		state.markCommittedWriteRecordsPersisted([]*streamingpb.CommittedWriteRecord{rec}, gen)
 		state.evictPersisted()
 	}
 	require.Empty(t, state.entries)
@@ -188,8 +188,8 @@ func writeTestPChannelSummaryChunk(
 	generation uint64,
 	chunkManager storage.ChunkManager,
 	checkpoint *utility.WALCheckpoint,
-	records map[string][]committedWriteRecord,
-) (*pchannelSummaryChunkFooter, string, string) {
+	records map[string][]*streamingpb.CommittedWriteRecord,
+) (*streamingpb.PChannelSummaryChunkFooter, string, string) {
 	return writeTestPChannelSummaryChunkWithTerm(ctx, t, pchannel, generation, 0, chunkManager, checkpoint, records)
 }
 
@@ -201,8 +201,8 @@ func writeTestPChannelSummaryChunkWithTerm(
 	term int64,
 	chunkManager storage.ChunkManager,
 	checkpoint *utility.WALCheckpoint,
-	records map[string][]committedWriteRecord,
-) (*pchannelSummaryChunkFooter, string, string) {
+	records map[string][]*streamingpb.CommittedWriteRecord,
+) (*streamingpb.PChannelSummaryChunkFooter, string, string) {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
@@ -363,9 +363,9 @@ func TestPersistPChannelSummaryRetriesTransientMetaLoad(t *testing.T) {
 	rs.SetLogger(resource.Resource().Logger())
 	rs.summaryManager.SetLogger(resource.Resource().Logger())
 
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-1",
 				CommitTimetick:         99,
 				MessageId:              rmq.NewRmqID(99).IntoProto(),
@@ -460,17 +460,17 @@ func TestCommittedWriteRecordFromMessageWithIdempotency(t *testing.T) {
 
 	record, ok := newCommittedWriteRecordFromMessage("p1", msg)
 	require.True(t, ok)
-	require.Equal(t, "p1", record.SourcePChannel)
-	require.Equal(t, "v1", record.VChannel)
-	require.Equal(t, uint64(120), record.SourceTimeTick)
-	require.True(t, message.MustUnmarshalMessageID(record.SourceMessageID).EQ(rmq.NewRmqID(120)))
-	require.True(t, message.MustUnmarshalMessageID(record.LastConfirmedMessageID).EQ(rmq.NewRmqID(119)))
-	require.NotNil(t, record.Idempotency)
-	require.Equal(t, "key-1", record.Idempotency.Key)
+	require.Equal(t, "p1", record.SourcePchannel)
+	require.Equal(t, "v1", record.Vchannel)
+	require.Equal(t, uint64(120), record.SourceTimetick)
+	require.True(t, message.MustUnmarshalMessageID(record.SourceMessageId).EQ(rmq.NewRmqID(120)))
+	require.True(t, message.MustUnmarshalMessageID(record.LastConfirmedMessageId).EQ(rmq.NewRmqID(119)))
+	require.NotEmpty(t, record.IdempotencyKey)
+	require.Equal(t, "key-1", record.GetIdempotencyKey())
 	require.Equal(t, []uint32{2, 0}, record.IdempotentResult.GetRowOffsets())
 	require.Equal(t, []int64{11, 10}, record.IdempotentResult.GetIds().GetIntId().GetData())
 
-	entry := record.SummaryEntry()
+	entry := summaryEntryOfCommittedWriteRecord(record)
 	require.NotNil(t, entry)
 	require.Equal(t, "key-1", entry.GetKey())
 	require.Equal(t, []uint32{2, 0}, entry.GetIdempotentResult().GetRowOffsets())
@@ -520,10 +520,10 @@ func TestCommittedWriteRecordFromTxnMessageWithIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	record, ok := newCommittedWriteRecordFromMessage("p1", txnMsg)
 	require.True(t, ok)
-	require.Equal(t, "txn-key", record.Idempotency.Key)
+	require.Equal(t, "txn-key", record.GetIdempotencyKey())
 	require.Equal(t, []uint32{0, 2, 1}, record.IdempotentResult.GetRowOffsets())
 	require.Equal(t, []string{"pk-0", "pk-2", "pk-1"}, record.IdempotentResult.GetIds().GetStrId().GetData())
-	require.True(t, message.MustUnmarshalMessageID(record.SourceMessageID).EQ(rmq.NewRmqID(103)))
+	require.True(t, message.MustUnmarshalMessageID(record.SourceMessageId).EQ(rmq.NewRmqID(103)))
 }
 
 // testReplicateHeader marks a message as replicated from another cluster.
@@ -568,7 +568,7 @@ func TestVChannelSummarySkipsReplicatedIdempotencyKey(t *testing.T) {
 	// response, so persisting its rows would be pure write amplification.
 	require.NotEmpty(t, state.pendingRecords)
 	last := state.pendingRecords[len(state.pendingRecords)-1]
-	require.Nil(t, last.Idempotency)
+	require.Empty(t, last.IdempotencyKey)
 	require.Nil(t, last.IdempotentResult)
 }
 
@@ -617,7 +617,7 @@ func TestCommittedWriteRecordSkipsReplicatedTxnCommitKey(t *testing.T) {
 	// results may surface on the committed-write record.
 	record, ok := newCommittedWriteRecordFromMessage("p1", txnMsg)
 	require.True(t, ok)
-	require.Nil(t, record.Idempotency)
+	require.Empty(t, record.IdempotencyKey)
 	require.Nil(t, record.IdempotentResult)
 }
 
@@ -635,9 +635,9 @@ func TestCommittedWriteRecordWithoutKeyDoesNotEnterSummary(t *testing.T) {
 
 	record, ok := newCommittedWriteRecordFromMessage("p1", msg)
 	require.True(t, ok)
-	require.Nil(t, record.Idempotency)
+	require.Empty(t, record.IdempotencyKey)
 	require.Equal(t, []string{"pk-1"}, record.IdempotentResult.GetIds().GetStrId().GetData())
-	require.Nil(t, record.SummaryEntry())
+	require.Nil(t, summaryEntryOfCommittedWriteRecord(record))
 }
 
 func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencySummary(t *testing.T) {
@@ -710,7 +710,7 @@ func TestRecoveryStorageAdvancesOnlyTargetSummaryForOrdinaryMessages(t *testing.
 func TestConsumeDirtySnapshotDoesNotConsumeIdempotencySummaries(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, summary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	require.NoError(t, summary.applyCommittedWriteRecord(committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 20,
 		MessageId:      rmq.NewRmqID(20).IntoProto(),
@@ -728,7 +728,7 @@ func TestConsumeDirtySnapshotDoesNotConsumeIdempotencySummaries(t *testing.T) {
 func TestConsumeIdempotencySnapshotDoesNotConsumeRecoveryState(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, summary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	require.NoError(t, summary.applyCommittedWriteRecord(committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 20,
 		MessageId:      rmq.NewRmqID(20).IntoProto(),
@@ -761,15 +761,15 @@ func TestCommittedWriteRecordFromSummaryEntry(t *testing.T) {
 
 	record := committedWriteRecordFromSummaryEntry("p1", "v1", entry)
 	require.NotNil(t, record)
-	require.Equal(t, "p1", record.SourcePChannel)
-	require.Equal(t, "v1", record.VChannel)
-	require.Equal(t, uint64(130), record.SourceTimeTick)
-	require.NotNil(t, record.Idempotency)
-	require.Equal(t, "key-1", record.Idempotency.Key)
+	require.Equal(t, "p1", record.SourcePchannel)
+	require.Equal(t, "v1", record.Vchannel)
+	require.Equal(t, uint64(130), record.SourceTimetick)
+	require.NotEmpty(t, record.IdempotencyKey)
+	require.Equal(t, "key-1", record.GetIdempotencyKey())
 	require.Equal(t, []uint32{3, 1}, record.IdempotentResult.GetRowOffsets())
 	require.Equal(t, []string{"pk-3", "pk-1"}, record.IdempotentResult.GetIds().GetStrId().GetData())
 
-	roundTrip := record.SummaryEntry()
+	roundTrip := summaryEntryOfCommittedWriteRecord(record)
 	require.Equal(t, entry.GetKey(), roundTrip.GetKey())
 	require.Equal(t, entry.GetCommitTimetick(), roundTrip.GetCommitTimetick())
 	require.Equal(t, entry.GetIdempotentResult().GetRowOffsets(), roundTrip.GetIdempotentResult().GetRowOffsets())
@@ -778,7 +778,7 @@ func TestCommittedWriteRecordFromSummaryEntry(t *testing.T) {
 
 func TestSummaryMaterializerApplyCommittedWriteRecords(t *testing.T) {
 	state := newEmptyVChannelSummary("p1", "v1", nil)
-	record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	record := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:                    "key-1",
 		CommitTimetick:         110,
 		MessageId:              rmq.NewRmqID(110).IntoProto(),
@@ -790,19 +790,19 @@ func TestSummaryMaterializerApplyCommittedWriteRecords(t *testing.T) {
 			},
 		},
 	})
-	keylessRecord := committedWriteRecord{
-		SourcePChannel:         "p1",
-		SourceMessageID:        rmq.NewRmqID(112).IntoProto(),
-		SourceTimeTick:         112,
-		VChannel:               "v1",
-		LastConfirmedMessageID: rmq.NewRmqID(111).IntoProto(),
+	keylessRecord := &streamingpb.CommittedWriteRecord{
+		SourcePchannel:         "p1",
+		SourceMessageId:        rmq.NewRmqID(112).IntoProto(),
+		SourceTimetick:         112,
+		Vchannel:               "v1",
+		LastConfirmedMessageId: rmq.NewRmqID(111).IntoProto(),
 		IdempotentResult: message.NewIdempotentInsertResult(
 			[]uint32{0},
 			&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{12}}}},
 		),
 	}
 
-	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{keylessRecord, record, record}, 0))
+	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]*streamingpb.CommittedWriteRecord{keylessRecord, record, record}, 0))
 	require.False(t, state.dirty)
 	require.Empty(t, state.pendingEntries)
 
@@ -815,18 +815,18 @@ func TestSummaryMaterializerApplyCommittedWriteRecords(t *testing.T) {
 
 func TestSummaryConsumesPendingCommittedWriteRecords(t *testing.T) {
 	state := newEmptyVChannelSummary("p1", "v1", nil)
-	didRecord := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	didRecord := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:                    "key-1",
 		CommitTimetick:         110,
 		MessageId:              rmq.NewRmqID(110).IntoProto(),
 		LastConfirmedMessageId: rmq.NewRmqID(109).IntoProto(),
 	})
-	keylessRecord := committedWriteRecord{
-		SourcePChannel:         "p1",
-		SourceMessageID:        rmq.NewRmqID(111).IntoProto(),
-		SourceTimeTick:         111,
-		VChannel:               "v1",
-		LastConfirmedMessageID: rmq.NewRmqID(110).IntoProto(),
+	keylessRecord := &streamingpb.CommittedWriteRecord{
+		SourcePchannel:         "p1",
+		SourceMessageId:        rmq.NewRmqID(111).IntoProto(),
+		SourceTimetick:         111,
+		Vchannel:               "v1",
+		LastConfirmedMessageId: rmq.NewRmqID(110).IntoProto(),
 	}
 
 	require.NoError(t, state.applyCommittedWriteRecord(didRecord, true))
@@ -835,8 +835,8 @@ func TestSummaryConsumesPendingCommittedWriteRecords(t *testing.T) {
 	pending, metaUpdate := state.consumePendingCommittedWriteRecords()
 	require.Len(t, pending, 2)
 	require.NotNil(t, metaUpdate)
-	require.Equal(t, "key-1", pending[0].Idempotency.Key)
-	require.Nil(t, pending[1].Idempotency)
+	require.Equal(t, "key-1", pending[0].IdempotencyKey)
+	require.Empty(t, pending[1].IdempotencyKey)
 	require.False(t, state.dirty)
 	require.Empty(t, state.pendingEntries)
 	require.Empty(t, state.pendingRecords)
@@ -861,18 +861,18 @@ func TestSummaryCheckpointOnlyDoesNotForceMetaUpdate(t *testing.T) {
 
 func TestSummaryMaterializerApplyCommittedWriteRecordDuplicate(t *testing.T) {
 	state := newEmptyVChannelSummary("p1", "v1", nil)
-	first := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	first := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 100,
 		MessageId:      rmq.NewRmqID(100).IntoProto(),
 	})
-	duplicate := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	duplicate := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 101,
 		MessageId:      rmq.NewRmqID(101).IntoProto(),
 	})
 
-	err := state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{first, duplicate}, 0)
+	err := state.applyCommittedWriteRecordsAtGeneration([]*streamingpb.CommittedWriteRecord{first, duplicate}, 0)
 	require.NoError(t, err)
 
 	snapshot := state.snapshot()
@@ -886,19 +886,19 @@ func TestSummaryMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
 	state.evictionCfg = summaryEvictionConfig{entryTTL: time.Second}
 	firstTT := tsoutil.ComposeTS(100_000, 0)
 	reusedTT := tsoutil.ComposeTS(102_000, 0)
-	first := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	first := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: firstTT,
 		MessageId:      rmq.NewRmqID(100).IntoProto(),
 	})
-	reused := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	reused := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: reusedTT,
 		MessageId:      rmq.NewRmqID(101).IntoProto(),
 	})
 
-	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{first}, 0))
-	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{reused}, 1))
+	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]*streamingpb.CommittedWriteRecord{first}, 0))
+	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]*streamingpb.CommittedWriteRecord{reused}, 1))
 
 	snapshot := state.snapshot()
 	require.Len(t, snapshot.GetEntries(), 1)
@@ -909,9 +909,9 @@ func TestSummaryMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
 }
 
 func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v2": {
-			*committedWriteRecordFromSummaryEntry("p1", "v2", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v2", &streamingpb.SummaryEntry{
 				Key:            "key-2",
 				CommitTimetick: 119,
 				MessageId:      rmq.NewRmqID(119).IntoProto(),
@@ -919,16 +919,16 @@ func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 		},
 		"v1": {
 			{
-				SourcePChannel:  "p1",
-				SourceMessageID: rmq.NewRmqID(105).IntoProto(),
-				SourceTimeTick:  105,
-				VChannel:        "v1",
+				SourcePchannel:  "p1",
+				SourceMessageId: rmq.NewRmqID(105).IntoProto(),
+				SourceTimetick:  105,
+				Vchannel:        "v1",
 				IdempotentResult: message.NewIdempotentInsertResult(
 					[]uint32{0},
 					&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"pk-105"}}}},
 				),
 			},
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -945,13 +945,13 @@ func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(7), footer.Generation)
 	require.Equal(t, uint64(120), footer.SourceCheckpointTimetick)
 	require.Len(t, footer.Chunks, 2)
-	require.Equal(t, "v1", footer.Chunks[0].VChannel)
+	require.Equal(t, "v1", footer.Chunks[0].Vchannel)
 	require.Equal(t, uint64(2), footer.Chunks[0].RecordCount)
 	// The source span is a timetick range: nothing below the pchannel level
 	// records a physical WAL position.
 	require.Equal(t, uint64(105), footer.Chunks[0].SourceStartTimetick)
 	require.Equal(t, uint64(110), footer.Chunks[0].SourceEndTimetick)
-	require.Equal(t, "v2", footer.Chunks[1].VChannel)
+	require.Equal(t, "v2", footer.Chunks[1].Vchannel)
 	require.Equal(t, uint64(1), footer.Chunks[1].RecordCount)
 	require.Equal(t, uint64(105), footer.SourceStartTimetick)
 	require.Equal(t, uint64(119), footer.SourceEndTimetick)
@@ -960,16 +960,16 @@ func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, checksum, decodedChecksum)
 	require.Len(t, decoded, 2)
-	require.Nil(t, decoded["v1"][0].Idempotency)
+	require.Empty(t, decoded["v1"][0].IdempotencyKey)
 	require.Equal(t, []string{"pk-105"}, decoded["v1"][0].IdempotentResult.GetIds().GetStrId().GetData())
-	require.Equal(t, "key-1", decoded["v1"][1].Idempotency.Key)
-	require.Equal(t, "key-2", decoded["v2"][0].Idempotency.Key)
+	require.Equal(t, "key-1", decoded["v1"][1].IdempotencyKey)
+	require.Equal(t, "key-2", decoded["v2"][0].IdempotencyKey)
 }
 
 func TestPChannelSummaryChunkCodecHasNoViewTypeAndTakesIdentityFromFooter(t *testing.T) {
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -987,18 +987,18 @@ func TestPChannelSummaryChunkCodecHasNoViewTypeAndTakesIdentityFromFooter(t *tes
 	require.NotContains(t, string(payload), "view_type")
 	require.Len(t, footer.Chunks, 1)
 	chunkIndex := footer.Chunks[0]
-	require.Equal(t, "v1", chunkIndex.VChannel)
+	require.Equal(t, "v1", chunkIndex.Vchannel)
 	require.Equal(t, uint64(9), footer.Generation)
 	chunkPayload := payload[int(chunkIndex.Offset):int(chunkIndex.Offset+chunkIndex.Length)]
 	require.NotContains(t, string(chunkPayload), "view_type")
 
 	// The payload holds records only. Where they belong is the footer's to say,
 	// so decoding takes the destination from the index rather than the bytes.
-	decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload, footer.PChannel, chunkIndex.VChannel)
+	decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload, footer.Pchannel, chunkIndex.Vchannel)
 	require.NoError(t, err)
 	require.Len(t, decodedChunk.Records, 1)
-	require.Equal(t, "p1", decodedChunk.Records[0].SourcePChannel)
-	require.Equal(t, "v1", decodedChunk.Records[0].VChannel)
+	require.Equal(t, "p1", decodedChunk.Records[0].SourcePchannel)
+	require.Equal(t, "v1", decodedChunk.Records[0].Vchannel)
 }
 
 func TestPChannelSummaryChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
@@ -1022,9 +1022,9 @@ func TestPChannelSummaryChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
 }
 
 func TestPChannelSummaryChunkCodecChecksumMismatch(t *testing.T) {
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 100,
 				MessageId:      rmq.NewRmqID(100).IntoProto(),
@@ -1047,9 +1047,9 @@ func TestPChannelSummaryChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
 	payload, _, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
-	}, map[string][]committedWriteRecord{
+	}, map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 100,
 				MessageId:      rmq.NewRmqID(100).IntoProto(),
@@ -1058,7 +1058,7 @@ func TestPChannelSummaryChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	payload = rewritePChannelSummaryFooterPayload(t, payload, func(footer *pchannelSummaryChunkFooter) {
+	payload = rewritePChannelSummaryFooterPayload(t, payload, func(footer *streamingpb.PChannelSummaryChunkFooter) {
 		footer.SourceEndTimetick++
 	})
 
@@ -1072,9 +1072,9 @@ func TestPChannelSummaryChunkCodecDetectsVChannelBlockChecksumMismatch(t *testin
 	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
-	}, map[string][]committedWriteRecord{
+	}, map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 100,
 				MessageId:      rmq.NewRmqID(100).IntoProto(),
@@ -1102,7 +1102,7 @@ func TestPChannelSummaryChunkKeyIsDeterministic(t *testing.T) {
 func rewritePChannelSummaryFooterPayload(
 	t *testing.T,
 	payload []byte,
-	mutate func(*pchannelSummaryChunkFooter),
+	mutate func(*streamingpb.PChannelSummaryChunkFooter),
 ) []byte {
 	t.Helper()
 	footerMagicStart := len(payload) - len(pchannelSummaryChunkFooterMagic)
@@ -1145,9 +1145,9 @@ func TestPChannelSummaryPersistRecover(t *testing.T) {
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-1",
 				CommitTimetick:         99,
 				MessageId:              rmq.NewRmqID(99).IntoProto(),
@@ -1195,9 +1195,9 @@ func TestPChannelSummaryRecoverWithContinuousChunks(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records0 := map[string][]committedWriteRecord{
+	records0 := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-from-generation-0",
 				CommitTimetick:         110,
 				MessageId:              rmq.NewRmqID(110).IntoProto(),
@@ -1210,9 +1210,9 @@ func TestPChannelSummaryRecoverWithContinuousChunks(t *testing.T) {
 		TimeTick:  120,
 	}, records0)
 
-	records1 := map[string][]committedWriteRecord{
+	records1 := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-from-generation-1",
 				CommitTimetick:         130,
 				MessageId:              rmq.NewRmqID(130).IntoProto(),
@@ -1250,9 +1250,9 @@ func TestPChannelSummaryRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records0 := map[string][]committedWriteRecord{
+	records0 := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-evicted",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -1264,9 +1264,9 @@ func TestPChannelSummaryRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 		TimeTick:  120,
 	}, records0)
 
-	records1 := map[string][]committedWriteRecord{
+	records1 := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-retained",
 				CommitTimetick: 130,
 				MessageId:      rmq.NewRmqID(130).IntoProto(),
@@ -1374,9 +1374,9 @@ func TestPChannelSummaryRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 	}
 	catalogState.storeMeta = writeTestBootstrapPChannelSummaryMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
 
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-orphan",
 				CommitTimetick:         110,
 				MessageId:              rmq.NewRmqID(110).IntoProto(),
@@ -1426,7 +1426,7 @@ func TestPChannelSummaryRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T)
 	// (still LatestGeneration=0), and the chunk on disk is corrupt/truncated.
 	payload, _, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}, nil)
 	require.NoError(t, err)
-	corruptPayload := rewritePChannelSummaryFooterPayload(t, payload, func(footer *pchannelSummaryChunkFooter) {
+	corruptPayload := rewritePChannelSummaryFooterPayload(t, payload, func(footer *streamingpb.PChannelSummaryChunkFooter) {
 		footer.SourceCheckpointTimetick = 999999
 	})
 	orphanKey := buildPChannelSummaryChunkKey("p1", 1, 0)
@@ -1488,9 +1488,9 @@ func TestPChannelSummaryRecoveryRewindsCheckpointByStoreAndFlusher(t *testing.T)
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-1",
 				CommitTimetick:         99,
 				MessageId:              rmq.NewRmqID(99).IntoProto(),
@@ -1548,8 +1548,8 @@ func TestPChannelSummaryRecoveryReplayTailIdempotently(t *testing.T) {
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
-		"v1": {*record100},
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.CommittedWriteRecord{
+		"v1": {record100},
 	}, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
@@ -1643,8 +1643,8 @@ func TestPChannelSummaryCrashAfterConsumeCheckpointRecoversFromChunkWithoutRepla
 		TimeTick:  10,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
-		"v1": {*record100},
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.CommittedWriteRecord{
+		"v1": {record100},
 	}, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
@@ -1963,7 +1963,7 @@ func TestPChannelSummaryPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	summary := newEmptyVChannelSummary("p1", "v1", nil)
-	record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	record := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 210,
 		MessageId:      rmq.NewRmqID(210).IntoProto(),
@@ -1978,7 +1978,7 @@ func TestPChannelSummaryPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
 	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.SetLogger(resource.Resource().Logger())
 
-	summaryMetas, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	summaryMetas, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": records,
 	}, map[string]*summaryMetaUpdate{
 		"v1": metaUpdate,
@@ -2004,9 +2004,9 @@ func TestPChannelSummaryPersistRetryDoesNotAllocateNextGenerationWhenCheckpointC
 		TimeTick:  100,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -2043,15 +2043,15 @@ func TestPChannelSummaryMetaMinInUseIncludesNonDirtySummaries(t *testing.T) {
 	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 4).intoCatalogMeta()
 
 	oldSummary := newEmptyVChannelSummary("p1", "v-old", nil)
-	require.NoError(t, oldSummary.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{
-		*committedWriteRecordFromSummaryEntry("p1", "v-old", &streamingpb.SummaryEntry{
+	require.NoError(t, oldSummary.applyCommittedWriteRecordsAtGeneration([]*streamingpb.CommittedWriteRecord{
+		committedWriteRecordFromSummaryEntry("p1", "v-old", &streamingpb.SummaryEntry{
 			Key:            "key-old",
 			CommitTimetick: 210,
 			MessageId:      rmq.NewRmqID(210).IntoProto(),
 		}),
 	}, 2))
 	newSummary := newEmptyVChannelSummary("p1", "v-new", nil)
-	require.NoError(t, newSummary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v-new", &streamingpb.SummaryEntry{
+	require.NoError(t, newSummary.applyCommittedWriteRecord(committedWriteRecordFromSummaryEntry("p1", "v-new", &streamingpb.SummaryEntry{
 		Key:            "key-new",
 		CommitTimetick: 410,
 		MessageId:      rmq.NewRmqID(410).IntoProto(),
@@ -2068,7 +2068,7 @@ func TestPChannelSummaryMetaMinInUseIncludesNonDirtySummaries(t *testing.T) {
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	summaryMetas, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	summaryMetas, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.CommittedWriteRecord{
 		"v-new": records,
 	}, map[string]*summaryMetaUpdate{
 		"v-new": metaUpdate,

@@ -229,9 +229,9 @@ func TestRecoverSummariesFailsOnReferencedChunkCorruption(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 99,
 				MessageId:      rmq.NewRmqID(99).IntoProto(),
@@ -276,9 +276,9 @@ func TestRecoverSummariesSelfHealsCorruptOrphanChunk(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records := map[string][]committedWriteRecord{
+	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 99,
 				MessageId:      rmq.NewRmqID(99).IntoProto(),
