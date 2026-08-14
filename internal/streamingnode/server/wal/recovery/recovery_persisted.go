@@ -2,11 +2,18 @@ package recovery
 
 import (
 	"context"
+	"math"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	messageadaptor "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -76,10 +83,14 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if err := conc.BlockOnAll(fVChannel, fSegment, fTransformLog); err != nil {
 		return err
 	}
-	if err := r.ensureDataCheckpoint(); err != nil {
+	if _, err := r.migrateLegacyRecoveryInfo(ctx, vchannelMetas, segmentMetas); err != nil {
 		return err
 	}
-	if err := validateRecoveredViewMeta(vchannelMetas, segmentMetas); err != nil {
+	if err := validateRecoveredViewMeta(
+		vchannelMetas,
+		segmentMetas,
+		r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2,
+	); err != nil {
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
@@ -108,23 +119,158 @@ func segmentAssignmentMetaMap(segments []*streamingpb.SegmentAssignmentMeta) (ma
 	return metas, nil
 }
 
-func (r *recoveryStorageImpl) ensureDataCheckpoint() error {
+func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
+	ctx context.Context,
+	vchannels map[string]*streamingpb.VChannelMeta,
+	segments map[int64]*streamingpb.SegmentAssignmentMeta,
+) (bool, error) {
 	if r.checkpoint == nil {
-		return nil
+		return false, merr.WrapErrDataIntegrityMsg("missing recovery checkpoint")
 	}
-	if r.checkpoint.DataCheckpoint == nil || r.checkpoint.DataCheckpoint.MessageID == nil {
-		r.checkpoint.DataCheckpoint = &utility.WALConsumeCheckpoint{
-			MessageID: r.checkpoint.MessageID,
-			TimeTick:  r.checkpoint.TimeTick,
+	if r.checkpoint.DataCheckpoint != nil {
+		if r.checkpoint.DataCheckpoint.MessageID == nil {
+			return false, merr.WrapErrDataIntegrityMsg("recovery data checkpoint missing message id")
 		}
-		r.checkpointDirty = true
+		return false, nil
 	}
-	return nil
+	if r.checkpoint.Magic != utility.RecoveryMagicStreamingInitialized {
+		return false, merr.WrapErrDataIntegrityMsg(
+			"recovery checkpoint missing data checkpoint at magic %d",
+			r.checkpoint.Magic,
+		)
+	}
+
+	normalizeLegacyRecoveredViewMeta(vchannels, r.checkpoint.TimeTick)
+	if err := validateRecoveredViewMeta(vchannels, segments, true); err != nil {
+		return false, err
+	}
+
+	dataCheckpoint := &utility.WALConsumeCheckpoint{
+		MessageID: r.checkpoint.MessageID,
+		TimeTick:  r.checkpoint.TimeTick,
+	}
+	for vchannelName, vchannel := range vchannels {
+		if vchannel.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+			continue
+		}
+		vchannelCheckpoint, err := r.getLegacyVChannelDataCheckpoint(ctx, vchannelName)
+		if err != nil {
+			return false, merr.Wrapf(err, "get legacy data checkpoint for vchannel %s", vchannelName)
+		}
+		if vchannelCheckpoint.MessageID.WALName() != dataCheckpoint.MessageID.WALName() {
+			return false, merr.WrapErrDataIntegrityMsg(
+				"legacy data checkpoint WAL mismatch for vchannel %s: expected %s, got %s",
+				vchannelName,
+				dataCheckpoint.MessageID.WALName(),
+				vchannelCheckpoint.MessageID.WALName(),
+			)
+		}
+		if vchannelCheckpoint.MessageID.LT(dataCheckpoint.MessageID) {
+			dataCheckpoint = vchannelCheckpoint
+		}
+	}
+
+	migratedCheckpoint := r.checkpoint.Clone()
+	migratedCheckpoint.Magic = utility.RecoveryMagicRecoveryStorageV2
+	migratedCheckpoint.DataCheckpoint = dataCheckpoint.Clone()
+	if err := r.persistLegacyRecoveryMigration(ctx, vchannels, migratedCheckpoint); err != nil {
+		return false, merr.Wrap(err, "persist legacy recovery migration")
+	}
+
+	r.installCheckpoint(migratedCheckpoint)
+	r.persistedCheckpoint = migratedCheckpoint.Clone()
+	r.checkpointDirty = false
+	r.Logger().Info(ctx, "legacy recovery metadata migrated",
+		mlog.String("dataCheckpoint", dataCheckpoint.MessageID.String()),
+		mlog.Uint64("dataCheckpointTimeTick", dataCheckpoint.TimeTick),
+	)
+	return true, nil
+}
+
+func normalizeLegacyRecoveredViewMeta(
+	vchannels map[string]*streamingpb.VChannelMeta,
+	baselineTimeTick uint64,
+) {
+	for _, vchannel := range vchannels {
+		if vchannel.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_NORMAL &&
+			vchannel.GetCheckpointTimeTick() == 0 {
+			vchannel.CheckpointTimeTick = baselineTimeTick
+		}
+		for _, partition := range vchannel.GetCollectionInfo().GetPartitions() {
+			if partition.GetState() == streamingpb.PartitionState_PARTITION_STATE_UNKNOWN {
+				partition.State = streamingpb.PartitionState_PARTITION_STATE_NORMAL
+			}
+		}
+	}
+}
+
+func (r *recoveryStorageImpl) getLegacyVChannelDataCheckpoint(
+	ctx context.Context,
+	vchannel string,
+) (*utility.WALConsumeCheckpoint, error) {
+	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := coord.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+	return legacyDataCheckpointFromPosition(vchannel, resp.GetInfo().GetSeekPosition(), r.checkpoint.MessageID.WALName())
+}
+
+func legacyDataCheckpointFromPosition(
+	vchannel string,
+	position *msgpb.MsgPosition,
+	walName message.WALName,
+) (*utility.WALConsumeCheckpoint, error) {
+	if position == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("legacy vchannel %s missing seek position", vchannel)
+	}
+	if len(position.GetMsgID()) == 0 {
+		if position.GetTimestamp() == math.MaxUint64 {
+			return nil, merr.WrapErrDataIntegrityMsg("active legacy vchannel %s is dropped in DataCoord", vchannel)
+		}
+		return nil, merr.WrapErrDataIntegrityMsg("legacy vchannel %s seek position missing message id", vchannel)
+	}
+
+	if position.GetWALName() != commonpb.WALName_Unknown && message.WALName(position.GetWALName()) != walName {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"legacy vchannel %s seek position WAL mismatch: expected %s, got %s",
+			vchannel,
+			walName,
+			message.WALName(position.GetWALName()),
+		)
+	}
+	mqMessageID, err := messageadaptor.DeserializeToMQWrapperID(position.GetMsgID(), walName.String())
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode legacy vchannel %s seek position", vchannel)
+	}
+	messageID := messageadaptor.MustGetMessageIDFromMQWrapperID(mqMessageID)
+	if messageID == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("legacy vchannel %s seek position has unsupported message id", vchannel)
+	}
+	return &utility.WALConsumeCheckpoint{
+		MessageID: messageID,
+		TimeTick:  position.GetTimestamp(),
+	}, nil
+}
+
+func (r *recoveryStorageImpl) persistLegacyRecoveryMigration(
+	ctx context.Context,
+	vchannels map[string]*streamingpb.VChannelMeta,
+	checkpoint *utility.WALCheckpoint,
+) error {
+	return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
+		VChannels:         vchannels,
+		ConsumeCheckpoint: checkpoint.IntoProto(),
+	})
 }
 
 func validateRecoveredViewMeta(
 	vchannels map[string]*streamingpb.VChannelMeta,
 	segments map[int64]*streamingpb.SegmentAssignmentMeta,
+	allowLegacySchemaBaseline bool,
 ) error {
 	normalizeRecoveredViewMeta(vchannels, segments)
 	for vchannelName, vchannel := range vchannels {
@@ -177,8 +323,8 @@ func validateRecoveredViewMeta(
 		if len(schemas) == 0 {
 			return merr.WrapErrDataIntegrityMsg("vchannel %s missing schemas in recovery meta", vchannelName)
 		}
-		for _, schema := range schemas {
-			if schema.GetCheckpointTimeTick() == 0 {
+		for schemaIndex, schema := range schemas {
+			if schema.GetCheckpointTimeTick() == 0 && (!allowLegacySchemaBaseline || schemaIndex != 0) {
 				return merr.WrapErrDataIntegrityMsg("vchannel %s missing schema checkpoint timetick in recovery meta", vchannelName)
 			}
 			if schema.GetSchema() == nil {

@@ -10,7 +10,7 @@ import (
 
 const (
 	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
-	// the checkpoint is set into the catalog.
+	RecoveryMagicRecoveryStorageV2    int64 = 2 // legacy recovery metadata has a safe data checkpoint.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
@@ -28,6 +28,7 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		DataCheckpoint:      NewWALConsumeCheckpointFromProto(cp.DataCheckpoint),
 	}
 }
+
 // WALCheckpoint represents a consume checkpoint in the Write-Ahead Log (WAL).
 type WALCheckpoint struct {
 	MessageID           message.MessageID // should always be not nil.
