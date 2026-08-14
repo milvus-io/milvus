@@ -17,6 +17,14 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`.
 5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
 6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` garbage-collects aged-out tasks from the catalog.
 
+## Idempotent Broadcast
+
+A broadcast message carrying the `_ik` idempotency key property is additionally indexed by that key. A later broadcast presenting the same key short-circuits: it creates no task and returns the ORIGINAL broadcast's message in `BroadcastAppendResult.Duplicated`, leaving `AppendResults` nil. The lookup happens inside `broadcasterWithRK.Broadcast`, which only exists after the resource keys are held — so two concurrent same-key requests are serialized by the resource lock rather than both missing.
+
+The index lives and dies with the task entry, so **the idempotency window a client observes equals the tombstone retention**: `maxLifetime` or `maxCount`, whichever comes first. The count bound is hard — a busy cluster can evict tombstones well before `maxLifetime`, ending the window early. Any subsystem that advertises this guarantee (currently BulkImport) must keep its own retention at least as long as `maxLifetime`, or an in-window retry can resolve to an ID its own metadata has already GC'd.
+
+Replicated tasks are indexed too: the query path is unreachable on a secondary (`WithResourceKeys` rejects non-primary clusters), and indexing there lets a promoted secondary honor pre-failover keys.
+
 ## Resource Key Locking
 
 Each ResourceKey has: **Domain** (resource type), **Key** (entity identifier), **Shared** (read vs exclusive). Every broadcast automatically acquires SharedCluster.
