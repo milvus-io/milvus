@@ -19,11 +19,32 @@ package taskresource
 import (
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// testNodeMemory is the node size every analyze test below is written
+// against: the 64GiB DataNode from issue #52180. EstimateAnalyze now reads the
+// node, so leaving it at whatever the build host happens to have would make
+// every assertion below machine-dependent.
+// It is a var rather than a const so the fractional products below (0.8 x it,
+// 0.3 x it) are ordinary runtime arithmetic instead of untyped constants that
+// have to divide exactly.
+var testNodeMemory = int64(64) * gib
+
+func mockNodeMemory(t *testing.T, total int64) {
+	t.Helper()
+	mk := mockey.Mock(hardware.GetMemoryCount).Return(uint64(total)).Build()
+	t.Cleanup(func() { mk.UnPatch() })
+}
 
 // Reproduces issue #52180 incident 2: HNSW, 1163739 rows, dim 768.
 // calculateIndexTaskSlot produced taskSlot=384 on a node reporting
@@ -79,28 +100,59 @@ func TestEstimateIndexBuildAddsDecodeWindowOnV3(t *testing.T) {
 	assert.Greater(t, v3.Memory, v2.Memory)
 }
 
+// TestEstimateStatsUsesFieldNotWholeSegment exercises the claim its name
+// makes, which means going through RequirementForStats: EstimateStats alone is
+// handed the field size and cannot possibly disagree with it.
+//
+// The fixture is a segment whose json field is a small part of the whole, so
+// the two answers are far apart and both comfortably clear the 64MiB floor.
 func TestEstimateStatsUsesFieldNotWholeSegment(t *testing.T) {
 	paramtable.Init()
 
-	got := EstimateStats(StatsInput{
-		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
-		FieldMemorySize: 100 * mib,
-	})
+	const jsonBytes = 400 * mib
+	const otherBytes = 4 * gib
 
-	assert.Greater(t, got.Memory, int64(0))
+	req := &workerpb.CreateStatsRequest{
+		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_JSON},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+			},
+		},
+		InsertLogs: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: jsonBytes}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: otherBytes}}},
+		},
+	}
+
+	got := RequirementForStats(req)
+
+	factor := paramtable.Get().DataCoordCfg.ResourceJSONKeyIndexFactor.GetAsFloat()
+	want := int64(float64(jsonBytes) * factor)
+	require.Greater(t, want, int64(64)*mib, "setup: the expected value must not be the floor")
+	assert.Equal(t, want, got.Memory)
 	assert.Greater(t, got.CPU, float64(0))
+
+	// The whole-segment charge is what this is meant to be cheaper than; if the
+	// field selection silently fell through, that is the number it would land on.
+	wholeSegment := int64(float64(jsonBytes+otherBytes) * factor)
+	assert.Less(t, got.Memory, wholeSegment)
 }
 
 func TestEstimateAnalyzeScalesWithInputAndIsCapped(t *testing.T) {
 	paramtable.Init()
 
-	small := EstimateAnalyze(gib)
-	huge := EstimateAnalyze(1000 * gib)
+	mockNodeMemory(t, testNodeMemory)
+
+	small := EstimateAnalyze(gib, 0.8)
+	huge := EstimateAnalyze(1000*gib, 0.8)
 
 	assert.Greater(t, small.Memory, int64(0))
 	assert.Greater(t, huge.Memory, small.Memory)
-	assert.LessOrEqual(t, huge.Memory,
-		paramtable.Get().DataCoordCfg.ResourceAnalyzeMaxMemory.GetAsInt64())
+	// The cap now bounds the phase-2 grant only; what actually binds a large
+	// dataset is the training buffer the task allocates today.
+	assert.LessOrEqual(t, huge.Memory, int64(float64(testNodeMemory)*0.8))
 }
 
 // --- Additional coverage: each test below fails if the formula it names were
@@ -241,35 +293,80 @@ func TestEstimateStatsFloorAppliesToTinyField(t *testing.T) {
 	assert.Equal(t, int64(64)*mib, got.Memory)
 }
 
-// TestEstimateAnalyzeExactFormulaBelowCap pins the multiplication for an
-// input comfortably under the cap.
+// TestEstimateAnalyzeExactFormulaBelowCap pins the multiplication for a
+// dataset smaller than the training buffer: the dataset bounds the charge,
+// because the training set cannot be larger than the data that exists.
 func TestEstimateAnalyzeExactFormulaBelowCap(t *testing.T) {
 	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
 
 	const size = 2 * gib
-	got := EstimateAnalyze(size)
+	got := EstimateAnalyze(size, 0.8)
 
-	factor := paramtable.Get().DataCoordCfg.ResourceAnalyzeFactor.GetAsFloat()
-	assert.Equal(t, int64(float64(size)*factor), got.Memory)
+	// 0.8 x 64GiB = 51.2GiB of buffer, but only 2GiB of data exists.
+	assert.Equal(t, size, got.Memory)
 	assert.Equal(t, 1.0, got.CPU)
+	require.Greater(t, got.Memory, int64(64)*mib, "must clear the floor to pin the formula")
 }
 
-// TestEstimateAnalyzeCapIsExact proves the cap clamps to exactly
-// analyzeMaxMemory, not merely to "something under" it.
-func TestEstimateAnalyzeCapIsExact(t *testing.T) {
+// TestEstimateAnalyzeChargesTheBufferTheTaskActuallyAllocates is the C3
+// regression. Until phase 2 converts the task, task_analyze.go sets
+// TrainSize = GetMemoryCount() x MaxTrainSizeRatio -- 51.2GiB on this node --
+// regardless of the grant. The old estimator answered min(dataset, 4GiB)
+// here, so a node that was about to load 0.8 of its RAM reported ~94% free;
+// the 65535-slot constant that used to serialize analyze no longer does
+// anything, because phase 0 reroutes availability onto the ledger.
+func TestEstimateAnalyzeChargesTheBufferTheTaskActuallyAllocates(t *testing.T) {
 	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
 
-	got := EstimateAnalyze(1000 * gib)
+	// A dataset far larger than the buffer: the buffer is what binds.
+	got := EstimateAnalyze(1000*gib, 0.8)
 
-	assert.Equal(t, paramtable.Get().DataCoordCfg.ResourceAnalyzeMaxMemory.GetAsInt64(), got.Memory)
+	assert.Equal(t, int64(float64(testNodeMemory)*0.8), got.Memory)
+	// The point of the fix: this must be well past the old cap, which is what
+	// made the task look free.
+	assert.Greater(t, got.Memory,
+		10*paramtable.Get().DataCoordCfg.ResourceAnalyzeMaxMemory.GetAsInt64())
+	// And past the node's own task budget, so the guard treats it as oversized
+	// and runs it alone -- the behavior analyzeTaskSlotUsage=65535 used to buy.
+	assert.Greater(t, got.Memory, int64(float64(testNodeMemory)*
+		paramtable.Get().DataNodeCfg.ResourceMemoryRatio.GetAsFloat()))
+}
+
+// A legacy request that never filled MaxTrainSizeRatio must not be read as
+// "this task allocates nothing"; it falls back to the config DataCoord fills
+// the field from.
+func TestEstimateAnalyzeMissingRatioFallsBackToConfig(t *testing.T) {
+	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
+
+	ratio := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat()
+	require.Greater(t, ratio, 0.0, "setup: the fallback must be a real ratio")
+
+	got := EstimateAnalyze(1000*gib, 0)
+
+	assert.Equal(t, int64(float64(testNodeMemory)*ratio), got.Memory)
+}
+
+// An unknown dataset size (a field type with no closed-form width) must not
+// bound the charge downwards: the buffer is allocated either way.
+func TestEstimateAnalyzeUnknownDatasetStillChargesTheBuffer(t *testing.T) {
+	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
+
+	got := EstimateAnalyze(0, 0.8)
+
+	assert.Equal(t, int64(float64(testNodeMemory)*0.8), got.Memory)
 }
 
 // TestEstimateAnalyzeFloorAppliesToTinyInput proves the 64MiB floor also
 // binds EstimateAnalyze for a near-zero input.
 func TestEstimateAnalyzeFloorAppliesToTinyInput(t *testing.T) {
 	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
 
-	got := EstimateAnalyze(1024)
+	got := EstimateAnalyze(1024, 0.8)
 
 	assert.Equal(t, int64(64)*mib, got.Memory)
 }

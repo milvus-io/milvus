@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -45,32 +46,109 @@ func TestEstimateMixCompactionV1IsInputIndependent(t *testing.T) {
 	assert.Greater(t, small.Memory, int64(0))
 }
 
+// TestEstimateMixCompactionV3ScalesWithInput is the estimator at the center of
+// incidents 1 and 3, so it is asserted against the formula rather than against
+// a bound. A single input size with a GreaterOrEqual against the true value
+// tests neither the scaling nor the factor: a constant return passes it, and so
+// does a factor ten times too large.
 func TestEstimateMixCompactionV3ScalesWithInput(t *testing.T) {
 	paramtable.Init()
 
-	// V3 retains the whole input (issue #52180 incident 1), so the estimate
-	// must scale. This is the defect that charged 8 tasks x 4.5GiB as 32 slots.
-	got := EstimateCompaction(CompactionInput{
-		Type:            datapb.CompactionType_MixCompaction,
-		StorageVersion:  3,
-		TotalMemorySize: 4 * gib,
-	})
+	factor := paramtable.Get().DataCoordCfg.ResourceMixCompactionV3Factor.GetAsFloat()
+	require.Greater(t, factor, 0.0, "setup: the factor must be live for the exact assertions below")
 
-	assert.GreaterOrEqual(t, got.Memory, 4*gib)
+	v3 := func(input int64) Requirement {
+		return EstimateCompaction(CompactionInput{
+			Type:            datapb.CompactionType_MixCompaction,
+			StorageVersion:  3,
+			TotalMemorySize: input,
+		})
+	}
+
+	// Exact, at two sizes far apart. V3 retains the whole input (issue #52180
+	// incident 1); this is the defect that charged 8 tasks x 4.5GiB as 32 slots.
+	small := v3(4 * gib)
+	large := v3(40 * gib)
+	assert.Equal(t, int64(float64(4*gib)*factor), small.Memory)
+	assert.Equal(t, int64(float64(40*gib)*factor), large.Memory)
+
+	// Linear, not merely monotonic: ten times the input, ten times the charge.
+	assert.Equal(t, 10*small.Memory, large.Memory)
+
+	// Both are well clear of the atLeast(binlogChunkBytes) floor, so neither
+	// assertion above is being satisfied by the clamp.
+	require.Greater(t, small.Memory, binlogChunkBytes())
+
+	// And the delete payload is a separate additive term, not folded into the
+	// factor.
+	withDeletes := EstimateCompaction(CompactionInput{
+		Type:                  datapb.CompactionType_MixCompaction,
+		StorageVersion:        3,
+		TotalMemorySize:       4 * gib,
+		MaxSegmentDeleteBytes: 512 * mib,
+	})
+	assert.Equal(t, small.Memory+512*mib, withDeletes.Memory)
 }
 
+// Same shape for sort: storage.Sort Retains every record from every reader
+// before sorting, then holds one rowIndex per surviving row, so both terms
+// must be visible in the answer.
 func TestEstimateSortCompactionScalesWithInput(t *testing.T) {
 	paramtable.Init()
 
-	// storage.Sort retains every record before sorting.
+	const rowIndexBytes = 8
+	expansion := arrowExpansion()
+	chunk := binlogChunkBytes()
+
+	sort := func(input, rows int64) Requirement {
+		return EstimateCompaction(CompactionInput{
+			Type:            datapb.CompactionType_SortCompaction,
+			StorageVersion:  1,
+			TotalMemorySize: input,
+			TotalRows:       rows,
+		})
+	}
+
+	got := sort(2*gib, 1_000_000)
+	want := int64(float64(2*gib)*expansion) + 1_000_000*rowIndexBytes + chunk
+	assert.Equal(t, want, got.Memory)
+	require.Greater(t, got.Memory, chunk, "must clear the floor to pin the formula")
+
+	// The data term scales linearly...
+	bigger := sort(20*gib, 1_000_000)
+	assert.Equal(t, int64(float64(20*gib)*expansion)+1_000_000*rowIndexBytes+chunk, bigger.Memory)
+
+	// ...and the row term is genuinely separate from it: same bytes, ten times
+	// the rows, and the difference is exactly the rowIndex array.
+	moreRows := sort(2*gib, 10_000_000)
+	assert.Equal(t, got.Memory+9_000_000*rowIndexBytes, moreRows.Memory)
+}
+
+// TestEstimateClusteringChargesTheBufferTheTaskActuallyAllocates is the C3
+// regression for clustering. Until phase 2 converts the task,
+// clusteringCompactor sizes its write buffer as GetMemoryCount() x
+// memoryBufferRatio -- 19.2GiB on a 64GiB node -- regardless of input size,
+// and the grant below caps out at 8GiB. Phase 0 rerouted availability onto the
+// ledger, so clusteringCompactionSlotUsage=65535 no longer serializes anything.
+func TestEstimateClusteringChargesTheBufferTheTaskActuallyAllocates(t *testing.T) {
+	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
+
+	ratio := paramtable.Get().DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat()
+	require.Greater(t, ratio, 0.0, "setup: the buffer ratio must be live")
+
+	// A tiny input: the grant would be the configured minimum, but the task
+	// still allocates the whole buffer.
 	got := EstimateCompaction(CompactionInput{
-		Type:            datapb.CompactionType_SortCompaction,
-		StorageVersion:  1,
-		TotalMemorySize: 2 * gib,
-		TotalRows:       1_000_000,
+		Type:            datapb.CompactionType_ClusteringCompaction,
+		TotalMemorySize: 100 * mib,
 	})
 
-	assert.GreaterOrEqual(t, got.Memory, 2*gib)
+	buffer := int64(float64(testNodeMemory) * ratio)
+	assert.Equal(t, buffer, got.Memory)
+	assert.Greater(t, got.Memory,
+		paramtable.Get().DataCoordCfg.ResourceClusteringMaxMemory.GetAsInt64(),
+		"the real allocation must dominate the phase-2 grant's cap")
 }
 
 func TestEstimateL0CompactionUsesDeleteBytesNotRowCount(t *testing.T) {
@@ -147,6 +225,12 @@ func TestEstimateCompactionAlwaysPositive(t *testing.T) {
 
 func TestEstimateClusteringCompactionRespectsMinMaxAndScales(t *testing.T) {
 	paramtable.Init()
+	// This test is about the phase-2 grant's clamps, so the node is mocked
+	// small enough that the buffer the task allocates today (0.3 x node) stays
+	// below every figure asserted below and cannot mask them.
+	// TestEstimateClusteringChargesTheBufferTheTaskActuallyAllocates covers the
+	// other side.
+	mockNodeMemory(t, gib)
 
 	// Below the floor: the grant clamps up to clusteringMinMemory (default
 	// 512MiB), not down to ~0.3 * TotalMemorySize.
