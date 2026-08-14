@@ -126,3 +126,114 @@ func TestIdempotencyIndexRecovery(t *testing.T) {
 	// The keyless task must not occupy an entry.
 	require.Len(t, bm.idempotencyIndex.keyToBroadcastID, 2)
 }
+
+// newBroadcastTaskManagerForTest recovers a broadcast task manager with the same test
+// resources TestIdempotencyIndexRecovery sets up: a catalog that accepts every save, a
+// WAL that always appends successfully, and a tombstone GC window long enough that the
+// GC cannot race the assertions.
+func newBroadcastTaskManagerForTest(t *testing.T, protos ...*streamingpb.BroadcastTask) *broadcastTaskManager {
+	paramtable.Init()
+	registry.ResetRegistration()
+	// A completed import broadcast triggers the import ack callback; without a registered
+	// one the ack scheduler blocks forever waiting for the registration future.
+	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
+		return nil
+	})
+	oldInterval := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("1h")
+	oldLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("1h")
+	oldCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("8192")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue(oldInterval)
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue(oldLifetime)
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(oldCount)
+	})
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	resource.InitForTest(resource.OptStreamingCatalog(meta))
+
+	operator := mock_streaming.NewMockWALAccesser(t)
+	appendFn := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+		resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+		for idx := range msgs {
+			resps.Responses[idx] = types.AppendResponse{
+				AppendResult: &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
+					TimeTick:  uint64(time.Now().UnixMilli()),
+				},
+			}
+		}
+		return resps
+	}
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
+	streaming.SetWALForTest(operator)
+
+	bm := newBroadcastTaskManager(protos)
+	t.Cleanup(bm.Close)
+	return bm
+}
+
+func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
+	// Recover a manager that already owns "import/1/k" from a tombstoned task:
+	// a tombstone is exactly what a late retry is expected to hit.
+	bm := newBroadcastTaskManagerForTest(t,
+		createImportBroadcastTaskProto(100, "import/1/k",
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{0x01}))
+
+	guards := bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey())
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: guards}
+
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{}).
+		WithIdempotencyKey("import/1/k").
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	result, err := api.Broadcast(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, result.Duplicated)
+	// BroadcastID must be the ORIGINAL broadcast's ID, not the freshly allocated
+	// 999 that went unused.
+	require.Equal(t, uint64(100), result.BroadcastID)
+	require.Nil(t, result.AppendResults)
+	require.Equal(t, "import/1/k", message.IdempotencyKeyOf(result.Duplicated))
+
+	// On a hit the guards were never consumed, so Close() must actually release
+	// the lock — otherwise the next broadcast on the same collection blocks forever.
+	require.NotNil(t, api.guards)
+	api.Close()
+	released := make(chan struct{})
+	go func() {
+		bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey()).Unlock()
+		close(released)
+	}()
+	select {
+	case <-released:
+	case <-time.After(3 * time.Second):
+		t.Fatal("resource key lock was not released after a deduplicated broadcast")
+	}
+}
+
+func TestBroadcastWithoutKeyIsUnaffected(t *testing.T) {
+	// A broadcast carrying no idempotency key must not consult the index at all
+	// and must follow the original path, which consumes the guards by handing
+	// them to the newly created task.
+	bm := newBroadcastTaskManagerForTest(t)
+
+	guards := bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey())
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: guards}
+
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{}).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	result, err := api.Broadcast(context.Background(), msg)
+	require.NoError(t, err)
+	require.Nil(t, result.Duplicated)
+	require.Equal(t, uint64(999), result.BroadcastID)
+	// The keyless path consumes the guards: they now belong to the created task.
+	require.Nil(t, api.guards)
+}
