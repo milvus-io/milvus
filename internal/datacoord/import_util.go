@@ -828,6 +828,43 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 	return nil
 }
 
+// importRetentionCoversTombstone reports whether the import job retention is long
+// enough to back the advertised BulkImport idempotency window. That window is bounded
+// by the broadcast tombstone lifetime, so a job must live at least as long as its
+// tombstone; equal durations satisfy the constraint.
+func importRetentionCoversTombstone(taskRetention, tombstoneMaxLifetime time.Duration) bool {
+	return taskRetention >= tombstoneMaxLifetime
+}
+
+// importIdempotencyWindowDurations reads the two configs that bound the BulkImport
+// idempotency window. They use different unit conventions — the retention is a plain
+// number of seconds, the tombstone lifetime is a parsed duration string — so the reads
+// live here rather than at each use site.
+func importIdempotencyWindowDurations() (taskRetention, tombstoneMaxLifetime time.Duration) {
+	return paramtable.Get().DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse()
+}
+
+// warnOnImportIdempotencyWindowMisconfig logs a warning when the configured import job
+// retention is shorter than the broadcast tombstone lifetime.
+//
+// It warns rather than fails: an operator may accept the risk deliberately. paramtable
+// has no cross-key validation hook (ParamItem.Formatter is per-key), so the two keys can
+// only be compared explicitly, here.
+func warnOnImportIdempotencyWindowMisconfig(ctx context.Context) {
+	taskRetention, tombstoneMaxLifetime := importIdempotencyWindowDurations()
+	if importRetentionCoversTombstone(taskRetention, tombstoneMaxLifetime) {
+		return
+	}
+	mlog.Warn(ctx, "import job retention is shorter than the broadcast tombstone lifetime, "+
+		"so a BulkImport retry presenting an idempotency key that is still within the window can resolve "+
+		"to a jobID whose job has already been garbage collected, leaving the client unable to distinguish "+
+		"'already imported' from 'never imported'; raise dataCoord.import.taskRetention to at least "+
+		"streaming.walBroadcaster.tombstone.maxLifetime",
+		mlog.Duration("dataCoord.import.taskRetention", taskRetention),
+		mlog.Duration("streaming.walBroadcaster.tombstone.maxLifetime", tombstoneMaxLifetime))
+}
+
 // CalculateTaskSlot calculates the required resource slots for an import task based on CPU and memory constraints
 // The function uses a dual-constraint approach:
 // 1. CPU constraint: Based on the number of files to process in parallel

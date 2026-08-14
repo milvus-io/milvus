@@ -1361,3 +1361,33 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
 }
+
+func TestImportUtil_ImportRetentionCoversTombstone(t *testing.T) {
+	tests := []struct {
+		name                 string
+		taskRetention        time.Duration
+		tombstoneMaxLifetime time.Duration
+		covered              bool
+	}{
+		{"retention longer than tombstone", 48 * time.Hour, 24 * time.Hour, true},
+		// Equal durations satisfy the constraint: the job outlives every retry the
+		// tombstone can still deduplicate.
+		{"retention equal to tombstone", 24 * time.Hour, 24 * time.Hour, true},
+		{"retention shorter than tombstone", 12 * time.Hour, 24 * time.Hour, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.covered,
+				importRetentionCoversTombstone(tt.taskRetention, tt.tombstoneMaxLifetime))
+		})
+	}
+
+	// The shipped defaults must not warn. This reads the configs through the same
+	// helper the startup check uses, so it also guards the unit conventions: the
+	// retention is seconds, the tombstone lifetime is a parsed duration string.
+	paramtable.Init()
+	defaultRetention, defaultTombstone := importIdempotencyWindowDurations()
+	assert.Equal(t, 24*time.Hour, defaultRetention)
+	assert.Equal(t, 24*time.Hour, defaultTombstone)
+	assert.True(t, importRetentionCoversTombstone(defaultRetention, defaultTombstone))
+}

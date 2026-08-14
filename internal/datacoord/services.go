@@ -1938,7 +1938,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Broadcast the import message
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
-	duplicatedJobID, err := s.broadcastImport(
+	duplicatedJobID, duplicated, err := s.broadcastImport(
 		ctx,
 		in.GetCollectionName(),
 		in.GetCollectionID(),
@@ -1955,7 +1955,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
 		return resp, nil
 	}
-	if duplicatedJobID != 0 {
+	if duplicated {
 		// The idempotency window still holds this key, so the original job is the
 		// answer. Verify it is still queryable first: tombstone retention can
 		// outlive a job when restarts keep resetting the tombstone clock, and
