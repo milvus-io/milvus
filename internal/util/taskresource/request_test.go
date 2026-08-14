@@ -124,6 +124,42 @@ func TestRequirementForCompactionL0SumsDeleteAcrossSegments(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+// Regression for a bug where totalRows was accumulated inside the per-field
+// binlog loop, so a segment with N fields had its row count counted N times.
+// estimateSortCompaction feeds TotalRows*rowIndexBytes directly, so a
+// 10-field, 1M-row segment was charged as if it had 10M rows.
+func TestRequirementForCompactionCountsRowsOncePerSegment(t *testing.T) {
+	paramtable.Init()
+
+	plan := &datapb.CompactionPlan{
+		Type: datapb.CompactionType_SortCompaction,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				FieldBinlogs: []*datapb.FieldBinlog{
+					{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 1_000_000}}},
+					{FieldID: 101, Binlogs: []*datapb.Binlog{{EntriesNum: 1_000_000}}},
+					{FieldID: 102, Binlogs: []*datapb.Binlog{{EntriesNum: 1_000_000}}},
+				},
+			},
+		},
+	}
+
+	got := RequirementForCompaction(plan)
+	want := EstimateCompaction(CompactionInput{
+		Type:      datapb.CompactionType_SortCompaction,
+		TotalRows: 1_000_000, // once, not x3 for the three fields
+	})
+	assert.Equal(t, want, got)
+}
+
+func TestSegmentRowCountSkipsFieldsWithNoBinlogs(t *testing.T) {
+	fieldBinlogs := []*datapb.FieldBinlog{
+		{FieldID: 100}, // e.g. an all-null column with nothing written
+		{FieldID: 101, Binlogs: []*datapb.Binlog{{EntriesNum: 42}}},
+	}
+	assert.Equal(t, int64(42), segmentRowCount(fieldBinlogs))
+}
+
 // ---------------------------------------------------------------------------
 // RequirementForIndex
 // ---------------------------------------------------------------------------

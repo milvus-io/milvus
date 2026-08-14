@@ -57,18 +57,10 @@ func RequirementForCompaction(plan *datapb.CompactionPlan) Requirement {
 			storageVersion = v
 		}
 
-		var segDelete int64
-		for _, fb := range seg.GetFieldBinlogs() {
-			for _, b := range fb.GetBinlogs() {
-				totalMemory += b.GetMemorySize()
-				totalRows += b.GetEntriesNum()
-			}
-		}
-		for _, fb := range seg.GetDeltalogs() {
-			for _, b := range fb.GetBinlogs() {
-				segDelete += b.GetMemorySize()
-			}
-		}
+		totalMemory += sumFieldBinlogMemory(seg.GetFieldBinlogs())
+		totalRows += segmentRowCount(seg.GetFieldBinlogs())
+
+		segDelete := sumFieldBinlogMemory(seg.GetDeltalogs())
 		if plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
 			// L0's ComposeDeleteDataFromSegments loads every segment's
 			// deletes at once: sum across segments.
@@ -88,6 +80,30 @@ func RequirementForCompaction(plan *datapb.CompactionPlan) Requirement {
 		TotalRows:             totalRows,
 		MaxSegmentDeleteBytes: maxDelete,
 	})
+}
+
+// segmentRowCount returns a compaction input segment's row count from a
+// single field's binlogs. Every field in a segment covers the same rows, so
+// summing EntriesNum across all of them (as an earlier version of
+// RequirementForCompaction did) multiplies the row count by the field count
+// instead of counting it once -- for a 10-field, 1M-row segment that is 10M,
+// not 1M, feeding directly into estimateSortCompaction's
+// TotalRows*rowIndexBytes term. CompactionSegmentBinlogs carries no row-count
+// field of its own (checked pkg/proto/datapb/data_coord.pb.go), so this reads
+// one field instead of guessing at a dedicated count. It skips over any field
+// with zero binlogs (e.g. an all-null column) to avoid returning 0 when a
+// later field would report the real count.
+func segmentRowCount(fieldBinlogs []*datapb.FieldBinlog) int64 {
+	for _, fb := range fieldBinlogs {
+		var rows int64
+		for _, b := range fb.GetBinlogs() {
+			rows += b.GetEntriesNum()
+		}
+		if rows > 0 {
+			return rows
+		}
+	}
+	return 0
 }
 
 // vectorFieldByteSize mirrors the DataType switch in
