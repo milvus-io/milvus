@@ -53,6 +53,7 @@ type task struct {
 	mu          sync.RWMutex
 	taskID      int64
 	runID       int64
+	slot        int64
 	state       State
 	progress    float32
 	reason      string
@@ -86,8 +87,8 @@ func NewTaskManagerWithContext(parent context.Context) *TaskManager {
 	return &TaskManager{ctx: ctx, cancel: cancel, tasks: make(map[int64]*task)}
 }
 
-func (m *TaskManager) Add(taskID, runID int64, execute Run) error {
-	if m == nil || execute == nil || taskID == 0 || runID == 0 {
+func (m *TaskManager) Add(taskID, runID, slot int64, execute Run) error {
+	if m == nil || execute == nil || taskID == 0 || runID == 0 || slot <= 0 {
 		return merr.WrapErrImportSysFailedMsg("invalid import V3 task create request")
 	}
 	m.mu.Lock()
@@ -114,7 +115,7 @@ func (m *TaskManager) Add(taskID, runID int64, execute Run) error {
 		}
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
-	t := &task{taskID: taskID, runID: runID, state: StatePending, cancel: cancel}
+	t := &task{taskID: taskID, runID: runID, slot: slot, state: StatePending, cancel: cancel}
 	m.tasks[taskID] = t
 	m.workers.Add(1)
 	m.mu.Unlock()
@@ -158,6 +159,25 @@ func (m *TaskManager) Add(taskID, runID int64, execute Run) error {
 		t.state = StateCompleted
 	}()
 	return nil
+}
+
+// Slots returns slots currently occupied by pending or running V3 tasks.
+// Completed, failed, and retryable runs have stopped consuming DataNode work.
+func (m *TaskManager) Slots() int64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var slots int64
+	for _, task := range m.tasks {
+		task.mu.RLock()
+		if task.state == StatePending || task.state == StateRunning {
+			slots += task.slot
+		}
+		task.mu.RUnlock()
+	}
+	return slots
 }
 
 func (m *TaskManager) Query(taskID, runID int64) (Snapshot, bool) {

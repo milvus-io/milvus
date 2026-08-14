@@ -42,13 +42,13 @@ import (
 
 func (node *DataNode) createImportV3WorkerTask(
 	_ context.Context,
-	taskID, runID int64,
+	taskID, runID, slot int64,
 	execute importv3.Run,
 ) (*commonpb.Status, error) {
 	if node.importV3TaskMgr == nil {
 		return merr.Status(merr.WrapErrServiceNotReadyMsg("import V3 task manager is not initialized")), nil
 	}
-	if err := node.importV3TaskMgr.Add(taskID, runID, execute); err != nil {
+	if err := node.importV3TaskMgr.Add(taskID, runID, slot, execute); err != nil {
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil

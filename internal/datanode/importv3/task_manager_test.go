@@ -33,7 +33,7 @@ func TestTaskManagerRunFenceAndCompletedResult(t *testing.T) {
 	manager := NewTaskManager()
 	started := make(chan struct{})
 	release := make(chan struct{})
-	require.NoError(t, manager.Add(10, 20, func(ctx context.Context, runID int64) (*Result, error) {
+	require.NoError(t, manager.Add(10, 20, 2, func(ctx context.Context, runID int64) (*Result, error) {
 		require.Equal(t, int64(20), runID)
 		close(started)
 		select {
@@ -60,7 +60,7 @@ func TestTaskManagerDropCancelsRun(t *testing.T) {
 	manager := NewTaskManager()
 	started := make(chan struct{})
 	canceled := make(chan struct{})
-	require.NoError(t, manager.Add(11, 22, func(ctx context.Context, _ int64) (*Result, error) {
+	require.NoError(t, manager.Add(11, 22, 1, func(ctx context.Context, _ int64) (*Result, error) {
 		close(started)
 		<-ctx.Done()
 		close(canceled)
@@ -79,7 +79,7 @@ func TestTaskManagerCreateRunFencing(t *testing.T) {
 	oldStarted := make(chan struct{})
 	newStarted := make(chan struct{})
 	newRelease := make(chan struct{})
-	require.NoError(t, manager.Add(12, 30, func(ctx context.Context, _ int64) (*Result, error) {
+	require.NoError(t, manager.Add(12, 30, 2, func(ctx context.Context, _ int64) (*Result, error) {
 		close(oldStarted)
 		<-ctx.Done()
 		close(oldCanceled)
@@ -88,15 +88,15 @@ func TestTaskManagerCreateRunFencing(t *testing.T) {
 	<-oldStarted
 	// Same and smaller runs are idempotent/stale no-ops. Their callbacks must
 	// never run.
-	require.NoError(t, manager.Add(12, 30, func(context.Context, int64) (*Result, error) {
+	require.NoError(t, manager.Add(12, 30, 9, func(context.Context, int64) (*Result, error) {
 		t.Fatal("same run callback must not run twice")
 		return nil, nil
 	}))
-	require.NoError(t, manager.Add(12, 29, func(context.Context, int64) (*Result, error) {
+	require.NoError(t, manager.Add(12, 29, 9, func(context.Context, int64) (*Result, error) {
 		t.Fatal("stale run callback must not run")
 		return nil, nil
 	}))
-	require.NoError(t, manager.Add(12, 31, func(ctx context.Context, _ int64) (*Result, error) {
+	require.NoError(t, manager.Add(12, 31, 4, func(ctx context.Context, _ int64) (*Result, error) {
 		close(newStarted)
 		select {
 		case <-newRelease:
@@ -116,15 +116,48 @@ func TestTaskManagerCreateRunFencing(t *testing.T) {
 
 func TestTaskManagerRetryAndFailureCode(t *testing.T) {
 	manager := NewTaskManager()
-	require.NoError(t, manager.Add(13, 40, func(context.Context, int64) (*Result, error) {
+	require.NoError(t, manager.Add(13, 40, 1, func(context.Context, int64) (*Result, error) {
 		return nil, merr.ErrServiceUnavailable
 	}))
 	snapshot := waitSnapshot(t, manager, 13, 40, StateRetry)
 	require.Equal(t, merr.Code(merr.ErrServiceUnavailable), snapshot.FailureCode)
 
-	require.NoError(t, manager.Add(14, 41, func(context.Context, int64) (*Result, error) {
+	require.NoError(t, manager.Add(14, 41, 1, func(context.Context, int64) (*Result, error) {
 		return nil, merr.ErrImportSysFailed
 	}))
 	snapshot = waitSnapshot(t, manager, 14, 41, StateFailed)
 	require.Equal(t, merr.Code(merr.ErrImportSysFailed), snapshot.FailureCode)
+}
+
+func TestTaskManagerSlotsFollowCurrentRun(t *testing.T) {
+	manager := NewTaskManager()
+	require.Error(t, manager.Add(20, 1, 0, func(context.Context, int64) (*Result, error) { return nil, nil }))
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	require.NoError(t, manager.Add(20, 1, 2, func(ctx context.Context, _ int64) (*Result, error) {
+		close(started)
+		select {
+		case <-release:
+			return &Result{Ref: "done", Digest: []byte{1}}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}))
+	<-started
+	require.Equal(t, int64(2), manager.Slots())
+
+	// Same-run Create is idempotent even if the duplicate request carries a
+	// different literal slot value.
+	require.NoError(t, manager.Add(20, 1, 9, func(context.Context, int64) (*Result, error) {
+		t.Fatal("same run must not start twice")
+		return nil, nil
+	}))
+	require.Equal(t, int64(2), manager.Slots())
+
+	close(release)
+	waitSnapshot(t, manager, 20, 1, StateCompleted)
+	require.Zero(t, manager.Slots())
+	require.True(t, manager.Drop(20, 1))
+	require.Zero(t, manager.Slots())
 }

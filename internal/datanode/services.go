@@ -738,8 +738,13 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		totalSlots     = index.CalculateNodeSlots()
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
+		importV2Used   = node.importScheduler.Slots()
+		importV3Used   int64
 	)
+	if node.importV3TaskMgr != nil {
+		importV3Used = node.importV3TaskMgr.Slots()
+	}
+	importUsed := importV2Used + importV3Used
 
 	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
 	if availableSlots < 0 {
@@ -752,6 +757,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Int64("indexStatsUsed", indexStatsUsed),
 		mlog.Int64("compactionUsed", compactionUsed),
 		mlog.Int64("importUsed", importUsed),
+		mlog.Int64("importV3Used", importV3Used),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
@@ -761,9 +767,10 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
 	return &datapb.QuerySlotResponse{
-		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
-		Version:        currentMilvusVersion(),
+		Status:               merr.Success(),
+		AvailableSlots:       availableSlots,
+		Version:              currentMilvusVersion(),
+		MaxImportTaskVersion: 3,
 	}, nil
 }
 
@@ -823,7 +830,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
+		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), req.GetTaskSlot(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
 			return node.executeReshardTask(runCtx, req, runID)
 		})
 	case taskcommon.ImportV3:
@@ -834,7 +841,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
+		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), req.GetTaskSlot(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
 			return node.executeImportTaskV3(runCtx, req, runID)
 		})
 	case taskcommon.Compaction:

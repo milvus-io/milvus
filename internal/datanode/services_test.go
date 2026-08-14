@@ -519,6 +519,7 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.True(merr.Ok(resp.GetStatus()))
 		s.NoError(merr.Error(resp.GetStatus()))
 		s.NotEmpty(resp.GetVersion())
+		s.Equal(uint32(3), resp.GetMaxImportTaskVersion())
 	})
 }
 
