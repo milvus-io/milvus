@@ -308,8 +308,21 @@ func (impl *shardInterceptor) handleCreateSnapshot(ctx context.Context, msg mess
 	// this fence needs them: DataCoord decides snapshot membership from the
 	// boundary, and WAL recovery re-derives the same set from the state it has
 	// rebuilt at this position, the way FlushAll does.
+	//
+	// FlushAndFenceSegmentAllocUntil only fails with "collection not found", and
+	// that cannot happen here: DataCoord's CreateSnapshot handler and rootcoord's
+	// DropCollection both broadcast under the same exclusive collection-name
+	// resource key (see startBroadcastWithCollectionLock / the lock set built in
+	// Server.CreateSnapshot), and that lock is held for the entire broadcast --
+	// from before the collection-existence check until every target vchannel has
+	// acked the message (broadcastTask.MarkAckCallbackDone releases it). So a
+	// DropCollection broadcast cannot even start until this CreateSnapshot
+	// broadcast, including this fence on every vchannel, has fully finished.
+	// An error here means that invariant was violated, so panic instead of
+	// degrading to a per-request failure.
 	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick()); err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		impl.shardManager.Logger().Panic(ctx, "unreachable: collection must exist when create snapshot message is appended",
+			mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
 	}
 	return appendOp(ctx, msg)
 }

@@ -83,7 +83,7 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 		// these tasks, so it must not be skipped here. The merge half is gated
 		// separately, inside triggerOneCollection.
 		if policy.meta.isCompactionBlockedForType(collection.ID, datapb.CompactionType_SortCompaction) {
-			mlog.Info(ctx, "skip single compaction for collection due to unloaded protected snapshot RefIndex",
+			mlog.RatedInfo(ctx, rate.Limit(20), "skip single compaction for collection due to unloaded protected snapshot RefIndex",
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}

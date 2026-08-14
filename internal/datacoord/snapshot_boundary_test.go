@@ -327,7 +327,7 @@ func TestWaitForSortedBoundary(t *testing.T) {
 		sm := boundaryTestManager(boundaryTestSegment(1))
 
 		go func() {
-			time.Sleep(snapshotSortWaitPollInterval + 200*time.Millisecond)
+			time.Sleep(Params.DataCoordCfg.SnapshotSortWaitPollInterval.GetAsDuration(time.Second) + 200*time.Millisecond)
 			sm.meta.segMu.Lock()
 			defer sm.meta.segMu.Unlock()
 			// A sort replaces its input with a new id. Neither id has to be

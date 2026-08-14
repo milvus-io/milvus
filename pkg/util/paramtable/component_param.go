@@ -5578,6 +5578,7 @@ type dataCoordConfig struct {
 	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	SnapshotSortWaitTimeout                ParamItem `refreshable:"true"`
+	SnapshotSortWaitPollInterval           ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
 	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
@@ -6573,6 +6574,15 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.SnapshotSortWaitTimeout.Init(base.mgr)
+
+	p.SnapshotSortWaitPollInterval = ParamItem{
+		Key:          "dataCoord.snapshot.sortWaitPollIntervalSeconds",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc:          "How often snapshot creation re-checks whether its segments have finished sort compaction while waiting. Default 1.",
+		Export:       true,
+	}
+	p.SnapshotSortWaitPollInterval.Init(base.mgr)
 
 	p.SnapshotRestorePinTTLSeconds = ParamItem{
 		Key:          "dataCoord.snapshot.restorePinTTLSeconds",

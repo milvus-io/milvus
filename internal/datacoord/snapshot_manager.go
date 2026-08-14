@@ -525,11 +525,6 @@ func (sm *snapshotManager) CreateSnapshot(
 	return snapshotID, nil
 }
 
-// snapshotSortWaitPollInterval is how often the wait re-checks the boundary.
-// Sort completion is reported through meta rather than a signal we can wait on,
-// so this polls.
-const snapshotSortWaitPollInterval = time.Second
-
 // channelsBehindBoundary returns the boundary's channels whose checkpoint has not
 // reached it yet.
 //
@@ -628,7 +623,7 @@ func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collection
 	waitCtx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.SnapshotSortWaitTimeout.GetAsDuration(time.Second))
 	defer cancel()
 
-	ticker := time.NewTicker(snapshotSortWaitPollInterval)
+	ticker := time.NewTicker(Params.DataCoordCfg.SnapshotSortWaitPollInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 
 	start := time.Now()
