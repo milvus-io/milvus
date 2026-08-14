@@ -141,11 +141,21 @@ func estimateL0Compaction(in CompactionInput) Requirement {
 // just an under-estimate: until this branch clustering was serialized by
 // dataCoord.slot.clusteringCompactionSlotUsage=65535, and phase 0 reroutes
 // AvailableSlots onto the ledger so that constant no longer serializes
-// anything. Charging the real allocation normally makes the task oversized,
-// which the guard answers with exclusive execution -- the same one-at-a-time
-// behavior through the new mechanism. Note this estimator is DataNode-only:
-// DataCoord's clustering task still reports the 65535 constant and does not
-// call it.
+// anything.
+//
+// What replaces the sentinel here is a bound, NOT serialization, and that is
+// deliberate. Unlike EstimateAnalyze -- whose 0.8 of the node exceeds the 0.75
+// memoryRatio budget, so an analyze task is oversized under defaults and does
+// run alone -- 0.3 of the node fits the budget comfortably. On the 16c/64GiB
+// node from issue #52180 the budget is 48GiB and each clustering task is
+// charged 19.2GiB and 8 CPU, so exactly two run concurrently (38.4GiB of 48,
+// 16 of 16 cores) and a third is deferred. That is a real capacity gain over
+// the sentinel, and it is *accounted for*, which is the whole point of the
+// ledger. Inflating the charge to force exclusivity would trade that gain for a
+// number that merely looked like the old behavior.
+//
+// Note this estimator is DataNode-only: DataCoord's clustering task still
+// reports the 65535 constant and does not call it.
 func estimateClusteringCompaction(in CompactionInput) Requirement {
 	cfg := &paramtable.Get().DataCoordCfg
 	want := int64(float64(in.TotalMemorySize) * cfg.ResourceClusteringFactor.GetAsFloat())
