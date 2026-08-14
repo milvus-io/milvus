@@ -137,7 +137,7 @@ func TestFreezeOnlyAboveHighWatermark(t *testing.T) {
 // Both marks are boundaries, and both belong to the conservative side: a node
 // exactly at the high mark is frozen, and a frozen node exactly at the low mark
 // stays frozen. Only strictly below the low mark does admission resume.
-func TestWatermarkBoundariesFavourTheConservativeSide(t *testing.T) {
+func TestWatermarkBoundariesFavorTheConservativeSide(t *testing.T) {
 	g := newTestGuard(t, 100, 1000)
 
 	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build()
@@ -470,7 +470,7 @@ func TestLoweredNonTaskMemoryWakesBlockedWaiters(t *testing.T) {
 	}
 }
 
-func TestWatermarkLoopSamplesUntilContextCancelled(t *testing.T) {
+func TestWatermarkLoopSamplesUntilContextCanceled(t *testing.T) {
 	g := newTestGuard(t, 100, 1000)
 
 	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build()
