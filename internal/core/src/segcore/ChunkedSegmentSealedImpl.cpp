@@ -7043,8 +7043,12 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     auto& field_meta = schema_snapshot->operator[](field_id);
     auto prepare_array_offsets = [&](RuntimeResourceState& target_runtime) {
-        if (auto parsed_struct_name = GetStructNameForArrayField(field_meta);
-            parsed_struct_name.has_value()) {
+        auto parsed_struct_name = GetStructNameForArrayField(field_meta);
+        if (data_type != DataType::ARRAY && !parsed_struct_name.has_value()) {
+            return;
+        }
+
+        if (parsed_struct_name.has_value()) {
             auto& struct_name = *parsed_struct_name;
             auto it = target_runtime.struct_to_array_offsets.find(struct_name);
             if (it != target_runtime.struct_to_array_offsets.end()) {
@@ -7056,7 +7060,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 *column, field_meta, num_rows);
             target_runtime.struct_to_array_offsets[struct_name] = new_offsets;
             target_runtime.array_offsets_map[field_id] = new_offsets;
+            return;
         }
+
+        target_runtime.array_offsets_map[field_id] =
+            ArrayOffsetsSealed::BuildFromColumn(*column, field_meta, num_rows);
     };
 
     auto apply_loaded_column =
@@ -7753,12 +7761,25 @@ ChunkedSegmentSealedImpl::fill_empty_field(
 }
 
 void
-ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
+ChunkedSegmentSealedImpl::EnsureArrayOffsetsForField(
     const FieldMeta& field_meta,
     int64_t row_count,
     RuntimeResourceState& runtime) {
+    const auto data_type = field_meta.get_data_type();
     auto struct_name = GetStructNameForArrayField(field_meta);
+    if (data_type != DataType::ARRAY && !struct_name.has_value()) {
+        return;
+    }
+
+    const auto field_id = field_meta.get_id();
+    if (runtime.array_offsets_map.find(field_id) !=
+        runtime.array_offsets_map.end()) {
+        return;
+    }
+
     if (!struct_name.has_value()) {
+        runtime.array_offsets_map[field_id] =
+            ArrayOffsetsSealed::BuildAllZeros(row_count);
         return;
     }
 
@@ -7770,7 +7791,7 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
                 .first;
     }
 
-    runtime.array_offsets_map[field_meta.get_id()] = it->second;
+    runtime.array_offsets_map[field_id] = it->second;
 }
 
 void
@@ -7806,7 +7827,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         const auto& field_meta = schema_snapshot->operator[](field_id);
         fill_empty_field(
             field_meta, schema_snapshot, segment_load_info, *target_runtime);
-        EnsureArrayOffsetsForStructField(
+        EnsureArrayOffsetsForField(
             field_meta, target_runtime->row_count, *target_runtime);
         filled_fields.push_back(field_id);
     }
@@ -7930,8 +7951,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             } else {
                 runtime.mmap_field_ids.erase(field_id);
             }
-            EnsureArrayOffsetsForStructField(
-                field_meta, runtime.row_count, runtime);
+            EnsureArrayOffsetsForField(field_meta, runtime.row_count, runtime);
             LOG_INFO(
                 "fill empty field {} (data type {}) for growing segment {} "
                 "done",

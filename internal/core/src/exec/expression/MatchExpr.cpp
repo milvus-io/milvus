@@ -19,14 +19,18 @@
 #include <algorithm>
 #include <cstddef>
 
+#include <simdjson.h>
+
 #include "bitset/bitset.h"
 #include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Json.h"
 #include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
 #include "folly/FBVector.h"
 
 namespace milvus {
@@ -247,12 +251,190 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
+    // struct_name is the legacy locator for a logical struct group and does
+    // not carry a physical field id. Plain ARRAY / JSON always carry column.
     auto schema = segment_->get_schema_snapshot();
-    auto field_meta =
-        schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
+    const auto& field_name = expr_->get_field_name();
+    if (expr_->get_field_id() == 0) {
+        // Struct sub-fields share one ArrayOffsets; pick any of them.
+        const auto& field_meta = schema->GetFirstArrayFieldInStruct(field_name);
+        EvalWithOffsets(context,
+                        result,
+                        segment_->GetArrayOffsets(field_meta.get_id()),
+                        field_meta.get_id());
+        return;
+    }
 
-    auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
-    AssertInfo(array_offsets != nullptr, "Array offsets not available");
+    auto field_id = FieldId(expr_->get_field_id());
+    auto field_type = schema->GetFieldType(field_id);
+    switch (field_type) {
+        case DataType::ARRAY:
+            EvalWithOffsets(
+                context, result, segment_->GetArrayOffsets(field_id), field_id);
+            return;
+        case DataType::JSON:
+            EvalJsonBrute(context, result);
+            return;
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "MatchExpr unsupported field type: {}",
+                      field_type);
+    }
+}
+
+void
+PhyMatchFilterExpr::EvalJsonBrute(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
+    int64_t batch_rows =
+        has_offset_input_ ? input->size()
+                          : std::min(batch_size_, active_count_ - current_pos_);
+
+    if (batch_rows <= 0) {
+        result = nullptr;
+        return;
+    }
+
+    result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
+                                            TargetBitmap(batch_rows, true));
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+    TargetBitmapView result_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmapView result_valid_view(col_vec->GetValidRawData(),
+                                       col_vec->size());
+
+    auto match_type = expr_->get_match_type();
+    int64_t threshold = expr_->get_count();
+    auto pointer = milvus::Json::pointer(expr_->get_nested_path());
+
+    auto match_one_row = [&](int64_t row_idx,
+                             const TargetBitmapView& match_view,
+                             const TargetBitmapView& valid_view,
+                             int64_t elem_count,
+                             bool all_valid) {
+        auto dispatch = [&]<bool all_valid_v>() {
+            switch (match_type) {
+                case MatchType::MatchAny:
+                    return MatchSingleRow<MatchType::MatchAny, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchAll:
+                    return MatchSingleRow<MatchType::MatchAll, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchLeast:
+                    return MatchSingleRow<MatchType::MatchLeast, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchMost:
+                    return MatchSingleRow<MatchType::MatchMost, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchExact:
+                    return MatchSingleRow<MatchType::MatchExact, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              "Unsupported match type: {}",
+                              static_cast<int>(match_type));
+            }
+        };
+        if (all_valid ? dispatch.template operator()<true>()
+                      : dispatch.template operator()<false>()) {
+            result_view[row_idx] = true;
+        }
+    };
+
+    TargetBitmap empty_match;
+    TargetBitmap empty_valid;
+    TargetBitmapView empty_match_view(empty_match);
+    TargetBitmapView empty_valid_view(empty_valid);
+
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        int32_t row_id = has_offset_input_
+                             ? (*input)[i]
+                             : static_cast<int32_t>(current_pos_ + i);
+        if (!IsValidJsonArrayRow(row_id, pointer)) {
+            result_valid_view[i] = false;
+            continue;
+        }
+        OffsetVector one_row;
+        one_row.push_back(row_id);
+        EvalCtx eval_ctx(context.get_exec_context(), &one_row);
+
+        VectorPtr match_result;
+        inputs_[0]->Eval(eval_ctx, match_result);
+        if (match_result == nullptr) {
+            match_one_row(i, empty_match_view, empty_valid_view, 0, true);
+            continue;
+        }
+
+        auto match_result_col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(match_result);
+        AssertInfo(match_result_col_vec != nullptr,
+                   "Match result should be ColumnVector");
+        AssertInfo(match_result_col_vec->IsBitmap(),
+                   "Match result should be bitmap");
+
+        TargetBitmapView match_view(match_result_col_vec->GetRawData(),
+                                    match_result_col_vec->size());
+        TargetBitmapView valid_view(match_result_col_vec->GetValidRawData(),
+                                    match_result_col_vec->size());
+        match_one_row(i,
+                      match_view,
+                      valid_view,
+                      match_result_col_vec->size(),
+                      valid_view.all());
+    }
+
+    if (!has_offset_input_) {
+        current_pos_ += batch_rows;
+    }
+}
+
+bool
+PhyMatchFilterExpr::IsValidJsonArrayRow(int32_t row_id,
+                                        const std::string& pointer) const {
+    auto is_array = [&pointer](const Json& json, bool row_valid) {
+        if (!row_valid) {
+            return false;
+        }
+        return json.array_at(pointer).error() == simdjson::SUCCESS;
+    };
+
+    auto field_id = FieldId(expr_->get_field_id());
+    if (segment_->type() == SegmentType::Sealed) {
+        if (segment_->is_chunked()) {
+            auto [chunk_id, chunk_offset] =
+                segment_->get_chunk_by_offset(field_id, row_id);
+            FixedVector<int32_t> offsets;
+            offsets.push_back(static_cast<int32_t>(chunk_offset));
+            auto pw = segment_->get_views_by_offsets<Json>(
+                op_ctx_, field_id, chunk_id, offsets);
+            auto [data, valid_data] = pw.get();
+            return is_array(data[0], !valid_data.data() || valid_data[0]);
+        }
+
+        OffsetVector offsets;
+        offsets.push_back(row_id);
+        auto pw =
+            segment_->get_views_by_offsets<Json>(op_ctx_, field_id, 0, offsets);
+        auto [data, valid_data] = pw.get();
+        return is_array(data[0], !valid_data.data() || valid_data[0]);
+    }
+
+    auto chunk_id = row_id / size_per_chunk_;
+    auto chunk_offset = row_id % size_per_chunk_;
+    auto pw = segment_->chunk_data<Json>(op_ctx_, field_id, chunk_id);
+    auto chunk = pw.get();
+    const bool* valid_data = chunk.valid_data();
+    bool row_valid = valid_data == nullptr || valid_data[chunk_offset];
+    return is_array(chunk.data()[chunk_offset], row_valid);
+}
+
+void
+PhyMatchFilterExpr::EvalWithOffsets(
+    EvalCtx& context,
+    VectorPtr& result,
+    std::shared_ptr<const IArrayOffsets> array_offsets,
+    std::optional<FieldId> row_validity_field_id) {
+    auto input = context.get_offset_input();
+    AssertInfo(array_offsets != nullptr,
+               "MatchExpr requires ArrayOffsets for element aggregation");
 
     int64_t batch_rows;
     int64_t elem_start;
@@ -307,8 +489,10 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (MatchEmptyElements(match_type, threshold)) {
             bitset_view.set();
         }
-        ApplyStructRowValidity(
-            col_vec.get(), field_meta.get_id(), input, batch_rows);
+        if (row_validity_field_id.has_value()) {
+            ApplyRowValidity(
+                col_vec.get(), *row_validity_field_id, input, batch_rows);
+        }
         if (!has_offset_input_) {
             current_pos_ += batch_rows;
         }
@@ -411,18 +595,20 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         dispatch.template operator()<false>();
     }
 
-    ApplyStructRowValidity(
-        col_vec.get(), field_meta.get_id(), input, batch_rows);
+    if (row_validity_field_id.has_value()) {
+        ApplyRowValidity(
+            col_vec.get(), *row_validity_field_id, input, batch_rows);
+    }
     if (!has_offset_input_) {
         current_pos_ += batch_rows;
     }
 }
 
 void
-PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
-                                           FieldId field_id,
-                                           const OffsetVector* input,
-                                           int64_t batch_rows) {
+PhyMatchFilterExpr::ApplyRowValidity(ColumnVector* col_vec,
+                                     FieldId field_id,
+                                     const OffsetVector* input,
+                                     int64_t batch_rows) {
     TargetBitmapView value_view(col_vec->GetRawData(), col_vec->size());
     TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
     if (input != nullptr) {

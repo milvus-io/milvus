@@ -49,6 +49,90 @@
 namespace milvus {
 
 namespace exec {
+namespace {
+
+template <typename T, typename ValueType>
+struct BinaryRangeSubBatchExecutor {
+    bool lower_inclusive_;
+    bool upper_inclusive_;
+    const TargetBitmap& bitmap_input_;
+    size_t& processed_cursor_;
+
+    template <FilterType filter_type = FilterType::sequential>
+    void
+    operator()(const T* data,
+               ValidityView valid_data,
+               const int32_t* offsets,
+               const int size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res,
+               const ValueType& val1,
+               const ValueType& val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor_ += size;
+            return;
+        }
+        if (lower_inclusive_ && upper_inclusive_) {
+            BinaryRangeElementFunc<T, true, true, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input_,
+                 processed_cursor_,
+                 offsets);
+        } else if (lower_inclusive_ && !upper_inclusive_) {
+            BinaryRangeElementFunc<T, true, false, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input_,
+                 processed_cursor_,
+                 offsets);
+        } else if (!lower_inclusive_ && upper_inclusive_) {
+            BinaryRangeElementFunc<T, false, true, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input_,
+                 processed_cursor_,
+                 offsets);
+        } else {
+            BinaryRangeElementFunc<T, false, false, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input_,
+                 processed_cursor_,
+                 offsets);
+        }
+        // There is a batch operation in BinaryRangeElementFunc, so keep the
+        // batch intact and mask invalid entries after the batch operation.
+        if (valid_data) {
+            for (int i = 0; i < size; i++) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = (offsets) ? offsets[i] : i;
+                }
+                if (!valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
+        }
+        processed_cursor_ += size;
+    }
+};
+
+}  // namespace
 
 void
 PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
@@ -62,7 +146,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput((input != nullptr));
 
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    if (expr_->column_.element_level_ &&
+        expr_->column_.data_type_ != DataType::JSON) {
         data_type = expr_->column_.element_type_;
     }
     switch (data_type) {
@@ -175,8 +260,18 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                     lower_type));
                 }
             } else {
-                if (requires_precise_int64_comparison &&
-                    exec_path_ != ExprExecPath::JsonStats) {
+                if (is_numeric && expr_->column_.element_level_) {
+                    // Safe integer bounds use double so JSON integer and
+                    // floating elements share numeric comparison semantics.
+                    // Unsafe integer bounds stay int64 to preserve identity.
+                    const bool use_element_double =
+                        use_double || !requires_precise_int64_comparison;
+                    result =
+                        use_element_double
+                            ? ExecRangeVisitorImplForJson<double>(context)
+                            : ExecRangeVisitorImplForJson<int64_t>(context);
+                } else if (requires_precise_int64_comparison &&
+                           exec_path_ != ExprExecPath::JsonStats) {
                     result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
                 } else if (is_numeric && use_double) {
                     // Use double when either bound is float
@@ -659,17 +754,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
         "binary_range_json_bruteforce",
         [this](double us) { json_filter_bruteforce_latency_us_ += us; });
 
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
     if (!arg_inited_) {
@@ -680,6 +764,64 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     ValueType val1 = lower_arg_.GetValue<ValueType>();
     ValueType val2 = upper_arg_.GetValue<ValueType>();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+
+    if (expr_->column_.element_level_) {
+        AssertInfo(has_offset_input_ && input != nullptr,
+                   "JSON element-level binary range filtering requires row "
+                   "offsets");
+        TargetBitmap json_res;
+        TargetBitmap json_valid_res;
+
+        size_t processed_cursor = 0;
+        BinaryRangeSubBatchExecutor<ValueType, ValueType> execute_sub_batch{
+            lower_inclusive, upper_inclusive, bitmap_input, processed_cursor};
+
+        int64_t processed_size = 0;
+        FixedVector<ValueType> element_values;
+        FixedVector<bool> element_valid;
+        VisitJsonRowsByOffsets(input, [&](const Json& json, bool row_valid) {
+            auto elem_count = ExtractJsonElementValues<ValueType>(
+                json, row_valid, pointer, element_values, element_valid);
+            if (elem_count == 0) {
+                return;
+            }
+
+            auto old_size = json_res.size();
+            json_res.resize(old_size + elem_count, false);
+            json_valid_res.resize(old_size + elem_count, true);
+
+            TargetBitmapView res_view(json_res);
+            TargetBitmapView valid_res_view(json_valid_res);
+            execute_sub_batch.template operator()<FilterType::sequential>(
+                element_values.data(),
+                ValidityView::FromExpanded(element_valid.data()),
+                nullptr,
+                static_cast<int>(elem_count),
+                res_view + old_size,
+                valid_res_view + old_size,
+                val1,
+                val2);
+            processed_size += elem_count;
+        });
+        AssertInfo(processed_size == static_cast<int64_t>(json_res.size()),
+                   "internal error: expr processed JSON elements {} not "
+                   "equal result size {}",
+                   processed_size,
+                   json_res.size());
+        return std::make_shared<ColumnVector>(std::move(json_res),
+                                              std::move(json_valid_res));
+    }
+
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
@@ -1196,13 +1338,14 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
     }
 
     // JsonStats
-    if (CanUseJsonStatsAtInit()) {
+    if (!expr_->column_.element_level_ && CanUseJsonStatsAtInit()) {
         exec_path_ = ExprExecPath::JsonStats;
         return;
     }
 
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    if (expr_->column_.element_level_ &&
+        expr_->column_.data_type_ != DataType::JSON) {
         data_type = expr_->column_.element_type_;
     }
 
@@ -1274,7 +1417,8 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
 void
 PhyBinaryRangeFilterExpr::PrefetchRawData() {
     auto datatype = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    if (expr_->column_.element_level_ &&
+        expr_->column_.data_type_ != DataType::JSON) {
         datatype = expr_->column_.element_type_;
     }
 

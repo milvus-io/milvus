@@ -353,13 +353,19 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
     std::unique_lock lock(array_offsets_map_mutex_);
     auto schema = get_schema_snapshot();
 
-    // Group fields by struct_name
+    // Group struct subfields by struct_name; collect plain array fields.
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
+    std::vector<FieldId> plain_array_fields;
 
     for (const auto& [field_id, field_meta] : schema->get_fields()) {
         auto struct_name = GetStructNameForArrayField(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
+            continue;
+        }
+
+        if (field_meta.get_data_type() == DataType::ARRAY) {
+            plain_array_fields.push_back(field_id);
         }
     }
 
@@ -384,6 +390,14 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
             struct_name,
             field_ids.size(),
             representative_field.get());
+    }
+
+    // Plain array field: own ArrayOffsetsGrowing, field is its own representative.
+    for (auto field_id : plain_array_fields) {
+        array_offsets_map_[field_id] = std::make_shared<ArrayOffsetsGrowing>();
+        struct_representative_fields_.insert(field_id);
+        LOG_INFO("Created ArrayOffsetsGrowing for plain array field_id={}",
+                 field_id.get());
     }
 }
 
@@ -2712,7 +2726,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
             }
-            EnsureArrayOffsetsForStructField(field_meta, row_count, *sch);
+            EnsureArrayOffsetsForField(field_meta, row_count, *sch);
         }
         std::atomic_store_explicit(
             &schema_, std::move(sch), std::memory_order_release);
@@ -2825,7 +2839,7 @@ SegmentGrowingImpl::FillAbsentFields() {
                 insert_record_.is_valid_data_exist(field_id) &&
                 insert_record_.get_valid_data(field_id)->empty()) {
                 fill_empty_field(field_meta);
-                EnsureArrayOffsetsForStructField(
+                EnsureArrayOffsetsForField(
                     field_meta, insert_record_.row_count(), *schema);
             }
             continue;
@@ -2834,7 +2848,7 @@ SegmentGrowingImpl::FillAbsentFields() {
         // so we must check data empty here
         if (insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
-            EnsureArrayOffsetsForStructField(
+            EnsureArrayOffsetsForField(
                 field_meta, insert_record_.row_count(), *schema);
         }
     }
@@ -3172,34 +3186,41 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
 }
 
 void
-SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
-    const FieldMeta& field_meta, int64_t row_count) {
+SegmentGrowingImpl::EnsureArrayOffsetsForField(const FieldMeta& field_meta,
+                                               int64_t row_count) {
     auto schema = get_schema_snapshot();
-    EnsureArrayOffsetsForStructField(field_meta, row_count, *schema);
+    EnsureArrayOffsetsForField(field_meta, row_count, *schema);
 }
 
 void
-SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
-    const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
+SegmentGrowingImpl::EnsureArrayOffsetsForField(const FieldMeta& field_meta,
+                                               int64_t row_count,
+                                               const Schema& schema) {
+    const auto data_type = field_meta.get_data_type();
     auto struct_name = GetStructNameForArrayField(field_meta);
-    if (!struct_name.has_value()) {
+    if (data_type != DataType::ARRAY && !struct_name.has_value()) {
         return;
     }
 
     std::unique_lock lock(array_offsets_map_mutex_);
 
     std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
-    for (const auto& [field_id, offsets] : array_offsets_map_) {
-        auto field_it = schema.get_fields().find(field_id);
-        if (field_it == schema.get_fields().end()) {
-            continue;
-        }
+    if (auto it = array_offsets_map_.find(field_meta.get_id());
+        it != array_offsets_map_.end()) {
+        array_offsets = it->second;
+    } else if (struct_name.has_value()) {
+        for (const auto& [field_id, offsets] : array_offsets_map_) {
+            auto field_it = schema.get_fields().find(field_id);
+            if (field_it == schema.get_fields().end()) {
+                continue;
+            }
 
-        auto existing_struct_name =
-            GetStructNameForArrayField(field_it->second);
-        if (existing_struct_name == struct_name) {
-            array_offsets = offsets;
-            break;
+            auto existing_struct_name =
+                GetStructNameForArrayField(field_it->second);
+            if (existing_struct_name == struct_name) {
+                array_offsets = offsets;
+                break;
+            }
         }
     }
 
@@ -3210,7 +3231,7 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 
     auto current_row_count = array_offsets->GetRowCount();
     AssertInfo(current_row_count <= row_count,
-               "struct array offsets row count {} exceeds segment row count "
+               "array offsets row count {} exceeds segment row count "
                "{} for field {}",
                current_row_count,
                row_count,

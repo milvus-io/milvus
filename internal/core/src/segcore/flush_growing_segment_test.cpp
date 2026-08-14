@@ -21,17 +21,17 @@
 #include <vector>
 
 #include "common/IndexMeta.h"
-#include "segcore/default_fs.h"
-#include "segcore/segment_c.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "test_utils/c_api_test_utils.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/SegcoreConfigUtils.h"
-#include "storage/Util.h"
-#include "storage/loon_ffi/property_singleton.h"
 #include "knowhere/index/index_factory.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/default_fs.h"
+#include "segcore/segment_c.h"
+#include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "test_utils/c_api_test_utils.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "milvus-storage/transaction/transaction.h"
 
 using namespace milvus;

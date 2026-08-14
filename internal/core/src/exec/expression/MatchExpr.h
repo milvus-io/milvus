@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -84,13 +86,29 @@ class PhyMatchFilterExpr : public Expr {
     }
 
  private:
+    // Shared element -> row aggregation for plain and struct arrays. Their
+    // row-to-element mapping is owned by the segment.
     void
-    ApplyStructRowValidity(ColumnVector* col_vec,
-                           FieldId field_id,
-                           const OffsetVector* input,
-                           int64_t batch_rows);
+    EvalWithOffsets(
+        EvalCtx& context,
+        VectorPtr& result,
+        std::shared_ptr<const IArrayOffsets> array_offsets,
+        std::optional<FieldId> row_validity_field_id = std::nullopt);
 
- private:
+    // JSON raw-data evaluation: iterate JSON rows one at a time, evaluate the inner
+    // predicate through the normal Eval framework, then aggregate that row's
+    // element-level bitmap with MATCH semantics.
+    void
+    EvalJsonBrute(EvalCtx& context, VectorPtr& result);
+
+    bool
+    IsValidJsonArrayRow(int32_t row_id, const std::string& pointer) const;
+
+    void
+    ApplyRowValidity(ColumnVector* col_vec,
+                     FieldId field_id,
+                     const OffsetVector* input,
+                     int64_t batch_rows);
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
     int64_t active_count_;

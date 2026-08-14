@@ -744,7 +744,11 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         }
 
         auto data_type = expr_->column_.data_type_;
-        if (expr_->column_.element_level_) {
+        // JSON keeps DataType::JSON here so the arith-index gate below
+        // consistently rejects it; only non-JSON element-level fields get
+        // rewritten.
+        if (expr_->column_.element_level_ &&
+            expr_->column_.data_type_ != DataType::JSON) {
             data_type = expr_->column_.element_type_;
         }
 
