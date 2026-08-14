@@ -33,8 +33,9 @@ matches `milvus` at distance 1.
 
 Milvus BM25 currently hashes analyzed terms into `uint32` dimensions. This is
 sufficient for scoring but loses the enumerable string vocabulary required for
-fuzzy expansion. This design therefore adds a field-level Segment FST that
-preserves analyzed terms and supports automaton-based enumeration.
+fuzzy expansion. This design therefore adds a Segment FST for each required
+text field. A fuzzy-enabled BM25 Function identifies which input field must
+preserve analyzed terms for automaton-based enumeration.
 
 The user continues to call the normal BM25 search API. Fuzzy BM25 is enabled
 when `fuzzy_max_edit_distance` is greater than zero. Fuzzy expansion happens
@@ -121,36 +122,36 @@ explicitly bound to sealed-segment FST generations.
 
 ## 4. User interface
 
-### 4.1 Field capability
+### 4.1 Function capability
 
-The BM25 input text field uses the temporary property:
+The BM25 Function uses the optional parameter:
 
 ```text
-enable_analyzer = true
-enable_fuzzy_bm25 = true
+function.type = BM25
+function.params = {"enable_fuzzy": "true"}
 ```
 
-`enable_fuzzy_bm25` is a field property rather than a BM25 Function parameter
-because the Segment FST belongs to the analyzed text field:
+`enable_fuzzy` belongs to the BM25 Function because fuzzy expansion is a BM25
+query capability. The Function binds that capability to its input text field,
+whose analyzed terms must be preserved in Segment FSTs.
 
-- analyzer configuration and emitted terms are field-scoped;
-- multiple consumers can reuse the same field vocabulary;
-- the future Segment Text Index is also field-scoped;
-- placing the option on a Function could duplicate the same vocabulary for
-  multiple Functions over one input field.
+The physical artifact remains field-scoped. If multiple fuzzy-enabled BM25
+Functions use the same input field, Milvus builds and stores only one Segment
+FST for that field. This also preserves the path toward a shared field-scoped
+Segment Text Index.
 
-The field must be `VARCHAR` or `TEXT`, enable analysis, and be used as a BM25
-input field.
+The Function must have the normal BM25 shape. Its input field must be `VARCHAR`
+or `TEXT` and set `enable_analyzer = true`. Omission or `false` keeps fuzzy BM25
+disabled and does not require Segment FST maintenance.
 
-The first implementation may reject online changes to this property because
-existing segments do not yet have complete Segment FSTs. This is a rollout
-limitation, not the permanent API. A follow-up PR should support online
-`false -> true` by building and publishing complete FSTs for existing segments
-before exposing the capability. The disable path must also define cleanup and
-in-flight-query behavior.
+The first implementation may reject online changes to this Function parameter
+because existing segments do not yet have complete Segment FSTs. A follow-up PR
+should support `false -> true` by building and publishing complete FSTs for
+existing segments before exposing the capability. The disable path must also
+define cleanup and in-flight-query behavior.
 
 Long term, `enable_match` or a Match Index definition should own construction
-of the shared Segment Text Index, making `enable_fuzzy_bm25` unnecessary.
+of the shared Segment Text Index, making `enable_fuzzy` unnecessary.
 
 ### 4.2 Search options
 
@@ -176,9 +177,9 @@ search_params = {
 }
 ```
 
-A positive edit distance is accepted only when the BM25 input field has the
-fuzzy capability enabled. `fuzzy_max_expansions` and `fuzzy_prefix_length` do
-not independently enable fuzzy BM25.
+A positive edit distance is accepted only when the BM25 Function producing the
+searched `anns_field` has `enable_fuzzy = true`. `fuzzy_max_expansions` and
+`fuzzy_prefix_length` do not independently enable fuzzy BM25.
 
 ## 5. Segment FST lifecycle
 
@@ -331,7 +332,7 @@ expose global generation, coverage, and lag.
 
 ### Phase 1: Segment FST and exact fuzzy BM25
 
-- Add the temporary field capability and search options.
+- Add the BM25 Function capability and search options.
 - Persist analyzed terms and build Segment FSTs across sync, compaction, import,
   load, and recovery.
 - Add sealed Worker expansion and Delegator-side global rewrite/IDF.
@@ -345,7 +346,7 @@ expose global generation, coverage, and lag.
 ### Phase 3: operational improvements
 
 - Add `global_only` mode.
-- Support online alteration of the field capability with backfill and cleanup.
+- Support online alteration of `enable_fuzzy` with backfill and cleanup.
 - Converge fuzzy BM25 and Tantivy text match on a shared Segment Text Index.
 
 ## 9. Correctness requirements
@@ -361,8 +362,9 @@ expose global generation, coverage, and lag.
 
 ## 10. Compatibility, testing, and observability
 
-Existing fields default to fuzzy disabled. Until online backfill is available,
-only fields created with the capability enabled have complete Segment FSTs.
+Existing BM25 Functions default to fuzzy disabled. Until online backfill is
+available, only Functions created with `enable_fuzzy = true` require complete
+Segment FSTs for their input fields.
 Mixed-version clusters must prevent fuzzy-enabled collections from running on
 nodes that do not understand the term sidecar, FST metadata, or expansion RPC.
 
