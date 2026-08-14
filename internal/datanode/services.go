@@ -736,13 +736,13 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 // legacyAvailableSlots folds the guard's two-dimensional state into the
 // scalar an old DataCoord still reads.
 //
-// It takes the worse of the two utilisations on purpose: the folded value
+// It takes the worse of the two utilizations on purpose: the folded value
 // must be conservative, so an old coordinator sees the node as full earlier
 // than it truly is, never later. legacyTotal is left at whatever
 // CalculateNodeSlots reports so the old coordinator's own arithmetic keeps
 // its established meaning.
 //
-// Two states read as a full node (0) regardless of the utilisation
+// Two states read as a full node (0) regardless of the utilization
 // arithmetic:
 //   - Frozen: the watermark loop has stopped admission outright.
 //   - ExclusiveTaskID != 0: an oversized task is running alone and nothing
@@ -758,20 +758,55 @@ func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
 		return 0
 	}
 
-	utilisation := 0.0
+	utilization := 0.0
 	if snap.Total.CPU > 0 {
-		utilisation = snap.Reserved.CPU / snap.Total.CPU
+		utilization = snap.Reserved.CPU / snap.Total.CPU
 	}
 	if snap.Total.Memory > 0 {
-		if memUtil := float64(snap.Reserved.Memory) / float64(snap.Total.Memory); memUtil > utilisation {
-			utilisation = memUtil
+		if memUtil := float64(snap.Reserved.Memory) / float64(snap.Total.Memory); memUtil > utilization {
+			utilization = memUtil
 		}
 	}
-	if utilisation > 1 {
-		utilisation = 1
+	if utilization > 1 {
+		utilization = 1
 	}
 
-	available := int64(float64(legacyTotal) * (1 - utilisation))
+	available := int64(float64(legacyTotal) * (1 - utilization))
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
+// queuedSlots is what the three executors have accepted but the ledger does not
+// know about: their own counters are incremented at ENQUEUE, the ledger only at
+// admission.
+func (node *DataNode) queuedSlots() (indexStats, compaction, imports int64) {
+	return node.taskScheduler.TaskQueue.GetUsingSlot(),
+		node.compactionExecutor.Slots(),
+		node.importScheduler.Slots()
+}
+
+// availableSlots is the scalar this node reports to DataCoord.
+//
+// It is the smaller of two answers, and needs both. legacyAvailableSlots folds
+// the ledger, which is the memory-aware half and the reason this branch exists
+// -- but the ledger counts only ADMITTED tasks. A node holding five hundred
+// queued compactions that have not been admitted yet has an empty ledger and
+// would advertise itself completely free, so DataCoord's water-filling would
+// keep choosing it and one node would hoard the whole cluster's work. The
+// compaction executor's taskCh is capped (maxTaskQueueNum), and once it fills,
+// Enqueue blocks inside the gRPC handler.
+//
+// The executors' own counters are the pre-branch answer to that: they are
+// charged at enqueue and released at completion, so they see the queue. They
+// are not memory-aware, which is why they cannot be the only input either.
+// Taking the minimum keeps whichever is currently the more conservative.
+func availableSlots(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) int64 {
+	available := legacyAvailableSlots(snap, legacyTotal)
+	if queued := legacyTotal - indexStatsUsed - compactionUsed - importUsed; queued < available {
+		available = queued
+	}
 	if available < 0 {
 		available = 0
 	}
@@ -787,7 +822,8 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 
 	snap := resource.GetGuard().Snapshot()
 	legacyTotal := index.CalculateNodeSlots()
-	available := legacyAvailableSlots(snap, legacyTotal)
+	indexStatsUsed, compactionUsed, importUsed := node.queuedSlots()
+	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
 	// A sustained watermark freeze can leave tasks parked in Acquire
 	// indefinitely (Acquire only returns on ctx cancellation), reporting
@@ -812,12 +848,6 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
 			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	}
-
-	var (
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
-	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(available))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(legacyTotal))
