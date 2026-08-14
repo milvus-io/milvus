@@ -677,16 +677,15 @@ class BinaryRangeFilterExpr : public ITypeFilterExpr {
 
 class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
  public:
-    BinaryArithOpEvalRangeExpr(
-        const ColumnInfo& column,
-        const proto::plan::OpType op_type,
-        const proto::plan::ArithOpType arith_op_type,
-        const proto::plan::GenericValue value,
-        const proto::plan::GenericValue right_operand,
-        const proto::plan::ArithOpType arith_op_type2 =
-            proto::plan::ArithOpType::Unknown,
-        const proto::plan::GenericValue right_operand2 =
-            proto::plan::GenericValue())
+    BinaryArithOpEvalRangeExpr(const ColumnInfo& column,
+                               const proto::plan::OpType op_type,
+                               const proto::plan::ArithOpType arith_op_type,
+                               const proto::plan::GenericValue value,
+                               const proto::plan::GenericValue right_operand,
+                               const proto::plan::ArithOpType arith_op_type2 =
+                                   proto::plan::ArithOpType::Unknown,
+                               const proto::plan::GenericValue right_operand2 =
+                                   proto::plan::GenericValue())
         : column_(column),
           op_type_(op_type),
           arith_op_type_(arith_op_type),

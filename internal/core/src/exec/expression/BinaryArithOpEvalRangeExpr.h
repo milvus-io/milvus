@@ -734,10 +734,9 @@ ApplyArithOp(HighPrecisonType v, HighPrecisonType right_operand) {
     } else if constexpr (arith_op == proto::plan::ArithOpType::Shr) {
         return HighPrecisonType(long(v) >> long(right_operand));
     } else {
-        ThrowInfo(
-            UnexpectedError,
-            fmt::format("unsupported arith type:{} for ApplyArithOp",
-                        arith_op));
+        ThrowInfo(UnexpectedError,
+                  fmt::format("unsupported arith type:{} for ApplyArithOp",
+                              arith_op));
         return HighPrecisonType();
     }
 }
@@ -814,8 +813,7 @@ struct ArithOpElementFunc2 {
             for (int i = 0; i < size; ++i) {
                 auto offset = (offsets) ? offsets[i] : i;
                 auto intermediate = ApplyArithOp<HighPrecisonType, arith_op1>(
-                    static_cast<HighPrecisonType>(src[offset]),
-                    right_operand1);
+                    static_cast<HighPrecisonType>(src[offset]), right_operand1);
                 auto result = ApplyArithOp<HighPrecisonType, arith_op2>(
                     intermediate, right_operand2);
                 res[i] =
@@ -827,7 +825,14 @@ struct ArithOpElementFunc2 {
         // Generic scalar two-op path (no dedicated SIMD kernel yet — see
         // bitset::inplace_arith_compare2; true fusion for chained
         // Add/Sub/Mul/Div is a possible follow-up).
-        res.template inplace_arith_compare2<T, arith_op1, arith_op2, cmp_op>(
+        constexpr auto cmp_op_cvt = CmpOpHelper<cmp_op>::op;
+        constexpr auto arith_op1_cvt = ArithOpHelper<arith_op1>::op;
+        constexpr auto arith_op2_cvt = ArithOpHelper<arith_op2>::op;
+
+        res.template inplace_arith_compare2<T,
+                                            arith_op1_cvt,
+                                            arith_op2_cvt,
+                                            cmp_op_cvt>(
             src, right_operand1, right_operand2, val, size);
     }
 };

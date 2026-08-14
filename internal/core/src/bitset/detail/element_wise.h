@@ -983,14 +983,14 @@ struct ElementWiseBitsetPolicy {
                       const ArithHighPrecisionType<T>& right_operand2,
                       const ArithHighPrecisionType<T>& value,
                       const size_t size) {
-        op_func(data,
-                start,
-                size,
-                [src, right_operand1, right_operand2, value](
-                    const size_t bit_idx) {
-                    return ArithCompareOperator2<AOp1, AOp2, CmpOp>::compare(
-                        src[bit_idx], right_operand1, right_operand2, value);
-                });
+        op_func(
+            data,
+            start,
+            size,
+            [src, right_operand1, right_operand2, value](const size_t bit_idx) {
+                return ArithCompareOperator2<AOp1, AOp2, CmpOp>::compare(
+                    src[bit_idx], right_operand1, right_operand2, value);
+            });
     }
 
     //

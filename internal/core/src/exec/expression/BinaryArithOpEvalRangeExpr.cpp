@@ -233,9 +233,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     auto has_second_op = expr_->has_second_op();
     auto value = value_arg_.GetValue<ValueType>();
     auto right_operand = right_operand_arg_.GetValue<ValueType>();
-    auto right_operand2 = has_second_op
-                              ? right_operand2_arg_.GetValue<ValueType>()
-                              : ValueType();
+    auto right_operand2 =
+        has_second_op ? right_operand2_arg_.GetValue<ValueType>() : ValueType();
 
     // Validate divisor for division/modulo operations
     if ((arith_type == proto::plan::ArithOpType::Div ||
@@ -263,58 +262,58 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
 // after extraction, before 'cmp' (which by then references op2's dispatch
 // via the arith_type/right_operand aliasing done at the top of the lambda
 // body) runs — see ApplyJsonArithOp above.
-#define BinaryArithRangeJSONCompare(cmp)                                    \
-    do {                                                                    \
-        for (size_t i = 0; i < size; ++i) {                                 \
-            auto offset = i;                                                \
-            if constexpr (filter_type == FilterType::random) {              \
-                offset = (offsets) ? offsets[i] : i;                        \
-            }                                                               \
-            if (valid_data != nullptr && !valid_data[offset]) {             \
-                res[i] = false;                                             \
-                valid_res[i] = false;                                       \
-                continue;                                                   \
-            }                                                               \
-            if constexpr (std::is_same_v<GetType, int64_t>) {               \
-                auto x_num = data[offset].at_numeric(pointer);              \
-                if (x_num.error()) {                                        \
-                    res[i] = false;                                         \
-                    valid_res[i] = false;                                   \
-                    continue;                                               \
-                }                                                           \
-                auto n = x_num.value();                                     \
-                if (n.is_int64()) {                                         \
-                    auto json_v = n.get_int64();                            \
-                    if (has_second_op) {                                    \
-                        json_v = ApplyJsonArithOp(                          \
-                            arith_type1, json_v, right_operand1);           \
-                    }                                                       \
-                    res[i] = (cmp);                                         \
-                } else {                                                    \
-                    auto json_v = n.is_uint64()                             \
-                                      ? static_cast<double>(n.get_uint64()) \
-                                      : n.get_double();                     \
-                    if (has_second_op) {                                    \
-                        json_v = ApplyJsonArithOp(                          \
-                            arith_type1, json_v, right_operand1);           \
-                    }                                                       \
-                    res[i] = (cmp);                                         \
-                }                                                           \
-            } else {                                                        \
-                auto x = data[offset].template at<GetType>(pointer);        \
-                if (x.error()) {                                            \
-                    res[i] = false;                                         \
-                    valid_res[i] = false;                                   \
-                    continue;                                               \
-                }                                                           \
-                auto json_v = x.value();                                    \
-                if (has_second_op) {                                        \
-                    json_v = ApplyJsonArithOp(                              \
-                        arith_type1, json_v, right_operand1);               \
-                }                                                           \
-                res[i] = (cmp);                                             \
-            }                                                               \
-        }                                                                   \
+#define BinaryArithRangeJSONCompare(cmp)                                       \
+    do {                                                                       \
+        for (size_t i = 0; i < size; ++i) {                                    \
+            auto offset = i;                                                   \
+            if constexpr (filter_type == FilterType::random) {                 \
+                offset = (offsets) ? offsets[i] : i;                           \
+            }                                                                  \
+            if (valid_data != nullptr && !valid_data[offset]) {                \
+                res[i] = false;                                                \
+                valid_res[i] = false;                                          \
+                continue;                                                      \
+            }                                                                  \
+            if constexpr (std::is_same_v<GetType, int64_t>) {                  \
+                auto x_num = data[offset].at_numeric(pointer);                 \
+                if (x_num.error()) {                                           \
+                    res[i] = false;                                            \
+                    valid_res[i] = false;                                      \
+                    continue;                                                  \
+                }                                                              \
+                auto n = x_num.value();                                        \
+                if (n.is_int64()) {                                            \
+                    auto json_v = n.get_int64();                               \
+                    if (has_second_op) {                                       \
+                        json_v = ApplyJsonArithOp(                             \
+                            arith_type1, json_v, right_operand1);              \
+                    }                                                          \
+                    res[i] = (cmp);                                            \
+                } else {                                                       \
+                    auto json_v = n.is_uint64()                                \
+                                      ? static_cast<double>(n.get_uint64())    \
+                                      : n.get_double();                        \
+                    if (has_second_op) {                                       \
+                        json_v = ApplyJsonArithOp(                             \
+                            arith_type1, json_v, right_operand1);              \
+                    }                                                          \
+                    res[i] = (cmp);                                            \
+                }                                                              \
+            } else {                                                           \
+                auto x = data[offset].template at<GetType>(pointer);           \
+                if (x.error()) {                                               \
+                    res[i] = false;                                            \
+                    valid_res[i] = false;                                      \
+                    continue;                                                  \
+                }                                                              \
+                auto json_v = x.value();                                       \
+                if (has_second_op) {                                           \
+                    json_v =                                                   \
+                        ApplyJsonArithOp(arith_type1, json_v, right_operand1); \
+                }                                                              \
+                res[i] = (cmp);                                                \
+            }                                                                  \
+        }                                                                      \
     } while (false)
 
 #define BinaryArithRangeJONCompareArrayLength(cmp)              \
@@ -343,10 +342,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     } while (false)
 
     auto execute_sub_batch =
-        [op_type,
-         arith_type1 = arith_type,
-         arith_type2,
-         has_second_op]<FilterType filter_type = FilterType::sequential>(
+        [ op_type, arith_type1 = arith_type, arith_type2,
+          has_second_op ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -844,9 +841,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     auto has_second_op = expr_->has_second_op();
     auto value = value_arg_.GetValue<ValueType>();
     auto right_operand = right_operand_arg_.GetValue<ValueType>();
-    auto right_operand2 = has_second_op
-                              ? right_operand2_arg_.GetValue<ValueType>()
-                              : ValueType();
+    auto right_operand2 =
+        has_second_op ? right_operand2_arg_.GetValue<ValueType>() : ValueType();
 
     // Validate divisor for division/modulo operations
     if ((arith_type == proto::plan::ArithOpType::Div ||
@@ -866,30 +862,29 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     }
 
 // See BinaryArithRangeJSONCompare above for the has_second_op pre-transform.
-#define BinaryArithRangeArrayCompare(cmp)                       \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            if (index >= data[offset].length()) {               \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            auto value = data[offset].get_data<GetType>(index); \
-            if (has_second_op) {                                \
-                value =                                         \
-                    ApplyJsonArithOp(arith_type1, value, right_operand1); \
-            }                                                   \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeArrayCompare(cmp)                                     \
+    do {                                                                      \
+        for (size_t i = 0; i < size; ++i) {                                   \
+            auto offset = i;                                                  \
+            if constexpr (filter_type == FilterType::random) {                \
+                offset = (offsets) ? offsets[i] : i;                          \
+            }                                                                 \
+            if (valid_data != nullptr && !valid_data[offset]) {               \
+                res[i] = false;                                               \
+                valid_res[i] = false;                                         \
+                continue;                                                     \
+            }                                                                 \
+            if (index >= data[offset].length()) {                             \
+                res[i] = false;                                               \
+                valid_res[i] = false;                                         \
+                continue;                                                     \
+            }                                                                 \
+            auto value = data[offset].get_data<GetType>(index);               \
+            if (has_second_op) {                                              \
+                value = ApplyJsonArithOp(arith_type1, value, right_operand1); \
+            }                                                                 \
+            res[i] = (cmp);                                                   \
+        }                                                                     \
     } while (false)
 
 #define BinaryArithRangeArrayLengthCompate(cmp)                 \
@@ -908,10 +903,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     } while (false)
 
     auto execute_sub_batch =
-        [op_type,
-         arith_type1 = arith_type,
-         arith_type2,
-         has_second_op]<FilterType filter_type = FilterType::sequential>(
+        [ op_type, arith_type1 = arith_type, arith_type2,
+          has_second_op ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -1503,9 +1496,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto value = value_arg_.GetValue<HighPrecisionType>();
     auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto has_second_op = expr_->has_second_op();
-    auto right_operand2 = has_second_op
-                              ? right_operand2_arg_.GetValue<HighPrecisionType>()
-                              : HighPrecisionType();
+    auto right_operand2 =
+        has_second_op ? right_operand2_arg_.GetValue<HighPrecisionType>()
+                      : HighPrecisionType();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto arith_type2 = expr_->arith_op_type2_;
@@ -1516,72 +1509,74 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
 // macro (mirroring the codebase's own DECLARE_PARTIAL_* pattern in the
 // bitset platform headers) rather than hand-authoring the full
 // (cmp x arith x arith) combinatorial switch by hand.
-#define DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, ARITH_OP2)             \
-    case proto::plan::ArithOpType::ARITH_OP2: {                             \
-        ArithOpIndexFunc2<T,                                                \
-                          proto::plan::OpType::CMP_OP,                      \
-                          proto::plan::ArithOpType::ARITH_OP1,              \
-                          proto::plan::ArithOpType::ARITH_OP2,              \
-                          filter_type>                                      \
-            func;                                                           \
-        res = std::move(func(index_ptr,                                    \
-                             sub_batch_size,                                \
-                             value,                                         \
-                             right_operand,                                 \
-                             right_operand2,                                \
-                             offsets));                                     \
-        break;                                                              \
+#define DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, ARITH_OP2) \
+    case proto::plan::ArithOpType::ARITH_OP2: {                  \
+        ArithOpIndexFunc2<T,                                     \
+                          proto::plan::OpType::CMP_OP,           \
+                          proto::plan::ArithOpType::ARITH_OP1,   \
+                          proto::plan::ArithOpType::ARITH_OP2,   \
+                          filter_type>                           \
+            func;                                                \
+        res = std::move(func(index_ptr,                          \
+                             sub_batch_size,                     \
+                             value,                              \
+                             right_operand,                      \
+                             right_operand2,                     \
+                             offsets));                          \
+        break;                                                   \
     }
-#define DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, ARITH_OP1)                      \
-    case proto::plan::ArithOpType::ARITH_OP1: {                             \
-        switch (arith_type2) {                                              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Add)              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Sub)              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Mul)              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Div)              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Mod)              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitAnd)           \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitOr)            \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitXor)           \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Shl)              \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Shr)              \
-            default:                                                        \
-                ThrowInfo(UnexpectedError,                                  \
-                          fmt::format("unsupported second arith type for "  \
-                                      "binary arithmetic eval expr: {}",    \
-                                      arith_type2));                        \
-        }                                                                    \
-        break;                                                              \
+#define DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, ARITH_OP1)                    \
+    case proto::plan::ArithOpType::ARITH_OP1: {                            \
+        switch (arith_type2) {                                             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Add)             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Sub)             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Mul)             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Div)             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Mod)             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitAnd)          \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitOr)           \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitXor)          \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Shl)             \
+            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Shr)             \
+            default:                                                       \
+                ThrowInfo(UnexpectedError,                                 \
+                          fmt::format("unsupported second arith type for " \
+                                      "binary arithmetic eval expr: {}",   \
+                                      arith_type2));                       \
+        }                                                                  \
+        break;                                                             \
     }
-#define DISPATCH_ARITH2_INDEX_CMP(CMP_OP)                                    \
-    case proto::plan::OpType::CMP_OP: {                                     \
-        switch (arith_type) {                                               \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Add)                       \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Sub)                       \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Mul)                       \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Div)                       \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Mod)                       \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitAnd)                    \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitOr)                     \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitXor)                    \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Shl)                       \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Shr)                       \
-            default:                                                        \
-                ThrowInfo(UnexpectedError,                                  \
-                          fmt::format("unsupported arith type for binary "  \
-                                      "arithmetic eval expr: {}",           \
-                                      arith_type));                         \
-        }                                                                    \
-        break;                                                              \
+#define DISPATCH_ARITH2_INDEX_CMP(CMP_OP)                                  \
+    case proto::plan::OpType::CMP_OP: {                                    \
+        switch (arith_type) {                                              \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Add)                      \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Sub)                      \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Mul)                      \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Div)                      \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Mod)                      \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitAnd)                   \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitOr)                    \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitXor)                   \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Shl)                      \
+            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Shr)                      \
+            default:                                                       \
+                ThrowInfo(UnexpectedError,                                 \
+                          fmt::format("unsupported arith type for binary " \
+                                      "arithmetic eval expr: {}",          \
+                                      arith_type));                        \
+        }                                                                  \
+        break;                                                             \
     }
 
     auto execute_sub_batch =
-        [op_type,
-         arith_type,
-         arith_type2,
-         has_second_op,
-         right_operand2,
-         sub_batch_size]<FilterType filter_type = FilterType::sequential>(
+        [
+            op_type,
+            arith_type,
+            arith_type2,
+            has_second_op,
+            right_operand2,
+            sub_batch_size
+        ]<FilterType filter_type = FilterType::sequential>(
             Index * index_ptr,
             HighPrecisionType value,
             HighPrecisionType right_operand,
@@ -2518,80 +2513,71 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     auto value = value_arg_.GetValue<HighPrecisionType>();
     auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto has_second_op = expr_->has_second_op();
-    auto right_operand2 = has_second_op
-                              ? right_operand2_arg_.GetValue<HighPrecisionType>()
-                              : HighPrecisionType();
+    auto right_operand2 =
+        has_second_op ? right_operand2_arg_.GetValue<HighPrecisionType>()
+                      : HighPrecisionType();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto arith_type2 = expr_->arith_op_type2_;
 
 // See ExecRangeVisitorImplForIndex above for why this is macro-generated.
-#define DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, ARITH_OP2)              \
-    case proto::plan::ArithOpType::ARITH_OP2: {                             \
-        ArithOpElementFunc2<T,                                              \
-                            proto::plan::OpType::CMP_OP,                    \
-                            proto::plan::ArithOpType::ARITH_OP1,            \
-                            proto::plan::ArithOpType::ARITH_OP2,            \
-                            filter_type>                                    \
-            func;                                                           \
-        func(data,                                                          \
-             size,                                                          \
-             value,                                                         \
-             right_operand,                                                 \
-             right_operand2,                                                \
-             res,                                                           \
-             offsets);                                                      \
-        break;                                                              \
+#define DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, ARITH_OP2)               \
+    case proto::plan::ArithOpType::ARITH_OP2: {                               \
+        ArithOpElementFunc2<T,                                                \
+                            proto::plan::OpType::CMP_OP,                      \
+                            proto::plan::ArithOpType::ARITH_OP1,              \
+                            proto::plan::ArithOpType::ARITH_OP2,              \
+                            filter_type>                                      \
+            func;                                                             \
+        func(data, size, value, right_operand, right_operand2, res, offsets); \
+        break;                                                                \
     }
-#define DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, ARITH_OP1)                       \
-    case proto::plan::ArithOpType::ARITH_OP1: {                             \
-        switch (arith_type2) {                                              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Add)               \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Sub)               \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Mul)               \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Div)               \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Mod)               \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitAnd)            \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitOr)             \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitXor)            \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Shl)               \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Shr)               \
-            default:                                                        \
-                ThrowInfo(UnexpectedError,                                  \
-                          fmt::format("unsupported second arith type for "  \
-                                      "binary arithmetic eval expr: {}",    \
-                                      arith_type2));                        \
-        }                                                                    \
-        break;                                                              \
+#define DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, ARITH_OP1)                     \
+    case proto::plan::ArithOpType::ARITH_OP1: {                            \
+        switch (arith_type2) {                                             \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Add)              \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Sub)              \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Mul)              \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Div)              \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Mod)              \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitAnd)           \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitOr)            \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitXor)           \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Shl)              \
+            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Shr)              \
+            default:                                                       \
+                ThrowInfo(UnexpectedError,                                 \
+                          fmt::format("unsupported second arith type for " \
+                                      "binary arithmetic eval expr: {}",   \
+                                      arith_type2));                       \
+        }                                                                  \
+        break;                                                             \
     }
-#define DISPATCH_ARITH2_DATA_CMP(CMP_OP)                                     \
-    case proto::plan::OpType::CMP_OP: {                                     \
-        switch (arith_type) {                                               \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Add)                        \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Sub)                        \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Mul)                        \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Div)                        \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Mod)                        \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitAnd)                     \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitOr)                      \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitXor)                     \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Shl)                        \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Shr)                        \
-            default:                                                        \
-                ThrowInfo(UnexpectedError,                                  \
-                          fmt::format("unsupported arith type for binary "  \
-                                      "arithmetic eval expr: {}",           \
-                                      arith_type));                         \
-        }                                                                    \
-        break;                                                              \
+#define DISPATCH_ARITH2_DATA_CMP(CMP_OP)                                   \
+    case proto::plan::OpType::CMP_OP: {                                    \
+        switch (arith_type) {                                              \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Add)                       \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Sub)                       \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Mul)                       \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Div)                       \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Mod)                       \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitAnd)                    \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitOr)                     \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitXor)                    \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Shl)                       \
+            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Shr)                       \
+            default:                                                       \
+                ThrowInfo(UnexpectedError,                                 \
+                          fmt::format("unsupported arith type for binary " \
+                                      "arithmetic eval expr: {}",          \
+                                      arith_type));                        \
+        }                                                                  \
+        break;                                                             \
     }
 
     auto execute_sub_batch =
-        [op_type,
-         arith_type,
-         arith_type2,
-         has_second_op,
-         right_operand2]<FilterType filter_type = FilterType::sequential>(
+        [ op_type, arith_type, arith_type2, has_second_op,
+          right_operand2 ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -2622,619 +2608,689 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             // Shared tail (valid-mask application) below still needs to run;
             // fall through instead of returning early.
         } else {
-        switch (op_type) {
-            case proto::plan::OpType::Equal: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Add,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
+            switch (op_type) {
+                case proto::plan::OpType::Equal: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Add,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Sub,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Mul,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Div,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Mod,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::BitAnd,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::BitOr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::BitXor,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shl: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Shl,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::Equal,
+                                               proto::plan::ArithOpType::Shr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Sub,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Mul,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Div,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Mod,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::BitAnd,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::BitOr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::BitXor,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shl: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Shl,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::Equal,
-                                           proto::plan::ArithOpType::Shr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::NotEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Add,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
+                case proto::plan::OpType::NotEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Add,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Sub,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Mul,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Div,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Mod,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::BitAnd,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::BitOr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::BitXor,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shl: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Shl,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::NotEqual,
+                                               proto::plan::ArithOpType::Shr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Sub,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Mul,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Div,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Mod,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::BitAnd,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::BitOr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::BitXor,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shl: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Shl,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::NotEqual,
-                                           proto::plan::ArithOpType::Shr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Add,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
+                case proto::plan::OpType::GreaterThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Add,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Sub,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Mul,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Div,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Mod,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::BitAnd,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::BitOr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::BitXor,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shl: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Shl,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::GreaterThan,
+                                               proto::plan::ArithOpType::Shr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Sub,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Mul,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Div,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Mod,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::BitAnd,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::BitOr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::BitXor,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shl: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Shl,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterThan,
-                                           proto::plan::ArithOpType::Shr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Add,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
+                case proto::plan::OpType::GreaterEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Add,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Sub,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Mul,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Div,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Mod,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::BitAnd,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::BitOr,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::BitXor,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shl: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Shl,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shr: {
+                            ArithOpElementFunc<
+                                T,
+                                proto::plan::OpType::GreaterEqual,
+                                proto::plan::ArithOpType::Shr,
+                                filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Sub,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Mul,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Div,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Mod,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::BitAnd,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::BitOr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::BitXor,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shl: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Shl,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::GreaterEqual,
-                                           proto::plan::ArithOpType::Shr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Add,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
+                case proto::plan::OpType::LessThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Add,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Sub,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Mul,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Div,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Mod,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::BitAnd,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::BitOr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::BitXor,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shl: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Shl,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessThan,
+                                               proto::plan::ArithOpType::Shr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Sub,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Mul,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Div,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Mod,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::BitAnd,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::BitOr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::BitXor,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shl: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Shl,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessThan,
-                                           proto::plan::ArithOpType::Shr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Add,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
+                case proto::plan::OpType::LessEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Add,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Sub,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Mul,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Div,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Mod,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::BitAnd,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::BitOr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::BitXor,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shl: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Shl,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Shr: {
+                            ArithOpElementFunc<T,
+                                               proto::plan::OpType::LessEqual,
+                                               proto::plan::ArithOpType::Shr,
+                                               filter_type>
+                                func;
+                            func(
+                                data, size, value, right_operand, res, offsets);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Sub,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Mul,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Div,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Mod,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::BitAnd,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::BitOr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::BitXor,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shl: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Shl,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Shr: {
-                        ArithOpElementFunc<T,
-                                           proto::plan::OpType::LessEqual,
-                                           proto::plan::ArithOpType::Shr,
-                                           filter_type>
-                            func;
-                        func(data, size, value, right_operand, res, offsets);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
+                default:
+                    ThrowInfo(UnexpectedError,
+                              "unsupported operator type for binary "
+                              "arithmetic eval expr: {}",
+                              op_type);
             }
-            default:
-                ThrowInfo(UnexpectedError,
-                          "unsupported operator type for binary "
-                          "arithmetic eval expr: {}",
-                          op_type);
-        }
         }
         // there is a batch operation in ArithOpElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
@@ -3256,27 +3312,31 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
 #undef DISPATCH_ARITH2_DATA_ARITH1
 #undef DISPATCH_ARITH2_DATA_CMP
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, op_type, arith_type, value, right_operand,
-         has_second_op](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            // CanSkipBinaryArithRange only reasons about a single arithmetic
-            // op against per-chunk min/max stats; it has no notion of a
-            // second chained op. Extending it is out of scope here, so
-            // conservatively never skip a chunk for a depth-2 expression
-            // rather than risk incorrectly pruning rows that would still
-            // match after the second op is applied.
-            if (has_second_op) {
-                return false;
-            }
-            return skip_index.CanSkipBinaryArithRange<T>(op_ctx,
-                                                         field_id,
-                                                         chunk_id,
-                                                         op_type,
-                                                         arith_type,
-                                                         value,
-                                                         right_operand);
-        };
+    auto skip_index_func = [op_ctx = op_ctx_,
+                            op_type,
+                            arith_type,
+                            value,
+                            right_operand,
+                            has_second_op](const SkipIndex& skip_index,
+                                           FieldId field_id,
+                                           int64_t chunk_id) {
+        // CanSkipBinaryArithRange only reasons about a single arithmetic
+        // op against per-chunk min/max stats; it has no notion of a
+        // second chained op. Extending it is out of scope here, so
+        // conservatively never skip a chunk for a depth-2 expression
+        // rather than risk incorrectly pruning rows that would still
+        // match after the second op is applied.
+        if (has_second_op) {
+            return false;
+        }
+        return skip_index.CanSkipBinaryArithRange<T>(op_ctx,
+                                                     field_id,
+                                                     chunk_id,
+                                                     op_type,
+                                                     arith_type,
+                                                     value,
+                                                     right_operand);
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
