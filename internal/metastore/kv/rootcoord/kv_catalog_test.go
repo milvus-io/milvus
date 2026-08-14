@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -2998,11 +3000,17 @@ func TestRBAC_Grant(t *testing.T) {
 				contains := strings.Contains(key, GranteeIDPrefix)
 				if contains {
 					if secondLoadWithPrefixReturn.Load() {
+						firstID := crypto.MD5(funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant) + "obj1/obj_name1")
+						secondID := crypto.MD5(funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant) + "obj2/obj_name2")
 						return []string{
-							key + "PrivilegeLoad",
-							key + "PrivilegeRelease",
-							key + "random/a/b/c",
-							key + util.AnyWord,
+							key + firstID + "/PrivilegeLoad",
+							key + firstID + "/PrivilegeRelease",
+							key + firstID + "/random/a/b/c",
+							key + firstID + "/" + util.AnyWord,
+							key + secondID + "/PrivilegeLoad",
+							key + secondID + "/PrivilegeRelease",
+							key + secondID + "/random/a/b/c",
+							key + secondID + "/" + util.AnyWord,
 						}
 					}
 					return nil
@@ -3270,15 +3278,20 @@ func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
 	firstLegacyID := crypto.MD5(firstLogicalKey)
 	secondLegacyID := crypto.MD5(secondLogicalKey)
 	var granteePrefixLoads atomic.Int32
+	var totalPrefixLoads atomic.Int32
 
 	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 		func(ctx context.Context, key string) []string {
+			totalPrefixLoads.Inc()
 			switch {
 			case key == granteePrefix:
 				granteePrefixLoads.Inc()
 				return []string{firstEtcdKey, secondEtcdKey}
-			case strings.HasPrefix(key, granteeIDPrefix):
-				return []string{key + "PrivilegeLoad"}
+			case key == granteeIDPrefix:
+				return []string{
+					key + firstLegacyID + "/PrivilegeLoad",
+					key + secondLegacyID + "/PrivilegeLoad",
+				}
 			default:
 				return nil
 			}
@@ -3302,6 +3315,74 @@ func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, policies, 2)
 	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "ListPolicy should reuse the initially loaded grantee keys for legacy ID collision checks")
+	assert.Equal(t, int32(2), totalPrefixLoads.Load(), "ListPolicy should load grantees and all grantee IDs with two fixed prefix scans")
+}
+
+func TestRBACListPolicyBulkLoadsGranteeIDs(t *testing.T) {
+	assertBulkLoadCount := func(t *testing.T, idBuilder func(string, int) string) {
+		ctx := context.Background()
+		metaKV := memkv.NewMemoryKV()
+		c := NewCatalog(metaKV)
+		const granteeCount = 1000
+		objectType := commonpb.ObjectType_Collection.String()
+		kvs := make(map[string]string, granteeCount*2)
+		for i := 0; i < granteeCount; i++ {
+			granteeKey := fmt.Sprintf("%s/role-%d/%s/%s", GranteePrefix, i, objectType, funcutil.CombineObjectName(util.DefaultDBName, fmt.Sprintf("coll-%d", i)))
+			idStr := idBuilder(granteeKey, i)
+			kvs[granteeKey] = idStr
+			kvs[buildGranteeIDKey(idStr, "PrivilegeLoad")] = "root"
+		}
+		require.NoError(t, metaKV.MultiSave(ctx, kvs))
+
+		var loadWithPrefixCalls atomic.Int32
+		var origin func(*memkv.MemoryKV, context.Context, string) ([]string, []string, error)
+		patched := mockey.Mock((*memkv.MemoryKV).LoadWithPrefix).To(
+			func(kv *memkv.MemoryKV, ctx context.Context, key string) ([]string, []string, error) {
+				loadWithPrefixCalls.Inc()
+				return origin(kv, ctx, key)
+			}).Origin(&origin).Build()
+		defer patched.UnPatch()
+
+		policies, err := c.ListPolicy(ctx, util.DefaultTenant)
+		require.NoError(t, err)
+		require.Len(t, policies, granteeCount)
+		assert.Equal(t, int32(2), loadWithPrefixCalls.Load())
+	}
+
+	t.Run("prefix load count is independent of grantee count", func(t *testing.T) {
+		assertBulkLoadCount(t, func(granteeKey string, _ int) string {
+			return crypto.GranteeID(granteeKey)
+		})
+	})
+
+	t.Run("legacy grantee ownership is indexed in memory", func(t *testing.T) {
+		assertBulkLoadCount(t, func(_ string, i int) string {
+			return fmt.Sprintf("%016x", i)
+		})
+	})
+
+	t.Run("falls back to computed id and skips malformed privilege keys", func(t *testing.T) {
+		ctx := context.Background()
+		metaKV := memkv.NewMemoryKV()
+		c := NewCatalog(metaKV)
+		objectType := commonpb.ObjectType_Collection.String()
+		granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "fallback-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, "fallback-coll"))
+		storedID := strings.Repeat("a", 32)
+		computedID := crypto.GranteeID(granteeKey)
+		require.NotEqual(t, storedID, computedID)
+		require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+			granteeKey: storedID,
+			buildGranteeIDKey(computedID, "PrivilegeLoad"):                                        "root",
+			buildGranteeIDKey(computedID, "invalid/nested"):                                       "root",
+			funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant) + "malformed": "root",
+		}))
+
+		policies, err := c.ListPolicy(ctx, util.DefaultTenant)
+		require.NoError(t, err)
+		require.Len(t, policies, 1)
+		assert.Equal(t, "fallback-role", policies[0].GetRole().GetName())
+		assert.Equal(t, "Load", policies[0].GetGrantor().GetPrivilege().GetName())
+	})
 }
 
 func TestRBACGrantMigrationIgnoresUnreferencedComputedLegacyID(t *testing.T) {
@@ -4222,7 +4303,7 @@ func TestRBACReadSkipsEmptyKeySegments(t *testing.T) {
 
 	t.Run("ListPolicy", func(t *testing.T) {
 		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
-		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock)
 
@@ -4234,8 +4315,8 @@ func TestRBACReadSkipsEmptyKeySegments(t *testing.T) {
 			[]string{"grant-id", "bad-id"},
 			nil,
 		)
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
-			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeIDPrefix).Return(
+			[]string{granteeIDPrefix + "grant-id/PrivilegeLoad", granteeIDPrefix + "grant-id/"},
 			nil,
 			nil,
 		)
