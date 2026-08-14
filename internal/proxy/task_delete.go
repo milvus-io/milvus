@@ -441,6 +441,7 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 
 func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*deleteTask, error) {
 	dt := &deleteTask{
+		baseTask:     baseTask{metaCache: dr.getMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		req:          dr.req,
