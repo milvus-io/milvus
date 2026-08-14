@@ -296,7 +296,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		importMeta: &importMeta{},
 	}
 
-	_, err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -345,7 +345,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		broker:     mockBroker,
 	}
 
-	_, err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -404,7 +404,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		broker:     mockBroker,
 	}
 
-	_, err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -468,7 +468,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		broker:     mockBroker,
 	}
 
-	_, err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -530,7 +530,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		broker:     mockBroker,
 	}
 
-	_, err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -591,7 +591,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		broker:     mockBroker,
 	}
 
-	_, err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,

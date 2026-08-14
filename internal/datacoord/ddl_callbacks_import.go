@@ -210,7 +210,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
-) (duplicatedJobID int64, err error) {
+) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -221,7 +221,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return 0, merr.Wrap(err, "failed to validate import request")
+		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
 	// Per-file PK ranges are the default path for every autoID import. The
@@ -255,7 +255,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return 0, merr.Wrap(err, "failed to start broadcast with collection id")
+		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
@@ -271,7 +271,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
@@ -297,23 +297,23 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Broadcast the message
 	result, err := broadcaster.Broadcast(ctx, msg)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if result.Duplicated == nil {
-		return 0, nil
+		return 0, false, nil
 	}
 	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
 	// new job was created; recover the jobID that broadcast carried.
 	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	mlog.Info(ctx, "import broadcast deduplicated by idempotency key",
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldJobID(originalJobID),
 		// Never log the raw key: it is client-controlled and may carry sensitive data.
 		mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey)))
-	return originalJobID, nil
+	return originalJobID, true, nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

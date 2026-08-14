@@ -350,7 +350,7 @@ func newDuplicatedImportBroadcastResult(originalJobID int64) *types.BroadcastApp
 // setupImportV2DuplicateBroadcast wires the mocks ImportV2 needs so that the broadcast
 // comes back deduplicated, and returns the server under test. importMeta is supplied by
 // the caller so it can decide whether the original job still exists.
-func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta) *Server {
+func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64) *Server {
 	mockBalancerInst := &mockBalancerImpl{}
 	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
 		return mockBalancerInst, nil
@@ -366,7 +366,7 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	s.T().Cleanup(func() { mockAssignment.UnPatch() })
 
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(4242)
+	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID)
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
@@ -422,7 +422,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 		ImportJob: &datapb.ImportJob{JobID: 4242},
 	})
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta)
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
@@ -430,6 +430,29 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	s.NotNil(resp)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
 	s.Equal("4242", resp.GetJobID())
+}
+
+// A duplicate is reported by an explicit flag, never by a non-zero jobID, so a
+// duplicated broadcast carrying jobID 0 must still take the duplicate branch and let
+// the job-existence check decide — not fall through to the freshly allocated 1000.
+func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate() {
+	ctx := context.Background()
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(0)).Return(&importJob{
+		ImportJob: &datapb.ImportJob{JobID: 0},
+	})
+
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 0)
+
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.NotEqual("1000", resp.GetJobID())
+	s.Equal("0", resp.GetJobID())
 }
 
 // The key outlived its job, so returning the original jobID would hand the client an
@@ -441,7 +464,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError()
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil)
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta)
+	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
