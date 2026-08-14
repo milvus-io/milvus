@@ -1571,9 +1571,13 @@ func GetIdempotencyKeyFromContext(ctx context.Context) string {
 // travels in the message properties of the write it guards and is retained in the
 // broadcaster's in-memory dedup index for the whole idempotency window, so its
 // size is bounded here rather than at the component that ends up storing it.
+//
+// The bound fails closed, matching the other length checks in this file: a limit
+// of 0 rejects every non-empty key, i.e. the cluster accepts no idempotency keys
+// at all. A request that carries no key is unaffected at any limit.
 func validateIdempotencyKeyLength(key string) error {
 	limit := Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	if limit > 0 && len(key) > limit {
+	if len(key) > limit {
 		return merr.WrapErrParameterInvalidMsg(
 			"idempotency key length %d exceeds limit %d", len(key), limit)
 	}

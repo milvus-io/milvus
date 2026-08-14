@@ -7420,4 +7420,13 @@ func TestValidateIdempotencyKeyLength(t *testing.T) {
 	err := validateIdempotencyKeyLength(strings.Repeat("a", 257))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	// A limit of 0 fails closed: it accepts no key at all, rather than lifting
+	// the bound. A request carrying no key still passes.
+	old := Params.StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("0")
+	defer Params.StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue(old)
+	assert.NoError(t, validateIdempotencyKeyLength(""))
+	err = validateIdempotencyKeyLength("a")
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }

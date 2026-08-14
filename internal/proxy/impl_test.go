@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -1787,6 +1788,81 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 		assert.Equal(t, "123456789", rsp.GetJobID())
+	})
+
+	t.Run("ImportV2 rejects an oversized idempotency key", func(t *testing.T) {
+		// The node is deliberately left without a scheduler. ImportV2 must reject
+		// the key before it touches node.sched.dmQueue, so a regression that drops
+		// the early return panics on the nil scheduler here instead of passing
+		// silently. The mixCoord mock carries no expectations for the same reason:
+		// any call downstream fails the test.
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.mixCoord = mocks.NewMockMixCoordClient(t)
+
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		globalMetaCache = mc
+
+		oversized := strings.Repeat("a", Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()+1)
+		mdCtx := metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderIdempotencyKey, oversized))
+		rsp, err := node.ImportV2(mdCtx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(rsp.GetStatus()), merr.ErrParameterInvalid)
+	})
+
+	t.Run("ImportV2 forwards the idempotency key to datacoord", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		assert.NoError(t, node.sched.Start())
+		defer node.sched.Close()
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		node.chMgr = chMgr
+
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 1}, nil)
+		globalMetaCache = mc
+
+		var capturedReq *internalpb.ImportRequestInternal
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+				capturedReq = req
+				return &internalpb.ImportResponse{
+					Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					JobID:  "123456789",
+				}, nil
+			})
+		node.mixCoord = mixCoord
+
+		mdCtx := metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderIdempotencyKey, "run-1-batch-1"))
+		rsp, err := node.ImportV2(mdCtx, &internalpb.ImportRequest{
+			CollectionName: "aaa",
+			Files: []*internalpb.ImportFile{{
+				Id:    1,
+				Paths: []string{"a.json"},
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+		assert.NotNil(t, capturedReq)
+		assert.Equal(t, "run-1-batch-1", capturedReq.GetIdempotencyKey())
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
