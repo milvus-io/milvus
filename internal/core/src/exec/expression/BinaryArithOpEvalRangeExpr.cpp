@@ -895,7 +895,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 offset = (offsets) ? offsets[i] : i;            \
             }                                                   \
             if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = valid_res[i] = false;                  \
+                res[i] = false;                                 \
+                valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
             res[i] = (cmp);                                     \
