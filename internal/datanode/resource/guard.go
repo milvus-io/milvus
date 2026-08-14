@@ -19,6 +19,7 @@ package resource
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -198,7 +199,7 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		return true, g.availLocked(budget)
 	}
 	if g.frozen {
-		return false, g.availLocked(budget)
+		return g.deferLocked(taskType, reasonFrozen, budget)
 	}
 	// While an oversized task occupies the node, nothing else is admitted. The
 	// arithmetic below would refuse everyone anyway as things stand -- reserved
@@ -206,7 +207,7 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 	// config and can grow under the task, and the promise made at admission has
 	// to outlive that.
 	if g.exclusiveTaskID != 0 {
-		return false, g.availLocked(budget)
+		return g.deferLocked(taskType, reasonExclusive, budget)
 	}
 
 	if g.isOversizedLocked(req) {
@@ -221,7 +222,7 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		// not depend on the order. An oversized task may claim the node only
 		// from the front of the queue, or when nobody is queued at all.
 		if len(g.waiters) > 0 && g.waiters[0].taskID != taskID {
-			return false, g.availLocked(budget)
+			return g.deferLocked(taskType, reasonHeadOfLine, budget)
 		}
 		// It cannot share the node, so it runs alone: admitted only once every
 		// other task has finished. The test is the ledger, not the reserved
@@ -233,7 +234,7 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		// coordinator places such a task on the emptiest worker on purpose and
 		// relies on this wait.
 		if len(g.ledger) != 0 {
-			return false, g.availLocked(budget)
+			return g.deferLocked(taskType, reasonAwaitingDrain, budget)
 		}
 		g.exclusiveTaskID = taskID
 		g.reserved = g.reserved.Add(req)
@@ -246,10 +247,10 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 	}
 
 	if g.blockedByHeadOfLineLocked(taskID, budget) {
-		return false, g.availLocked(budget)
+		return g.deferLocked(taskType, reasonHeadOfLine, budget)
 	}
 	if !g.reserved.Add(req).FitsIn(budget) {
-		return false, g.availLocked(budget)
+		return g.deferLocked(taskType, reasonInsufficient, budget)
 	}
 
 	g.reserved = g.reserved.Add(req)
@@ -304,10 +305,13 @@ func (g *guard) hasOversizedWaiterLocked(exceptTaskID int64) bool {
 }
 
 func (g *guard) Acquire(ctx context.Context, taskID int64, taskType taskcommon.Type, req taskresource.Requirement) error {
+	start := time.Now()
+
 	g.mu.Lock()
 	ok, _ := g.tryAcquireLocked(taskID, taskType, req)
 	if ok {
 		g.mu.Unlock()
+		observeAdmissionWait(taskType, time.Since(start))
 		return nil
 	}
 
@@ -342,6 +346,7 @@ func (g *guard) Acquire(ctx context.Context, taskID int64, taskType taskcommon.T
 		ok, _ = g.tryAcquireLocked(taskID, taskType, req)
 		g.mu.Unlock()
 		if ok {
+			observeAdmissionWait(taskType, time.Since(start))
 			return nil
 		}
 

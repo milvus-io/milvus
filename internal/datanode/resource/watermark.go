@@ -66,6 +66,9 @@ func (g *guard) sampleOnce() {
 	g.updateFrozenLocked(used, total)
 	g.updateNonTaskLocked(used)
 	frozen := g.frozen
+	// One consistent set of gauges per sample; see publishLocked for why this
+	// is the only place that publishes them.
+	g.publishLocked(int64(used))
 	g.mu.Unlock()
 
 	if !frozen {
