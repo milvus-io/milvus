@@ -512,3 +512,78 @@ func TestImportTask_DeleteModeIgnoresLoadedCollectionRestriction(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{common.AllPartitionsID}, task.partitionIDs)
 }
+
+// TestImportTask_UpsertRejectsAutoIDPrimaryKey verifies that write_mode=Upsert is rejected at
+// PreExecute for a collection whose primary key is auto-generated: the import file carries no
+// primary keys for such a collection (import readers reject an explicit pk column on autoID
+// fields by default), so there is nothing for upsert to overwrite.
+func TestImportTask_UpsertRejectsAutoIDPrimaryKey(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+		CollectionSchema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil)
+	oldCache := globalMetaCache
+	globalMetaCache = mockCache
+	defer func() { globalMetaCache = oldCache }()
+
+	task := &importTask{
+		ctx: ctx,
+		req: &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Upsert,
+			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
+		},
+	}
+
+	err := task.PreExecute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "auto-generated")
+	assert.Contains(t, err.Error(), "coll")
+}
+
+// TestImportTask_UpsertAllowsNonAutoIDPrimaryKey verifies that write_mode=Upsert passes the
+// autoID gate for a collection with a user-assigned primary key.
+func TestImportTask_UpsertAllowsNonAutoIDPrimaryKey(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+		CollectionSchema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil)
+	oldCache := globalMetaCache
+	globalMetaCache = mockCache
+	defer func() { globalMetaCache = oldCache }()
+
+	chMgr := NewMockChannelsMgr(t)
+	chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"ch-0"}, nil)
+	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+
+	task := &importTask{
+		ctx:  ctx,
+		node: &Proxy{chMgr: chMgr},
+		req: &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Upsert,
+			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
+		},
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+}

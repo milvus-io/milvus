@@ -239,6 +239,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
+	isUpsert := importutilv2.IsUpsertMode(t.req.GetOptions())
 	for {
 		data, err := reader.Read()
 		if err != nil {
@@ -275,6 +276,16 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error
 		if err != nil {
 			return err
 		}
+		// hashedUpsertDelData holds this batch's companion delete records, grouped by
+		// vchannel and partition to match the rows, as read from the file before
+		// AppendSystemFieldsData runs.
+		var hashedUpsertDelData HashedDeleteData
+		if isUpsert {
+			hashedUpsertDelData, err = HashDeleteDataForUpsert(t, data, t.req.GetTs())
+			if err != nil {
+				return err
+			}
+		}
 		err = appendSystemFieldsDataWithCursor(t, data, rowNum, cur)
 		if err != nil {
 			return err
@@ -304,6 +315,14 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error
 		}
 		syncFutures = append(syncFutures, fs...)
 		syncTasks = append(syncTasks, sts...)
+		if isUpsert {
+			fs, sts, err := t.syncUpsertDelete(hashedUpsertDelData)
+			if err != nil {
+				return err
+			}
+			syncFutures = append(syncFutures, fs...)
+			syncTasks = append(syncTasks, sts...)
+		}
 	}
 	err := conc.AwaitAll(syncFutures...)
 	if err != nil {
@@ -320,10 +339,19 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error
 	return nil
 }
 
+// insertRequestSegments returns segments whose level is not L0. This is the candidate set
+// the append path's segment picking uses.
+func insertRequestSegments(segments []*datapb.ImportRequestSegment) []*datapb.ImportRequestSegment {
+	return lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
+		return info.GetLevel() != datapb.SegmentLevel_L0
+	})
+}
+
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
 	mlog.Info(t.ctx, "start to sync import data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
+	insertSegments := insertRequestSegments(t.req.GetRequestSegments())
 	for channelIdx, datas := range hashedData {
 		channel := t.GetVchannels()[channelIdx]
 		for partitionIdx, data := range datas {
@@ -331,7 +359,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 				continue
 			}
 			partitionID := t.GetPartitionIDs()[partitionIdx]
-			segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+			segmentID, err := PickSegment(insertSegments, channel, partitionID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -396,6 +424,40 @@ func (t *ImportTask) syncDeleteOnly(delData *storage.DeleteData) ([]*conc.Future
 		}
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)
+	}
+	return futures, syncTasks, nil
+}
+
+// syncUpsertDelete writes hashedDelData into the job's L0 segments, one sync task per
+// (vchannel, partition) pair present in hashedDelData.
+func (t *ImportTask) syncUpsertDelete(hashedDelData HashedDeleteData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
+	futures := make([]*conc.Future[struct{}], 0)
+	syncTasks := make([]syncmgr.Task, 0)
+	for channelIdx, partitions := range hashedDelData {
+		channel := t.GetVchannels()[channelIdx]
+		for partitionIdx, data := range partitions {
+			if data.RowCount == 0 {
+				continue
+			}
+			partitionID := t.GetPartitionIDs()[partitionIdx]
+			segmentID, err := PickSegmentByLevel(t.req.GetRequestSegments(), channel, partitionID, datapb.SegmentLevel_L0)
+			if err != nil {
+				return nil, nil, err
+			}
+			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
+				segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
+				nil, storage.StorageV2, false, t.req.GetStorageConfig())
+			if err != nil {
+				return nil, nil, err
+			}
+			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+			if err != nil {
+				mlog.Error(t.ctx, "failed to sync delete data", WrapLogFields(t, mlog.Err(err))...)
+				return nil, nil, err
+			}
+			futures = append(futures, future)
+			syncTasks = append(syncTasks, syncTask)
+		}
 	}
 	return futures, syncTasks, nil
 }
