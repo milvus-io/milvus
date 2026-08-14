@@ -57,7 +57,7 @@ func RequirementForCompaction(plan *datapb.CompactionPlan) Requirement {
 			storageVersion = v
 		}
 
-		totalMemory += sumFieldBinlogMemory(seg.GetFieldBinlogs())
+		totalMemory += compactionSegmentMemory(seg)
 		totalRows += segmentRowCount(seg.GetFieldBinlogs())
 
 		segDelete := sumFieldBinlogMemory(seg.GetDeltalogs())
@@ -80,6 +80,27 @@ func RequirementForCompaction(plan *datapb.CompactionPlan) Requirement {
 		TotalRows:             totalRows,
 		MaxSegmentDeleteBytes: maxDelete,
 	})
+}
+
+// compactionSegmentMemory is one input segment's contribution to
+// CompactionInput.TotalMemorySize.
+//
+// It must agree, term for term, with what DataCoord charges for the same
+// segment when it sizes the very same task: SegmentInfo.getSegmentSize
+// (internal/datacoord/segment_info.go) sums insert, delta AND stats logs, and
+// mixCompactionTask.computeAndCacheTaskSlot feeds exactly that into
+// EstimateCompaction. Summing only the insert logs here made the DataNode --
+// the side that actually enforces -- the one that under-counts, which is the
+// unsafe direction of a disagreement. (Deltas being counted a second time as
+// MaxSegmentDeleteBytes is deliberate and symmetric: both sides do it, and the
+// compactors really do hold the delete set alongside the record batches.)
+//
+// TestCompactionRequirementAgreesWithDataCoord in internal/datacoord pins the
+// agreement by running one fixture through both paths.
+func compactionSegmentMemory(seg *datapb.CompactionSegmentBinlogs) int64 {
+	return sumFieldBinlogMemory(seg.GetFieldBinlogs()) +
+		sumFieldBinlogMemory(seg.GetDeltalogs()) +
+		sumFieldBinlogMemory(seg.GetField2StatslogPaths())
 }
 
 // segmentRowCount returns a compaction input segment's row count from a
@@ -136,12 +157,41 @@ func sumFieldBinlogMemory(logs []*datapb.FieldBinlog) int64 {
 	return total
 }
 
+// fieldBinlogCarries reports whether fb holds fieldID's data.
+//
+// Storage v1 keys a FieldBinlog by the field's own ID. Storage v2/v3 does not:
+// entries are keyed by COLUMN GROUP id -- a sequential counter from 0, see
+// storagecommon.SplitBySchema in internal/storagecommon/split_policy.go -- and
+// the real field IDs (>= 100) are listed in ChildFields, see
+// internal/flushcommon/syncmgr/pack_writer_v3.go and
+// internal/storage/binlog_record_writer.go. Matching the top-level ID alone
+// therefore never matches on the storage format this whole effort targets, and
+// the caller silently prices a multi-GiB field at the 64MiB estimator floor.
+//
+// Both ways round is the idiom the rest of the repo already uses for this:
+// segmentutil.CalcValidRowCountFromFieldBinLog and DataCoord's own
+// SegmentInfo.getFieldBinlogSize check the top-level ID first and fall through
+// to ChildFields. Returning the whole column group's bytes for one of its
+// member fields over-estimates, which is the safe direction and is what
+// DataCoord does.
+func fieldBinlogCarries(fb *datapb.FieldBinlog, fieldID int64) bool {
+	if fb.GetFieldID() == fieldID {
+		return true
+	}
+	for _, child := range fb.GetChildFields() {
+		if child == fieldID {
+			return true
+		}
+	}
+	return false
+}
+
 // sumFieldBinlogMemoryForField sums Binlog.MemorySize for the first
-// FieldBinlog matching fieldID, mirroring getFieldDataSizeFromBinlogs in
+// FieldBinlog carrying fieldID, mirroring getFieldDataSizeFromBinlogs in
 // internal/datanode/index/util.go (which also stops at the first match).
 func sumFieldBinlogMemoryForField(logs []*datapb.FieldBinlog, fieldID int64) int64 {
 	for _, fb := range logs {
-		if fb.GetFieldID() != fieldID {
+		if !fieldBinlogCarries(fb, fieldID) {
 			continue
 		}
 		var total int64
@@ -172,7 +222,17 @@ func estimateFieldMemorySize(req *workerpb.CreateJobRequest) int64 {
 	if fieldID == 0 {
 		fieldID = req.GetFieldID()
 	}
-	return sumFieldBinlogMemoryForField(req.GetInsertLogs(), fieldID)
+	if size := sumFieldBinlogMemoryForField(req.GetInsertLogs(), fieldID); size > 0 {
+		return size
+	}
+	// The field could not be isolated -- an unrecognized binlog layout, a
+	// request that named a field the logs do not carry, or a genuinely empty
+	// column. Charging 0 here would floor the estimate at 64MiB and switch
+	// admission control off for this task, which is exactly how a multi-GiB
+	// scalar index build came to be priced at the floor. DataCoord's
+	// SegmentInfo.getFieldBinlogSize makes the same choice for the same reason:
+	// when the per-field figure is <= 0 it falls back to the whole segment.
+	return sumFieldBinlogMemory(req.GetInsertLogs())
 }
 
 // getIndexTypeFromParams mirrors GetIndexType in
@@ -213,12 +273,16 @@ func touchedFieldIDs(schema *schemapb.CollectionSchema, matches func(*schemapb.F
 	return ids
 }
 
-// sumFieldBinlogMemoryForFieldSet sums Binlog.MemorySize across every field
-// in logs whose FieldID is in ids.
+// sumFieldBinlogMemoryForFieldSet sums Binlog.MemorySize across every entry in
+// logs that carries at least one field in ids -- by its own FieldID on storage
+// v1, or through ChildFields on v2/v3 (see fieldBinlogCarries). An entry is
+// counted once however many of its members are in the set: a column group is
+// one set of binlogs, and adding it per matching child would multiply the same
+// bytes by the number of fields sharing the group.
 func sumFieldBinlogMemoryForFieldSet(logs []*datapb.FieldBinlog, ids map[int64]bool) int64 {
 	var total int64
 	for _, fb := range logs {
-		if !ids[fb.GetFieldID()] {
+		if !fieldBinlogCarriesAny(fb, ids) {
 			continue
 		}
 		for _, b := range fb.GetBinlogs() {
@@ -226,6 +290,18 @@ func sumFieldBinlogMemoryForFieldSet(logs []*datapb.FieldBinlog, ids map[int64]b
 		}
 	}
 	return total
+}
+
+func fieldBinlogCarriesAny(fb *datapb.FieldBinlog, ids map[int64]bool) bool {
+	if ids[fb.GetFieldID()] {
+		return true
+	}
+	for _, child := range fb.GetChildFields() {
+		if ids[child] {
+			return true
+		}
+	}
+	return false
 }
 
 // RequirementForStats derives a stats sub-job's requirement from the field(s)
@@ -290,6 +366,17 @@ func RequirementForStats(req *workerpb.CreateStatsRequest) Requirement {
 		touched = sumFieldBinlogMemory(req.GetInsertLogs())
 	}
 
+	if touched <= 0 {
+		// No field could be isolated. Charging 0 floors the estimate at 64MiB,
+		// which reads as "this job is free" and turns admission control off for
+		// the whole stats family -- the three sub-jobs above are the only ones
+		// DataCoord submits. Falling back to the whole segment is what DataCoord
+		// itself does today (getFieldBinlogSize returns getSegmentSize() when
+		// the per-field figure is <= 0) and only ever over-charges, which is the
+		// direction that does not OOM the node.
+		touched = sumFieldBinlogMemory(req.GetInsertLogs())
+	}
+
 	return EstimateStats(StatsInput{SubJobType: subJob, FieldMemorySize: touched})
 }
 
@@ -313,7 +400,7 @@ func RequirementForAnalyze(req *workerpb.AnalyzeRequest) Requirement {
 		dataType = req.GetFieldType()
 	}
 
-	return EstimateAnalyze(vectorFieldByteSize(dataType, req.GetDim(), totalRows))
+	return EstimateAnalyze(vectorFieldByteSize(dataType, req.GetDim(), totalRows), req.GetMaxTrainSizeRatio())
 }
 
 // LegacySlotToRequirement converts a scalar slot into a requirement. It is the

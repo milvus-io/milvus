@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -484,11 +485,11 @@ func TestRequirementForAnalyzeSumsRowsAcrossSegments(t *testing.T) {
 	}
 
 	got := RequirementForAnalyze(req)
-	want := EstimateAnalyze(int64(2048) * 150_000 * 4)
+	want := EstimateAnalyze(int64(2048)*150_000*4, req.GetMaxTrainSizeRatio())
 	assert.Equal(t, want, got)
 	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor to actually exercise row summation")
 
-	onlyFirstSegment := EstimateAnalyze(int64(2048) * 100_000 * 4)
+	onlyFirstSegment := EstimateAnalyze(int64(2048)*100_000*4, req.GetMaxTrainSizeRatio())
 	assert.NotEqual(t, onlyFirstSegment, got)
 }
 
@@ -526,4 +527,192 @@ func TestLegacySlotToRequirement(t *testing.T) {
 
 	negative := LegacySlotToRequirement(-5)
 	assert.Equal(t, want, negative, "a negative slot must floor the same as zero")
+}
+
+// ---------------------------------------------------------------------------
+// Storage v2/v3 column-group binlogs
+// ---------------------------------------------------------------------------
+
+// columnGroupInsertLogs is the storage v2/v3 layout, which is what this whole
+// effort targets: FieldBinlog entries are keyed by COLUMN GROUP id -- a
+// sequential counter from 0, see storagecommon.SplitBySchema -- and the real
+// field ids (>= 100) live in ChildFields. A lookup that matches only the
+// top-level FieldID finds nothing here at all.
+func columnGroupInsertLogs() []*datapb.FieldBinlog {
+	return []*datapb.FieldBinlog{
+		{
+			FieldID:     0,
+			ChildFields: []int64{100, 101},
+			Binlogs:     []*datapb.Binlog{{MemorySize: 3 << 30, EntriesNum: 1_000_000}},
+		},
+		{
+			FieldID:     1,
+			ChildFields: []int64{102},
+			Binlogs:     []*datapb.Binlog{{MemorySize: 512 << 20, EntriesNum: 1_000_000}},
+		},
+	}
+}
+
+// A scalar index build over a multi-GiB varchar column stored in a v3 column
+// group used to price at the 64MiB floor, because the per-field lookup never
+// matched. Returning the whole column group over-estimates, which is the safe
+// direction and is what DataCoord's getFieldBinlogSize does.
+func TestRequirementForIndexFindsFieldInsideAColumnGroup(t *testing.T) {
+	paramtable.Init()
+
+	req := &workerpb.CreateJobRequest{
+		BuildID:        1,
+		FieldID:        100,
+		Field:          &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_VarChar},
+		StorageVersion: 3,
+		InsertLogs:     columnGroupInsertLogs(),
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "INVERTED"},
+		},
+	}
+
+	got := RequirementForIndex(req)
+
+	want := EstimateIndexBuild(IndexInput{
+		IndexType:       "INVERTED",
+		FieldMemorySize: 3 << 30,
+		StorageVersion:  3,
+	})
+	assert.Equal(t, want, got)
+	// 3GiB x 0.8 (INVERTED) + the v3 decode window: nowhere near the floor,
+	// which is exactly the point -- 64MiB is what this used to be charged.
+	assert.Greater(t, got.Memory, int64(2)<<30)
+	assert.NotEqual(t, int64(64)<<20, got.Memory)
+}
+
+// The stats sub-jobs select their fields by schema and then look those field
+// ids up in the binlogs, so they hit the same wall. All three sub-jobs
+// DataCoord actually submits go through one helper; json-key stands for them.
+func TestRequirementForStatsFindsFieldsInsideColumnGroups(t *testing.T) {
+	paramtable.Init()
+
+	req := &workerpb.CreateStatsRequest{
+		TaskID:         2,
+		SubJobType:     indexpb.StatsSubJob_JsonKeyIndexJob,
+		StorageVersion: 3,
+		InsertLogs:     columnGroupInsertLogs(),
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_VarChar},
+				{FieldID: 101, DataType: schemapb.DataType_Int64},
+				{FieldID: 102, DataType: schemapb.DataType_JSON},
+			},
+		},
+	}
+
+	got := RequirementForStats(req)
+
+	factor := paramtable.Get().DataCoordCfg.ResourceJSONKeyIndexFactor.GetAsFloat()
+	want := int64(float64(512<<20) * factor)
+	require.Greater(t, want, int64(64)<<20, "setup: the expected value must not be the floor")
+	assert.Equal(t, want, got.Memory)
+}
+
+// A column group is one set of binlogs. When two of its member fields are both
+// selected, its bytes must be counted once -- adding it per matching child
+// would multiply the same bytes by the number of fields sharing the group.
+func TestStatsCountsAColumnGroupOnceForAllItsMatchingFields(t *testing.T) {
+	paramtable.Init()
+
+	logs := columnGroupInsertLogs()
+	req := &workerpb.CreateStatsRequest{
+		TaskID:     3,
+		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
+		InsertLogs: logs,
+		Schema: &schemapb.CollectionSchema{
+			// Both members of group 0 are JSON, so both are selected.
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_JSON},
+				{FieldID: 101, DataType: schemapb.DataType_JSON},
+			},
+		},
+	}
+
+	got := RequirementForStats(req)
+
+	factor := paramtable.Get().DataCoordCfg.ResourceJSONKeyIndexFactor.GetAsFloat()
+	want := int64(float64(3<<30) * factor)
+	assert.Equal(t, want, got.Memory, "group 0's bytes must be counted once, not twice")
+}
+
+// A field that cannot be isolated must not be charged the floor: that reads as
+// "this task is free" and switches admission control off for it. DataCoord's
+// getFieldBinlogSize makes the same choice -- <= 0 falls back to the whole
+// segment -- and over-charging is the direction that does not OOM the node.
+func TestUnresolvableFieldFallsBackToTheWholeSegment(t *testing.T) {
+	paramtable.Init()
+
+	logs := columnGroupInsertLogs()
+	wholeSegment := int64(3<<30) + int64(512<<20)
+
+	t.Run("index build", func(t *testing.T) {
+		req := &workerpb.CreateJobRequest{
+			BuildID:    1,
+			FieldID:    9999, // not carried by any group
+			Field:      &schemapb.FieldSchema{FieldID: 9999, DataType: schemapb.DataType_VarChar},
+			InsertLogs: logs,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "INVERTED"},
+			},
+		}
+
+		got := RequirementForIndex(req)
+		want := EstimateIndexBuild(IndexInput{IndexType: "INVERTED", FieldMemorySize: wholeSegment})
+		assert.Equal(t, want, got)
+		assert.Greater(t, got.Memory, int64(64)<<20, "must not fall to the estimator floor")
+	})
+
+	t.Run("stats", func(t *testing.T) {
+		req := &workerpb.CreateStatsRequest{
+			TaskID:     2,
+			SubJobType: indexpb.StatsSubJob_TextIndexJob,
+			InsertLogs: logs,
+			// No field in this schema enables match, so the touched set is empty.
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64}},
+			},
+		}
+
+		got := RequirementForStats(req)
+		factor := paramtable.Get().DataCoordCfg.ResourceTextIndexFactor.GetAsFloat()
+		assert.Equal(t, int64(float64(wholeSegment)*factor), got.Memory)
+		assert.Greater(t, got.Memory, int64(64)<<20, "must not fall to the estimator floor")
+	})
+}
+
+// TestCompactionMemoryCountsDeltaAndStatsLogs pins the F5 contract on the
+// DataNode side: TotalMemorySize means insert + delta + stats, the same three
+// terms SegmentInfo.getSegmentSize sums, because DataCoord feeds exactly that
+// into the same estimator for the same task.
+func TestCompactionMemoryCountsDeltaAndStatsLogs(t *testing.T) {
+	paramtable.Init()
+
+	plan := &datapb.CompactionPlan{
+		Type: datapb.CompactionType_MixCompaction,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				StorageVersion:      3,
+				FieldBinlogs:        []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 4 << 30, EntriesNum: 100}}}},
+				Deltalogs:           []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 700 << 20}}}},
+				Field2StatslogPaths: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 300 << 20}}}},
+			},
+		},
+	}
+
+	got := RequirementForCompaction(plan)
+
+	// v3: factor x (insert + delta + stats) + the delete payload again.
+	factor := paramtable.Get().DataCoordCfg.ResourceMixCompactionV3Factor.GetAsFloat()
+	total := int64(4<<30) + int64(700<<20) + int64(300<<20)
+	want := int64(float64(total)*factor) + int64(700<<20)
+	assert.Equal(t, want, got.Memory)
+
+	// Anti-vacuity: insert-only would be a full GiB smaller.
+	insertOnly := int64(float64(4<<30)*factor) + int64(700<<20)
+	require.Greater(t, got.Memory, insertOnly)
 }
