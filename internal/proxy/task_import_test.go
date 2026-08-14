@@ -408,3 +408,50 @@ func (s *ImportTaskSuite) TestPreExecute_GetCollectionIDFailsReturnsError() {
 	s.Error(err)
 	s.Contains(err.Error(), "collection not found")
 }
+
+func (s *ImportTaskSuite) TestExecute_ForwardsIdempotencyKey() {
+	ctx := context.Background()
+
+	mockCache := NewMockCache(s.T())
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+		DBID: 42,
+	}, nil)
+
+	oldCache := globalMetaCache
+	globalMetaCache = mockCache
+	defer func() { globalMetaCache = oldCache }()
+
+	var capturedReq *internalpb.ImportRequestInternal
+	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
+	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+			capturedReq = req
+			return &internalpb.ImportResponse{
+				Status: merr.Success(),
+				JobID:  "12345",
+			}, nil
+		})
+
+	task := &importTask{
+		ctx:      ctx,
+		mixCoord: mockMixCoord,
+		req: &internalpb.ImportRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+		},
+		collectionID: 100,
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+			},
+		},
+		resp:           &internalpb.ImportResponse{},
+		idempotencyKey: "run-1-batch-1",
+	}
+
+	err := task.Execute(ctx)
+
+	s.NoError(err)
+	s.NotNil(capturedReq)
+	s.Equal("run-1-batch-1", capturedReq.GetIdempotencyKey())
+}
