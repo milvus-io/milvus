@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -141,16 +142,51 @@ func EstimateStats(in StatsInput) Requirement {
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, 64*mib)}
 }
 
-// EstimateAnalyze sizes the kmeans training set. The task currently derives it
-// from the node (GetMemoryCount x MaxTrainSizeRatio); phase 2 makes it read the
-// grant returned here instead.
-func EstimateAnalyze(totalMemorySize int64) Requirement {
+// EstimateAnalyze sizes the kmeans training set.
+//
+// It charges what the analyze task allocates TODAY, which is not the grant the
+// factor/cap below describe. internal/datanode/index/task_analyze.go sets
+// TrainSize = hardware.GetMemoryCount() x trainSizeRatio -- 0.8 of the whole
+// node by default, 51GiB on the 64GiB node from issue #52180 -- regardless of
+// how much data the task actually has. Phase 2 converts the task to read the
+// grant instead, and this function then reduces to the grant alone.
+//
+// Charging the grant before that conversion would be a live regression, not
+// just an under-estimate. Until this branch, analyze was protected by
+// dataCoord.slot.analyzeTaskSlotUsage=65535: the node reported zero slots free
+// and ran exactly one analyze at a time. Phase 0 reroutes AvailableSlots onto
+// the ledger, so the 65535 no longer serializes anything, and a task charged
+// <= 4GiB while intending to load 0.8 x RAM would leave the node reporting
+// ~94% free. Charging the real allocation normally makes the task oversized,
+// which the guard answers with exclusive execution -- the same one-at-a-time
+// behavior, now expressed through the mechanism that replaced the constant.
+//
+// trainSizeRatio is AnalyzeRequest.MaxTrainSizeRatio, the ratio the task will
+// actually apply; a non-positive value (a legacy request that never filled it)
+// falls back to the config DataCoord fills it from.
+func EstimateAnalyze(totalMemorySize int64, trainSizeRatio float64) Requirement {
 	cfg := &paramtable.Get().DataCoordCfg
 
+	// The phase-2 grant.
 	mem := int64(float64(totalMemorySize) * cfg.ResourceAnalyzeFactor.GetAsFloat())
 	if maxMem := cfg.ResourceAnalyzeMaxMemory.GetAsInt64(); mem > maxMem {
 		mem = maxMem
 	}
+
+	if trainSizeRatio <= 0 {
+		trainSizeRatio = cfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat()
+	}
+	// Today's allocation. The training set cannot exceed the data that exists,
+	// so a known-smaller dataset bounds it; an unknown dataset (0) does not
+	// bound it at all, and the buffer is allocated either way.
+	allocated := int64(float64(hardware.GetMemoryCount()) * trainSizeRatio)
+	if totalMemorySize > 0 && totalMemorySize < allocated {
+		allocated = totalMemorySize
+	}
+	if allocated > mem {
+		mem = allocated
+	}
+
 	// CPU is a flat charge, not yet read from config; see EstimateStats.
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, 64*mib)}
 }
