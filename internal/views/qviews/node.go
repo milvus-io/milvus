@@ -84,3 +84,8 @@ func (s StreamingNode) Key() WorkNodeKey {
 func (s StreamingNode) String() string {
 	return s.Key()
 }
+
+// BalanceAttrAtWorkNode is the balance attributes reported by a work node.
+type BalanceAttrAtWorkNode interface {
+	WorkNode() WorkNode
+}
