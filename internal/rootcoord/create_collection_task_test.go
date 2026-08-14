@@ -903,7 +903,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 								Kind: &schemapb.TypeSchema_ArrayElement{
 									ArrayElement: &schemapb.TypeSchema{
-										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_ArrayOfVector},
+										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
 									},
 								},
 							},

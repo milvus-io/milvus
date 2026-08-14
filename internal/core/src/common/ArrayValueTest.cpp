@@ -238,7 +238,7 @@ StorageV3NestedArraySchema(bool enable_mmap) {
     nested->set_element_type(proto::schema::DataType::Array);
     nested->set_nullable(false);
     auto type =
-        NestedArrayType(LeafArrayType(proto::schema::DataType::String, true));
+        NestedArrayType(LeafArrayType(proto::schema::DataType::VarChar, true));
     *nested->mutable_type_schema() = type;
 
     auto* mmap = nested->add_type_params();
@@ -258,14 +258,14 @@ StorageV3NestedArrayRows() {
     std::string large_value(
         milvus_storage::DEFAULT_MAX_ROW_GROUP_SIZE + 64 * 1024, 'x');
     return {
-        NestedArrayRow(proto::schema::DataType::String,
+        NestedArrayRow(proto::schema::DataType::VarChar,
                        {StringArrayRow({large_value, "bb"}),
                         ScalarFieldProto{},
                         StringArrayRow({})}),
-        NestedArrayRow(proto::schema::DataType::String, {}),
-        NestedArrayRow(proto::schema::DataType::String,
+        NestedArrayRow(proto::schema::DataType::VarChar, {}),
+        NestedArrayRow(proto::schema::DataType::VarChar,
                        {StringArrayRow({"c"})}),
-        NestedArrayRow(proto::schema::DataType::String,
+        NestedArrayRow(proto::schema::DataType::VarChar,
                        {StringArrayRow({}), StringArrayRow({"d", "ee"})}),
     };
 }
@@ -494,8 +494,8 @@ TEST(ArrayValue, NestedArrayRawDataSizeIncludesLeafAndOffsets) {
 
 TEST(ArrayValue, NestedStringArrayUsesRecursiveNodes) {
     auto type =
-        NestedArrayType(LeafArrayType(proto::schema::DataType::String, true));
-    auto row = NestedArrayRow(proto::schema::DataType::String,
+        NestedArrayType(LeafArrayType(proto::schema::DataType::VarChar, true));
+    auto row = NestedArrayRow(proto::schema::DataType::VarChar,
                               {StringArrayRow({"a", "bb"}),
                                StringArrayRow({}),
                                StringArrayRow({"c"})});
@@ -913,10 +913,11 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     std::vector<int64_t> result_offsets{0, 1, 2};
     auto result = segment->bulk_subscript(
         nullptr, array_field, result_offsets.data(), result_offsets.size());
-    ASSERT_EQ(result->valid_data_size(), 3);
-    ASSERT_TRUE(result->valid_data(0));
-    ASSERT_FALSE(result->valid_data(1));
-    ASSERT_TRUE(result->valid_data(2));
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), 3);
+    ASSERT_TRUE(valid_data[0]);
+    ASSERT_FALSE(valid_data[1]);
+    ASSERT_TRUE(valid_data[2]);
     const auto& result_arrays = result->scalars().array_data();
     ASSERT_EQ(result_arrays.element_type(), proto::schema::DataType::Array);
     ASSERT_EQ(result_arrays.data_size(), 3);
@@ -928,13 +929,13 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
 
 TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     auto type = NestedArrayType(
-        LeafArrayType(proto::schema::DataType::String, true), true);
-    auto row0 = NestedArrayRow(proto::schema::DataType::String,
+        LeafArrayType(proto::schema::DataType::VarChar, true), true);
+    auto row0 = NestedArrayRow(proto::schema::DataType::VarChar,
                                {StringArrayRow({"a", "bb"}),
                                 ScalarFieldProto{},
                                 StringArrayRow({}),
                                 StringArrayRow({"c"})});
-    auto row2 = NestedArrayRow(proto::schema::DataType::String,
+    auto row2 = NestedArrayRow(proto::schema::DataType::VarChar,
                                {StringArrayRow({"d"})});
 
     arrow::BinaryBuilder builder;
@@ -996,13 +997,14 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
 }
 
 TEST(ColumnarArrayChunk, SealedFactoriesUseRecursiveChunk) {
-    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::String));
+    auto type =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::VarChar));
     const auto field_id = FieldId(100);
     auto field_meta = NestedArrayFieldMeta(field_id, type);
     auto row0 =
-        NestedArrayRow(proto::schema::DataType::String,
+        NestedArrayRow(proto::schema::DataType::VarChar,
                        {StringArrayRow({"a", "bb"}), StringArrayRow({})});
-    auto row2 = NestedArrayRow(proto::schema::DataType::String,
+    auto row2 = NestedArrayRow(proto::schema::DataType::VarChar,
                                {StringArrayRow({"c"})});
 
     arrow::BinaryBuilder builder;

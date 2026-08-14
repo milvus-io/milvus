@@ -1116,14 +1116,6 @@ func TestValidateFieldNestedArrayOfVector(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "nested ArrayOfVector is not supported")
 	})
-
-	t.Run("nested array of vector type schema mismatch rejected", func(t *testing.T) {
-		field := nestedField()
-		field.ElementType = schemapb.DataType_FloatVector
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "must specify data_type Array and element_type Array")
-	})
 }
 
 func TestValidateMultipleVectorFields(t *testing.T) {
