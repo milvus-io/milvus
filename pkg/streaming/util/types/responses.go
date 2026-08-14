@@ -12,6 +12,21 @@ import (
 type BroadcastAppendResult struct {
 	BroadcastID   uint64                   // the broadcast id of the append operation.
 	AppendResults map[string]*AppendResult // make the channel name to the append result.
+
+	// Duplicated is non-nil when the broadcast was deduplicated by its idempotency
+	// key: no new broadcast task was created, and BroadcastID is the ID of the
+	// ORIGINAL broadcast. It carries the original broadcast message so the caller
+	// can recover its own response payload (the import jobID, for imports).
+	//
+	// AppendResults is nil in that case: the original append results are of no use
+	// to any current caller, and rebuilding them from the task's AckedCheckpoints
+	// is deferred until something needs them.
+	//
+	// Only the in-process broadcaster path fills this field. The gRPC client path
+	// (GRPCBroadcastServiceImpl.Broadcast) leaves it nil regardless of whether the
+	// broadcast was deduplicated, so it must not be read as "was not a duplicate"
+	// there.
+	Duplicated message.BroadcastMutableMessage
 }
 
 // GetAppendResult returns the append result of the given channel.

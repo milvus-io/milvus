@@ -114,3 +114,10 @@ func TestAppendResponses_FillAllResponse(t *testing.T) {
 		assert.Equal(t, resp, r)
 	}
 }
+
+func TestBroadcastAppendResultDuplicated(t *testing.T) {
+	// 未去重时 Duplicated 为 nil，且不影响既有取值行为。
+	fresh := &BroadcastAppendResult{BroadcastID: 1, AppendResults: map[string]*AppendResult{}}
+	assert.Nil(t, fresh.Duplicated)
+	assert.Nil(t, fresh.GetAppendResult("v1"))
+}
