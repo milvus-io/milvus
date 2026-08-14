@@ -197,7 +197,7 @@ func (m *summaryManager) bootstrapPChannelSummaryStore(ctx context.Context, pcha
 	// lose the pchannel-meta CAS, but a prefix delete would remove the new
 	// owner's referenced chunk before the stale owner is fenced.
 	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
-		return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, m.term)
+		return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, footer, m.term)
 	}); err != nil {
 		return nil, err
 	}

@@ -17,31 +17,100 @@ const (
 )
 
 // committedWriteRecord is the internal representation of a committed write
-// fact derived from an already-landed pchannel WAL message.
+// fact derived from an already-landed pchannel WAL message. It is the in-memory
+// model; its durable form is streamingpb.CommittedWriteRecord, converted in
+// summary_store_codec.go.
 type committedWriteRecord struct {
-	SourcePChannel         string                         `json:"source_pchannel"`
-	SourceMessageID        *commonpb.MessageID            `json:"source_message_id,omitempty"`
-	SourceTimeTick         uint64                         `json:"source_timetick"`
-	VChannel               string                         `json:"vchannel"`
-	Rows                   []committedWriteRow            `json:"rows,omitempty"`
-	Idempotency            *committedWriteIdempotency     `json:"idempotency,omitempty"`
-	DuplicateResponse      *committedWriteDuplicateResult `json:"-"`
-	LastConfirmedMessageID *commonpb.MessageID            `json:"last_confirmed_message_id,omitempty"`
+	SourcePChannel  string
+	SourceMessageID *commonpb.MessageID
+	SourceTimeTick  uint64
+	VChannel        string
+	Rows            []committedWriteRow
+	Idempotency     *committedWriteIdempotency
+	// DuplicateResponse is never persisted: it is rebuilt from Rows on the way
+	// out (see SummaryEntry), so the chunk stores the rows once.
+	DuplicateResponse      *committedWriteDuplicateResult
+	LastConfirmedMessageID *commonpb.MessageID
 }
 
 type committedWriteRow struct {
-	RowOffset             uint32 `json:"row_offset"`
-	PrimaryKeyType        string `json:"primary_key_type,omitempty"`
-	Int64PrimaryKeyValue  int64  `json:"int64_primary_key_value,omitempty"`
-	StringPrimaryKeyValue string `json:"string_primary_key_value,omitempty"`
-	RowID                 int64  `json:"row_id,omitempty"`
+	RowOffset             uint32
+	PrimaryKeyType        string
+	Int64PrimaryKeyValue  int64
+	StringPrimaryKeyValue string
 }
 
 type committedWriteIdempotency struct {
-	Key string `json:"key"`
+	Key string
 }
 
 type committedWriteDuplicateResult = messagespb.IdempotentInsertResult
+
+func (record committedWriteRecord) intoProto() *streamingpb.CommittedWriteRecord {
+	pb := &streamingpb.CommittedWriteRecord{
+		SourcePchannel:         record.SourcePChannel,
+		SourceMessageId:        cloneMessageIDProto(record.SourceMessageID),
+		SourceTimetick:         record.SourceTimeTick,
+		Vchannel:               record.VChannel,
+		LastConfirmedMessageId: cloneMessageIDProto(record.LastConfirmedMessageID),
+		Rows:                   make([]*streamingpb.CommittedWriteRow, 0, len(record.Rows)),
+	}
+	if record.Idempotency != nil {
+		pb.IdempotencyKey = record.Idempotency.Key
+	}
+	for _, row := range record.Rows {
+		pb.Rows = append(pb.Rows, row.intoProto())
+	}
+	return pb
+}
+
+func newCommittedWriteRecordFromProto(pb *streamingpb.CommittedWriteRecord) committedWriteRecord {
+	record := committedWriteRecord{
+		SourcePChannel:         pb.GetSourcePchannel(),
+		SourceMessageID:        cloneMessageIDProto(pb.GetSourceMessageId()),
+		SourceTimeTick:         pb.GetSourceTimetick(),
+		VChannel:               pb.GetVchannel(),
+		LastConfirmedMessageID: cloneMessageIDProto(pb.GetLastConfirmedMessageId()),
+	}
+	// An absent key and an empty key are the same thing here: a record only ever
+	// carries an idempotency block when the write had a non-empty key.
+	if key := pb.GetIdempotencyKey(); key != "" {
+		record.Idempotency = &committedWriteIdempotency{Key: key}
+	}
+	if rows := pb.GetRows(); len(rows) > 0 {
+		record.Rows = make([]committedWriteRow, 0, len(rows))
+		for _, row := range rows {
+			record.Rows = append(record.Rows, newCommittedWriteRowFromProto(row))
+		}
+	}
+	return record
+}
+
+func (row committedWriteRow) intoProto() *streamingpb.CommittedWriteRow {
+	pb := &streamingpb.CommittedWriteRow{RowOffset: row.RowOffset}
+	// The primary key is a oneof on the wire, so a row whose type tag is unset
+	// (a rows-without-ids result) simply carries no key rather than a zero one.
+	switch row.PrimaryKeyType {
+	case committedWritePrimaryKeyTypeInt64:
+		pb.PrimaryKey = &streamingpb.CommittedWriteRow_Int64PrimaryKey{Int64PrimaryKey: row.Int64PrimaryKeyValue}
+	case committedWritePrimaryKeyTypeString:
+		pb.PrimaryKey = &streamingpb.CommittedWriteRow_StringPrimaryKey{StringPrimaryKey: row.StringPrimaryKeyValue}
+	}
+	return pb
+}
+
+func newCommittedWriteRowFromProto(pb *streamingpb.CommittedWriteRow) committedWriteRow {
+	row := committedWriteRow{RowOffset: pb.GetRowOffset()}
+	switch key := pb.GetPrimaryKey().(type) {
+	case *streamingpb.CommittedWriteRow_Int64PrimaryKey:
+		row.PrimaryKeyType = committedWritePrimaryKeyTypeInt64
+		row.Int64PrimaryKeyValue = key.Int64PrimaryKey
+	case *streamingpb.CommittedWriteRow_StringPrimaryKey:
+		row.PrimaryKeyType = committedWritePrimaryKeyTypeString
+		row.StringPrimaryKeyValue = key.StringPrimaryKey
+	}
+	return row
+}
 
 // newCommittedWriteRecordFromMessage extracts a committed write fact from an
 // immutable WAL message. Callers should only pass messages observed after WAL

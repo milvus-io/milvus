@@ -3,7 +3,6 @@ package recovery
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -1130,10 +1129,12 @@ func rewritePChannelSummaryFooterPayload(
 	// Preserve the original (now stale) trailer checksum so mutating the footer
 	// body is detected as corruption.
 	staleChecksum := payload[footerChecksumStart:footerLenStart]
-	footer := &pchannelSummaryChunkFooter{}
-	require.NoError(t, json.Unmarshal(payload[footerStart:footerChecksumStart], footer))
+	// Go through the package's own codec rather than hand-rolling the encoding,
+	// so this helper cannot drift from the format under test.
+	footer, err := unmarshalPChannelSummaryChunkFooter(payload[footerStart:footerChecksumStart])
+	require.NoError(t, err)
 	mutate(footer)
-	footerPayload, err := json.Marshal(footer)
+	footerPayload, err := marshalPChannelSummaryChunkFooter(footer)
 	require.NoError(t, err)
 	mutated := make([]byte, 0, footerStart+len(footerPayload)+pchannelSummaryChunkChecksumSize+4+len(pchannelSummaryChunkFooterMagic))
 	mutated = append(mutated, payload[:footerStart]...)

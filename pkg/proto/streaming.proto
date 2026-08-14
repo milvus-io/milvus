@@ -794,6 +794,86 @@ message SummarySnapshot {
 }
 
 ///
+/// Summary store chunk payloads
+///
+// A summary chunk lives in object storage, not in etcd, and the object frames
+// its own payloads: a fixed header, the per-vchannel payloads back to back, then
+// a footer indexing each of them by offset/length/checksum, the footer checksum,
+// its length and a trailing magic. The frame is what lets recovery locate and
+// verify one vchannel's records without decoding the whole object, so it stays
+// hand-rolled binary; the messages below are only the payloads inside it.
+
+// SummaryChunkSourceRange is the source WAL span covered by a chunk or by one
+// vchannel inside it, kept for operational inspection and replay bounds.
+message SummaryChunkSourceRange {
+    common.MessageID start_message_id = 1;
+    common.MessageID end_message_id   = 2;
+    uint64 start_timetick             = 3;
+    uint64 end_timetick               = 4;
+}
+
+// VChannelSummaryChunkIndex locates one vchannel's payload inside the chunk
+// object. The checksum covers exactly the stored payload bytes and is always
+// present; it is verified before that payload is decoded.
+message VChannelSummaryChunkIndex {
+    string vchannel                       = 1;
+    uint64 offset                         = 2;
+    uint64 length                         = 3;
+    bytes checksum                        = 4;
+    uint64 record_count                   = 5;
+    SummaryChunkSourceRange source_range  = 6;
+}
+
+// PChannelSummaryChunkFooter is the chunk object's index. Recovery reads it
+// first, from the object's tail.
+message PChannelSummaryChunkFooter {
+    uint32 codec_version                            = 1;
+    string pchannel                                 = 2;
+    uint64 generation                               = 3;
+    // The WAL assignment term of the writer. Used to arbitrate a same-generation
+    // write conflict between two owners (split-brain): the newer term wins, the
+    // older term is fenced.
+    int64 term                                      = 4;
+    common.MessageID source_checkpoint_message_id   = 5;
+    uint64 source_checkpoint_timetick               = 6;
+    SummaryChunkSourceRange source_range            = 7;
+    repeated VChannelSummaryChunkIndex chunks       = 8;
+}
+
+// CommittedWriteRow is one row of a committed write: where it sat in the
+// original request and the primary key it was written under.
+message CommittedWriteRow {
+    uint32 row_offset = 1;
+    oneof primary_key {
+        int64 int64_primary_key   = 2;
+        string string_primary_key = 3;
+    }
+}
+
+// CommittedWriteRecord is one committed write fact derived from an already
+// landed WAL message.
+message CommittedWriteRecord {
+    string source_pchannel                        = 1;
+    common.MessageID source_message_id            = 2;
+    uint64 source_timetick                        = 3;
+    string vchannel                               = 4;
+    repeated CommittedWriteRow rows               = 5;
+    // Empty when the write carried no idempotency key.
+    string idempotency_key                        = 6;
+    common.MessageID last_confirmed_message_id    = 7;
+}
+
+// VChannelSummaryChunk is one vchannel's payload inside the chunk object.
+message VChannelSummaryChunk {
+    uint32 codec_version                     = 1;
+    string pchannel                          = 2;
+    string vchannel                          = 3;
+    uint64 generation                        = 4;
+    SummaryChunkSourceRange source_range     = 5;
+    repeated CommittedWriteRecord records    = 6;
+}
+
+///
 /// SegmentAssignment
 ///
 // SegmentAssignmentMeta is the stat of segment assignment.

@@ -1,11 +1,9 @@
 package recovery
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,10 +13,11 @@ import (
 )
 
 // The footer integrity check must cover the exact stored footer bytes, carried
-// in the binary trailer — not a checksum embedded in the JSON and re-derived by
-// re-marshaling the parsed struct. Re-deriving would falsely flag corruption the
-// day a proto field's JSON encoding changes. We prove the property by re-encoding
-// the footer JSON into a byte-different but semantically identical form (indented)
+// in the binary trailer — not a checksum embedded in the footer and re-derived
+// by re-marshaling the parsed struct. Proto marshaling is not guaranteed
+// byte-stable across library versions, so re-deriving would falsely flag a
+// healthy chunk as corrupt the day the encoding shifts. We prove the property by
+// re-encoding the footer into a byte-different but semantically identical form
 // and refreshing the trailer checksum: decode must still accept it.
 func TestPChannelSummaryFooterChecksumCoversStoredBytes(t *testing.T) {
 	payload, _, checksum, err := marshalPChannelSummaryChunk("p1", 3, 0, &utility.WALCheckpoint{
@@ -28,30 +27,40 @@ func TestPChannelSummaryFooterChecksumCoversStoredBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, checksum)
 
+	rebuilt, newChecksum := repackChunkWithPaddedFooter(t, payload)
+	require.NotEqual(t, payload, rebuilt)
+
+	records, footer, decodedChecksum, err := unmarshalPChannelSummaryChunk(rebuilt)
+	require.NoError(t, err)
+	require.Empty(t, records)
+	require.Equal(t, uint64(3), footer.Generation)
+	require.Equal(t, hex.EncodeToString(newChecksum), decodedChecksum)
+}
+
+// repackChunkWithPaddedFooter re-frames a chunk with an unknown proto field
+// appended to its footer and a refreshed trailer checksum. The result is byte-
+// different from the input but decodes to the same footer identity, because a
+// proto decoder preserves and ignores unknown fields. It returns the rebuilt
+// chunk and the new footer checksum.
+func repackChunkWithPaddedFooter(t *testing.T, payload []byte) ([]byte, []byte) {
+	t.Helper()
 	footerMagicStart := len(payload) - len(pchannelSummaryChunkFooterMagic)
 	footerLenStart := footerMagicStart - 4
 	footerChecksumStart := footerLenStart - sha256.Size
 	footerLen := int(binary.BigEndian.Uint32(payload[footerLenStart:footerMagicStart]))
 	footerStart := footerChecksumStart - footerLen
 
-	var indented bytes.Buffer
-	require.NoError(t, json.Indent(&indented, payload[footerStart:footerChecksumStart], "", "  "))
-	newFooter := indented.Bytes()
-	require.NotEqual(t, payload[footerStart:footerChecksumStart], newFooter)
-	newChecksum := sha256.Sum256(newFooter)
+	// Field 1000, varint wire type, value 1: unknown to the footer message.
+	padded := append([]byte(nil), payload[footerStart:footerChecksumStart]...)
+	padded = append(padded, 0xC0, 0x3E, 0x01)
+	checksum := sha256.Sum256(padded)
 
-	rebuilt := make([]byte, 0, footerStart+len(newFooter)+sha256.Size+4+len(pchannelSummaryChunkFooterMagic))
-	rebuilt = append(rebuilt, payload[:footerStart]...)
-	rebuilt = append(rebuilt, newFooter...)
-	rebuilt = append(rebuilt, newChecksum[:]...)
+	rebuilt := append([]byte(nil), payload[:footerStart]...)
+	rebuilt = append(rebuilt, padded...)
+	rebuilt = append(rebuilt, checksum[:]...)
 	lenBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(lenBytes, uint32(len(newFooter)))
+	binary.BigEndian.PutUint32(lenBytes, uint32(len(padded)))
 	rebuilt = append(rebuilt, lenBytes...)
 	rebuilt = append(rebuilt, pchannelSummaryChunkFooterMagic...)
-
-	records, footer, decodedChecksum, err := unmarshalPChannelSummaryChunk(rebuilt)
-	require.NoError(t, err)
-	require.Empty(t, records)
-	require.Equal(t, uint64(3), footer.Generation)
-	require.Equal(t, hex.EncodeToString(newChecksum[:]), decodedChecksum)
+	return rebuilt, checksum[:]
 }

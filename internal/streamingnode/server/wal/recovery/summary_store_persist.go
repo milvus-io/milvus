@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -95,7 +96,7 @@ func (m *summaryManager) persistPChannelSummaryChunk(
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelSummaryChunk"), mlog.Uint64("generation", nextGeneration)),
 		func(ctx context.Context) error {
-			return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, m.term)
+			return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, footer, m.term)
 		}); err != nil {
 		return nil, err
 	}
@@ -209,7 +210,7 @@ func (m *summaryManager) persistSummaryMetas(ctx context.Context, logger *mlog.L
 		})
 }
 
-func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte, term int64) error {
+func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte, footer *pchannelSummaryChunkFooter, term int64) error {
 	chunkManager := resource.Resource().ChunkManager()
 	if chunkManager == nil {
 		return merr.WrapErrServiceInternalMsg("pchannel summary chunk manager is not initialized")
@@ -228,14 +229,13 @@ func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, pay
 	if bytes.Equal(existingPayload, payload) {
 		return nil
 	}
-	// Same generation, different bytes: another writer produced this chunk.
-	// The Exist->Write above is not atomic, so under split-brain both owners
-	// can pass the absence check and the last write would silently win —
-	// replacing the other owner's summary records with no error anywhere.
-	// Arbitrate by the assignment term embedded in the footer instead: the
-	// newer term is the current owner and keeps/overwrites the chunk, the
-	// older term is fenced and must stop persisting. Only an undecidable
-	// conflict (same term, or an undecodable existing payload) is corruption.
+	// Same generation, different bytes. Either this owner is retrying its own
+	// write, or another writer produced this chunk. The Exist->Write above is not
+	// atomic, so under split-brain both owners can pass the absence check and the
+	// last write would silently win — replacing the other owner's summary records
+	// with no error anywhere. Arbitrate on the decoded footer: the newer term is
+	// the current owner and keeps/overwrites the chunk, the older term is fenced
+	// and must stop persisting.
 	if _, existingFooter, _, decodeErr := unmarshalPChannelSummaryChunk(existingPayload); decodeErr == nil {
 		if existingFooter.Term > term {
 			return pchannelSummaryStoreFencedf("pchannel summary chunk %s already written by term %d, own term %d", chunkKey, existingFooter.Term, term)
@@ -243,8 +243,52 @@ func writePChannelSummaryChunkIfAbsent(ctx context.Context, chunkKey string, pay
 		if existingFooter.Term < term {
 			return chunkManager.Write(ctx, chunkKey, payload)
 		}
+		// Same term: this is our own chunk. Byte inequality alone does not prove a
+		// conflict, because the payload encoding is not guaranteed to be
+		// byte-stable across proto library versions — a retry that spans a binary
+		// upgrade can re-encode the same records differently. Compare what the
+		// chunk actually contains instead, so an identical rewrite stays
+		// idempotent and only genuinely different content is corruption.
+		if pchannelSummaryChunkFooterSameContent(existingFooter, footer) {
+			return nil
+		}
 	}
 	return pchannelSummaryStoreCorruptedf("pchannel summary chunk already exists with different payload: %s", chunkKey)
+}
+
+// pchannelSummaryChunkFooterSameContent reports whether two footers describe the
+// same chunk contents. It must cover everything a chunk durably carries, not
+// just its records: a checkpoint-only generation has no vchannel chunks at all,
+// and its source checkpoint is the whole of its content. The per-vchannel
+// checksums cover the exact stored payload bytes of each vchannel chunk, so an
+// equal (vchannel, record count, checksum) list means identical records even
+// when the surrounding encodings differ.
+func pchannelSummaryChunkFooterSameContent(left, right *pchannelSummaryChunkFooter) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	if left.Generation != right.Generation || left.Term != right.Term {
+		return false
+	}
+	if left.SourceCheckpointTimetick != right.SourceCheckpointTimetick {
+		return false
+	}
+	if !proto.Equal(left.SourceCheckpointMessageID, right.SourceCheckpointMessageID) {
+		return false
+	}
+	if len(left.Chunks) != len(right.Chunks) {
+		return false
+	}
+	for i := range left.Chunks {
+		l, r := left.Chunks[i], right.Chunks[i]
+		if !bytes.Equal(l.Checksum, r.Checksum) {
+			return false
+		}
+		if l.VChannel != r.VChannel || l.RecordCount != r.RecordCount {
+			return false
+		}
+	}
+	return true
 }
 
 func buildPChannelSummaryChunkKey(pchannel string, generation uint64, term ...int64) string {

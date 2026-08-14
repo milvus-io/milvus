@@ -27,15 +27,15 @@ func TestWritePChannelSummaryChunkIfAbsentArbitratesByTerm(t *testing.T) {
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
-	stalePayload, _, _, err := marshalPChannelSummaryChunk("p1", 7, 3, checkpoint, nil)
+	stalePayload, staleFooter, _, err := marshalPChannelSummaryChunk("p1", 7, 3, checkpoint, nil)
 	require.NoError(t, err)
-	currentPayload, _, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, nil)
+	currentPayload, currentFooter, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, nil)
 	require.NoError(t, err)
 	chunkKey := buildPChannelSummaryChunkKey("p1", 7)
 
 	// A stale owner (term 3) must not overwrite the newer owner's chunk (term 5).
 	require.NoError(t, chunkManager.Write(ctx, chunkKey, currentPayload))
-	err = writePChannelSummaryChunkIfAbsent(ctx, chunkKey, stalePayload, 3)
+	err = writePChannelSummaryChunkIfAbsent(ctx, chunkKey, stalePayload, staleFooter, 3)
 	require.ErrorIs(t, err, ErrPChannelSummaryStoreFenced)
 	stored, err := chunkManager.Read(ctx, chunkKey)
 	require.NoError(t, err)
@@ -43,16 +43,61 @@ func TestWritePChannelSummaryChunkIfAbsentArbitratesByTerm(t *testing.T) {
 
 	// The newer owner overwrites a stale owner's leftover chunk.
 	require.NoError(t, chunkManager.Write(ctx, chunkKey, stalePayload))
-	require.NoError(t, writePChannelSummaryChunkIfAbsent(ctx, chunkKey, currentPayload, 5))
+	require.NoError(t, writePChannelSummaryChunkIfAbsent(ctx, chunkKey, currentPayload, currentFooter, 5))
 	stored, err = chunkManager.Read(ctx, chunkKey)
 	require.NoError(t, err)
 	require.Equal(t, currentPayload, stored)
 
-	// Same term, different payload: undecidable — corruption, as before.
-	conflictPayload, _, _, err := marshalPChannelSummaryChunk("p1", 7, 5, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(200), TimeTick: 200}, nil)
+	// Same term, different content: undecidable — corruption, as before.
+	conflictPayload, conflictFooter, _, err := marshalPChannelSummaryChunk("p1", 7, 5, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(200), TimeTick: 200}, nil)
 	require.NoError(t, err)
-	err = writePChannelSummaryChunkIfAbsent(ctx, chunkKey, conflictPayload, 5)
+	err = writePChannelSummaryChunkIfAbsent(ctx, chunkKey, conflictPayload, conflictFooter, 5)
 	require.ErrorIs(t, err, ErrPChannelSummaryStoreCorrupted)
+}
+
+// A same-term retry of an identical chunk must stay idempotent even when the
+// stored bytes differ. The payload encoding is protobuf, which is not guaranteed
+// byte-stable across library versions, so a retry that spans a binary upgrade
+// re-encodes the same records differently; arbitration must compare the decoded
+// content, not the raw bytes, or a healthy retry would be reported as corruption.
+func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t *testing.T) {
+	ctx := context.Background()
+	catalog, _ := newTestPChannelSummaryCatalog(t)
+	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
+	records := map[string][]committedWriteRecord{
+		"v1": {{
+			SourcePChannel:  "p1",
+			VChannel:        "v1",
+			SourceMessageID: rmq.NewRmqID(101).IntoProto(),
+			SourceTimeTick:  101,
+			Idempotency:     &committedWriteIdempotency{Key: "key-1"},
+			Rows: []committedWriteRow{{
+				RowOffset:            0,
+				PrimaryKeyType:       committedWritePrimaryKeyTypeInt64,
+				Int64PrimaryKeyValue: 7,
+			}},
+		}},
+	}
+	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, records)
+	require.NoError(t, err)
+	chunkKey := buildPChannelSummaryChunkKey("p1", 7)
+
+	// Simulate a byte-different but semantically identical stored chunk by
+	// padding the footer with a proto unknown field, which a decoder preserves
+	// and ignores. The per-vchannel payloads and the footer's identity fields are
+	// untouched, so the content comparison must accept it.
+	stored, _ := repackChunkWithPaddedFooter(t, payload)
+	require.NotEqual(t, payload, stored)
+	require.NoError(t, chunkManager.Write(ctx, chunkKey, stored))
+
+	require.NoError(t, writePChannelSummaryChunkIfAbsent(ctx, chunkKey, payload, footer, 5))
+	// The stored chunk is left as-is: it already holds the same content.
+	after, err := chunkManager.Read(ctx, chunkKey)
+	require.NoError(t, err)
+	require.Equal(t, stored, after)
 }
 
 // A cleaner whose assignment term is older than the term stamped in the durable

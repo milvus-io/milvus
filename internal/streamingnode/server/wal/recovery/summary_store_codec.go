@@ -5,18 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"sort"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
-	// pchannelSummaryCodecVersion is bumped to 2: the footer checksum moved out of
-	// the JSON body into the binary trailer so integrity is verified against the
-	// exact stored bytes, not a JSON re-serialization of the parsed struct.
-	pchannelSummaryCodecVersion      = 2
+	// pchannelSummaryCodecVersion is the on-disk chunk format version. A chunk
+	// whose version does not match is rejected rather than parsed on a guess.
+	pchannelSummaryCodecVersion      = 1
 	pchannelSummaryChunkHeaderSize   = 16
 	pchannelSummaryChunkChecksumSize = sha256.Size
 )
@@ -26,50 +27,58 @@ var (
 	pchannelSummaryChunkFooterMagic = []byte("PSCFT001")
 )
 
+// summaryChunkMarshalOptions pins deterministic output. The persist path treats
+// a byte-identical rewrite of a generation as an idempotent retry, so a stable
+// encoding keeps the common retry cheap. It is only an optimization, not a
+// correctness dependency: proto guarantees determinism within a build but not
+// across versions, so writePChannelSummaryChunkIfAbsent falls back to comparing
+// the decoded footer identity rather than trusting byte equality.
+var summaryChunkMarshalOptions = proto.MarshalOptions{Deterministic: true}
+
 type pchannelSummarySourceCheckpoint struct {
-	MessageID *commonpb.MessageID `json:"message_id,omitempty"`
-	TimeTick  uint64              `json:"timetick"`
+	MessageID *commonpb.MessageID
+	TimeTick  uint64
 }
 
 type pchannelSummaryChunkFooter struct {
-	CodecVersion int    `json:"codec_version"`
-	PChannel     string `json:"pchannel"`
-	Generation   uint64 `json:"generation"`
+	CodecVersion int
+	PChannel     string
+	Generation   uint64
 	// The WAL assignment term of the writer. Used to arbitrate a same-generation
 	// write conflict between two owners (split-brain): the newer term wins, the
-	// older term is fenced. Chunks written before this field decode as term 0.
-	Term                      int64                       `json:"term,omitempty"`
-	SourceCheckpointMessageID *commonpb.MessageID         `json:"source_checkpoint_message_id,omitempty"`
-	SourceCheckpointTimetick  uint64                      `json:"source_checkpoint_timetick,omitempty"`
-	SourceStartMessageID      *commonpb.MessageID         `json:"source_start_message_id,omitempty"`
-	SourceEndMessageID        *commonpb.MessageID         `json:"source_end_message_id,omitempty"`
-	SourceStartTimetick       uint64                      `json:"source_start_timetick,omitempty"`
-	SourceEndTimetick         uint64                      `json:"source_end_timetick,omitempty"`
-	Chunks                    []vchannelSummaryChunkIndex `json:"chunks"`
+	// older term is fenced.
+	Term                      int64
+	SourceCheckpointMessageID *commonpb.MessageID
+	SourceCheckpointTimetick  uint64
+	SourceStartMessageID      *commonpb.MessageID
+	SourceEndMessageID        *commonpb.MessageID
+	SourceStartTimetick       uint64
+	SourceEndTimetick         uint64
+	Chunks                    []vchannelSummaryChunkIndex
 }
 
 type vchannelSummaryChunkIndex struct {
-	VChannel             string              `json:"vchannel"`
-	Offset               uint64              `json:"offset"`
-	Length               uint64              `json:"length"`
-	Checksum             string              `json:"checksum"`
-	RecordCount          uint64              `json:"record_count"`
-	SourceStartMessageID *commonpb.MessageID `json:"source_start_message_id,omitempty"`
-	SourceEndMessageID   *commonpb.MessageID `json:"source_end_message_id,omitempty"`
-	SourceStartTimetick  uint64              `json:"source_start_timetick,omitempty"`
-	SourceEndTimetick    uint64              `json:"source_end_timetick,omitempty"`
+	VChannel             string
+	Offset               uint64
+	Length               uint64
+	Checksum             []byte
+	RecordCount          uint64
+	SourceStartMessageID *commonpb.MessageID
+	SourceEndMessageID   *commonpb.MessageID
+	SourceStartTimetick  uint64
+	SourceEndTimetick    uint64
 }
 
 type vchannelSummaryChunk struct {
-	CodecVersion         int                    `json:"codec_version"`
-	PChannel             string                 `json:"pchannel"`
-	VChannel             string                 `json:"vchannel"`
-	Generation           uint64                 `json:"generation"`
-	SourceStartMessageID *commonpb.MessageID    `json:"source_start_message_id,omitempty"`
-	SourceEndMessageID   *commonpb.MessageID    `json:"source_end_message_id,omitempty"`
-	SourceStartTimetick  uint64                 `json:"source_start_timetick,omitempty"`
-	SourceEndTimetick    uint64                 `json:"source_end_timetick,omitempty"`
-	Records              []committedWriteRecord `json:"records"`
+	CodecVersion         int
+	PChannel             string
+	VChannel             string
+	Generation           uint64
+	SourceStartMessageID *commonpb.MessageID
+	SourceEndMessageID   *commonpb.MessageID
+	SourceStartTimetick  uint64
+	SourceEndTimetick    uint64
+	Records              []committedWriteRecord
 }
 
 func newPChannelSummarySourceCheckpoint(checkpoint *WALCheckpoint) *pchannelSummarySourceCheckpoint {
@@ -136,7 +145,7 @@ func marshalPChannelSummaryChunk(
 			VChannel:             vchannel,
 			Offset:               offset,
 			Length:               uint64(len(payload)),
-			Checksum:             checksumHex(payload),
+			Checksum:             chunkChecksum(payload),
 			RecordCount:          uint64(len(records)),
 			SourceStartMessageID: cloneMessageIDProto(chunk.SourceStartMessageID),
 			SourceEndMessageID:   cloneMessageIDProto(chunk.SourceEndMessageID),
@@ -152,8 +161,9 @@ func marshalPChannelSummaryChunk(
 	// bytes.Buffer.Write never returns an error, so the trailer writes are unchecked.
 	buf.Write(footerPayload)
 	// Checksum the footer bytes exactly as written and carry it in the trailer,
-	// so verification never re-marshals the parsed footer (which would break the
-	// day a proto field's JSON encoding changes).
+	// so verification never re-marshals the parsed footer — proto marshaling is
+	// not guaranteed byte-stable across library versions, and re-deriving would
+	// then flag a healthy chunk as corrupt.
 	footerChecksum := sha256.Sum256(footerPayload)
 	buf.Write(footerChecksum[:])
 	footerLen := make([]byte, 4)
@@ -207,7 +217,7 @@ func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]committedWriteR
 			return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid vchannel summary chunk range for vchannel %s", chunkIndex.VChannel)
 		}
 		chunkPayload := payload[chunkIndex.Offset:end]
-		if chunkIndex.Checksum != "" && chunkIndex.Checksum != checksumHex(chunkPayload) {
+		if !bytes.Equal(chunkIndex.Checksum, chunkChecksum(chunkPayload)) {
 			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk checksum mismatch for vchannel %s", chunkIndex.VChannel)
 		}
 		decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload)
@@ -241,17 +251,18 @@ func marshalVChannelSummaryChunk(chunk *vchannelSummaryChunk) ([]byte, error) {
 	// No self-checksum: the chunk's bytes are protected by the footer's per-chunk
 	// index checksum (vchannelSummaryChunkIndex.Checksum), computed over these exact
 	// bytes and verified before this chunk is ever decoded.
-	return json.Marshal(chunk)
+	return summaryChunkMarshalOptions.Marshal(chunk.intoProto())
 }
 
 func unmarshalVChannelSummaryChunk(payload []byte) (*vchannelSummaryChunk, error) {
-	chunk := &vchannelSummaryChunk{}
-	if err := json.Unmarshal(payload, chunk); err != nil {
+	pb := &streamingpb.VChannelSummaryChunk{}
+	if err := proto.Unmarshal(payload, pb); err != nil {
 		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	if chunk.CodecVersion != pchannelSummaryCodecVersion {
-		return nil, pchannelSummaryStoreCorruptedf("unsupported vchannel summary chunk version %d", chunk.CodecVersion)
+	if pb.GetCodecVersion() != pchannelSummaryCodecVersion {
+		return nil, pchannelSummaryStoreCorruptedf("unsupported vchannel summary chunk version %d", pb.GetCodecVersion())
 	}
+	chunk := newVChannelSummaryChunkFromProto(pb)
 	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
 	return chunk, nil
 }
@@ -275,18 +286,128 @@ func marshalPChannelSummaryChunkFooter(footer *pchannelSummaryChunkFooter) ([]by
 	})
 	// No self-checksum: integrity is verified against the trailer checksum over
 	// these exact bytes (see marshal/unmarshalPChannelSummaryChunk).
-	return json.Marshal(footer)
+	return summaryChunkMarshalOptions.Marshal(footer.intoProto())
 }
 
 func unmarshalPChannelSummaryChunkFooter(payload []byte) (*pchannelSummaryChunkFooter, error) {
-	footer := &pchannelSummaryChunkFooter{}
-	if err := json.Unmarshal(payload, footer); err != nil {
+	pb := &streamingpb.PChannelSummaryChunkFooter{}
+	if err := proto.Unmarshal(payload, pb); err != nil {
 		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	if footer.CodecVersion != pchannelSummaryCodecVersion {
-		return nil, pchannelSummaryStoreCorruptedf("unsupported pchannel summary chunk footer version %d", footer.CodecVersion)
+	if pb.GetCodecVersion() != pchannelSummaryCodecVersion {
+		return nil, pchannelSummaryStoreCorruptedf("unsupported pchannel summary chunk footer version %d", pb.GetCodecVersion())
 	}
-	return footer, nil
+	return newPChannelSummaryChunkFooterFromProto(pb), nil
+}
+
+// newSummaryChunkSourceRange builds the wire source range, returning nil when
+// the range carries nothing so an absent range stays absent on the wire.
+func newSummaryChunkSourceRange(startID, endID *commonpb.MessageID, startTT, endTT uint64) *streamingpb.SummaryChunkSourceRange {
+	if startID == nil && endID == nil && startTT == 0 && endTT == 0 {
+		return nil
+	}
+	return &streamingpb.SummaryChunkSourceRange{
+		StartMessageId: cloneMessageIDProto(startID),
+		EndMessageId:   cloneMessageIDProto(endID),
+		StartTimetick:  startTT,
+		EndTimetick:    endTT,
+	}
+}
+
+func (footer *pchannelSummaryChunkFooter) intoProto() *streamingpb.PChannelSummaryChunkFooter {
+	pb := &streamingpb.PChannelSummaryChunkFooter{
+		CodecVersion:              uint32(footer.CodecVersion),
+		Pchannel:                  footer.PChannel,
+		Generation:                footer.Generation,
+		Term:                      footer.Term,
+		SourceCheckpointMessageId: cloneMessageIDProto(footer.SourceCheckpointMessageID),
+		SourceCheckpointTimetick:  footer.SourceCheckpointTimetick,
+		SourceRange: newSummaryChunkSourceRange(
+			footer.SourceStartMessageID, footer.SourceEndMessageID,
+			footer.SourceStartTimetick, footer.SourceEndTimetick,
+		),
+		Chunks: make([]*streamingpb.VChannelSummaryChunkIndex, 0, len(footer.Chunks)),
+	}
+	for _, index := range footer.Chunks {
+		pb.Chunks = append(pb.Chunks, &streamingpb.VChannelSummaryChunkIndex{
+			Vchannel:    index.VChannel,
+			Offset:      index.Offset,
+			Length:      index.Length,
+			Checksum:    index.Checksum,
+			RecordCount: index.RecordCount,
+			SourceRange: newSummaryChunkSourceRange(
+				index.SourceStartMessageID, index.SourceEndMessageID,
+				index.SourceStartTimetick, index.SourceEndTimetick,
+			),
+		})
+	}
+	return pb
+}
+
+func newPChannelSummaryChunkFooterFromProto(pb *streamingpb.PChannelSummaryChunkFooter) *pchannelSummaryChunkFooter {
+	footer := &pchannelSummaryChunkFooter{
+		CodecVersion:              int(pb.GetCodecVersion()),
+		PChannel:                  pb.GetPchannel(),
+		Generation:                pb.GetGeneration(),
+		Term:                      pb.GetTerm(),
+		SourceCheckpointMessageID: cloneMessageIDProto(pb.GetSourceCheckpointMessageId()),
+		SourceCheckpointTimetick:  pb.GetSourceCheckpointTimetick(),
+		SourceStartMessageID:      cloneMessageIDProto(pb.GetSourceRange().GetStartMessageId()),
+		SourceEndMessageID:        cloneMessageIDProto(pb.GetSourceRange().GetEndMessageId()),
+		SourceStartTimetick:       pb.GetSourceRange().GetStartTimetick(),
+		SourceEndTimetick:         pb.GetSourceRange().GetEndTimetick(),
+		Chunks:                    make([]vchannelSummaryChunkIndex, 0, len(pb.GetChunks())),
+	}
+	for _, index := range pb.GetChunks() {
+		footer.Chunks = append(footer.Chunks, vchannelSummaryChunkIndex{
+			VChannel:             index.GetVchannel(),
+			Offset:               index.GetOffset(),
+			Length:               index.GetLength(),
+			Checksum:             index.GetChecksum(),
+			RecordCount:          index.GetRecordCount(),
+			SourceStartMessageID: cloneMessageIDProto(index.GetSourceRange().GetStartMessageId()),
+			SourceEndMessageID:   cloneMessageIDProto(index.GetSourceRange().GetEndMessageId()),
+			SourceStartTimetick:  index.GetSourceRange().GetStartTimetick(),
+			SourceEndTimetick:    index.GetSourceRange().GetEndTimetick(),
+		})
+	}
+	return footer
+}
+
+func (chunk *vchannelSummaryChunk) intoProto() *streamingpb.VChannelSummaryChunk {
+	pb := &streamingpb.VChannelSummaryChunk{
+		CodecVersion: uint32(chunk.CodecVersion),
+		Pchannel:     chunk.PChannel,
+		Vchannel:     chunk.VChannel,
+		Generation:   chunk.Generation,
+		SourceRange: newSummaryChunkSourceRange(
+			chunk.SourceStartMessageID, chunk.SourceEndMessageID,
+			chunk.SourceStartTimetick, chunk.SourceEndTimetick,
+		),
+		Records: make([]*streamingpb.CommittedWriteRecord, 0, len(chunk.Records)),
+	}
+	for _, record := range chunk.Records {
+		pb.Records = append(pb.Records, record.intoProto())
+	}
+	return pb
+}
+
+func newVChannelSummaryChunkFromProto(pb *streamingpb.VChannelSummaryChunk) *vchannelSummaryChunk {
+	chunk := &vchannelSummaryChunk{
+		CodecVersion:         int(pb.GetCodecVersion()),
+		PChannel:             pb.GetPchannel(),
+		VChannel:             pb.GetVchannel(),
+		Generation:           pb.GetGeneration(),
+		SourceStartMessageID: cloneMessageIDProto(pb.GetSourceRange().GetStartMessageId()),
+		SourceEndMessageID:   cloneMessageIDProto(pb.GetSourceRange().GetEndMessageId()),
+		SourceStartTimetick:  pb.GetSourceRange().GetStartTimetick(),
+		SourceEndTimetick:    pb.GetSourceRange().GetEndTimetick(),
+		Records:              make([]committedWriteRecord, 0, len(pb.GetRecords())),
+	}
+	for _, record := range pb.GetRecords() {
+		chunk.Records = append(chunk.Records, newCommittedWriteRecordFromProto(record))
+	}
+	return chunk
 }
 
 func cloneAndSortCommittedWriteRecords(pchannel, vchannel string, records []committedWriteRecord) []committedWriteRecord {
@@ -360,7 +481,7 @@ func firstNonEmpty(value string, fallback string) string {
 	return fallback
 }
 
-func checksumHex(payload []byte) string {
+func chunkChecksum(payload []byte) []byte {
 	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:])
+	return sum[:]
 }
