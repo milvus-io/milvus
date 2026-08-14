@@ -22,9 +22,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -32,6 +34,7 @@ import (
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -333,4 +336,52 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 
 func TestImportInspector(t *testing.T) {
 	suite.Run(t, new(ImportInspectorSuite))
+}
+
+func TestImportInspectorV3StageGate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("reshard is scheduled only after PreImporting is published", func(t *testing.T) {
+		importMeta := NewMockImportMeta(t)
+		scheduler := task2.NewMockGlobalScheduler(t)
+		inspector := NewImportInspector(ctx, nil, importMeta, scheduler).(*importInspector)
+		job := &importJob{ImportJob: &datapb.ImportJob{
+			JobID:             1,
+			State:             internalpb.ImportJobState_Pending,
+			ImportTaskVersion: msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3,
+		}}
+		reshard := newReshardTask(&datapb.ReshardTask{
+			JobId: 1, TaskId: 10, State: datapb.ReshardTask_Pending, NodeId: NullNodeID,
+		}, importMeta, nil)
+
+		importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Twice()
+		scheduler.EXPECT().Enqueue(reshard).Once()
+
+		inspector.processPendingImport(reshard)
+		require.Equal(t, internalpb.ImportJobState_Pending, job.GetState())
+		job.ImportJob.State = internalpb.ImportJobState_PreImporting
+		inspector.processPendingImport(reshard)
+	})
+
+	t.Run("import v3 is scheduled only after Importing is published", func(t *testing.T) {
+		importMeta := NewMockImportMeta(t)
+		scheduler := task2.NewMockGlobalScheduler(t)
+		inspector := NewImportInspector(ctx, nil, importMeta, scheduler).(*importInspector)
+		job := &importJob{ImportJob: &datapb.ImportJob{
+			JobID:             2,
+			State:             internalpb.ImportJobState_Planning,
+			ImportTaskVersion: msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3,
+		}}
+		importTask := newImportTaskV3(&datapb.ImportTaskV3{
+			JobId: 2, TaskId: 20, State: datapb.ImportTaskV3_Pending, NodeId: NullNodeID,
+		}, importMeta, nil)
+
+		importMeta.EXPECT().GetJob(mock.Anything, int64(2)).Return(job).Twice()
+		scheduler.EXPECT().Enqueue(importTask).Once()
+
+		inspector.processPendingImport(importTask)
+		require.Equal(t, internalpb.ImportJobState_Planning, job.GetState())
+		job.ImportJob.State = internalpb.ImportJobState_Importing
+		inspector.processPendingImport(importTask)
+	})
 }

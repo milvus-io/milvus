@@ -137,6 +137,8 @@ func (c *importChecker) runStateMachineLoop() {
 					c.checkPendingJob(job)
 				case internalpb.ImportJobState_PreImporting:
 					c.checkPreImportingJob(job)
+				case internalpb.ImportJobState_Planning:
+					c.checkPlanningJob(job)
 				case internalpb.ImportJobState_Importing:
 					c.checkImportingJob(job)
 				case internalpb.ImportJobState_Sorting:
@@ -261,6 +263,9 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
 		if err := c.createV3ReshardTasks(job); err != nil {
 			log.Warn(c.ctx, "create import v3 reshard tasks failed", mlog.Err(err))
+			if isImportTerminalError(err) {
+				_ = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()), UpdateJobFailureCode(importFailureCode(err)))
+			}
 		}
 		return
 	}
@@ -297,8 +302,29 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
-		if err := c.planV3Job(job); err != nil {
-			log.Warn(c.ctx, "plan import v3 job failed", mlog.Err(err))
+		completed, totalRows, err := c.summarizeV3ReshardResults(job)
+		if err != nil {
+			log.Warn(c.ctx, "validate import v3 reshard results failed", mlog.Err(err))
+			if isImportTerminalError(err) {
+				_ = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()), UpdateJobFailureCode(importFailureCode(err)))
+			}
+			return
+		}
+		if !completed {
+			return
+		}
+		if totalRows == 0 {
+			state := internalpb.ImportJobState_Uncommitted
+			if job.GetAutoCommit() {
+				state = internalpb.ImportJobState_Completed
+			}
+			if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(state)); err != nil {
+				log.Warn(c.ctx, "finish empty import v3 job failed", mlog.Err(err))
+			}
+			return
+		}
+		if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Planning)); err != nil {
+			log.Warn(c.ctx, "advance import v3 job to Planning failed", mlog.Err(err))
 		}
 		return
 	}
@@ -370,6 +396,16 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	}
 
 	updateJobState(internalpb.ImportJobState_Importing, UpdateRequestedDiskSize(requestSize))
+}
+
+func (c *importChecker) checkPlanningJob(job ImportJob) {
+	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	if err := c.planV3Job(job); err != nil {
+		log.Warn(c.ctx, "plan import v3 job failed", mlog.Err(err))
+		if isImportTerminalError(err) {
+			_ = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()), UpdateJobFailureCode(importFailureCode(err)))
+		}
+	}
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {

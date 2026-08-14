@@ -88,10 +88,25 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 		return err
 	}
 	if existing := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID())); len(existing) > 0 {
-		if len(existing) != len(bins) {
-			return merr.WrapErrDataIntegrityMsg("import v3 reshard task set is incomplete: got=%d want=%d", len(existing), len(bins))
+		if len(existing) == len(bins) {
+			if err := c.validateV3ReshardTaskSet(job, existing, bins); err != nil {
+				return err
+			}
+			return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 		}
-		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+		// Pending is the unpublished task-set state.  With the inspector gate,
+		// these tasks cannot have run, so a crash after saving only a prefix of
+		// the set is recovered by removing that prefix and rebuilding once.
+		for _, task := range existing {
+			if task.GetState() != datapb.ImportTaskStateV2_Pending || task.GetNodeID() != NullNodeID {
+				return merr.WrapErrDataIntegrityMsg("partial import v3 reshard task set was dispatched before publication")
+			}
+		}
+		for _, task := range existing {
+			if err := c.importMeta.RemoveTask(c.ctx, task.GetTaskID()); err != nil {
+				return err
+			}
+		}
 	}
 	start, _, err := c.alloc.AllocN(int64(len(bins)))
 	if err != nil {
@@ -130,6 +145,59 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 		}
 	}
 	return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+}
+
+func (c *importChecker) validateV3ReshardTaskSet(job ImportJob, tasks []ImportTask, bins []v3ReshardBin) error {
+	expected := make(map[string]int, len(bins))
+	for _, bin := range bins {
+		ids := make([]int64, 0, len(bin.sources))
+		for _, source := range bin.sources {
+			ids = append(ids, source.file.GetId())
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		expected[fmt.Sprint(ids)]++
+	}
+	actual := make(map[string]int, len(tasks))
+	for _, generic := range tasks {
+		task, ok := generic.(*reshardTask)
+		if !ok {
+			return merr.WrapErrDataIntegrityMsg("import v3 reshard task set contains an unexpected task type")
+		}
+		p := task.task.Load()
+		plan := &datapb.ReshardTaskPlan{}
+		prefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "reshard", strconv.FormatInt(p.GetTaskId(), 10))
+		if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, p.GetTaskPlanRef(), prefix, p.GetTaskPlanDigest(), plan); err != nil {
+			return err
+		}
+		if plan.GetJobId() != job.GetJobID() || plan.GetTaskId() != p.GetTaskId() || plan.GetCollectionId() != job.GetCollectionID() {
+			return merr.WrapErrDataIntegrityMsg("import v3 reshard task plan identity mismatch")
+		}
+		ids := make([]int64, 0, len(plan.GetSources()))
+		for _, source := range plan.GetSources() {
+			if source == nil || source.GetFile() == nil {
+				return merr.WrapErrDataIntegrityMsg("import v3 reshard task plan has a nil source")
+			}
+			ids = append(ids, source.GetFile().GetId())
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		actual[fmt.Sprint(ids)]++
+	}
+	if !mapsEqual(expected, actual) {
+		return merr.WrapErrDataIntegrityMsg("import v3 reshard task grouping does not match the deterministic BFD plan")
+	}
+	return nil
+}
+
+func mapsEqual(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 type v3ReshardSource struct {
@@ -225,16 +293,149 @@ type v3PlanningFragment struct {
 	bytes int64
 }
 
+func loadImportV3Proto(ctx context.Context, cm storage.ChunkManager, ref, expectedPrefix string, digest []byte, target proto.Message) error {
+	data, err := loadImportV3Object(ctx, cm, ref, expectedPrefix, digest)
+	if err != nil {
+		return err
+	}
+	if err := proto.Unmarshal(data, target); err != nil {
+		return merr.WrapErrDataIntegrity(err, "unmarshal import v3 planning object")
+	}
+	return nil
+}
+
+func (c *importChecker) summarizeV3ReshardResults(job ImportJob) (bool, int64, error) {
+	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID()))
+	if len(tasks) == 0 {
+		return false, 0, nil
+	}
+	var totalRows int64
+	for _, generic := range tasks {
+		task, ok := generic.(*reshardTask)
+		if !ok {
+			return false, 0, merr.WrapErrDataIntegrityMsg("import v3 reshard result set contains an unexpected task type")
+		}
+		if task.GetState() != datapb.ImportTaskStateV2_Completed {
+			return false, 0, nil
+		}
+		p := task.task.Load()
+		manifest, err := loadReshardResultManifest(c.ctx, c.meta.chunkManager, p.GetResultRef(), p.GetOutputPrefix(), p.GetResultDigest())
+		if err != nil {
+			return false, 0, err
+		}
+		if err := validateReshardManifest(manifest, job.GetJobID(), p.GetTaskId(), p.GetRunId(), p.GetTaskPlanDigest()); err != nil {
+			return false, 0, err
+		}
+		totalRows += manifest.GetTotalRows()
+	}
+	return true, totalRows, nil
+}
+
+func (c *importChecker) cleanupUnpublishedV3ImportTasks(job ImportJob) error {
+	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
+	for _, generic := range tasks {
+		task, ok := generic.(*importTaskV3)
+		if !ok {
+			return merr.WrapErrDataIntegrityMsg("import v3 planning task set contains an unexpected task type")
+		}
+		if task.GetState() != datapb.ImportTaskStateV2_Pending || task.GetNodeID() != NullNodeID {
+			return merr.WrapErrDataIntegrityMsg("unpublished import v3 task %d was dispatched", task.GetTaskID())
+		}
+	}
+	for _, generic := range tasks {
+		task := generic.(*importTaskV3)
+		segmentIDs := task.task.Load().GetOutputSegmentIds()
+		if len(segmentIDs) > 0 {
+			if err := c.meta.UpdateSegmentsInfo(c.ctx, dropImportV3Skeletons(segmentIDs, false)); err != nil {
+				return err
+			}
+		}
+		if err := c.importMeta.RemoveTask(c.ctx, task.GetTaskID()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *importChecker) validatePublishedV3Plan(job ImportJob) error {
+	if job.GetPlanningGeneration() <= 0 || job.GetPlanningSnapshotRef() == "" || len(job.GetPlanningSnapshotDigest()) == 0 ||
+		job.GetImportPlanIndexRef() == "" || len(job.GetImportPlanIndexDigest()) == 0 {
+		return merr.WrapErrImportSysFailedMsg("import v3 published planning marker is incomplete")
+	}
+	prefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(job.GetPlanningGeneration(), 10))
+	snapshot := &datapb.PlanningSnapshot{}
+	if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, job.GetPlanningSnapshotRef(), prefix, job.GetPlanningSnapshotDigest(), snapshot); err != nil {
+		return err
+	}
+	if snapshot.GetJobId() != job.GetJobID() || snapshot.GetGeneration() != job.GetPlanningGeneration() || snapshot.GetCollectionId() != job.GetCollectionID() {
+		return merr.WrapErrDataIntegrityMsg("import v3 planning snapshot identity mismatch")
+	}
+	index := &datapb.ImportPlanIndex{}
+	if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, job.GetImportPlanIndexRef(), prefix, job.GetImportPlanIndexDigest(), index); err != nil {
+		return err
+	}
+	if index.GetJobId() != job.GetJobID() || index.GetPlanningGeneration() != job.GetPlanningGeneration() ||
+		index.GetSnapshotRef() != job.GetPlanningSnapshotRef() || !bytes.Equal(index.GetSnapshotDigest(), job.GetPlanningSnapshotDigest()) {
+		return merr.WrapErrDataIntegrityMsg("import v3 plan index identity mismatch")
+	}
+	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
+	byID := make(map[int64]*importTaskV3, len(tasks))
+	for _, generic := range tasks {
+		task, ok := generic.(*importTaskV3)
+		if !ok {
+			return merr.WrapErrDataIntegrityMsg("import v3 published task set contains an unexpected task type")
+		}
+		byID[task.GetTaskID()] = task
+	}
+	if len(byID) != len(index.GetTasks()) {
+		return merr.WrapErrDataIntegrityMsg("import v3 published task count mismatch: tasks=%d index=%d", len(byID), len(index.GetTasks()))
+	}
+	seen := make(map[int64]struct{}, len(index.GetTasks()))
+	for _, entry := range index.GetTasks() {
+		if entry == nil || entry.GetTaskId() == 0 || entry.GetPlanRef() == "" || len(entry.GetPlanDigest()) == 0 {
+			return merr.WrapErrDataIntegrityMsg("import v3 plan index has an incomplete task entry")
+		}
+		if _, duplicate := seen[entry.GetTaskId()]; duplicate {
+			return merr.WrapErrDataIntegrityMsg("import v3 plan index has duplicate task %d", entry.GetTaskId())
+		}
+		seen[entry.GetTaskId()] = struct{}{}
+		task := byID[entry.GetTaskId()]
+		if task == nil {
+			return merr.WrapErrDataIntegrityMsg("import v3 plan index task %d is missing", entry.GetTaskId())
+		}
+		p := task.task.Load()
+		if p.GetPlanningGeneration() != job.GetPlanningGeneration() || p.GetTaskPlanRef() != entry.GetPlanRef() || !bytes.Equal(p.GetTaskPlanDigest(), entry.GetPlanDigest()) {
+			return merr.WrapErrDataIntegrityMsg("import v3 task %d does not match plan index", entry.GetTaskId())
+		}
+		plan := &datapb.ImportTaskPlan{}
+		if err := loadImportV3Proto(c.ctx, c.meta.chunkManager, entry.GetPlanRef(), path.Join(prefix, "tasks"), entry.GetPlanDigest(), plan); err != nil {
+			return err
+		}
+		if plan.GetJobId() != job.GetJobID() || plan.GetTaskId() != entry.GetTaskId() || plan.GetPlanningGeneration() != job.GetPlanningGeneration() ||
+			plan.GetPlanningSnapshotRef() != job.GetPlanningSnapshotRef() || !bytes.Equal(plan.GetPlanningSnapshotDigest(), job.GetPlanningSnapshotDigest()) ||
+			len(plan.GetSegmentPlans()) != len(p.GetOutputSegmentIds()) || p.GetLogIdRange() == nil || plan.GetRequiredLogIds() != p.GetLogIdRange().GetEnd()-p.GetLogIdRange().GetBegin() {
+			return merr.WrapErrDataIntegrityMsg("import v3 task %d plan contract mismatch", entry.GetTaskId())
+		}
+	}
+	return nil
+}
+
 func (c *importChecker) planV3Job(job ImportJob) error {
 	if _, err := validateImportV3Schema(c.meta, job.GetCollectionID(), job.GetSchema()); err != nil {
 		return err
 	}
 	if job.GetPlanningSnapshotRef() != "" || job.GetImportPlanIndexRef() != "" {
+		if err := c.validatePublishedV3Plan(job); err != nil {
+			return err
+		}
 		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+	}
+	if err := c.cleanupUnpublishedV3ImportTasks(job); err != nil {
+		return err
 	}
 	reshards := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID()))
 	if len(reshards) == 0 {
-		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+		return merr.WrapErrImportSysFailedMsg("import v3 planning has no completed reshard tasks")
 	}
 	if len(job.GetVchannels()) == 0 {
 		return merr.WrapErrDataIntegrityMsg("import v3 job has no vchannels")

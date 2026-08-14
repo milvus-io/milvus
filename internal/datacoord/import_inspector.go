@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
 const (
@@ -89,7 +90,7 @@ func (s *importInspector) reloadFromMeta() {
 	for _, job := range jobs {
 		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
 		for _, task := range tasks {
-			if task.GetState() == datapb.ImportTaskStateV2_InProgress {
+			if task.GetState() == datapb.ImportTaskStateV2_InProgress && s.taskStagePublished(job, task) {
 				s.scheduler.Enqueue(task)
 			}
 		}
@@ -124,7 +125,25 @@ func (s *importInspector) processPendingPreImport(task ImportTask) {
 }
 
 func (s *importInspector) processPendingImport(task ImportTask) {
+	job := s.importMeta.GetJob(s.ctx, task.GetJobID())
+	if job == nil || !s.taskStagePublished(job, task) {
+		return
+	}
 	s.scheduler.Enqueue(task)
+}
+
+// taskStagePublished prevents a partially persisted V3 task set from running
+// before its job-level marker is durable.  V2 keeps its existing scheduling
+// behavior; only the new marker-last task sets are gated here.
+func (s *importInspector) taskStagePublished(job ImportJob, task ImportTask) bool {
+	switch task.GetType() {
+	case ReshardTaskType:
+		return job.GetState() == internalpb.ImportJobState_PreImporting
+	case ImportTaskV3Type:
+		return job.GetState() == internalpb.ImportJobState_Importing
+	default:
+		return true
+	}
 }
 
 func (s *importInspector) processFailed(task ImportTask) {
