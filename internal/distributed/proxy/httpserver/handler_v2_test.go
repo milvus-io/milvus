@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tidwall/gjson"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -6792,4 +6793,70 @@ func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
 		assert.Equal(t, http.StatusOK, code)
 		assert.Contains(t, body, "cannot be used simultaneously")
 	})
+}
+
+func TestInjectIdempotencyKeySetsIncomingMetadata(t *testing.T) {
+	ctx := context.Background()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+
+	got := injectIdempotencyKey(ctx, c)
+	md, ok := metadata.FromIncomingContext(got)
+	assert.True(t, ok)
+	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+}
+
+func TestInjectIdempotencyKeyPreservesExistingMetadata(t *testing.T) {
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs(util.HeaderDBName, "db1"))
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+
+	got := injectIdempotencyKey(ctx, c)
+	md, _ := metadata.FromIncomingContext(got)
+	assert.Equal(t, []string{"db1"}, md.Get(util.HeaderDBName))
+	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+}
+
+func TestInjectIdempotencyKeyNoHeaderIsNoop(t *testing.T) {
+	ctx := context.Background()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+
+	got := injectIdempotencyKey(ctx, c)
+	assert.Equal(t, ctx, got)
+}
+
+func TestCreateImportJobForwardsIdempotencyKeyWithAuth(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+			return &internalpb.ImportResponse{
+				Status: commonSuccessStatus,
+				JobID:  "1234567890",
+			}, nil
+		}).Once()
+	testEngine := initHTTPServerV2(mp, true)
+
+	bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "files": [["book.json"]]}`))
+	req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bodyReader)
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	req.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
 }

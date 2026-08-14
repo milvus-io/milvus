@@ -33,6 +33,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
@@ -3946,6 +3948,20 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 	return resp, err
 }
 
+// injectIdempotencyKey copies the REST Idempotency-Key header into the gRPC
+// incoming metadata, so the proxy reads the key from exactly one place regardless
+// of whether the request arrived over REST or gRPC. Existing metadata is preserved.
+func injectIdempotencyKey(ctx context.Context, c *gin.Context) context.Context {
+	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
+	if key == "" {
+		return ctx
+	}
+	md, _ := metadata.FromIncomingContext(ctx)
+	md = md.Copy()
+	md.Set(util.HeaderIdempotencyKey, key)
+	return metadata.NewIncomingContext(ctx, md)
+}
+
 func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	var (
 		collectionGetter = anyReq.(requestutil.CollectionNameGetter)
@@ -3975,6 +3991,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}
 		ctx = c.Request.Context()
 	}
+	ctx = injectIdempotencyKey(ctx, c)
 	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
