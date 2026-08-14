@@ -23,7 +23,7 @@ import (
 func (m *summaryManager) persistPChannelSummary(
 	ctx context.Context,
 	logger *mlog.Logger,
-	recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord,
+	recordsByVChannel map[string][]*streamingpb.SummaryEntry,
 	summaryMetaUpdates map[string]*summaryMetaUpdate,
 	sourceCheckpoint *WALCheckpoint,
 ) (map[string]*streamingpb.VChannelSummaryMeta, uint64, error) {
@@ -44,7 +44,7 @@ func (m *summaryManager) persistPChannelSummary(
 func (m *summaryManager) persistPChannelSummaryChunk(
 	ctx context.Context,
 	logger *mlog.Logger,
-	recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord,
+	recordsByVChannel map[string][]*streamingpb.SummaryEntry,
 	sourceCheckpoint *WALCheckpoint,
 ) (*persistedPChannelSummaryChunk, error) {
 	if sourceCheckpoint == nil {
@@ -341,7 +341,7 @@ func sanitizeSummaryStorePathPart(value string) string {
 	return replacer.Replace(value)
 }
 
-func (m *summaryManager) markVChannelSummariesPersisted(recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64, sourceCheckpoint *WALCheckpoint) {
+func (m *summaryManager) markVChannelSummariesPersisted(recordsByVChannel map[string][]*streamingpb.SummaryEntry, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64, sourceCheckpoint *WALCheckpoint) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.markSummariesPersisted(recordsByVChannel, metas, generation)
@@ -418,9 +418,9 @@ func pchannelSummarySourceCheckpointToWALCheckpoint(checkpoint *pchannelSummaryS
 	})
 }
 
-func hasIdempotencyCommittedWriteRecords(records []*streamingpb.CommittedWriteRecord) bool {
+func hasIdempotencyContent(records []*streamingpb.SummaryEntry) bool {
 	for _, record := range records {
-		if record.GetIdempotencyKey() != "" {
+		if record.GetIdempotency().GetKey() != "" {
 			return true
 		}
 	}

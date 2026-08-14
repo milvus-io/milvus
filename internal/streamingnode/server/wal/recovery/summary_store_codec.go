@@ -58,7 +58,7 @@ func marshalPChannelSummaryChunk(
 	generation uint64,
 	term int64,
 	sourceCheckpoint *WALCheckpoint,
-	recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord,
+	recordsByVChannel map[string][]*streamingpb.SummaryEntry,
 ) ([]byte, *streamingpb.PChannelSummaryChunkFooter, string, error) {
 	buf := bytes.NewBuffer(make([]byte, 0))
 	buf.Write(newPChannelSummaryChunkHeader())
@@ -82,20 +82,20 @@ func marshalPChannelSummaryChunk(
 	}
 
 	for _, vchannel := range vchannels {
-		records := sortCommittedWriteRecords(recordsByVChannel[vchannel])
+		records := sortedSummaryEntries(recordsByVChannel[vchannel])
 		if len(records) == 0 {
 			continue
 		}
 		payload, err := marshalVChannelSummaryChunk(&streamingpb.VChannelSummaryChunk{
 			Vchannel: vchannel,
-			Records:  records,
+			Entries:  records,
 		})
 		if err != nil {
 			return nil, nil, "", err
 		}
 		offset := uint64(buf.Len())
 		buf.Write(payload)
-		startTimetick, endTimetick := committedWriteRecordSourceRange(records)
+		startTimetick, endTimetick := summaryEntrySourceRange(records)
 		extendPChannelSummaryChunkFooterSourceRange(footer, startTimetick, endTimetick)
 		footer.Chunks = append(footer.Chunks, &streamingpb.VChannelSummaryChunkIndex{
 			Vchannel:            vchannel,
@@ -127,7 +127,7 @@ func marshalPChannelSummaryChunk(
 	return buf.Bytes(), footer, hex.EncodeToString(footerChecksum[:]), nil
 }
 
-func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]*streamingpb.CommittedWriteRecord, *streamingpb.PChannelSummaryChunkFooter, string, error) {
+func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]*streamingpb.SummaryEntry, *streamingpb.PChannelSummaryChunkFooter, string, error) {
 	if len(payload) < pchannelSummaryChunkHeaderSize+pchannelSummaryChunkChecksumSize+len(pchannelSummaryChunkFooterMagic)+4 {
 		return nil, nil, "", pchannelSummaryStoreCorruptedf("pchannel summary chunk payload too short")
 	}
@@ -164,7 +164,7 @@ func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]*streamingpb.Co
 		return nil, nil, "", markPChannelSummaryStoreCorrupted(err)
 	}
 
-	recordsByVChannel := make(map[string][]*streamingpb.CommittedWriteRecord, len(footer.Chunks))
+	recordsByVChannel := make(map[string][]*streamingpb.SummaryEntry, len(footer.Chunks))
 	for _, chunkIndex := range footer.Chunks {
 		end := chunkIndex.Offset + chunkIndex.Length
 		if chunkIndex.Offset < uint64(pchannelSummaryChunkHeaderSize) || end > uint64(footerStart) || chunkIndex.Offset > end {
@@ -182,10 +182,10 @@ func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]*streamingpb.Co
 		// payload, so it is worth cross-checking. Identity is not: the vchannel
 		// comes from the index, and the checksum above already proved these are
 		// the bytes that index describes.
-		if uint64(len(chunk.Records)) != chunkIndex.RecordCount {
+		if uint64(len(chunk.Entries)) != chunkIndex.RecordCount {
 			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk record count mismatch for vchannel %s", chunkIndex.Vchannel)
 		}
-		recordsByVChannel[chunkIndex.Vchannel] = chunk.Records
+		recordsByVChannel[chunkIndex.Vchannel] = chunk.Entries
 	}
 	return recordsByVChannel, footer, hex.EncodeToString(storedFooterChecksum), nil
 }
@@ -200,7 +200,7 @@ func marshalVChannelSummaryChunk(chunk *streamingpb.VChannelSummaryChunk) ([]byt
 	if chunk == nil {
 		return nil, merr.WrapErrServiceInternalMsg("nil vchannel summary chunk")
 	}
-	if len(chunk.GetRecords()) == 0 {
+	if len(chunk.GetEntries()) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("empty vchannel summary chunk")
 	}
 	return summaryChunkMarshalOptions.Marshal(chunk)
@@ -214,7 +214,7 @@ func unmarshalVChannelSummaryChunk(payload []byte) (*streamingpb.VChannelSummary
 	if err := proto.Unmarshal(payload, pb); err != nil {
 		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	pb.Records = sortCommittedWriteRecords(pb.GetRecords())
+	pb.Entries = sortedSummaryEntries(pb.GetEntries())
 	return pb, nil
 }
 
@@ -251,15 +251,15 @@ func unmarshalPChannelSummaryChunkFooter(payload []byte) (*streamingpb.PChannelS
 	return pb, nil
 }
 
-// sortCommittedWriteRecords returns the records in chunk order: by source
+// sortedSummaryEntries returns the records in chunk order: by source
 // timetick, then source message id, then idempotency key. It copies the slice
 // but never the records — they are shared by pointer and nothing here mutates
 // them.
-func sortCommittedWriteRecords(records []*streamingpb.CommittedWriteRecord) []*streamingpb.CommittedWriteRecord {
+func sortedSummaryEntries(records []*streamingpb.SummaryEntry) []*streamingpb.SummaryEntry {
 	if len(records) == 0 {
 		return nil
 	}
-	sorted := make([]*streamingpb.CommittedWriteRecord, 0, len(records))
+	sorted := make([]*streamingpb.SummaryEntry, 0, len(records))
 	for _, record := range records {
 		if record == nil {
 			continue
@@ -274,7 +274,7 @@ func sortCommittedWriteRecords(records []*streamingpb.CommittedWriteRecord) []*s
 		if left.GetSourceMessageId().GetId() != right.GetSourceMessageId().GetId() {
 			return left.GetSourceMessageId().GetId() < right.GetSourceMessageId().GetId()
 		}
-		leftKey, rightKey := left.GetIdempotencyKey(), right.GetIdempotencyKey()
+		leftKey, rightKey := left.GetIdempotency().GetKey(), right.GetIdempotency().GetKey()
 		if leftKey != rightKey {
 			return leftKey < rightKey
 		}
@@ -283,10 +283,10 @@ func sortCommittedWriteRecords(records []*streamingpb.CommittedWriteRecord) []*s
 	return sorted
 }
 
-// committedWriteRecordSourceRange returns the timetick span of an already sorted
+// summaryEntrySourceRange returns the timetick span of an already sorted
 // record slice. The span is a timetick range only: a vchannel never records a
 // physical WAL position.
-func committedWriteRecordSourceRange(records []*streamingpb.CommittedWriteRecord) (uint64, uint64) {
+func summaryEntrySourceRange(records []*streamingpb.SummaryEntry) (uint64, uint64) {
 	if len(records) == 0 {
 		return 0, 0
 	}

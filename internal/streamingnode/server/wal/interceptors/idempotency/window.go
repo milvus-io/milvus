@@ -140,7 +140,7 @@ func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.SummarySna
 		if snapshotEntry == nil {
 			continue
 		}
-		key := IdempotencyKey(snapshotEntry.GetKey())
+		key := IdempotencyKey(snapshotEntry.GetIdempotency().GetKey())
 		window.entries[key] = snapshotEntry
 		window.bytes += proto.Size(snapshotEntry)
 		window.commitOrder = append(window.commitOrder, key)
@@ -191,20 +191,14 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 		return false, 0
 	}
 
-	entry := &streamingpb.SummaryEntry{
-		Key:                    string(pending.Key),
-		CommitTimetick:         result.CommitTimeTick,
-		MessageId:              result.MessageID,
-		LastConfirmedMessageId: result.LastConfirmedMessageID,
-		IdempotentResult:       result.IdempotentResult,
-	}
+	entry := &streamingpb.SummaryEntry{SourceMessageId: result.MessageID, SourceTimetick: result.CommitTimeTick, LastConfirmedMessageId: result.LastConfirmedMessageID, Idempotency: &streamingpb.IdempotencyContent{Key: string(pending.Key), InsertResult: result.IdempotentResult}}
 	delete(w.inflight, pending.Key)
 	w.entries[pending.Key] = entry
 	w.bytes += proto.Size(entry)
-	w.insertCommitOrderLocked(pending.Key, entry.GetCommitTimetick())
+	w.insertCommitOrderLocked(pending.Key, entry.GetSourceTimetick())
 	evicted := 0
 	if w.windowTTL > 0 {
-		evicted = w.evictLocked(evictBeforeCommitTT(entry.GetCommitTimetick(), w.windowTTL))
+		evicted = w.evictLocked(evictBeforeCommitTT(entry.GetSourceTimetick(), w.windowTTL))
 	} else if w.maxBytes > 0 {
 		evicted = w.evictLocked(0)
 	}
@@ -288,7 +282,7 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 	i := len(w.commitOrder)
 	for i > 0 {
 		prev, ok := w.entries[w.commitOrder[i-1]]
-		if ok && prev.GetCommitTimetick() <= commitTT {
+		if ok && prev.GetSourceTimetick() <= commitTT {
 			break
 		}
 		if !ok {
@@ -312,7 +306,7 @@ func (w *Window) servableLocked(entry *streamingpb.SummaryEntry) bool {
 	if w.windowTTL <= 0 || w.ttlEvictBoundTT == 0 {
 		return true
 	}
-	return entry.GetCommitTimetick() >= w.ttlEvictBoundTT
+	return entry.GetSourceTimetick() >= w.ttlEvictBoundTT
 }
 
 // dropEntryLocked removes a retained-but-unservable entry together with its
@@ -345,7 +339,7 @@ func (w *Window) evictLocked(evictBeforeTT uint64) int {
 		if !ok {
 			continue
 		}
-		if entry.GetCommitTimetick() >= evictBeforeTT {
+		if entry.GetSourceTimetick() >= evictBeforeTT {
 			w.commitOrder = append([]IdempotencyKey{key}, w.commitOrder...)
 			break
 		}
@@ -410,7 +404,7 @@ func (w *Window) refreshEvictedWatermarkLocked() {
 			continue
 		}
 		// The watermark is inclusive: it points to the oldest retained entry, not a strict evicted lower bound.
-		w.evictedWatermarkTT = entry.GetCommitTimetick()
+		w.evictedWatermarkTT = entry.GetSourceTimetick()
 		return
 	}
 	w.evictedWatermarkTT = w.snapshotCheckpointTT

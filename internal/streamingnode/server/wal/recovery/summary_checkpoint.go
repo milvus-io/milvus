@@ -28,7 +28,7 @@ func (m *summaryManager) flusherClampCheckpoint(flusherCheckpoint *WALCheckpoint
 // source checkpoint recorded in the persisted summary meta, so that position must
 // still be readable from the WAL. Unlike the persist clamp above, this one is NOT
 // gated on the summary being dirty: an idle pchannel never marks a summary dirty
-// (only committed write records do), so no snapshot is taken and the durable
+// (only summary entrys do), so no snapshot is taken and the durable
 // source checkpoint freezes while timeticks keep pushing the consume and flusher
 // checkpoints forward — truncating by those alone would drop the WAL entries the
 // next restart rewinds to. It reads the persisted (not the current) position

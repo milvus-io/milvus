@@ -18,7 +18,7 @@
 //     <minio-root>/streamingnode/summary-store/<pchannel>/chunks/<generation>-<term>
 //   - Inside that object: a footer indexing N per-vchannel chunks, each entry
 //     giving that chunk's offset, length, checksum, record count and source
-//     timetick range. The chunk itself holds committed write records, nothing
+//     timetick range. The chunk itself holds summary entrys, nothing
 //     else.
 //   - In etcd: one PChannelSummaryMeta per pchannel (generations, manifest,
 //     owner term) plus one VChannelSummaryMeta per (view_type, vchannel)
@@ -31,7 +31,7 @@
 //
 // The generated protobuf types ARE the model here — there is no parallel set of
 // Go structs mirroring them. A record read out of a chunk is the same
-// *streamingpb.CommittedWriteRecord the chunk stored, so nothing is copied
+// *streamingpb.SummaryEntry the chunk stored, so nothing is copied
 // between shapes and the two cannot drift. Add fields to the proto, not to a
 // wrapper.
 //
@@ -53,7 +53,7 @@
 //   - summary_background_task.go — periodic snapshot/clean task
 //   - summary_vchannel_state.go — per-vchannel summary state machine
 //   - summary_store_recover.go / summary_store_persist.go — pchannel chunk store recover / persist paths
-//   - summary_store_record.go — the committed-write record data model
+//   - summary_store_record.go — the summary entry data model
 //   - summary_store_codec.go — chunk serialization + checksums
 //   - summary_store_errors.go — summary-store corruption / fencing sentinels
 //   - summary_store_manifest.go — generation-to-term manifest

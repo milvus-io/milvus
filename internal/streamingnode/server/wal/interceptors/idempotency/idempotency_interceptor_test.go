@@ -909,11 +909,7 @@ func TestFillDuplicateResultClearsStaleExtra(t *testing.T) {
 	ctx := utility.WithExtraAppendResult(context.Background(), extra)
 
 	// A keyed duplicate that committed without an idempotent insert payload.
-	entry := &streamingpb.SummaryEntry{
-		Key:            "key-1",
-		CommitTimetick: 100,
-		MessageId:      message.MustMarshalMessageID(newTestMessageID(10)),
-	}
+	entry := &streamingpb.SummaryEntry{SourceMessageId: message.MustMarshalMessageID(newTestMessageID(10)), SourceTimetick: 100, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}
 	msgID, err := fillDuplicateResult(ctx, entry)
 	require.NoError(t, err)
 	require.True(t, newTestMessageID(10).EQ(msgID))

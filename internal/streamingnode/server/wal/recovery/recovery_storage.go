@@ -35,7 +35,7 @@ type RecoverySnapshot struct {
 	SummarySnapshots map[string]*streamingpb.SummarySnapshot
 	// pchannelSummaryRecords are pending physical summary records grouped by vchannel.
 	// They are written to pchannelSummaryChunk before advancing the pchannel consume checkpoint.
-	pchannelSummaryRecords map[string][]*streamingpb.CommittedWriteRecord
+	pchannelSummaryRecords map[string][]*streamingpb.SummaryEntry
 	// vchannelSummaryMetaUpdates are pending logical view metadata updates.
 	// They are persisted before PChannelSummaryMeta uses their GC boundary.
 	vchannelSummaryMetaUpdates map[string]*summaryMetaUpdate

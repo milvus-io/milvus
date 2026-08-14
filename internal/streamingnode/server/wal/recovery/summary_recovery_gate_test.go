@@ -229,13 +229,9 @@ func TestRecoverSummariesFailsOnReferencedChunkCorruption(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records := map[string][]*streamingpb.CommittedWriteRecord{
+	records := map[string][]*streamingpb.SummaryEntry{
 		"v1": {
-			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-				Key:            "key-1",
-				CommitTimetick: 99,
-				MessageId:      rmq.NewRmqID(99).IntoProto(),
-			}),
+			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(99).IntoProto(), SourceTimetick: 99, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}),
 		},
 	}
 	footer, key, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
@@ -276,13 +272,9 @@ func TestRecoverSummariesSelfHealsCorruptOrphanChunk(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records := map[string][]*streamingpb.CommittedWriteRecord{
+	records := map[string][]*streamingpb.SummaryEntry{
 		"v1": {
-			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-				Key:            "key-1",
-				CommitTimetick: 99,
-				MessageId:      rmq.NewRmqID(99).IntoProto(),
-			}),
+			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(99).IntoProto(), SourceTimetick: 99, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}),
 		},
 	}
 	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{

@@ -206,14 +206,14 @@ func (m *summaryManager) hasDirtySummaryUnsafe() bool {
 	return false
 }
 
-func (m *summaryManager) consumePendingCommittedWriteRecords() (map[string][]*streamingpb.CommittedWriteRecord, map[string]*summaryMetaUpdate, *WALCheckpoint) {
+func (m *summaryManager) consumePendingSummaryEntries() (map[string][]*streamingpb.SummaryEntry, map[string]*summaryMetaUpdate, *WALCheckpoint) {
 	if len(m.summaries()) == 0 || !m.hasDirtySummaryUnsafe() {
 		return nil, nil, nil
 	}
-	recordsByVChannel := make(map[string][]*streamingpb.CommittedWriteRecord)
+	recordsByVChannel := make(map[string][]*streamingpb.SummaryEntry)
 	metaUpdates := make(map[string]*summaryMetaUpdate)
 	for _, summary := range m.summaries() {
-		records, metaUpdate := summary.consumePendingCommittedWriteRecords()
+		records, metaUpdate := summary.consumePendingSummaryEntries()
 		if len(records) > 0 {
 			recordsByVChannel[summary.vchannel] = records
 		}
@@ -238,13 +238,13 @@ func (m *summaryManager) applyRecoveredSummaryMetas(metas []*streamingpb.VChanne
 	}
 }
 
-func (m *summaryManager) markSummariesPersisted(recordsByVChannel map[string][]*streamingpb.CommittedWriteRecord, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64) {
+func (m *summaryManager) markSummariesPersisted(recordsByVChannel map[string][]*streamingpb.SummaryEntry, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64) {
 	if generation == 0 && len(recordsByVChannel) == 0 && len(metas) == 0 {
 		return
 	}
 	for vchannel, records := range recordsByVChannel {
 		if summary, ok := m.summaries()[vchannel]; ok {
-			summary.markCommittedWriteRecordsPersisted(records, generation)
+			summary.markSummaryEntriesPersisted(records, generation)
 		}
 	}
 	for vchannel, meta := range metas {

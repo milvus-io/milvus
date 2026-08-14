@@ -69,15 +69,17 @@ func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
-	records := map[string][]*streamingpb.CommittedWriteRecord{
+	records := map[string][]*streamingpb.SummaryEntry{
 		"v1": {{
 			SourceMessageId: rmq.NewRmqID(101).IntoProto(),
 			SourceTimetick:  101,
-			IdempotencyKey:  "key-1",
-			IdempotentResult: message.NewIdempotentInsertResult(
-				[]uint32{0},
-				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
-			),
+			Idempotency: &streamingpb.IdempotencyContent{
+				Key: "key-1",
+				InsertResult: message.NewIdempotentInsertResult(
+					[]uint32{0},
+					&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
+				),
+			},
 		}},
 	}
 	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, records)
@@ -154,13 +156,9 @@ func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 
 	summary := newEmptyVChannelSummary("p1", "v1", nil)
-	record := committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-		Key:            "stale-key",
-		CommitTimetick: 210,
-		MessageId:      rmq.NewRmqID(210).IntoProto(),
-	})
-	require.NoError(t, summary.applyCommittedWriteRecord(record, true))
-	records, metaUpdate := summary.consumePendingCommittedWriteRecords()
+	record := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(210).IntoProto(), SourceTimetick: 210, Idempotency: &streamingpb.IdempotencyContent{Key: "stale-key"}})
+	require.NoError(t, summary.applySummaryEntry(record, true))
+	records, metaUpdate := summary.consumePendingSummaryEntries()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 3}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(200),
@@ -169,7 +167,7 @@ func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.SetLogger(resource.Resource().Logger())
 
-	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.CommittedWriteRecord{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]*streamingpb.SummaryEntry{
 		"v1": records,
 	}, map[string]*summaryMetaUpdate{
 		"v1": metaUpdate,
@@ -188,22 +186,14 @@ func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 	chunkManager := newTestPChannelSummaryCleanerChunkManager()
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	staleRecords := map[string][]*streamingpb.CommittedWriteRecord{
+	staleRecords := map[string][]*streamingpb.SummaryEntry{
 		"v1": {
-			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-				Key:            "stale-key",
-				CommitTimetick: 210,
-				MessageId:      rmq.NewRmqID(210).IntoProto(),
-			}),
+			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(210).IntoProto(), SourceTimetick: 210, Idempotency: &streamingpb.IdempotencyContent{Key: "stale-key"}}),
 		},
 	}
-	currentRecords := map[string][]*streamingpb.CommittedWriteRecord{
+	currentRecords := map[string][]*streamingpb.SummaryEntry{
 		"v1": {
-			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-				Key:            "current-key",
-				CommitTimetick: 220,
-				MessageId:      rmq.NewRmqID(220).IntoProto(),
-			}),
+			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(220).IntoProto(), SourceTimetick: 220, Idempotency: &streamingpb.IdempotencyContent{Key: "current-key"}}),
 		},
 	}
 	writeTestPChannelSummaryChunkWithTerm(ctx, t, "p1", 1, 1, chunkManager, &utility.WALCheckpoint{

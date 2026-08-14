@@ -10,46 +10,45 @@ import (
 )
 
 // A committed write fact derived from an already-landed pchannel WAL message is
-// streamingpb.CommittedWriteRecord itself — there is no separate in-memory
+// streamingpb.SummaryEntry itself — there is no separate in-memory
 // model. The generated type is the one representation: it is what the chunk
 // stores, what recovery decodes, and what callers receive, so nothing is copied
 // between shapes and the two cannot drift apart.
 
-// newCommittedWriteRecordFromMessage extracts a committed write fact from an
+// newSummaryEntryFromMessage extracts a committed write fact from an
 // immutable WAL message. Callers should only pass messages observed after WAL
 // append/scan has completed; inflight requests must never reach this function.
-func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMessage) (*streamingpb.CommittedWriteRecord, bool) {
+func newSummaryEntryFromMessage(pchannel string, msg message.ImmutableMessage) (*streamingpb.SummaryEntry, bool) {
 	if txnMsg := message.AsImmutableTxnMessage(msg); txnMsg != nil {
-		return newCommittedWriteRecordFromTxnMessage(pchannel, txnMsg)
+		return newSummaryEntryFromTxnMessage(pchannel, txnMsg)
 	}
 	if msg == nil || !msg.MessageType().IsDMLMessageType() || msg.IsPChannelLevel() {
 		return nil, false
 	}
-	record := &streamingpb.CommittedWriteRecord{
+	record := &streamingpb.SummaryEntry{
 		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
 		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
 	}
 
-	var decodedResult *messagespb.IdempotentInsertResult
-	if result, ok := idempotentInsertResultFromImmutableInsert(msg); ok {
-		decodedResult = result
-		record.IdempotentResult = result
-	}
-
+	// The result is only worth storing alongside a key: without one it can never
+	// be served (a keyless entry materializes nothing for any view), and the
+	// append path rejects an insert that carries a result but no key.
 	if key := idempotencyKeyFromImmutableMessage(msg); key != "" {
-		record.IdempotencyKey = key
-	} else if decodedResult == nil {
-		record.IdempotentResult = nil
+		content := &streamingpb.IdempotencyContent{Key: key}
+		if result, ok := idempotentInsertResultFromImmutableInsert(msg); ok {
+			content.InsertResult = result
+		}
+		record.Idempotency = content
 	}
 	return record, true
 }
 
-func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.ImmutableTxnMessage) (*streamingpb.CommittedWriteRecord, bool) {
+func newSummaryEntryFromTxnMessage(pchannel string, msg message.ImmutableTxnMessage) (*streamingpb.SummaryEntry, bool) {
 	if msg == nil || msg.IsPChannelLevel() {
 		return nil, false
 	}
-	record := &streamingpb.CommittedWriteRecord{
+	record := &streamingpb.SummaryEntry{
 		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
 		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
@@ -68,22 +67,26 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 		return nil
 	})
 
-	if key := idempotencyKeyFromImmutableMessage(msg.Commit()); key != "" {
-		record.IdempotencyKey = key
-	}
+	key := idempotencyKeyFromImmutableMessage(msg.Commit())
 	mergedResult, hadAny, err := message.MergeIdempotentInsertResults(insertResults...)
 	if err != nil {
 		// Corrupt committed-write payload (e.g. mixed id types): surface it loudly
 		// instead of silently degrading to "no idempotent payload", then keep the
-		// record without a duplicate response.
-		mlog.Warn(context.TODO(), "failed to merge idempotent insert results for committed write record",
+		// entry without a duplicate response.
+		mlog.Warn(context.TODO(), "failed to merge idempotent insert results for summary entry",
 			mlog.String("pchannel", pchannel),
 			mlog.String("vchannel", msg.VChannel()),
 			mlog.Err(err))
-	} else if hadAny {
-		record.IdempotentResult = mergedResult
+		hadAny = false
 	}
-	if !hadAny && record.GetIdempotencyKey() == "" && !hasDML {
+	if key != "" {
+		content := &streamingpb.IdempotencyContent{Key: key}
+		if hadAny {
+			content.InsertResult = mergedResult
+		}
+		record.Idempotency = content
+	}
+	if !hadAny && key == "" && !hasDML {
 		return nil, false
 	}
 	return record, true
@@ -118,7 +121,7 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 		return nil, false
 	}
 	// A replicated insert inherits the SOURCE cluster's header verbatim,
-	// including its IdempotentInsertResult. Its committed-write record is keyless
+	// including its IdempotentInsertResult. Its summary entry is keyless
 	// checkpoint bookkeeping only (see idempotencyKeyFromImmutableMessage), so a
 	// decoded result could never be served as a duplicate response — persisting
 	// its per-row PKs into the chunk would be pure write amplification.
@@ -130,36 +133,4 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 		return nil, false
 	}
 	return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
-}
-
-// committedWriteRecordFromSummaryEntry rebuilds the record a summary entry came
-// from. The destination is not part of it: the entry already lives under its
-// vchannel's summary.
-func committedWriteRecordFromSummaryEntry(entry *streamingpb.SummaryEntry) *streamingpb.CommittedWriteRecord {
-	if entry == nil {
-		return nil
-	}
-	return &streamingpb.CommittedWriteRecord{
-		SourceMessageId:        cloneMessageIDProto(entry.GetMessageId()),
-		SourceTimetick:         entry.GetCommitTimetick(),
-		LastConfirmedMessageId: cloneMessageIDProto(entry.GetLastConfirmedMessageId()),
-		IdempotentResult:       entry.GetIdempotentResult(),
-		IdempotencyKey:         entry.GetKey(),
-	}
-}
-
-// summaryEntryOfCommittedWriteRecord projects a record into the summary entry an
-// application view materializes from it. A keyless record has no entry: it is
-// checkpoint bookkeeping only.
-func summaryEntryOfCommittedWriteRecord(record *streamingpb.CommittedWriteRecord) *streamingpb.SummaryEntry {
-	if record == nil || record.GetIdempotencyKey() == "" {
-		return nil
-	}
-	return &streamingpb.SummaryEntry{
-		Key:                    record.GetIdempotencyKey(),
-		CommitTimetick:         record.GetSourceTimetick(),
-		MessageId:              cloneMessageIDProto(record.GetSourceMessageId()),
-		LastConfirmedMessageId: cloneMessageIDProto(record.GetLastConfirmedMessageId()),
-		IdempotentResult:       record.GetIdempotentResult(),
-	}
 }

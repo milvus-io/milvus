@@ -36,8 +36,8 @@ func TestIdempotencyWindowBeginCompleteAndDuplicate(t *testing.T) {
 	duplicate := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
 	require.NotNil(t, duplicate.Entry)
-	assert.Equal(t, "key-1", duplicate.Entry.GetKey())
-	assert.Equal(t, uint64(100), duplicate.Entry.GetCommitTimetick())
+	assert.Equal(t, "key-1", duplicate.Entry.GetIdempotency().GetKey())
+	assert.Equal(t, uint64(100), duplicate.Entry.GetSourceTimetick())
 }
 
 // The TTL eviction bound derives from the committing entry's timetick, not the
@@ -112,7 +112,7 @@ func TestWindowDuplicateVisibilityIsUniformAcrossSkewedShards(t *testing.T) {
 	require.Len(t, quiet.commitOrder, 1)
 	duplicate := quiet.Begin("shared-key", nil)
 	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
-	require.Equal(t, retryTT, duplicate.Entry.GetCommitTimetick())
+	require.Equal(t, retryTT, duplicate.Entry.GetSourceTimetick())
 }
 
 // Complete order is append-completion order, not commit-timetick order: the
@@ -209,7 +209,7 @@ func TestIdempotencyWindowWaitsForInflightResult(t *testing.T) {
 	result := waiter.Pending.Wait(context.Background(), nil)
 	require.NoError(t, result.Err)
 	require.NotNil(t, result.Entry)
-	assert.Equal(t, uint64(100), result.Entry.GetCommitTimetick())
+	assert.Equal(t, uint64(100), result.Entry.GetSourceTimetick())
 }
 
 func TestIdempotencyWindowMultipleWaitersAllReceiveResult(t *testing.T) {
@@ -243,7 +243,7 @@ func TestIdempotencyWindowMultipleWaitersAllReceiveResult(t *testing.T) {
 	for i := range results {
 		require.NoErrorf(t, results[i].Err, "waiter %d", i)
 		require.NotNilf(t, results[i].Entry, "waiter %d", i)
-		assert.Equal(t, uint64(100), results[i].Entry.GetCommitTimetick())
+		assert.Equal(t, uint64(100), results[i].Entry.GetSourceTimetick())
 	}
 }
 
@@ -377,8 +377,8 @@ func TestIdempotencyWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.
 	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &streamingpb.SummarySnapshot{
 		SnapshotCheckpointTimetick: checkpointTT,
 		Entries: []*streamingpb.SummaryEntry{
-			{Key: "expired", CommitTimetick: expiredTT},
-			{Key: "fresh", CommitTimetick: freshTT},
+			{SourceTimetick: expiredTT, Idempotency: &streamingpb.IdempotencyContent{Key: "expired"}},
+			{SourceTimetick: freshTT, Idempotency: &streamingpb.IdempotencyContent{Key: "fresh"}},
 		},
 	})
 
@@ -397,25 +397,19 @@ func TestIdempotencyWindowRestoreFromSnapshot(t *testing.T) {
 		SnapshotCheckpointTimetick: 100,
 		EvictedWatermarkTimetick:   90,
 		Entries: []*streamingpb.SummaryEntry{
-			{
-				Key:                    "key-1",
-				CommitTimetick:         90,
-				MessageId:              &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "10"},
-				LastConfirmedMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "9"},
-				IdempotentResult: &messagespb.IdempotentInsertResult{
-					RowOffsets: []uint32{1, 0},
-					Ids: &schemapb.IDs{
-						IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11, 10}}},
-					},
+			{SourceMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "10"}, SourceTimetick: 90, LastConfirmedMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "9"}, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1", InsertResult: &messagespb.IdempotentInsertResult{
+				RowOffsets: []uint32{1, 0},
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11, 10}}},
 				},
-			},
+			}}},
 		},
 	})
 
 	duplicate := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
-	require.Equal(t, []uint32{1, 0}, duplicate.Entry.GetIdempotentResult().GetRowOffsets())
-	require.Equal(t, []int64{11, 10}, duplicate.Entry.GetIdempotentResult().GetIds().GetIntId().GetData())
+	require.Equal(t, []uint32{1, 0}, duplicate.Entry.GetIdempotency().GetInsertResult().GetRowOffsets())
+	require.Equal(t, []int64{11, 10}, duplicate.Entry.GetIdempotency().GetInsertResult().GetIds().GetIntId().GetData())
 	require.Equal(t, uint64(90), window.EvictedWatermarkTT())
 	require.Equal(t, uint64(100), window.SnapshotCheckpointTT())
 }

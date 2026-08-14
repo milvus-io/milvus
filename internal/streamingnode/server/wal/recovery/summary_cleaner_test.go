@@ -268,7 +268,7 @@ func addTestSummaryPinnedAtGeneration(m *summaryManager, vchannel string, genera
 	summary := newEmptyVChannelSummary(m.pchannel, vchannel, nil)
 	key := "pin-" + vchannel
 	summary.entries[key] = &summaryEntry{
-		entry:         &streamingpb.SummaryEntry{Key: key},
+		entry:         &streamingpb.SummaryEntry{Idempotency: &streamingpb.IdempotencyContent{Key: key}},
 		generation:    generation,
 		generationSet: true,
 	}

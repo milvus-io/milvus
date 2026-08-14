@@ -541,18 +541,18 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 }
 
 func fillDuplicateResult(ctx context.Context, entry *streamingpb.SummaryEntry) (message.MessageID, error) {
-	if entry == nil || entry.GetMessageId() == nil {
+	if entry == nil || entry.GetSourceMessageId() == nil {
 		// Typed so the streamingnode->proxy status converter carries a real code
 		// instead of the untyped catch-all.
 		return nil, status.NewInner("missing duplicate idempotency entry result")
 	}
-	msgID := message.MustUnmarshalMessageID(entry.GetMessageId())
+	msgID := message.MustUnmarshalMessageID(entry.GetSourceMessageId())
 	lastConfirmed := message.MustUnmarshalMessageID(entry.GetLastConfirmedMessageId())
 	if lastConfirmed == nil {
 		lastConfirmed = msgID
 	}
 	if extra := utility.GetExtraAppendResult(ctx); extra != nil {
-		extra.TimeTick = entry.GetCommitTimetick()
+		extra.TimeTick = entry.GetSourceTimetick()
 		extra.LastConfirmedMessageID = lastConfirmed
 		// A duplicate response never carries a txn context; clear whatever an
 		// intervening inner append (e.g. the synthesized retried-txn rollback)
@@ -561,7 +561,7 @@ func fillDuplicateResult(ctx context.Context, entry *streamingpb.SummaryEntry) (
 		// Always overwrite Extra so a duplicate without an insert result does not
 		// leak whatever value the ExtraAppendResult already carried into this
 		// append's result.
-		if result := entry.GetIdempotentResult(); result != nil && result.GetIds() != nil {
+		if result := entry.GetIdempotency().GetInsertResult(); result != nil && result.GetIds() != nil {
 			extra.Extra = result
 		} else {
 			extra.Extra = nil

@@ -171,8 +171,8 @@ func TestEvictPersistedRemovesPersistedEntries(t *testing.T) {
 	populateSummaryEntries(state, []uint64{100, 200, 300, 400})
 
 	// key-0, key-1 are persisted; key-2, key-3 are not yet persisted.
-	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 3)
-	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 3)
+	state.markSummaryEntryGeneration(makeRecord("key-0", 100), 3)
+	state.markSummaryEntryGeneration(makeRecord("key-1", 200), 3)
 
 	state.evictPersisted()
 	require.Len(t, state.entries, 2)
@@ -196,8 +196,8 @@ func TestEvictPersistedAdvancesMinRequiredWithPendingEntries(t *testing.T) {
 	state := newEmptyVChannelSummary("p1", "v1", nil)
 	populateSummaryEntries(state, []uint64{100, 200, 300})
 	// key-0, key-1 persisted at generations 1 and 2; key-2 still pending.
-	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
-	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 2)
+	state.markSummaryEntryGeneration(makeRecord("key-0", 100), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-1", 200), 2)
 	state.latestAppliedGeneration = 2
 
 	state.evictPersisted()
@@ -218,10 +218,10 @@ func TestEvictPersistedStopsAtEntryWithoutGeneration(t *testing.T) {
 	})
 	populateSummaryEntries(state, []uint64{100, 200, 300, 400})
 
-	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
-	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 2)
+	state.markSummaryEntryGeneration(makeRecord("key-0", 100), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-1", 200), 2)
 	// key-2 has no generation
-	state.markCommittedWriteRecordGeneration(makeRecord("key-3", 400), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-3", 400), 1)
 
 	state.evictPersisted()
 	require.Len(t, state.entries, 2)
@@ -282,8 +282,8 @@ func TestEvictPersistedEntriesInNormalMode(t *testing.T) {
 	})
 	populateSummaryEntries(state, []uint64{100, 200, 300, 400})
 	// key-0, key-1 persisted; key-2, key-3 still pending.
-	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
-	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 2)
+	state.markSummaryEntryGeneration(makeRecord("key-0", 100), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-1", 200), 2)
 	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
 
 	manager.evictPersistedEntries()
@@ -300,9 +300,9 @@ func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
 		TimeTick:  1,
 	})
 	populateSummaryEntries(state, []uint64{100, 200, 300})
-	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
-	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 1)
-	state.markCommittedWriteRecordGeneration(makeRecord("key-2", 300), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-0", 100), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-1", 200), 1)
+	state.markSummaryEntryGeneration(makeRecord("key-2", 300), 1)
 	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
 
 	manager.evictPersistedEntries()
@@ -315,12 +315,8 @@ func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
 func populateSummaryEntries(state *vchannelSummary, timeticks []uint64) {
 	for i, tt := range timeticks {
 		key := fmt.Sprintf("key-%d", i)
-		record := committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-			Key:            key,
-			CommitTimetick: tt,
-			MessageId:      rmq.NewRmqID(int64(tt)).IntoProto(),
-		})
-		_ = state.applyCommittedWriteRecord(record, false)
+		record := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(int64(tt)).IntoProto(), SourceTimetick: tt, Idempotency: &streamingpb.IdempotencyContent{Key: key}})
+		_ = state.applySummaryEntry(record, false)
 	}
 }
 
@@ -328,20 +324,13 @@ func populateSummaryEntriesWithBaseTT(state *vchannelSummary, baseTT uint64, cou
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("key-%d", i)
 		tt := baseTT + uint64(i)
-		record := committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-			Key:            key,
-			CommitTimetick: tt,
-			MessageId:      rmq.NewRmqID(int64(tt)).IntoProto(),
-		})
-		_ = state.applyCommittedWriteRecord(record, false)
+		record := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(int64(tt)).IntoProto(), SourceTimetick: tt, Idempotency: &streamingpb.IdempotencyContent{Key: key}})
+		_ = state.applySummaryEntry(record, false)
 	}
 }
 
-func makeRecord(key string, timetick uint64) *streamingpb.CommittedWriteRecord {
-	return &streamingpb.CommittedWriteRecord{
-		SourceTimetick: timetick,
-		IdempotencyKey: key,
-	}
+func makeRecord(key string, timetick uint64) *streamingpb.SummaryEntry {
+	return &streamingpb.SummaryEntry{SourceTimetick: timetick, Idempotency: &streamingpb.IdempotencyContent{Key: key}}
 }
 
 func buildTimeTickMessage(t *testing.T, timetick uint64) message.ImmutableMessage {

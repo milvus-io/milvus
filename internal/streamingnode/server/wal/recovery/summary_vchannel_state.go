@@ -21,7 +21,7 @@ type vchannelSummary struct {
 	entries                    map[string]*summaryEntry
 	commitOrder                []string
 	pendingEntries             map[string]*streamingpb.SummaryEntry
-	pendingRecords             []*streamingpb.CommittedWriteRecord
+	pendingRecords             []*streamingpb.SummaryEntry
 	latestAppliedGeneration    uint64
 	minRequiredGeneration      uint64
 	dirty                      bool
@@ -82,7 +82,7 @@ func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoin
 		vchannel:        vchannel,
 		entries:         make(map[string]*summaryEntry),
 		pendingEntries:  make(map[string]*streamingpb.SummaryEntry),
-		pendingRecords:  make([]*streamingpb.CommittedWriteRecord, 0),
+		pendingRecords:  make([]*streamingpb.SummaryEntry, 0),
 		generationStats: make(map[uint64]*summaryGenerationStat),
 	}
 	if checkpoint != nil {
@@ -104,16 +104,16 @@ func newVChannelSummaryFromSnapshot(snapshot *streamingpb.SummarySnapshot) (*vch
 		evictedWatermarkTimetick:   snapshot.GetEvictedWatermarkTimetick(),
 		entries:                    make(map[string]*summaryEntry, len(snapshot.GetEntries())),
 		pendingEntries:             make(map[string]*streamingpb.SummaryEntry),
-		pendingRecords:             make([]*streamingpb.CommittedWriteRecord, 0),
+		pendingRecords:             make([]*streamingpb.SummaryEntry, 0),
 		commitOrder:                make([]string, 0, len(snapshot.GetEntries())),
 		generationStats:            make(map[uint64]*summaryGenerationStat),
 	}
 	sortedEntries := append([]*streamingpb.SummaryEntry(nil), snapshot.GetEntries()...)
 	sortSummaryEntries(sortedEntries)
 	for _, entry := range sortedEntries {
-		state.entries[entry.GetKey()] = &summaryEntry{entry: entry}
+		state.entries[entry.GetIdempotency().GetKey()] = &summaryEntry{entry: entry}
 		state.entryBytes += proto.Size(entry)
-		state.commitOrder = append(state.commitOrder, entry.GetKey())
+		state.commitOrder = append(state.commitOrder, entry.GetIdempotency().GetKey())
 	}
 	state.refreshEvictedWatermark()
 	state.refreshMinRequiredGeneration()
@@ -130,12 +130,12 @@ func (s *vchannelSummary) observeMessage(msg message.ImmutableMessage) {
 	if msg.TimeTick() <= s.snapshotCheckpointTimetick {
 		return
 	}
-	record, ok := newCommittedWriteRecordFromMessage(s.pchannel, msg)
+	record, ok := newSummaryEntryFromMessage(s.pchannel, msg)
 	if !ok {
 		s.advanceCheckpoint(msg)
 		return
 	}
-	_ = s.applyCommittedWriteRecord(record, true)
+	_ = s.applySummaryEntry(record, true)
 }
 
 func (s *vchannelSummary) advanceCheckpoint(msg message.ImmutableMessage) {
@@ -154,11 +154,11 @@ func (s *vchannelSummary) advanceCheckpointTo(checkpoint *WALCheckpoint) {
 	s.refreshEvictedWatermark()
 }
 
-func (s *vchannelSummary) consumePendingCommittedWriteRecords() ([]*streamingpb.CommittedWriteRecord, *summaryMetaUpdate) {
+func (s *vchannelSummary) consumePendingSummaryEntries() ([]*streamingpb.SummaryEntry, *summaryMetaUpdate) {
 	if !s.dirty {
 		return nil, nil
 	}
-	records := sortCommittedWriteRecords(s.pendingRecords)
+	records := sortedSummaryEntries(s.pendingRecords)
 	pendingEntryKeys := make([]string, 0, len(s.pendingEntries))
 	for key := range s.pendingEntries {
 		pendingEntryKeys = append(pendingEntryKeys, key)
@@ -195,13 +195,13 @@ func (s *vchannelSummary) snapshotWithEntries(entries []*streamingpb.SummaryEntr
 	return snapshot
 }
 
-func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []*streamingpb.CommittedWriteRecord, generation uint64) error {
-	records = sortCommittedWriteRecords(records)
+func (s *vchannelSummary) applySummaryEntriesAtGeneration(records []*streamingpb.SummaryEntry, generation uint64) error {
+	records = sortedSummaryEntries(records)
 	for _, record := range records {
-		if err := s.applyCommittedWriteRecord(record, false); err != nil {
+		if err := s.applySummaryEntry(record, false); err != nil {
 			return err
 		}
-		s.markCommittedWriteRecordGeneration(record, generation)
+		s.markSummaryEntryGeneration(record, generation)
 	}
 	s.latestAppliedGeneration = maxUint64(s.latestAppliedGeneration, generation)
 	s.refreshMinRequiredGeneration()
@@ -211,15 +211,15 @@ func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []*stre
 	return nil
 }
 
-func (s *vchannelSummary) applyCommittedWriteRecord(record *streamingpb.CommittedWriteRecord, markDirty bool) error {
-	key := record.GetIdempotencyKey()
+func (s *vchannelSummary) applySummaryEntry(record *streamingpb.SummaryEntry, markDirty bool) error {
+	key := record.GetIdempotency().GetKey()
 	if key == "" {
 		// A keyless write is checkpoint bookkeeping only: it advances the summary
 		// but materializes no entry.
 		if markDirty {
 			s.pendingRecords = append(s.pendingRecords, record)
 		}
-		s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
+		s.advanceCheckpointToSummaryEntry(record, markDirty)
 		return nil
 	}
 	if existing, ok := s.entries[key]; ok {
@@ -229,14 +229,13 @@ func (s *vchannelSummary) applyCommittedWriteRecord(record *streamingpb.Committe
 			if markDirty {
 				s.pendingRecords = append(s.pendingRecords, record)
 			}
-			s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
+			s.advanceCheckpointToSummaryEntry(record, markDirty)
 			return nil
 		}
 	}
-	entry := summaryEntryOfCommittedWriteRecord(record)
-	if entry == nil {
-		return merr.WrapErrServiceInternalMsg("committed write record cannot materialize idempotency summary entry")
-	}
+	// The chunk stores and the view materializes the same entry, so there is
+	// nothing to project here: the keyed entry is retained as it stands.
+	entry := record
 	s.entries[key] = &summaryEntry{entry: entry}
 	s.entryBytes += proto.Size(entry)
 	s.commitOrder = append(s.commitOrder, key)
@@ -244,7 +243,7 @@ func (s *vchannelSummary) applyCommittedWriteRecord(record *streamingpb.Committe
 		s.pendingEntries[key] = entry
 		s.pendingRecords = append(s.pendingRecords, record)
 	}
-	s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
+	s.advanceCheckpointToSummaryEntry(record, markDirty)
 	s.refreshMinRequiredGeneration()
 	return nil
 }
@@ -254,7 +253,7 @@ func (s *vchannelSummary) entryTTLExpiredAt(entry *streamingpb.SummaryEntry, now
 		return false
 	}
 	evictBeforeTT := evictBeforeTimetick(nowTT, s.evictionCfg.entryTTL)
-	return evictBeforeTT > 0 && entry.GetCommitTimetick() < evictBeforeTT
+	return evictBeforeTT > 0 && entry.GetSourceTimetick() < evictBeforeTT
 }
 
 func (s *vchannelSummary) dropEntry(key string) {
@@ -283,8 +282,8 @@ func (s *vchannelSummary) rebuildGenerationStat(generation uint64) {
 		}
 		stat.entryCount++
 		stat.byteSize += proto.Size(e.entry)
-		if e.entry.GetCommitTimetick() > stat.maxCommitTT {
-			stat.maxCommitTT = e.entry.GetCommitTimetick()
+		if e.entry.GetSourceTimetick() > stat.maxCommitTT {
+			stat.maxCommitTT = e.entry.GetSourceTimetick()
 		}
 	}
 	if stat.entryCount == 0 {
@@ -297,7 +296,7 @@ func (s *vchannelSummary) rebuildGenerationStat(generation uint64) {
 	s.generationStats[generation] = &stat
 }
 
-func (s *vchannelSummary) advanceCheckpointToCommittedWriteRecord(record *streamingpb.CommittedWriteRecord, markDirty bool) {
+func (s *vchannelSummary) advanceCheckpointToSummaryEntry(record *streamingpb.SummaryEntry, markDirty bool) {
 	if record.SourceTimetick <= s.snapshotCheckpointTimetick {
 		return
 	}
@@ -317,22 +316,22 @@ func (s *vchannelSummary) refreshEvictedWatermark() {
 			continue
 		}
 		// The watermark is inclusive: it points to the oldest retained entry, not a strict evicted lower bound.
-		s.evictedWatermarkTimetick = e.entry.GetCommitTimetick()
+		s.evictedWatermarkTimetick = e.entry.GetSourceTimetick()
 		return
 	}
 	s.evictedWatermarkTimetick = s.snapshotCheckpointTimetick
 }
 
-func (s *vchannelSummary) markCommittedWriteRecordsPersisted(records []*streamingpb.CommittedWriteRecord, generation uint64) {
+func (s *vchannelSummary) markSummaryEntriesPersisted(records []*streamingpb.SummaryEntry, generation uint64) {
 	for _, record := range records {
-		s.markCommittedWriteRecordGeneration(record, generation)
+		s.markSummaryEntryGeneration(record, generation)
 	}
 	s.latestAppliedGeneration = maxUint64(s.latestAppliedGeneration, generation)
 	s.refreshMinRequiredGeneration()
 }
 
-func (s *vchannelSummary) markCommittedWriteRecordGeneration(record *streamingpb.CommittedWriteRecord, generation uint64) {
-	key := record.GetIdempotencyKey()
+func (s *vchannelSummary) markSummaryEntryGeneration(record *streamingpb.SummaryEntry, generation uint64) {
+	key := record.GetIdempotency().GetKey()
 	if key == "" {
 		return
 	}
@@ -364,7 +363,7 @@ func (s *vchannelSummary) registerGenerationEntry(generation uint64, entry *stre
 	}
 	stat.entryCount++
 	stat.byteSize += proto.Size(entry)
-	if commitTT := entry.GetCommitTimetick(); commitTT > stat.maxCommitTT {
+	if commitTT := entry.GetSourceTimetick(); commitTT > stat.maxCommitTT {
 		stat.maxCommitTT = commitTT
 	}
 }
@@ -504,7 +503,7 @@ func (s *vchannelSummary) evictForRecovery(evictBeforeTT uint64, minEntries, max
 			s.commitOrder = s.commitOrder[1:]
 			continue
 		}
-		if e.entry.GetCommitTimetick() >= evictBeforeTT {
+		if e.entry.GetSourceTimetick() >= evictBeforeTT {
 			break
 		}
 		s.commitOrder = s.commitOrder[1:]
@@ -605,9 +604,9 @@ func maxUint64(left, right uint64) uint64 {
 func sortSummaryEntries(entries []*streamingpb.SummaryEntry) {
 	sort.Slice(entries, func(i, j int) bool {
 		left, right := entries[i], entries[j]
-		if left.GetCommitTimetick() != right.GetCommitTimetick() {
-			return left.GetCommitTimetick() < right.GetCommitTimetick()
+		if left.GetSourceTimetick() != right.GetSourceTimetick() {
+			return left.GetSourceTimetick() < right.GetSourceTimetick()
 		}
-		return left.GetKey() < right.GetKey()
+		return left.GetIdempotency().GetKey() < right.GetIdempotency().GetKey()
 	})
 }

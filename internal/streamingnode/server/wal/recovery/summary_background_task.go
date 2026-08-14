@@ -204,7 +204,7 @@ func (m *summaryManager) consumeIdempotencySnapshotLocked() *RecoverySnapshot {
 	if !m.hasDirtySummaryUnsafe() {
 		return nil
 	}
-	pchannelSummaryRecords, vchannelSummaryMetaUpdates, pchannelSummarySourceCheckpoint := m.consumePendingCommittedWriteRecords()
+	pchannelSummaryRecords, vchannelSummaryMetaUpdates, pchannelSummarySourceCheckpoint := m.consumePendingSummaryEntries()
 	return &RecoverySnapshot{
 		pchannelSummaryRecords:          pchannelSummaryRecords,
 		vchannelSummaryMetaUpdates:      vchannelSummaryMetaUpdates,

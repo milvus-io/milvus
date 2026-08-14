@@ -316,14 +316,14 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 		return nil, err
 	}
 	for vchannel, records := range recordsByVChannel {
-		if !hasIdempotencyCommittedWriteRecords(records) {
+		if !hasIdempotencyContent(records) {
 			continue
 		}
 		state := m.summaries()[vchannel]
 		if state == nil {
 			continue
 		}
-		if err := state.applyCommittedWriteRecordsAtGeneration(records, generation); err != nil {
+		if err := state.applySummaryEntriesAtGeneration(records, generation); err != nil {
 			return nil, errors.Wrapf(err, "failed to apply pchannel summary chunk %s for vchannel %s", chunkKey, vchannel)
 		}
 	}
@@ -339,7 +339,7 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	expectedTerm int64,
-) (map[string][]*streamingpb.CommittedWriteRecord, *streamingpb.PChannelSummaryChunkFooter, string, error) {
+) (map[string][]*streamingpb.SummaryEntry, *streamingpb.PChannelSummaryChunkFooter, string, error) {
 	chunkKey := buildPChannelSummaryChunkKey(pchannel, generation, expectedTerm)
 	// Bounded retry on the raw read: a transient object-storage blip must not
 	// hard-fail the WAL open now that referenced-state corruption does — only a

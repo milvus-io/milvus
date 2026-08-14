@@ -162,11 +162,7 @@ func TestRecoveryCheckpointBecomesDirtyAfterSummarySnapshotPersisted(t *testing.
 	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, summary.applyCommittedWriteRecord(committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
-		Key:            "key-1",
-		CommitTimetick: 120,
-		MessageId:      rmq.NewRmqID(120).IntoProto(),
-	}), true))
+	require.NoError(t, summary.applySummaryEntry((&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(120).IntoProto(), SourceTimetick: 120, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}), true))
 	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
 	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
@@ -240,7 +236,7 @@ func TestSimpleTruncateCheckpointClampedBySummarySnapshotCheckpoint(t *testing.T
 	rs.simpleTruncateCheckpoint(context.Background(), testRecoveryCheckpoint(120, 120))
 }
 
-// An idle pchannel takes no summary snapshot (only committed write records mark a
+// An idle pchannel takes no summary snapshot (only summary entrys mark a
 // summary dirty), so its durable source checkpoint freezes while timeticks keep
 // advancing the consume and flusher checkpoints. Truncation must stay clamped to
 // the frozen position, otherwise the restart rewind lands outside the WAL.
