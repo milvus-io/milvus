@@ -9,9 +9,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
@@ -74,11 +76,10 @@ func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t
 			SourceMessageID: rmq.NewRmqID(101).IntoProto(),
 			SourceTimeTick:  101,
 			Idempotency:     &committedWriteIdempotency{Key: "key-1"},
-			Rows: []committedWriteRow{{
-				RowOffset:            0,
-				PrimaryKeyType:       committedWritePrimaryKeyTypeInt64,
-				Int64PrimaryKeyValue: 7,
-			}},
+			IdempotentResult: message.NewIdempotentInsertResult(
+				[]uint32{0},
+				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
+			),
 		}},
 	}
 	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, records)

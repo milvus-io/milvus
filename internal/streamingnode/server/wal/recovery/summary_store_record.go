@@ -4,16 +4,10 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-)
-
-const (
-	committedWritePrimaryKeyTypeInt64  = "int64"
-	committedWritePrimaryKeyTypeString = "string"
 )
 
 // committedWriteRecord is the internal representation of a committed write
@@ -25,26 +19,17 @@ type committedWriteRecord struct {
 	SourceMessageID *commonpb.MessageID
 	SourceTimeTick  uint64
 	VChannel        string
-	Rows            []committedWriteRow
-	Idempotency     *committedWriteIdempotency
-	// DuplicateResponse is never persisted: it is rebuilt from Rows on the way
-	// out (see SummaryEntry), so the chunk stores the rows once.
-	DuplicateResponse      *committedWriteDuplicateResult
+	// IdempotentResult holds the rows this write produced, in the one shape they
+	// are ever used in: the result a duplicate append hands back. It is both the
+	// persisted form and the served form, so nothing is projected back and forth.
+	IdempotentResult       *messagespb.IdempotentInsertResult
+	Idempotency            *committedWriteIdempotency
 	LastConfirmedMessageID *commonpb.MessageID
-}
-
-type committedWriteRow struct {
-	RowOffset             uint32
-	PrimaryKeyType        string
-	Int64PrimaryKeyValue  int64
-	StringPrimaryKeyValue string
 }
 
 type committedWriteIdempotency struct {
 	Key string
 }
-
-type committedWriteDuplicateResult = messagespb.IdempotentInsertResult
 
 func (record committedWriteRecord) intoProto() *streamingpb.CommittedWriteRecord {
 	pb := &streamingpb.CommittedWriteRecord{
@@ -53,13 +38,10 @@ func (record committedWriteRecord) intoProto() *streamingpb.CommittedWriteRecord
 		SourceTimetick:         record.SourceTimeTick,
 		Vchannel:               record.VChannel,
 		LastConfirmedMessageId: cloneMessageIDProto(record.LastConfirmedMessageID),
-		Rows:                   make([]*streamingpb.CommittedWriteRow, 0, len(record.Rows)),
+		IdempotentResult:       record.IdempotentResult,
 	}
 	if record.Idempotency != nil {
 		pb.IdempotencyKey = record.Idempotency.Key
-	}
-	for _, row := range record.Rows {
-		pb.Rows = append(pb.Rows, row.intoProto())
 	}
 	return pb
 }
@@ -71,45 +53,14 @@ func newCommittedWriteRecordFromProto(pb *streamingpb.CommittedWriteRecord) comm
 		SourceTimeTick:         pb.GetSourceTimetick(),
 		VChannel:               pb.GetVchannel(),
 		LastConfirmedMessageID: cloneMessageIDProto(pb.GetLastConfirmedMessageId()),
+		IdempotentResult:       pb.GetIdempotentResult(),
 	}
 	// An absent key and an empty key are the same thing here: a record only ever
 	// carries an idempotency block when the write had a non-empty key.
 	if key := pb.GetIdempotencyKey(); key != "" {
 		record.Idempotency = &committedWriteIdempotency{Key: key}
 	}
-	if rows := pb.GetRows(); len(rows) > 0 {
-		record.Rows = make([]committedWriteRow, 0, len(rows))
-		for _, row := range rows {
-			record.Rows = append(record.Rows, newCommittedWriteRowFromProto(row))
-		}
-	}
 	return record
-}
-
-func (row committedWriteRow) intoProto() *streamingpb.CommittedWriteRow {
-	pb := &streamingpb.CommittedWriteRow{RowOffset: row.RowOffset}
-	// The primary key is a oneof on the wire, so a row whose type tag is unset
-	// (a rows-without-ids result) simply carries no key rather than a zero one.
-	switch row.PrimaryKeyType {
-	case committedWritePrimaryKeyTypeInt64:
-		pb.PrimaryKey = &streamingpb.CommittedWriteRow_Int64PrimaryKey{Int64PrimaryKey: row.Int64PrimaryKeyValue}
-	case committedWritePrimaryKeyTypeString:
-		pb.PrimaryKey = &streamingpb.CommittedWriteRow_StringPrimaryKey{StringPrimaryKey: row.StringPrimaryKeyValue}
-	}
-	return pb
-}
-
-func newCommittedWriteRowFromProto(pb *streamingpb.CommittedWriteRow) committedWriteRow {
-	row := committedWriteRow{RowOffset: pb.GetRowOffset()}
-	switch key := pb.GetPrimaryKey().(type) {
-	case *streamingpb.CommittedWriteRow_Int64PrimaryKey:
-		row.PrimaryKeyType = committedWritePrimaryKeyTypeInt64
-		row.Int64PrimaryKeyValue = key.Int64PrimaryKey
-	case *streamingpb.CommittedWriteRow_StringPrimaryKey:
-		row.PrimaryKeyType = committedWritePrimaryKeyTypeString
-		row.StringPrimaryKeyValue = key.StringPrimaryKey
-	}
-	return row
 }
 
 // newCommittedWriteRecordFromMessage extracts a committed write fact from an
@@ -136,8 +87,7 @@ func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMe
 	var decodedResult *messagespb.IdempotentInsertResult
 	if result, ok := idempotentInsertResultFromImmutableInsert(msg); ok {
 		decodedResult = result
-		record.Rows = committedWriteRowsFromInsertResult(result)
-		record.DuplicateResponse = result
+		record.IdempotentResult = result
 	}
 
 	if key := idempotencyKeyFromImmutableMessage(msg); key != "" {
@@ -145,7 +95,7 @@ func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMe
 			Key: key,
 		}
 	} else if decodedResult == nil {
-		record.DuplicateResponse = nil
+		record.IdempotentResult = nil
 	}
 	return record, true
 }
@@ -193,8 +143,7 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 			mlog.String("vchannel", record.VChannel),
 			mlog.Err(err))
 	} else if hadAny {
-		record.Rows = committedWriteRowsFromInsertResult(mergedResult)
-		record.DuplicateResponse = mergedResult
+		record.IdempotentResult = mergedResult
 	}
 	if !hadAny && record.Idempotency == nil && !hasDML {
 		return nil, false
@@ -255,11 +204,10 @@ func committedWriteRecordFromSummaryEntry(pchannel, vchannel string, entry *stre
 		SourceTimeTick:         entry.GetCommitTimetick(),
 		VChannel:               vchannel,
 		LastConfirmedMessageID: cloneMessageIDProto(entry.GetLastConfirmedMessageId()),
-		Rows:                   committedWriteRowsFromInsertResult(entry.GetIdempotentResult()),
+		IdempotentResult:       entry.GetIdempotentResult(),
 		Idempotency: &committedWriteIdempotency{
 			Key: entry.GetKey(),
 		},
-		DuplicateResponse: entry.GetIdempotentResult(),
 	}
 }
 
@@ -273,117 +221,16 @@ func (record *committedWriteRecord) SummaryEntry() *streamingpb.SummaryEntry {
 		MessageId:              cloneMessageIDProto(record.SourceMessageID),
 		LastConfirmedMessageId: cloneMessageIDProto(record.LastConfirmedMessageID),
 	}
-	if record.DuplicateResponse != nil {
-		entry.IdempotentResult = record.DuplicateResponse
-	}
-	if entry.IdempotentResult == nil && len(record.Rows) > 0 {
-		entry.IdempotentResult = message.NewIdempotentInsertResult(
-			committedWriteRowOffsets(record.Rows),
-			committedWriteRowIDs(record.Rows),
-		)
-	}
+	entry.IdempotentResult = record.IdempotentResult
 	return entry
 }
 
 func cloneCommittedWriteRecord(record committedWriteRecord) committedWriteRecord {
 	record.SourceMessageID = cloneMessageIDProto(record.SourceMessageID)
 	record.LastConfirmedMessageID = cloneMessageIDProto(record.LastConfirmedMessageID)
-	record.Rows = append([]committedWriteRow(nil), record.Rows...)
 	if record.Idempotency != nil {
 		idempotency := *record.Idempotency
 		record.Idempotency = &idempotency
 	}
 	return record
-}
-
-func committedWriteRowsFromInsertResult(result *messagespb.IdempotentInsertResult) []committedWriteRow {
-	if result == nil {
-		return nil
-	}
-	return committedWriteRowsFromIDs(result.GetRowOffsets(), result.GetIds())
-}
-
-func committedWriteRowsFromIDs(rowOffsets []uint32, ids *schemapb.IDs) []committedWriteRow {
-	if ids == nil {
-		rows := make([]committedWriteRow, 0, len(rowOffsets))
-		for _, offset := range rowOffsets {
-			rows = append(rows, committedWriteRow{
-				RowOffset: offset,
-			})
-		}
-		return rows
-	}
-	if intIDs := ids.GetIntId(); intIDs != nil {
-		rows := make([]committedWriteRow, 0, len(intIDs.GetData()))
-		for idx, pk := range intIDs.GetData() {
-			rows = append(rows, committedWriteRow{
-				RowOffset:            rowOffsetAt(rowOffsets, idx),
-				PrimaryKeyType:       committedWritePrimaryKeyTypeInt64,
-				Int64PrimaryKeyValue: pk,
-			})
-		}
-		return rows
-	}
-	if strIDs := ids.GetStrId(); strIDs != nil {
-		rows := make([]committedWriteRow, 0, len(strIDs.GetData()))
-		for idx, pk := range strIDs.GetData() {
-			rows = append(rows, committedWriteRow{
-				RowOffset:             rowOffsetAt(rowOffsets, idx),
-				PrimaryKeyType:        committedWritePrimaryKeyTypeString,
-				StringPrimaryKeyValue: pk,
-			})
-		}
-		return rows
-	}
-	return nil
-}
-
-func rowOffsetAt(rowOffsets []uint32, idx int) uint32 {
-	if idx < len(rowOffsets) {
-		return rowOffsets[idx]
-	}
-	return uint32(idx)
-}
-
-func committedWriteRowOffsets(rows []committedWriteRow) []uint32 {
-	if len(rows) == 0 {
-		return nil
-	}
-	offsets := make([]uint32, 0, len(rows))
-	for _, row := range rows {
-		offsets = append(offsets, row.RowOffset)
-	}
-	return offsets
-}
-
-func committedWriteRowIDs(rows []committedWriteRow) *schemapb.IDs {
-	if len(rows) == 0 {
-		return nil
-	}
-	switch rows[0].PrimaryKeyType {
-	case committedWritePrimaryKeyTypeInt64:
-		ids := make([]int64, 0, len(rows))
-		for _, row := range rows {
-			if row.PrimaryKeyType != committedWritePrimaryKeyTypeInt64 {
-				return nil
-			}
-			ids = append(ids, row.Int64PrimaryKeyValue)
-		}
-		return &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}},
-		}
-	case committedWritePrimaryKeyTypeString:
-		ids := make([]string, 0, len(rows))
-		for _, row := range rows {
-			if row.PrimaryKeyType != committedWritePrimaryKeyTypeString {
-				return nil
-			}
-			ids = append(ids, row.StringPrimaryKeyValue)
-		}
-		return &schemapb.IDs{
-			IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: ids}},
-		}
-	default:
-		return nil
-	}
 }

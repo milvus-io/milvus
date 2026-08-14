@@ -467,12 +467,8 @@ func TestCommittedWriteRecordFromMessageWithIdempotency(t *testing.T) {
 	require.True(t, message.MustUnmarshalMessageID(record.LastConfirmedMessageID).EQ(rmq.NewRmqID(119)))
 	require.NotNil(t, record.Idempotency)
 	require.Equal(t, "key-1", record.Idempotency.Key)
-	require.Len(t, record.Rows, 2)
-	require.Equal(t, uint32(2), record.Rows[0].RowOffset)
-	require.Equal(t, committedWritePrimaryKeyTypeInt64, record.Rows[0].PrimaryKeyType)
-	require.Equal(t, int64(11), record.Rows[0].Int64PrimaryKeyValue)
-	require.Equal(t, uint32(0), record.Rows[1].RowOffset)
-	require.Equal(t, int64(10), record.Rows[1].Int64PrimaryKeyValue)
+	require.Equal(t, []uint32{2, 0}, record.IdempotentResult.GetRowOffsets())
+	require.Equal(t, []int64{11, 10}, record.IdempotentResult.GetIds().GetIntId().GetData())
 
 	entry := record.SummaryEntry()
 	require.NotNil(t, entry)
@@ -525,8 +521,8 @@ func TestCommittedWriteRecordFromTxnMessageWithIdempotency(t *testing.T) {
 	record, ok := newCommittedWriteRecordFromMessage("p1", txnMsg)
 	require.True(t, ok)
 	require.Equal(t, "txn-key", record.Idempotency.Key)
-	require.Equal(t, []uint32{0, 2, 1}, record.DuplicateResponse.GetRowOffsets())
-	require.Equal(t, []string{"pk-0", "pk-2", "pk-1"}, record.DuplicateResponse.GetIds().GetStrId().GetData())
+	require.Equal(t, []uint32{0, 2, 1}, record.IdempotentResult.GetRowOffsets())
+	require.Equal(t, []string{"pk-0", "pk-2", "pk-1"}, record.IdempotentResult.GetIds().GetStrId().GetData())
 	require.True(t, message.MustUnmarshalMessageID(record.SourceMessageID).EQ(rmq.NewRmqID(103)))
 }
 
@@ -573,8 +569,7 @@ func TestVChannelSummarySkipsReplicatedIdempotencyKey(t *testing.T) {
 	require.NotEmpty(t, state.pendingRecords)
 	last := state.pendingRecords[len(state.pendingRecords)-1]
 	require.Nil(t, last.Idempotency)
-	require.Empty(t, last.Rows)
-	require.Nil(t, last.DuplicateResponse)
+	require.Nil(t, last.IdempotentResult)
 }
 
 func TestCommittedWriteRecordSkipsReplicatedTxnCommitKey(t *testing.T) {
@@ -623,8 +618,7 @@ func TestCommittedWriteRecordSkipsReplicatedTxnCommitKey(t *testing.T) {
 	record, ok := newCommittedWriteRecordFromMessage("p1", txnMsg)
 	require.True(t, ok)
 	require.Nil(t, record.Idempotency)
-	require.Empty(t, record.Rows)
-	require.Nil(t, record.DuplicateResponse)
+	require.Nil(t, record.IdempotentResult)
 }
 
 func TestCommittedWriteRecordWithoutKeyDoesNotEnterSummary(t *testing.T) {
@@ -642,9 +636,7 @@ func TestCommittedWriteRecordWithoutKeyDoesNotEnterSummary(t *testing.T) {
 	record, ok := newCommittedWriteRecordFromMessage("p1", msg)
 	require.True(t, ok)
 	require.Nil(t, record.Idempotency)
-	require.Len(t, record.Rows, 1)
-	require.Equal(t, committedWritePrimaryKeyTypeString, record.Rows[0].PrimaryKeyType)
-	require.Equal(t, "pk-1", record.Rows[0].StringPrimaryKeyValue)
+	require.Equal(t, []string{"pk-1"}, record.IdempotentResult.GetIds().GetStrId().GetData())
 	require.Nil(t, record.SummaryEntry())
 }
 
@@ -774,12 +766,8 @@ func TestCommittedWriteRecordFromSummaryEntry(t *testing.T) {
 	require.Equal(t, uint64(130), record.SourceTimeTick)
 	require.NotNil(t, record.Idempotency)
 	require.Equal(t, "key-1", record.Idempotency.Key)
-	require.Len(t, record.Rows, 2)
-	require.Equal(t, uint32(3), record.Rows[0].RowOffset)
-	require.Equal(t, committedWritePrimaryKeyTypeString, record.Rows[0].PrimaryKeyType)
-	require.Equal(t, "pk-3", record.Rows[0].StringPrimaryKeyValue)
-	require.Equal(t, uint32(1), record.Rows[1].RowOffset)
-	require.Equal(t, "pk-1", record.Rows[1].StringPrimaryKeyValue)
+	require.Equal(t, []uint32{3, 1}, record.IdempotentResult.GetRowOffsets())
+	require.Equal(t, []string{"pk-3", "pk-1"}, record.IdempotentResult.GetIds().GetStrId().GetData())
 
 	roundTrip := record.SummaryEntry()
 	require.Equal(t, entry.GetKey(), roundTrip.GetKey())
@@ -808,13 +796,10 @@ func TestSummaryMaterializerApplyCommittedWriteRecords(t *testing.T) {
 		SourceTimeTick:         112,
 		VChannel:               "v1",
 		LastConfirmedMessageID: rmq.NewRmqID(111).IntoProto(),
-		Rows: []committedWriteRow{
-			{
-				RowOffset:            0,
-				PrimaryKeyType:       committedWritePrimaryKeyTypeInt64,
-				Int64PrimaryKeyValue: 12,
-			},
-		},
+		IdempotentResult: message.NewIdempotentInsertResult(
+			[]uint32{0},
+			&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{12}}}},
+		),
 	}
 
 	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{keylessRecord, record, record}, 0))
@@ -938,13 +923,10 @@ func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 				SourceMessageID: rmq.NewRmqID(105).IntoProto(),
 				SourceTimeTick:  105,
 				VChannel:        "v1",
-				Rows: []committedWriteRow{
-					{
-						RowOffset:             0,
-						PrimaryKeyType:        committedWritePrimaryKeyTypeString,
-						StringPrimaryKeyValue: "pk-105",
-					},
-				},
+				IdempotentResult: message.NewIdempotentInsertResult(
+					[]uint32{0},
+					&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"pk-105"}}}},
+				),
 			},
 			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
@@ -979,12 +961,12 @@ func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 	require.Equal(t, checksum, decodedChecksum)
 	require.Len(t, decoded, 2)
 	require.Nil(t, decoded["v1"][0].Idempotency)
-	require.Equal(t, "pk-105", decoded["v1"][0].Rows[0].StringPrimaryKeyValue)
+	require.Equal(t, []string{"pk-105"}, decoded["v1"][0].IdempotentResult.GetIds().GetStrId().GetData())
 	require.Equal(t, "key-1", decoded["v1"][1].Idempotency.Key)
 	require.Equal(t, "key-2", decoded["v2"][0].Idempotency.Key)
 }
 
-func TestPChannelSummaryChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testing.T) {
+func TestPChannelSummaryChunkCodecHasNoViewTypeAndTakesIdentityFromFooter(t *testing.T) {
 	records := map[string][]committedWriteRecord{
 		"v1": {
 			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
@@ -1000,16 +982,23 @@ func TestPChannelSummaryChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *test
 		TimeTick:  120,
 	}, records)
 	require.NoError(t, err)
+	// The chunk store is view-agnostic: a view type belongs to the etcd meta, not
+	// to the physical payload.
 	require.NotContains(t, string(payload), "view_type")
 	require.Len(t, footer.Chunks, 1)
 	chunkIndex := footer.Chunks[0]
+	require.Equal(t, "v1", chunkIndex.VChannel)
+	require.Equal(t, uint64(9), footer.Generation)
 	chunkPayload := payload[int(chunkIndex.Offset):int(chunkIndex.Offset+chunkIndex.Length)]
 	require.NotContains(t, string(chunkPayload), "view_type")
-	decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload)
+
+	// The payload holds records only. Where they belong is the footer's to say,
+	// so decoding takes the destination from the index rather than the bytes.
+	decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload, footer.PChannel, chunkIndex.VChannel)
 	require.NoError(t, err)
-	require.Equal(t, uint64(9), decodedChunk.Generation)
-	require.Equal(t, "p1", decodedChunk.PChannel)
-	require.Equal(t, "v1", decodedChunk.VChannel)
+	require.Len(t, decodedChunk.Records, 1)
+	require.Equal(t, "p1", decodedChunk.Records[0].SourcePChannel)
+	require.Equal(t, "v1", decodedChunk.Records[0].VChannel)
 }
 
 func TestPChannelSummaryChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {

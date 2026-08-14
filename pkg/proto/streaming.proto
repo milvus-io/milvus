@@ -844,16 +844,6 @@ message PChannelSummaryChunkFooter {
     repeated VChannelSummaryChunkIndex chunks       = 9;
 }
 
-// CommittedWriteRow is one row of a committed write: where it sat in the
-// original request and the primary key it was written under.
-message CommittedWriteRow {
-    uint32 row_offset = 1;
-    oneof primary_key {
-        int64 int64_primary_key   = 2;
-        string string_primary_key = 3;
-    }
-}
-
 // CommittedWriteRecord is one committed write fact derived from an already
 // landed WAL message.
 message CommittedWriteRecord {
@@ -861,21 +851,32 @@ message CommittedWriteRecord {
     common.MessageID source_message_id            = 2;
     uint64 source_timetick                        = 3;
     string vchannel                               = 4;
-    repeated CommittedWriteRow rows               = 5;
+    // The rows the write produced, in the shape they are handed back in: the
+    // same IdempotentInsertResult a duplicate append returns. Storing the result
+    // itself rather than a per-row projection keeps one representation of the
+    // rows end to end, and its columnar packed encoding is more compact than a
+    // sub-message per row.
+    messages.IdempotentInsertResult idempotent_result = 5;
     // Empty when the write carried no idempotency key.
     string idempotency_key                        = 6;
     common.MessageID last_confirmed_message_id    = 7;
 }
 
-// VChannelSummaryChunk is one vchannel's payload inside the chunk object.
+// VChannelSummaryChunk is one vchannel's whole chunk inside the object.
+//
+// It carries records and nothing else today. It is kept as its own message
+// because block-level information — a key range, a filter, whatever lets a
+// reader skip the entire block without decoding it — belongs here when it
+// arrives.
+//
+// What it must not grow is a self-describing header. The footer index above
+// already names the vchannel and records this payload's offset, length,
+// checksum, record count and timetick range, and the payload is never decoded
+// without that index in hand and its checksum verified, so a pchannel,
+// vchannel, generation or codec version here could only repeat what the reader
+// already holds and has already proven.
 message VChannelSummaryChunk {
-    uint32 codec_version                     = 1;
-    string pchannel                          = 2;
-    string vchannel                          = 3;
-    uint64 generation                        = 4;
-    uint64 source_start_timetick             = 5;
-    uint64 source_end_timetick               = 6;
-    repeated CommittedWriteRecord records    = 7;
+    repeated CommittedWriteRecord records = 1;
 }
 
 ///

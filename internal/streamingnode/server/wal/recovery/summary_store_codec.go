@@ -55,6 +55,22 @@ type pchannelSummaryChunkFooter struct {
 	Chunks                    []vchannelSummaryChunkIndex
 }
 
+// vchannelSummaryChunk is one vchannel's whole chunk inside the object.
+//
+// It holds records and nothing else today, but it stays a named payload rather
+// than a bare record slice: block-level information — a key range, a filter,
+// whatever lets a reader skip the entire block without decoding it — belongs
+// here when it arrives. Do not collapse it back into []committedWriteRecord for
+// being a single field.
+//
+// What it must never grow back is a self-describing header. The footer index
+// names the vchannel and its checksum proves these bytes, so a pchannel,
+// vchannel, generation or codec version here could only repeat what the reader
+// already holds and has already verified.
+type vchannelSummaryChunk struct {
+	Records []committedWriteRecord
+}
+
 type vchannelSummaryChunkIndex struct {
 	VChannel            string
 	Offset              uint64
@@ -63,16 +79,6 @@ type vchannelSummaryChunkIndex struct {
 	RecordCount         uint64
 	SourceStartTimetick uint64
 	SourceEndTimetick   uint64
-}
-
-type vchannelSummaryChunk struct {
-	CodecVersion        int
-	PChannel            string
-	VChannel            string
-	Generation          uint64
-	SourceStartTimetick uint64
-	SourceEndTimetick   uint64
-	Records             []committedWriteRecord
 }
 
 func newPChannelSummarySourceCheckpoint(checkpoint *WALCheckpoint) *pchannelSummarySourceCheckpoint {
@@ -121,28 +127,22 @@ func marshalPChannelSummaryChunk(
 		if len(records) == 0 {
 			continue
 		}
-		chunk := &vchannelSummaryChunk{
-			CodecVersion: pchannelSummaryCodecVersion,
-			PChannel:     pchannel,
-			VChannel:     vchannel,
-			Generation:   generation,
-			Records:      records,
-		}
-		payload, err := marshalVChannelSummaryChunk(chunk)
+		payload, err := marshalVChannelSummaryChunk(&vchannelSummaryChunk{Records: records})
 		if err != nil {
 			return nil, nil, "", err
 		}
 		offset := uint64(buf.Len())
 		buf.Write(payload)
-		extendPChannelSummaryChunkFooterSourceRange(footer, chunk)
+		startTimetick, endTimetick := committedWriteRecordSourceRange(records)
+		extendPChannelSummaryChunkFooterSourceRange(footer, startTimetick, endTimetick)
 		footer.Chunks = append(footer.Chunks, vchannelSummaryChunkIndex{
 			VChannel:            vchannel,
 			Offset:              offset,
 			Length:              uint64(len(payload)),
 			Checksum:            chunkChecksum(payload),
 			RecordCount:         uint64(len(records)),
-			SourceStartTimetick: chunk.SourceStartTimetick,
-			SourceEndTimetick:   chunk.SourceEndTimetick,
+			SourceStartTimetick: startTimetick,
+			SourceEndTimetick:   endTimetick,
 		})
 	}
 
@@ -212,24 +212,28 @@ func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]committedWriteR
 		if !bytes.Equal(chunkIndex.Checksum, chunkChecksum(chunkPayload)) {
 			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk checksum mismatch for vchannel %s", chunkIndex.VChannel)
 		}
-		decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload)
+		chunk, err := unmarshalVChannelSummaryChunk(chunkPayload, footer.PChannel, chunkIndex.VChannel)
 		if err != nil {
 			return nil, nil, "", markPChannelSummaryStoreCorrupted(err)
 		}
-		if decodedChunk.VChannel != chunkIndex.VChannel {
-			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk vchannel mismatch, footer %s, payload %s", chunkIndex.VChannel, decodedChunk.VChannel)
-		}
-		if decodedChunk.Generation != footer.Generation {
-			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk generation mismatch for vchannel %s, footer %d, payload %d", chunkIndex.VChannel, footer.Generation, decodedChunk.Generation)
-		}
-		if uint64(len(decodedChunk.Records)) != chunkIndex.RecordCount {
+		// The record count is the footer's own tally, kept independently of the
+		// payload, so it is worth cross-checking. Identity is not: the vchannel
+		// comes from the index, and the checksum above already proved these are
+		// the bytes that index describes.
+		if uint64(len(chunk.Records)) != chunkIndex.RecordCount {
 			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk record count mismatch for vchannel %s", chunkIndex.VChannel)
 		}
-		recordsByVChannel[chunkIndex.VChannel] = decodedChunk.Records
+		recordsByVChannel[chunkIndex.VChannel] = chunk.Records
 	}
 	return recordsByVChannel, footer, hex.EncodeToString(storedFooterChecksum), nil
 }
 
+// marshalVChannelSummaryChunk encodes one vchannel's chunk. Its records must
+// already be cloned and sorted by the caller.
+//
+// No self-checksum: the bytes are protected by the footer's per-chunk index
+// checksum (vchannelSummaryChunkIndex.Checksum), computed over exactly these
+// bytes and verified before the payload is ever decoded.
 func marshalVChannelSummaryChunk(chunk *vchannelSummaryChunk) ([]byte, error) {
 	if chunk == nil {
 		return nil, merr.WrapErrServiceInternalMsg("nil vchannel summary chunk")
@@ -237,26 +241,40 @@ func marshalVChannelSummaryChunk(chunk *vchannelSummaryChunk) ([]byte, error) {
 	if len(chunk.Records) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("empty vchannel summary chunk")
 	}
-	chunk.CodecVersion = pchannelSummaryCodecVersion
-	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
-	chunk.SourceStartTimetick, chunk.SourceEndTimetick = committedWriteRecordSourceRange(chunk.Records)
-	// No self-checksum: the chunk's bytes are protected by the footer's per-chunk
-	// index checksum (vchannelSummaryChunkIndex.Checksum), computed over these exact
-	// bytes and verified before this chunk is ever decoded.
 	return summaryChunkMarshalOptions.Marshal(chunk.intoProto())
 }
 
-func unmarshalVChannelSummaryChunk(payload []byte) (*vchannelSummaryChunk, error) {
+// unmarshalVChannelSummaryChunk decodes a chunk payload. The pchannel and
+// vchannel come from the footer that located this payload rather than from the
+// payload itself; they backfill records that carry no destination of their own.
+func unmarshalVChannelSummaryChunk(payload []byte, pchannel, vchannel string) (*vchannelSummaryChunk, error) {
 	pb := &streamingpb.VChannelSummaryChunk{}
 	if err := proto.Unmarshal(payload, pb); err != nil {
 		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	if pb.GetCodecVersion() != pchannelSummaryCodecVersion {
-		return nil, pchannelSummaryStoreCorruptedf("unsupported vchannel summary chunk version %d", pb.GetCodecVersion())
-	}
 	chunk := newVChannelSummaryChunkFromProto(pb)
-	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
+	chunk.Records = cloneAndSortCommittedWriteRecords(pchannel, vchannel, chunk.Records)
 	return chunk, nil
+}
+
+func (chunk *vchannelSummaryChunk) intoProto() *streamingpb.VChannelSummaryChunk {
+	pb := &streamingpb.VChannelSummaryChunk{
+		Records: make([]*streamingpb.CommittedWriteRecord, 0, len(chunk.Records)),
+	}
+	for _, record := range chunk.Records {
+		pb.Records = append(pb.Records, record.intoProto())
+	}
+	return pb
+}
+
+func newVChannelSummaryChunkFromProto(pb *streamingpb.VChannelSummaryChunk) *vchannelSummaryChunk {
+	chunk := &vchannelSummaryChunk{
+		Records: make([]committedWriteRecord, 0, len(pb.GetRecords())),
+	}
+	for _, record := range pb.GetRecords() {
+		chunk.Records = append(chunk.Records, newCommittedWriteRecordFromProto(record))
+	}
+	return chunk
 }
 
 func newPChannelSummaryChunkHeader() []byte {
@@ -344,38 +362,6 @@ func newPChannelSummaryChunkFooterFromProto(pb *streamingpb.PChannelSummaryChunk
 	return footer
 }
 
-func (chunk *vchannelSummaryChunk) intoProto() *streamingpb.VChannelSummaryChunk {
-	pb := &streamingpb.VChannelSummaryChunk{
-		CodecVersion:        uint32(chunk.CodecVersion),
-		Pchannel:            chunk.PChannel,
-		Vchannel:            chunk.VChannel,
-		Generation:          chunk.Generation,
-		SourceStartTimetick: chunk.SourceStartTimetick,
-		SourceEndTimetick:   chunk.SourceEndTimetick,
-		Records:             make([]*streamingpb.CommittedWriteRecord, 0, len(chunk.Records)),
-	}
-	for _, record := range chunk.Records {
-		pb.Records = append(pb.Records, record.intoProto())
-	}
-	return pb
-}
-
-func newVChannelSummaryChunkFromProto(pb *streamingpb.VChannelSummaryChunk) *vchannelSummaryChunk {
-	chunk := &vchannelSummaryChunk{
-		CodecVersion:        int(pb.GetCodecVersion()),
-		PChannel:            pb.GetPchannel(),
-		VChannel:            pb.GetVchannel(),
-		Generation:          pb.GetGeneration(),
-		SourceStartTimetick: pb.GetSourceStartTimetick(),
-		SourceEndTimetick:   pb.GetSourceEndTimetick(),
-		Records:             make([]committedWriteRecord, 0, len(pb.GetRecords())),
-	}
-	for _, record := range pb.GetRecords() {
-		chunk.Records = append(chunk.Records, newCommittedWriteRecordFromProto(record))
-	}
-	return chunk
-}
-
 func cloneAndSortCommittedWriteRecords(pchannel, vchannel string, records []committedWriteRecord) []committedWriteRecord {
 	if len(records) == 0 {
 		return nil
@@ -386,7 +372,6 @@ func cloneAndSortCommittedWriteRecords(pchannel, vchannel string, records []comm
 		record.VChannel = firstNonEmpty(record.VChannel, vchannel)
 		record.SourceMessageID = cloneMessageIDProto(record.SourceMessageID)
 		record.LastConfirmedMessageID = cloneMessageIDProto(record.LastConfirmedMessageID)
-		record.Rows = append([]committedWriteRow(nil), record.Rows...)
 		if record.Idempotency != nil {
 			idempotency := *record.Idempotency
 			record.Idempotency = &idempotency
@@ -420,15 +405,15 @@ func committedWriteRecordSourceRange(records []committedWriteRecord) (uint64, ui
 	return records[0].SourceTimeTick, records[len(records)-1].SourceTimeTick
 }
 
-func extendPChannelSummaryChunkFooterSourceRange(footer *pchannelSummaryChunkFooter, chunk *vchannelSummaryChunk) {
-	if footer == nil || chunk == nil {
+func extendPChannelSummaryChunkFooterSourceRange(footer *pchannelSummaryChunkFooter, startTimetick, endTimetick uint64) {
+	if footer == nil {
 		return
 	}
-	if footer.SourceStartTimetick == 0 || chunk.SourceStartTimetick < footer.SourceStartTimetick {
-		footer.SourceStartTimetick = chunk.SourceStartTimetick
+	if footer.SourceStartTimetick == 0 || startTimetick < footer.SourceStartTimetick {
+		footer.SourceStartTimetick = startTimetick
 	}
-	if chunk.SourceEndTimetick > footer.SourceEndTimetick {
-		footer.SourceEndTimetick = chunk.SourceEndTimetick
+	if endTimetick > footer.SourceEndTimetick {
+		footer.SourceEndTimetick = endTimetick
 	}
 }
 
