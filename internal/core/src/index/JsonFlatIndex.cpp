@@ -30,7 +30,7 @@ JsonFlatIndex::build_index_for_json(
         auto n = data->get_num_rows();
         for (int i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                null_offset_.push_back(offset);
+                AddNullOffset(offset);
                 wrapper_->add_json_array_data(nullptr, 0, offset++);
                 continue;
             }

@@ -145,20 +145,20 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     BinarySet
     Serialize(const Config& config) override {
         std::shared_lock<folly::SharedMutex> lock(this->mutex_);
-        auto index_valid_data_length =
-            this->null_offset_.size() * sizeof(size_t);
+        auto null_offsets = RoaringToLegacyOffsets(this->null_offsets_);
+        auto index_valid_data_length = null_offsets.size() * sizeof(size_t);
         std::shared_ptr<uint8_t[]> index_valid_data(
             new uint8_t[index_valid_data_length]);
         memcpy(index_valid_data.get(),
-               this->null_offset_.data(),
+               null_offsets.data(),
                index_valid_data_length);
 
-        auto non_exist_data_length =
-            this->non_exist_offsets_.size() * sizeof(size_t);
+        auto non_exist_offsets = RoaringToLegacyOffsets(this->non_exist_offsets_);
+        auto non_exist_data_length = non_exist_offsets.size() * sizeof(size_t);
         std::shared_ptr<uint8_t[]> non_exist_data(
             new uint8_t[non_exist_data_length]);
         memcpy(non_exist_data.get(),
-               this->non_exist_offsets_.data(),
+               non_exist_offsets.data(),
                non_exist_data_length);
         lock.unlock();
         BinarySet res_set;
@@ -209,9 +209,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     // This includes rows that are null, does not have this JSON path, or have
     // null values for this JSON path.
     //
-    // For example, if the JSON path is "/a", this vector will store rows like
+    // For example, if the JSON path is "/a", this bitmap will store rows like
     // null, {}, {"a": null}, etc.
-    std::vector<size_t> non_exist_offsets_;
+    roaring::Roaring non_exist_offsets_;
 };
 
 }  // namespace milvus::index

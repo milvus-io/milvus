@@ -71,15 +71,24 @@ JsonInvertedIndex<T>::build_index_for_json(
             this->wrapper_->template add_array_data<T>(data, size, offset);
         },
         // handle null
-        [this](int64_t offset) { this->null_offset_.push_back(offset); },
+        [this](int64_t offset) { this->AddNullOffset(offset); },
         // handle non exist
-        [this](int64_t offset) { this->non_exist_offsets_.push_back(offset); },
+        [this](int64_t offset) {
+            AssertInfo(offset <= std::numeric_limits<uint32_t>::max(),
+                       "row offset {} exceeds uint32 range",
+                       offset);
+            this->non_exist_offsets_.add(static_cast<uint32_t>(offset));
+        },
         // handle error
         [this](const Json& json,
                const std::string& nested_path,
                simdjson::error_code error) {
             this->error_recorder_.Record(json, nested_path, error);
         });
+
+    this->OptimizeNullOffsets();
+    this->non_exist_offsets_.runOptimize();
+    this->non_exist_offsets_.shrinkToFit();
 
     error_recorder_.PrintErrStats();
 }
@@ -90,12 +99,8 @@ JsonInvertedIndex<T>::Exists() {
     int64_t count = this->Count();
     TargetBitmap bitset(count, true);
 
-    auto fill_bitset = [this, count, &bitset]() {
-        auto end = std::lower_bound(
-            non_exist_offsets_.begin(), non_exist_offsets_.end(), count);
-        for (auto iter = non_exist_offsets_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
+    auto fill_bitset = [this, &bitset]() {
+        ClearRoaringRows(non_exist_offsets_, bitset);
     };
 
     if (this->is_growing_) {
@@ -164,9 +169,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
     auto fill_non_exist_offset = [&](const uint8_t* data, int64_t size) {
-        auto prev_size = non_exist_offsets_.size();
-        non_exist_offsets_.resize(prev_size + (size_t)size / sizeof(size_t));
-        memcpy(non_exist_offsets_.data() + prev_size, data, (size_t)size);
+        LoadLegacyOffsets(non_exist_offsets_, data, size);
     };
     auto non_exist_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
@@ -226,9 +229,9 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     // 1. Legacy v2.5.x data where non_exist_offset_file doesn't exist
     // 2. All records are valid (no invalid offsets to track)
     //
-    // Use null_offset_ as the source for non_exist_offsets_ to maintain
+    // Use null_offsets_ as the source for non_exist_offsets_ to maintain
     // backward compatibility. This ensures Exists() behaves like v2.5.x IsNotNull().
-    non_exist_offsets_ = this->null_offset_;
+    non_exist_offsets_ = this->null_offsets_;
 }
 
 template <typename T>
@@ -257,12 +260,13 @@ JsonInvertedIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     // Write json-specific data (non_exist_offsets)
     std::shared_lock<folly::SharedMutex> lock(this->mutex_);
-    bool has_non_exist = !this->non_exist_offsets_.empty();
+    bool has_non_exist = !this->non_exist_offsets_.isEmpty();
     writer->PutMeta("has_non_exist", has_non_exist);
     if (has_non_exist) {
+        auto legacy_offsets = RoaringToLegacyOffsets(this->non_exist_offsets_);
         writer->WriteEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME,
-                           this->non_exist_offsets_.data(),
-                           this->non_exist_offsets_.size() * sizeof(size_t));
+                           legacy_offsets.data(),
+                           legacy_offsets.size() * sizeof(size_t));
     }
 }
 
@@ -277,9 +281,8 @@ JsonInvertedIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     bool has_non_exist = reader.GetMeta<bool>("has_non_exist", false);
     if (has_non_exist) {
         auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
-        this->non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
-        std::memcpy(
-            this->non_exist_offsets_.data(), e.data.data(), e.data.size());
+        LoadLegacyOffsets(
+            this->non_exist_offsets_, e.data.data(), e.data.size());
     }
     LOG_INFO("LoadEntries JsonInvertedIndex done, has_non_exist: {}",
              has_non_exist);

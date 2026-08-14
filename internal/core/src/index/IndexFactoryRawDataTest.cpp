@@ -31,11 +31,11 @@ TEST(IndexFactoryRawDataTest, JsonPathIndexCannotReplaceWholeJsonField) {
     auto& factory = IndexFactory::GetInstance();
 
     auto json_request = factory.ScalarIndexLoadResource(
-        DataType::JSON, 0, 1024, index_params, false);
+        DataType::JSON, 0, 1024, index_params, false, 1000);
     EXPECT_FALSE(json_request.has_raw_data);
 
     auto varchar_request = factory.ScalarIndexLoadResource(
-        DataType::VARCHAR, 0, 1024, index_params, false);
+        DataType::VARCHAR, 0, 1024, index_params, false, 1000);
     EXPECT_TRUE(varchar_request.has_raw_data);
 }
 

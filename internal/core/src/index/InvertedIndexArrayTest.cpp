@@ -18,6 +18,7 @@
 #include "exec/QueryContext.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
+#include "index/InvertedIndexUtil.h"
 #include "pb/plan.pb.h"
 #include "index/InvertedIndexTantivy.h"
 #include "common/Schema.h"
@@ -355,6 +356,46 @@ EvalFilterInBatches(const expr::TypedExprPtr& logical_expr,
                                           std::move(combined_validity));
 }
 
+TEST(InvertedIndexRowMaskUtil, LegacyOffsetsRoundTripThroughRoaring) {
+    const std::vector<size_t> legacy = {1, 3, 5, 7, 9};
+    roaring::Roaring offsets;
+
+    index::LoadLegacyOffsets(offsets,
+                             reinterpret_cast<const uint8_t*>(legacy.data()),
+                             legacy.size() * sizeof(size_t));
+
+    EXPECT_EQ(index::RoaringToLegacyOffsets(offsets), legacy);
+}
+
+TEST(InvertedIndexRowMaskUtil, MaterializesDenseRoaringRows) {
+    roaring::Roaring offsets;
+    offsets.addRange(0, 99);
+    offsets.runOptimize();
+
+    auto rows = index::RoaringToBitset(offsets, 100);
+    EXPECT_EQ(rows.count(), 99);
+    EXPECT_TRUE(rows[0]);
+    EXPECT_TRUE(rows[98]);
+    EXPECT_FALSE(rows[99]);
+
+    auto complement = index::RoaringToBitset(offsets, 100, /*inverted=*/true);
+    EXPECT_EQ(complement.count(), 1);
+    EXPECT_TRUE(complement[99]);
+}
+
+TEST(InvertedIndexRowMaskUtil, ClearsRoaringRowsFromCandidates) {
+    roaring::Roaring offsets;
+    offsets.add(1);
+    offsets.add(5);
+    TargetBitmap candidates(8, true);
+
+    index::ClearRoaringRows(offsets, candidates);
+
+    EXPECT_EQ(candidates.count(), 6);
+    EXPECT_FALSE(candidates[1]);
+    EXPECT_FALSE(candidates[5]);
+}
+
 class NullableInt64ArrayInvertedIndex
     : public index::InvertedIndexTantivy<int64_t> {
  public:
@@ -365,7 +406,10 @@ class NullableInt64ArrayInvertedIndex
 
     void
     SetNullOffsets(std::vector<size_t> offsets) {
-        null_offset_ = std::move(offsets);
+        for (auto offset : offsets) {
+            AddNullOffset(offset);
+        }
+        OptimizeNullOffsets();
     }
 
     void
