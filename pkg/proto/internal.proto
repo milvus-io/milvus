@@ -412,6 +412,8 @@ message ImportRequestInternal {
   repeated common.KeyValuePair options = 8;
   uint64 data_timestamp = 9;
   int64 jobID = 10;
+  // Client-supplied key for safely retrying an import request.
+  string idempotency_key = 11;
 }
 
 message ImportRequest {
