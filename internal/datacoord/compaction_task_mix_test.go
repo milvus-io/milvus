@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -509,4 +510,59 @@ func TestMixCompactionSlotCachesOnceAllSegmentsResolve(t *testing.T) {
 	// GetHealthySegment call fail the test.
 	again := task.GetTaskSlot()
 	assert.Equal(t, full, again)
+}
+
+// dataCoord.resource.enable is the branch's rollback story, and the only one it
+// has. The estimate is folded back onto the same scalar slot field the wire has
+// always carried, but with a different scale: a 4.5GiB storage-v3 compaction
+// moves from a flat 4 slots to about 36. Against a DataNode that has not
+// restarted yet -- an ordinary partial rollout, or a rollback -- a new
+// DataCoord therefore reads that node as full roughly nine times too early, on
+// every task rather than on rare ones.
+func TestMixCompactionSlotHonoursTheResourceKillSwitch(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	// 8GiB of storage-v3 input: comfortably more than the flat constant.
+	const inputBytes = int64(8) * 1024 * 1024 * 1024
+
+	estimated := newMixCompactionTaskForTest(t, 3, inputBytes).GetTaskSlot()
+	flat := pt.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	require.Greater(t, estimated, flat,
+		"setup: the estimate must differ from the constant, or this switch changes nothing")
+
+	pt.Save(pt.DataCoordCfg.ResourceEnable.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.ResourceEnable.Key)
+
+	off := newMixCompactionTaskForTest(t, 3, inputBytes).GetTaskSlot()
+	assert.Equal(t, flat, off, "with the switch off, mix compaction reports the pre-branch constant")
+}
+
+// Sort compaction had its own pre-branch formula -- the segment-size step
+// function -- so the rollback has to restore that, not the mix constant.
+func TestSortCompactionSlotKillSwitchRestoresTheStepFunction(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.ResourceEnable.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.ResourceEnable.Key)
+
+	const segSize = int64(2) * 1024 * 1024 * 1024
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:             200,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: 3,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: segSize}}},
+		},
+	}}).Once()
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_SortCompaction,
+		InputSegments: []int64{200},
+	}, nil, meta, newMockVersionManager())
+
+	assert.Equal(t, calculateStatsTaskSlot(segSize), task.GetTaskSlot())
+	assert.NotEqual(t, pt.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(), task.GetTaskSlot(),
+		"sort must not fall back to the mix constant")
 }

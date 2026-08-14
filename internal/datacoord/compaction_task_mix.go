@@ -103,6 +103,10 @@ func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, all
 		return slotUsage
 	}
 
+	if !paramtable.Get().DataCoordCfg.ResourceEnable.GetAsBool() {
+		return t.legacyTaskSlot(segments)
+	}
+
 	var totalMemory, totalRows, maxDelete, storageVersion int64
 	for _, segment := range segments {
 		totalMemory += segment.getSegmentSize()
@@ -142,6 +146,30 @@ func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, all
 		mlog.String("requirement", req.String()),
 		mlog.Int64("taskSlot", slotUsage),
 		mlog.Bool("cached", allResolved))
+	return slotUsage
+}
+
+// legacyTaskSlot is what this task reported before resource estimation existed:
+// a flat constant for mix, and the segment-size step function for sort. It is
+// the rollback path for dataCoord.resource.enable.
+//
+// The switch is needed because the wire protocol did not change in this phase.
+// The slot field still carries a scalar, but the estimator changed what a slot
+// MEANS for this task family -- a 4.5GiB storage-v3 compaction moves from 4
+// slots to about 36. A DataNode that has not restarted yet still reports its
+// availability on the old CPU-derived scale, so a new DataCoord reads it as
+// full roughly nine times too early, on every compaction rather than on rare
+// ones. That is a cluster-wide throughput collapse with no other way out, and
+// it is reachable by an ordinary partial rollout or a rollback.
+func (t *mixCompactionTask) legacyTaskSlot(segments []*SegmentInfo) int64 {
+	slotUsage := paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction && len(segments) > 0 {
+		segSize := segments[0].getSegmentSize()
+		slotUsage = calculateStatsTaskSlot(segSize)
+		mlog.Info(context.TODO(), "mixCompactionTask get legacy task slot",
+			mlog.Int64("segmentSize", segSize), mlog.Int64("taskSlot", slotUsage))
+	}
+	t.slotUsage.Store(slotUsage)
 	return slotUsage
 }
 
