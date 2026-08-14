@@ -7092,7 +7092,8 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 			"Disabled by default because restoring L0 segments is incompatible with commit_timestamp " +
 			"(two-phase-commit / replication imports), where it silently breaks delete semantics. " +
 			"Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to " +
-			"re-enable the legacy L0 import behavior.",
+			"re-enable the legacy L0 import behavior. " +
+			"This gate applies only to l0_import (backup restore); write_mode=Delete/Upsert imports are unaffected.",
 		DefaultValue: "false",
 		PanicIfEmpty: false,
 		Export:       true,
