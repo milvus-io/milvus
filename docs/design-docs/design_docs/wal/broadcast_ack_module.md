@@ -1,141 +1,123 @@
 # Broadcast Ack Module
 
-`AckModule` owns StreamingNode local acknowledgement for broadcast WAL messages.
-It is a RecoveryStorage module because broadcast ack is a replayable Data-side
-effect.
+`broadcastAckModule` sends consuming-side acknowledgements for broadcast WAL
+messages to StreamingCoord. It is a dedicated RecoveryStorage sink, not a
+`moduleapi.Module` and not a data persistence consumer.
 
-## 1. Ownership
+The common lifetime contract is defined in
+[WAL Message Ack Design](message_ack.md).
 
-`AckModule` owns:
-
-- detecting persisted messages that carry a `BroadcastHeader`;
-- submitting coordinator broadcast Ack RPC tasks;
-- ordering ack tasks by WAL ack order;
-- Data barriers that block RecoveryStorage Data checkpoint until ack succeeds.
-
-`AckModule` does not own:
-
-- VChannel, Segment, or TransformLog metadata;
-- data flush decisions;
-- object storage writes;
-- module dirty snapshots.
-
-## 2. Ack As Data Work
-
-Broadcast ack is a Data-side effect. For every persisted message with a
-`BroadcastHeader`, AckModule submits an ack task in MetaAndData mode and returns
-a Data barrier. The Data barrier disappears only after the coordinator Ack API
-succeeds.
-
-Ack is replayable and idempotent. If StreamingNode crashes after sending ack
-but before WALCheckpoint persistence, recovery may send the same ack again.
-
-## 3. Preconditions
-
-Ack tasks always wait for previous ack task completion. Some message types also
-wait for data-module progress before acking the coordinator.
-
-Preconditions are defined by message type and message scope:
-
-- VChannel-scoped flush/drop/schema-changing messages wait for the composed
-  durable Data frontier of affected modules in that vchannel.
-- Partition-scoped drop messages wait for the composed Data frontier of the
-  affected partition.
-- PChannel-wide flush-style messages wait for the composed all-local data-module
-  Data frontier.
-- `DropCollection`, `ManualFlush`, and `FlushAll` wait for the composed
-  materialized frontier. For SegmentModule this is the normal L1 Data frontier;
-  for TransformLogModule this is the L0 materialized frontier backed by
-  `materialized_time_tick`.
-- Broadcast messages without growing-data dependency wait only for previous ack
-  task completion.
-
-Examples:
-
-- `DropCollection` waits for the target vchannel's composed materialized
-  SegmentModule/TransformLogModule frontier.
-- `DropPartition` waits for the affected partition's SegmentModule frontier and
-  the vchannel TransformLogModule durable frontier.
-- `ManualFlush` waits for the target vchannel's composed materialized
-  SegmentModule/TransformLogModule frontier.
-- `FlushAll` waits for all local SegmentModule/TransformLogModule
-  materialized frontiers.
-- `CommitImport` waits only for previous ack task completion.
-
-## 4. Module Interaction
-
-AckModule does not call data modules to flush data, persist Views, or mutate
-state. It only observes module barriers/frontiers exposed through the
-RecoveryStorage framework.
-
-This keeps ack logic as transport-level acknowledgement while leaving business
-decisions inside VChannelModule, SegmentModule, and TransformLogModule.
-
-## 5. ModuleAPI Implementation
-
-`AckModule` implements the core `Module` API. It depends on a composed
-`DataFrontierProvider` built by RecoveryStorage.
+## 1. Accept Ownership
 
 ```go
-type AckModule struct {
-    frontierProvider moduleapi.DataFrontierProvider
-}
-
-var _ moduleapi.Module = (*AckModule)(nil)
+func (m *broadcastAckModule) Accept(owner message.OwnedImmutableMessage)
 ```
 
-### Module.Name
+`Accept` takes exclusive top-level ownership of the Owner. The caller must not
+use or clone it afterward.
 
-Returns `ModuleNameAck`.
+- If `owner.Message().BroadcastHeader() == nil`, BroadcastAck immediately calls
+  `owner.Release()` and creates no task.
+- Otherwise, BroadcastAck appends an Ack task to its per-PChannel arrival-ordered
+  task list and keeps the Owner until Coordinator Ack succeeds.
 
-### Module.ObserveMessage
+Tracker is not passed to BroadcastAck. The Owner finalizer established by
+Tracker is sufficient to mark the message complete after BroadcastAck finally
+releases the root reference.
 
-If the message has no `BroadcastHeader`, AckModule returns an empty
-`ObserveResult`.
+## 2. Exclusive Callback
 
-If the message has a `BroadcastHeader`, AckModule creates an ack task and
-returns a Data barrier. The task precondition combines:
-
-- previous ack task completion;
-- the composed Data frontier for the message scope when required by message
-  semantics.
-
-AckModule does not return Meta barriers.
-
-### Module.SwitchIntoMetaAndData
-
-Switches ack processing into MetaAndData mode and returns nil. AckModule does
-not contribute WAL open data snapshots.
-
-### Module.ConsumeDirtySnapshots
-
-Returns nil. Ack state is represented by in-memory Data barriers and replayable
-coordinator Ack RPCs, not by catalog snapshots.
-
-### DataFrontierProvider Dependency
-
-AckModule asks the provider for scope barriers:
+BroadcastAck registers exactly one callback before returning from `Accept`:
 
 ```go
-frontierProvider.DataFrontier(scope)
+owner.RegisterExclusiveCallback(func() {
+    task.exclusive.Store(true)
+    module.wakeDispatcher() // nonblocking send
+})
 ```
 
-The provider composes all modules implementing `DataFrontierView`, such as
-SegmentModule and TransformLogModule. AckModule does not depend on those
-modules directly.
+The callback fires once when BroadcastAck's Owner is the only remaining tracked
+reference. If the Owner is already exclusive, registration invokes the callback
+immediately. Otherwise, the last Retained release invokes it after dropping the
+reference-count lock.
 
-AckModule sets `scope.Kind` to `DataProgressDurable` for ordinary data
-dependencies and `DataProgressMaterialized` for `DropCollection`,
-`ManualFlush`, and `FlushAll`.
+The callback never performs Coordinator IO or submits a task directly. It only
+marks the task ready and performs a nonblocking send to the module's buffered
+wakeup channel. One module background goroutine consumes wakeups and runs the
+dispatcher. This avoids one waiter goroutine per broadcast message and prevents
+the final Retained release from blocking on Ack scheduling.
 
-AckModule does not implement `DataCheckpointView`, `DataFrontierView`, or
-`CheckpointPersistedObserver`.
+Once the Owner is accepted, no new Retained clones may be created. Therefore a
+fired callback remains a stable readiness precondition for the Ack task. The
+callback does not mean the message is complete, because BroadcastAck still owns
+the root reference.
 
-## 6. Invariants
+## 3. ResourceKey Partial Order
 
-1. AckModule returns Data barriers, not Meta barriers.
-2. Ack tasks are ordered by WAL ack order.
-3. Ack preconditions wait on module frontiers but do not mutate module state.
-4. Ack is idempotent across recovery.
-5. RecoveryStorage Data checkpoint cannot pass a broadcast message until its
-   ack barrier disappears.
+Every task snapshots `BroadcastHeader.ResourceKeys` when accepted. Two tasks
+conflict when they contain the same `(Domain, Key)` and at least one matching
+key is exclusive. Shared/shared access to the same resource does not conflict.
+
+A task is schedulable exactly when:
+
+```text
+exclusive callback has fired
+AND task is not already in flight
+AND no earlier unfinished task has a conflicting ResourceKey
+```
+
+The dispatcher scans tasks in RecoveryStorage observation order and submits all
+schedulable tasks. Therefore conflicting tasks preserve local WAL order while
+independent or shared-only tasks may Ack concurrently. An unready earlier task
+does not block a later non-conflicting task.
+
+All new broadcasts carry SharedCluster unless they explicitly carry a Cluster
+key. For compatibility with old WAL entries:
+
+- an empty ResourceKey set is normalized to ExclusiveCluster, preserving the
+  old global FIFO behavior conservatively;
+- a non-empty set without a Cluster-domain key receives SharedCluster.
+
+Import, CommitImport, and RollbackImport target their data VChannels plus
+CChannel. This provides the common ordered copy needed by replicated broadcast
+callback processing; their collection ResourceKeys are preserved in every WAL
+copy.
+
+## 4. Ack And Retry
+
+Coordinator Ack is executed by the shared NodeScheduler. On success,
+BroadcastAck releases the Owner, marks the task complete, and wakes the
+dispatcher so later conflicting tasks may run.
+
+If Coordinator Ack fails, the task retains the same Owner and remains an
+unfinished ResourceKey predecessor. After the retry delay it becomes
+schedulable again. Only later conflicting tasks remain blocked; non-conflicting
+tasks continue independently. Ack is idempotent, so replay may repeat an Ack
+accepted before a crash but not covered by a persisted Data checkpoint.
+
+## 5. AckSyncUp
+
+`BroadcastHeader.AckSyncUp` affects only StreamingCoord: it skips FastAck and
+waits for this consuming-side Ack. BroadcastAck still waits only for local
+Retained consumers. It does not wait for Meta/Data checkpoint publication,
+DirtySnapshot persistence, TransformLog materialization, or QueryRuntime
+readiness.
+
+## 6. Close
+
+Close stops the background dispatcher and cancels retry timers. It does not
+release unfinished Owners or mark unfinished work successful. Restart
+reconstructs the tasks by replaying from the persisted Data checkpoint.
+
+## 7. Invariants
+
+1. BroadcastAck is outside the recovery component dirty-snapshot lifecycle.
+2. `Accept` consumes the Owner exactly once.
+3. Non-broadcast Owners are released immediately.
+4. Broadcast Owners remain live through every failed Ack attempt.
+5. Coordinator Ack runs only after the Owner's one-shot exclusive callback.
+6. A callback performs only a nonblocking dispatcher wakeup.
+7. Earlier unfinished conflicts remain claimed through Ack retry.
+8. Successful Ack releases the Owner before later conflicting tasks run.
+9. BroadcastAck has no Tracker handle, checkpoint frontier, or materialization
+   dependency.

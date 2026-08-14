@@ -75,6 +75,37 @@ func TestScopedTaskSchedulerTracksDelayedTaskUntilSuccess(t *testing.T) {
 	require.NoError(t, scheduler.WaitIdle(context.Background()))
 }
 
+func TestScopedTaskSchedulerHonorsMaxRunningLimit(t *testing.T) {
+	inner := nodescheduler.New(2)
+	defer inner.Close()
+	scheduler := newScopedTaskScheduler(inner, 1)
+
+	firstStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	secondStarted := make(chan struct{})
+
+	scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+		close(firstStarted)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-firstRelease:
+			return nil
+		}
+	}))
+	scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+		close(secondStarted)
+		return nil
+	}))
+
+	require.Eventually(t, closed(firstStarted), time.Second, time.Millisecond)
+	require.Never(t, closed(secondStarted), 20*time.Millisecond, time.Millisecond)
+
+	close(firstRelease)
+	require.Eventually(t, closed(secondStarted), time.Second, time.Millisecond)
+	require.NoError(t, scheduler.WaitIdle(context.Background()))
+}
+
 func TestScopedTaskSchedulerCloseCancelsDelayedTask(t *testing.T) {
 	inner := nodescheduler.New(1)
 	defer inner.Close()
@@ -96,4 +127,15 @@ type nodeschedulerTaskFunc func(context.Context) error
 
 func (f nodeschedulerTaskFunc) Execute(ctx context.Context) error {
 	return f(ctx)
+}
+
+func closed(ch <-chan struct{}) func() bool {
+	return func() bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
 }

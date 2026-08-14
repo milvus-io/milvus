@@ -3,261 +3,225 @@ package recovery
 import (
 	"context"
 	"sync"
-
-	"go.uber.org/atomic"
+	"sync/atomic"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-type dataFrontierProvider struct {
-	views []moduleapi.DataFrontierProvider
-}
-
-func newDataFrontierProvider(views ...moduleapi.DataFrontierProvider) moduleapi.DataFrontierProvider {
-	filtered := make([]moduleapi.DataFrontierProvider, 0, len(views))
-	for _, view := range views {
-		if view != nil {
-			filtered = append(filtered, view)
-		}
-	}
-	return dataFrontierProvider{views: filtered}
-}
-
-func (p dataFrontierProvider) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
-	barriers := make([]walcheckpoint.Barrier, 0, len(p.views))
-	for _, view := range p.views {
-		if barrier := view.DataFrontier(scope); barrier != nil {
-			barriers = append(barriers, barrier)
-		}
-	}
-	return walcheckpoint.NewCompositeBarrier(barriers...)
-}
-
-type moduleMode int
-
-const (
-	moduleModeMetaOnly moduleMode = iota
-	moduleModeMetaAndData
-)
+const broadcastAckRetryInterval = 200 * time.Millisecond
 
 type broadcastAckModule struct {
-	channelName  string
-	frontierView moduleapi.DataFrontierProvider
-	runtime      moduleapi.Runtime
-	acked        *atomic.Uint64
-	mode         moduleMode
-	ackTaskMu    sync.Mutex
-	ackTaskHead  *broadcastAckTask
-	ackTaskTail  *broadcastAckTask
-	ack          func(context.Context, message.ImmutableMessage) error
+	runtime    moduleapi.Runtime
+	ctx        context.Context
+	cancel     context.CancelFunc
+	retryDelay time.Duration
+	closeOnce  sync.Once
+	workerMu   sync.Mutex
+	closed     bool
+	workerWG   sync.WaitGroup
+	ackTaskMu  sync.Mutex
+	ackTasks   []*broadcastAckTask
+	wakeup     chan struct{}
+	ack        func(context.Context, message.ImmutableMessage) error
 }
 
-func newBroadcastAckModule(
-	channelName string,
-	frontierView moduleapi.DataFrontierProvider,
-	runtime moduleapi.Runtime,
-) *broadcastAckModule {
-	return &broadcastAckModule{
-		channelName:  channelName,
-		frontierView: frontierView,
-		runtime:      runtime,
-		acked:        atomic.NewUint64(0),
-		mode:         moduleModeMetaOnly,
+func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &broadcastAckModule{
+		runtime:    runtime,
+		ctx:        ctx,
+		cancel:     cancel,
+		retryDelay: broadcastAckRetryInterval,
+		wakeup:     make(chan struct{}, 1),
 		ack: func(ctx context.Context, msg message.ImmutableMessage) error {
 			return streaming.WAL().Broadcast().Ack(ctx, msg)
 		},
 	}
+	m.workerWG.Add(1)
+	go m.background()
+	return m
 }
 
-func (m *broadcastAckModule) Name() moduleapi.ModuleName {
-	return moduleapi.ModuleNameAck
-}
-
-func (m *broadcastAckModule) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
-	header := msg.BroadcastHeader()
-	if header == nil || m.mode != moduleModeMetaAndData {
-		return moduleapi.ObserveResult{}
+func (m *broadcastAckModule) Accept(
+	owner message.OwnedImmutableMessage,
+) {
+	if owner.Message().BroadcastHeader() == nil {
+		owner.Release()
+		return
 	}
-
-	barrier := &broadcastAckBarrier{
-		timetick: msg.TimeTick(),
-		acked:    m.acked,
+	task := &broadcastAckTask{
+		module:       m,
+		owner:        owner,
+		resourceKeys: normalizeBroadcastAckResourceKeys(owner.Message().BroadcastHeader().ResourceKeys.Collect()),
 	}
-	task := m.newTask(msg)
-	if m.runtime.Scheduler != nil {
-		m.enqueueTask(task)
-	}
-	return moduleapi.ObserveResult{Data: barrier}
-}
-
-func (m *broadcastAckModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
-	m.mode = moduleModeMetaAndData
-	return nil
-}
-
-func (m *broadcastAckModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
-	return nil
-}
-
-func (m *broadcastAckModule) newTask(msg message.ImmutableMessage) *broadcastAckTask {
-	return &broadcastAckTask{
-		module:   m,
-		msg:      msg,
-		frontier: m.buildFrontier(msg),
-	}
-}
-
-func (m *broadcastAckModule) enqueueTask(task *broadcastAckTask) {
 	m.ackTaskMu.Lock()
-	shouldSubmit := m.ackTaskTail == nil
-	if shouldSubmit {
-		m.ackTaskHead = task
-	} else {
-		m.ackTaskTail.next = task
+	m.ackTasks = append(m.ackTasks, task)
+	m.ackTaskMu.Unlock()
+	owner.RegisterExclusiveCallback(func() {
+		task.exclusive.Store(true)
+		m.wakeDispatcher()
+	})
+}
+
+func (m *broadcastAckModule) background() {
+	defer m.workerWG.Done()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-m.wakeup:
+			m.dispatchReadyTasks()
+		}
 	}
-	m.ackTaskTail = task
+}
+
+func (m *broadcastAckModule) wakeDispatcher() {
+	select {
+	case m.wakeup <- struct{}{}:
+	default:
+	}
+}
+
+func (m *broadcastAckModule) dispatchReadyTasks() {
+	if m.runtime.Scheduler == nil || m.ctx.Err() != nil {
+		return
+	}
+
+	m.ackTaskMu.Lock()
+	m.compactCompletedTasksLocked()
+	readyTasks := make([]*broadcastAckTask, 0)
+	for idx, task := range m.ackTasks {
+		if !task.exclusive.Load() || task.inFlight {
+			continue
+		}
+		if hasEarlierBroadcastAckConflict(m.ackTasks[:idx], task) {
+			continue
+		}
+		task.inFlight = true
+		readyTasks = append(readyTasks, task)
+	}
 	m.ackTaskMu.Unlock()
 
-	if shouldSubmit {
+	for _, task := range readyTasks {
 		m.runtime.Scheduler.Submit(task)
 	}
 }
 
-func (m *broadcastAckModule) finishTask(task *broadcastAckTask) {
-	m.ackTaskMu.Lock()
-	if m.ackTaskHead != task {
-		m.ackTaskMu.Unlock()
+func (m *broadcastAckModule) retry(task *broadcastAckTask) {
+	if !m.beginWorker() {
 		return
 	}
-	next := task.next
-	task.next = nil
-	m.ackTaskHead = next
-	if next == nil {
-		m.ackTaskTail = nil
+	go func() {
+		defer m.workerWG.Done()
+		timer := time.NewTimer(m.retryDelay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			m.ackTaskMu.Lock()
+			if !task.completed {
+				task.inFlight = false
+			}
+			m.ackTaskMu.Unlock()
+			m.wakeDispatcher()
+		case <-m.ctx.Done():
+		}
+	}()
+}
+
+func (m *broadcastAckModule) Close() {
+	m.closeOnce.Do(func() {
+		m.workerMu.Lock()
+		m.closed = true
+		m.cancel()
+		m.workerMu.Unlock()
+		m.workerWG.Wait()
+	})
+}
+
+func (m *broadcastAckModule) beginWorker() bool {
+	m.workerMu.Lock()
+	defer m.workerMu.Unlock()
+	if m.closed {
+		return false
 	}
+	m.workerWG.Add(1)
+	return true
+}
+
+func (m *broadcastAckModule) finishTask(task *broadcastAckTask) {
+	m.ackTaskMu.Lock()
+	task.completed = true
+	task.inFlight = false
 	m.ackTaskMu.Unlock()
-
-	if next != nil {
-		m.runtime.Scheduler.Submit(next)
-	}
+	m.wakeDispatcher()
 }
 
-func (m *broadcastAckModule) buildFrontier(msg message.ImmutableMessage) walcheckpoint.Barrier {
-	switch msg.MessageType() {
-	case message.MessageTypeDropCollection:
-		return m.vchannelFrontier(msg.VChannel(), moduleapi.DataProgressMaterialized)
-	case message.MessageTypeTruncateCollection:
-		return m.vchannelFrontier(msg.VChannel(), moduleapi.DataProgressDurable)
-	case message.MessageTypeDropPartition:
-		drop := message.MustAsImmutableDropPartitionMessageV1(msg)
-		header := drop.Header()
-		return m.partitionFrontier(drop.VChannel(), header.GetCollectionId(), header.GetPartitionId(), moduleapi.DataProgressDurable)
-	case message.MessageTypeManualFlush:
-		return m.vchannelFrontier(msg.VChannel(), moduleapi.DataProgressMaterialized)
-	case message.MessageTypeFlushAll:
-		return m.allFrontier(moduleapi.DataProgressMaterialized)
-	case message.MessageTypeAlterCollection:
-		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
-		if messageutil.IsSchemaChange(alter.Header()) {
-			return m.vchannelFrontier(alter.VChannel(), moduleapi.DataProgressDurable)
-		}
-	case message.MessageTypeAlterWAL:
-		return m.allFrontier(moduleapi.DataProgressDurable)
-	default:
-	}
-	return nil
-}
-
-func (m *broadcastAckModule) partitionFrontier(
-	vchannel string,
-	collectionID int64,
-	partitionID int64,
-	kind moduleapi.DataProgressKind,
-) walcheckpoint.Barrier {
-	return m.frontier(moduleapi.Scope{
-		Type:         moduleapi.ScopePartition,
-		Kind:         kind,
-		VChannel:     vchannel,
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
-	})
-}
-
-func (m *broadcastAckModule) allFrontier(kind moduleapi.DataProgressKind) walcheckpoint.Barrier {
-	return m.frontier(moduleapi.Scope{
-		Type: moduleapi.ScopeAll,
-		Kind: kind,
-	})
-}
-
-func (m *broadcastAckModule) vchannelFrontier(vchannel string, kind moduleapi.DataProgressKind) walcheckpoint.Barrier {
-	return m.frontier(moduleapi.Scope{
-		Type:     moduleapi.ScopeVChannel,
-		Kind:     kind,
-		VChannel: vchannel,
-	})
-}
-
-func (m *broadcastAckModule) markAcked(timetick uint64) {
-	for {
-		current := m.acked.Load()
-		if current >= timetick {
-			return
-		}
-		if m.acked.CompareAndSwap(current, timetick) {
-			return
+func (m *broadcastAckModule) compactCompletedTasksLocked() {
+	pending := m.ackTasks[:0]
+	for _, task := range m.ackTasks {
+		if !task.completed {
+			pending = append(pending, task)
 		}
 	}
-}
-
-func (m *broadcastAckModule) frontier(scope moduleapi.Scope) walcheckpoint.Barrier {
-	if m.frontierView == nil {
-		return nil
-	}
-	return m.frontierView.DataFrontier(scope)
-}
-
-type broadcastAckBarrier struct {
-	timetick uint64
-	acked    *atomic.Uint64
-}
-
-func (b *broadcastAckBarrier) TimeTick() uint64 {
-	if b.acked.Load() < b.timetick {
-		return 0
-	}
-	return b.timetick
+	clear(m.ackTasks[len(pending):])
+	m.ackTasks = pending
 }
 
 type broadcastAckTask struct {
-	module   *broadcastAckModule
-	msg      message.ImmutableMessage
-	frontier walcheckpoint.Barrier
-	next     *broadcastAckTask
+	module       *broadcastAckModule
+	owner        message.OwnedImmutableMessage
+	resourceKeys []message.ResourceKey
+	exclusive    atomic.Bool
+	inFlight     bool
+	completed    bool
 }
 
 func (t *broadcastAckTask) Execute(ctx context.Context) error {
-	if t.frontier != nil && t.frontier.TimeTick() < t.msg.TimeTick() {
-		return nodescheduler.ErrDelay
+	if err := t.module.ack(ctx, t.owner.Message()); err != nil {
+		t.module.retry(t)
+		return nil
 	}
-	defer t.module.finishTask(t)
-	if err := t.module.ack(ctx, t.msg); err != nil {
-		return err
-	}
-	t.module.markAcked(t.msg.TimeTick())
-	if t.module.runtime.Notifier != nil {
-		t.module.runtime.Notifier.NotifyBarrierUpdated()
-	}
+	t.owner.Release()
+	t.module.finishTask(t)
 	return nil
 }
 
-var (
-	_ moduleapi.Module      = (*broadcastAckModule)(nil)
-	_ walcheckpoint.Barrier = (*broadcastAckBarrier)(nil)
-	_ nodescheduler.Task    = (*broadcastAckTask)(nil)
-)
+func normalizeBroadcastAckResourceKeys(keys []message.ResourceKey) []message.ResourceKey {
+	if len(keys) == 0 {
+		return []message.ResourceKey{message.NewExclusiveClusterResourceKey()}
+	}
+	for _, key := range keys {
+		if key.Domain == message.NewSharedClusterResourceKey().Domain {
+			return keys
+		}
+	}
+	return append(keys, message.NewSharedClusterResourceKey())
+}
+
+func hasEarlierBroadcastAckConflict(earlier []*broadcastAckTask, task *broadcastAckTask) bool {
+	for _, candidate := range earlier {
+		if broadcastAckResourceKeysConflict(candidate.resourceKeys, task.resourceKeys) {
+			return true
+		}
+	}
+	return false
+}
+
+func broadcastAckResourceKeysConflict(left, right []message.ResourceKey) bool {
+	for _, leftKey := range left {
+		for _, rightKey := range right {
+			if leftKey.Domain == rightKey.Domain &&
+				leftKey.Key == rightKey.Key &&
+				(!leftKey.Shared || !rightKey.Shared) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var _ nodescheduler.Task = (*broadcastAckTask)(nil)

@@ -1,6 +1,8 @@
 package utility
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -56,13 +58,21 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 
 // Clone creates a new WALCheckpoint with the same values as the original.
 func (c *WALCheckpoint) Clone() *WALCheckpoint {
+	var replicateConfig *commonpb.ReplicateConfiguration
+	if c.ReplicateConfig != nil {
+		replicateConfig = proto.Clone(c.ReplicateConfig).(*commonpb.ReplicateConfiguration)
+	}
+	var alterWalState *streamingpb.AlterWALState
+	if c.AlterWalState != nil {
+		alterWalState = proto.Clone(c.AlterWalState).(*streamingpb.AlterWALState)
+	}
 	return &WALCheckpoint{
 		MessageID:           c.MessageID,
 		TimeTick:            c.TimeTick,
 		Magic:               c.Magic,
-		ReplicateConfig:     c.ReplicateConfig,
+		ReplicateConfig:     replicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
-		AlterWalState:       c.AlterWalState,
+		AlterWalState:       alterWalState,
 		DataCheckpoint:      c.DataCheckpoint.Clone(),
 	}
 }

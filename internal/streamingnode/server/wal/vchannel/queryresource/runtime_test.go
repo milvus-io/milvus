@@ -10,6 +10,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestQueryRuntimeAdvanceRejectsNonMonotonicWatermark(t *testing.T) {
@@ -85,6 +87,20 @@ func TestQueryRuntimeInitialBatchAndReadyEventsUseSameConsumer(t *testing.T) {
 	runtime.Close()
 }
 
+func TestQueryRuntimeOwnsQueuedImmutableMessage(t *testing.T) {
+	module := &messageRecordingModule{}
+	runtime := NewQueryRuntime(module)
+	raw := message.CreateTestTimeTickSyncMessage(t, 1, 20, walimplstest.NewTestMessageID(10)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(11))
+	owner := message.NewOwnedImmutableMessage(raw, nil)
+	queued := owner.Message()
+	require.True(t, runtime.ObserveEvent(context.Background(), walview.VChannelResourceEvent{Message: queued}))
+	owner.Release()
+	require.NoError(t, runtime.Initialize(context.Background(), testWALView(1, "ch", qviews.DataVersion{})))
+	require.Equal(t, uint64(20), module.timeTick)
+	runtime.Close()
+}
+
 func testWALView(collectionID int64, vchannel string, version qviews.DataVersion) walview.VChannelWALView {
 	return walview.VChannelWALView{
 		CollectionID: collectionID,
@@ -112,6 +128,7 @@ func (m *recordingModule) ApplyLiveEvent(_ context.Context, event walview.VChann
 	defer m.mu.Unlock()
 	m.segments = append(m.segments, event.SegmentSealed.SegmentID)
 }
+
 func (m *recordingModule) Advance(version qviews.DataVersion) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -123,8 +140,20 @@ func (m *recordingModule) segmentIDs() []int64 {
 	defer m.mu.Unlock()
 	return append([]int64(nil), m.segments...)
 }
+
 func (m *recordingModule) advancedVersions() []qviews.DataVersion {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]qviews.DataVersion(nil), m.advances...)
 }
+
+type messageRecordingModule struct {
+	timeTick uint64
+}
+
+func (*messageRecordingModule) Prepare(context.Context, walview.VChannelWALView) error { return nil }
+func (m *messageRecordingModule) ApplyLiveEvent(_ context.Context, event walview.VChannelResourceEvent) {
+	m.timeTick = event.Message.TimeTick()
+}
+func (*messageRecordingModule) Advance(qviews.DataVersion) {}
+func (*messageRecordingModule) Close()                     {}

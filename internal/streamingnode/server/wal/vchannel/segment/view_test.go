@@ -77,7 +77,7 @@ func TestSharedDefaultFlushPolicyObservesDynamicConfig(t *testing.T) {
 	defer params.Reset(params.DataNodeCfg.FlushInsertBufferSize.Key)
 
 	assert.True(t, policy.ShouldFlush(writeOnlyInsertBuffer{
-		entries:    []message.ImmutableMessage{nil},
+		entries:    make([]message.RetainedImmutableMessage, 1),
 		binarySize: 2,
 	}, 0))
 }
@@ -173,13 +173,14 @@ func TestFlushedSegmentSnapshotReturnsFilteredSealedSegment(t *testing.T) {
 	assert.Equal(t, uint64(50), flushed.FlushTimeTick)
 	assert.Equal(t, qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1}, flushed.SealedAtDataVersion)
 }
+
 func TestPrunePendingFlushChunksClearsDiscardedBackingSlots(t *testing.T) {
 	view := &SegmentView{
 		meta: &streamingpb.SegmentAssignmentMeta{DataCheckpointTimeTick: 20},
 		pendingFlushChunks: []writeOnlyInsertBuffer{
-			{entries: make([]message.ImmutableMessage, 1), toTimeTick: 10},
-			{entries: make([]message.ImmutableMessage, 1), toTimeTick: 15},
-			{entries: make([]message.ImmutableMessage, 1), toTimeTick: 30},
+			{entries: make([]message.RetainedImmutableMessage, 1), toTimeTick: 10},
+			{entries: make([]message.RetainedImmutableMessage, 1), toTimeTick: 15},
+			{entries: make([]message.RetainedImmutableMessage, 1), toTimeTick: 30},
 		},
 	}
 

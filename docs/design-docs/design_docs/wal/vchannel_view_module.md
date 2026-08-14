@@ -1,219 +1,200 @@
-# VChannel View Module
+# VChannel Recovery Module
 
-`VChannelModule` owns collection-level WAL recovery metadata for a PChannel. It
-is responsible for VChannel, partition, and schema state only.
+`VChannelRecoveryModule` is the owner of all recovery state for one VChannel.
+It is created and indexed by `PChannelRecoveryManager`.
+
+Message completion is defined by
+[WAL Message Ack Design](message_ack.md).
 
 ## 1. Ownership
 
-`VChannelModule` owns:
-
-- VChannel creation and lifecycle metadata;
-- collection metadata needed by WAL recovery;
-- partition lifecycle metadata;
-- schema history;
-- VChannel and partition tombstones;
-- dirty snapshots and VChannel meta persistence;
-- the read-only `SchemaAt(vchannel, partitionID, timetick)` view used by
-  `SegmentModule`.
-
-`VChannelModule` does not own:
-
-- Insert data;
-- Segment assignment metadata;
-- Delete or Txn(Delete) data;
-- TransformLog buffers, chunks, scanners, or truncation;
-- Segment lifecycle side effects;
-- broadcast acknowledgement.
-
-## 2. Public View
-
-The only cross-module read required from `VChannelModule` is schema lookup:
-
-```go
-type SchemaProvider interface {
-    SchemaAt(vchannel string, partitionID int64, timetick uint64) (*schemapb.CollectionSchema, bool)
-}
+```text
+PChannelRecoveryManager
+  -> VChannelRecoveryModule
+       +-- VChannelView
+       +-- SegmentView*
+       +-- TransformLog
+       +-- DataView recovery state
+       +-- QueryRuntime bridge
 ```
 
-`SegmentModule` uses this when observing `CreateSegment` so the segment state
-stores the correct historical schema snapshot.
+`VChannelRecoveryModule` owns:
 
-No other module should depend on VChannel tombstone state for its own replay or
-cleanup. Segment and TransformLog tombstones are decided by their owning
-modules.
+- VChannel identity, collection metadata, partition state, and schema history;
+- VChannel lifecycle state and tombstones;
+- SegmentView lookup, creation, routing, and dirty aggregation;
+- the VChannel TransformLog and its stream registration;
+- DataView recovery state and Segment DataVersion summaries;
+- QueryRuntime creation and live event forwarding;
+- passing the same ref-counted immutable message to actual Segment and
+  TransformLog consumers.
 
-## 3. Observe Rules
+It does not own:
 
-### CreateCollection
+- PChannel checkpoint persistence;
+- the ordered global Ack tracker;
+- coordinator broadcast acknowledgement;
+- QueryView state transitions.
 
-Creates the VChannel View if absent. The View records collection metadata,
-initial partitions, schema history, normal VChannel state, and `MetaTimeTick`.
-It returns a Meta barrier until the dirty snapshot is persisted.
+## 2. Message Routing
 
-### CreatePartition
+`PChannelRecoveryManager` selects a VChannel module by message scope. A
+PChannel-wide message is routed to all relevant VChannels using the same
+ref-counted immutable message.
 
-Adds or restores the partition in normal state and advances `MetaTimeTick`.
-It returns a Meta barrier.
+Within one VChannel:
 
-### DropPartition
+```text
+ObserveMessage(Retained)
+  -> update VChannelView metadata
+  -> route the same ref-counted message to affected SegmentViews
+  -> route the same message to TransformLog
+  -> forward a live resource event to QueryRuntime when present
+  -> mark mutated recovery components dirty
+```
 
-Marks the partition as dropped at the message timetick and advances
-`MetaTimeTick`. The partition remains retained until VChannelModule-local
-tombstone cleanup removes it.
+QueryRuntime observation is not a WAL persistence completion condition and does
+not retain message handles. A live event that carries a ref-counted RecoveryStorage
+message is synchronously cloned before it enters the QueryRuntime queue, so the
+queued event owns an ordinary immutable message and may outlive Message Ack
+completion.
 
-`DropPartition` does not wait for Segment or TransformLog tombstones before
-recording the VChannel metadata change. Ack preconditions compose the relevant
-data frontiers outside this module.
+## 3. VChannel Metadata Rules
 
-### DropCollection
+### CreateCollection And CreatePartition
 
-Marks the VChannel as dropped at the message timetick and advances
-`MetaTimeTick`. The VChannel metadata remains retained until VChannelModule
-cleanup removes it.
+Create or update VChannel identity, partition membership, and schema history.
+The mutation marks the VChannelView dirty for the next persist batch.
+
+### DropPartition And DropCollection
+
+Record logical tombstones before physical cleanup. Segment and TransformLog
+consumers retain their own message handles for required data work.
 
 ### TruncateCollection
 
-Advances the VChannel metadata checkpoint to the truncation timetick. The
-collection View is not removed by this message.
+Advance VChannel truncation metadata and route the message to SegmentViews and
+TransformLog for any data work required at the truncation point.
 
-### AlterCollection
+### AlterCollection And SchemaChange
 
-Updates collection metadata. If the message changes schema, a new schema
-version is appended to schema history. Existing SegmentModule state keeps its
-own schema snapshot; segments created later read the new schema through
-`SchemaAt`.
+Append the new schema version and preserve historical schemas still required by
+existing SegmentViews. Schema-changing messages may cause Segment and
+TransformLog data work; non-schema changes are metadata-only.
 
-## 4. Tombstone And Cleanup
+### AlterLoadConfig And DropLoadConfig
 
-VChannel and partition tombstones are independent from Segment and TransformLog
-tombstones.
+QueryView metadata, not VChannel recovery metadata, is the source of truth for
+query-resource acquisition. These messages do not create QueryRuntime
+references in `VChannelRecoveryModule`.
 
-`VChannelModule` can physically remove retained VChannel or partition metadata
-when:
+## 4. Dirty Snapshots And Persist Batch
 
-```text
-Meta physical checkpoint > tombstone timetick
-Data physical checkpoint > tombstone timetick
-```
+`VChannelRecoveryModule.ConsumeDirtySnapshots()` aggregates stable snapshots
+from:
 
-Cleanup does not inspect `SegmentModule` or `TransformLogModule` internal state.
-The safety condition is the persisted physical checkpoints, not cross-module
-tombstone ordering.
+- `VChannelView`;
+- dirty SegmentViews;
+- TransformLog;
+- owned DataView recovery state where applicable.
 
-## 5. Recovery
+Each snapshot has component-specific `MarkPersisted()` behavior. RecoveryStorage
+freezes a checkpoint boundary before consuming the snapshots, persists them into
+independent catalog keys in etcd, and persists the frozen checkpoint last.
 
-On WAL open, RecoveryStorage loads VChannel snapshots from catalog and
-constructs `VChannelModule` in MetaOnly mode. Historical WAL replay uses the
-same `ObserveMessage` implementation. Dirty snapshots are consumed and
-persisted by RecoveryStorage.
-
-Schema history is VChannel child state. VChannel names are not reusable, so a
-final VChannel cleanup removes the VChannel owner key and schema keys under the
-same VChannel prefix.
-
-## 6. ModuleAPI Implementation
-
-`VChannelModule` implements the core `Module` API and the schema provider
-interface:
-
-```go
-type VChannelModule struct {
-    views map[string]*VChannelView
-}
-
-var _ moduleapi.Module = (*VChannelModule)(nil)
-var _ SchemaProvider = (*VChannelModule)(nil)
-var _ moduleapi.CheckpointPersistedObserver = (*VChannelModule)(nil)
-```
-
-### Module.Name
-
-Returns `ModuleNameVChannel`.
-
-### Module.ObserveMessage
-
-`ObserveMessage` handles only VChannel-owned metadata messages:
-
-- `CreateCollection`
-- `CreatePartition`
-- `DropPartition`
-- `DropCollection`
-- `TruncateCollection`
-- schema-changing and metadata-changing `AlterCollection`
-
-It updates VChannel-owned Meta state synchronously and returns a Meta barrier
-when the changed VChannel snapshot must be persisted. It does not return Data
-barriers because VChannelModule does not own Data-side durable work.
-
-Messages for Insert, Delete, Txn(Delete), segment flush, TransformLog
-truncation, import lifecycle, and broadcast ack are ignored by this module.
-
-### Module.SwitchIntoMetaAndData
-
-Switches all retained VChannel views from MetaOnly to MetaAndData mode and
-returns:
-
-```go
-type VChannelModuleSnapshot struct {
-    VChannels map[string]*streamingpb.VChannelMeta
-}
-```
-
-This snapshot is used by RecoveryStorage to build the WAL open
-`RecoverySnapshot`.
-
-### Module.ConsumeDirtySnapshots
-
-Returns one dirty snapshot per VChannel key. The operation only snapshots
-module-local memory and does not return an error:
+Message Ack does not replace metadata snapshots. The frozen batch points are:
 
 ```text
-ModuleName = vchannel
-Key        = {PChannel, VChannel}
-Op         = Upsert or Delete
-Payload    = *streamingpb.VChannelMeta for Upsert
+MetaPoint = latest completely observed WAL point
+DataPoint = min(MetaPoint, Ack completed frontier)
 ```
 
-For partition cleanup, the payload is the owning VChannel meta with the
-partition removed. For final VChannel cleanup, the operation is Delete.
+An asynchronous VChannel-owned consumer updates recovery metadata and marks its
+component dirty before releasing its retained message handle.
 
-### DirtySnapshot.MarkPersisted
+## 5. Segment And TransformLog Interaction
 
-The VChannel dirty snapshot calls back into its owning view:
+SegmentView and TransformLog data completion is joined by the shared
+ref-counted immutable message:
 
-```go
-func (s *vchannelDirtySnapshot) MarkPersisted() {
-    s.owner.markSnapshotPersisted(s)
-}
-```
+- Segment handles release after segment data/lifecycle work succeeds;
+- TransformLog handles release after containing chunks are durable;
+- BroadcastAck registers the Owner's one-shot exclusive callback, which proves
+  that all Segment and TransformLog Retained handles are gone, then lets its
+  background dispatcher perform Coordinator Ack under the ResourceKey partial
+  order.
 
-The owner records the persisted `MetaTimeTick`, clears the matching in-flight
-dirty snapshot, recomputes dirty state against the current VChannel view, and
-advances the Meta barrier. Delete snapshots remove the retained VChannel view
-after catalog drop succeeds.
+Historical schema lookup is an internal VChannel ownership operation when a new
+SegmentView is created. TransformLog does not inspect Segment private state for
+Delete replay.
 
-### CheckpointPersistedObserver
+## 6. Query Runtime Boundary
 
-`NotifyCheckpointPersisted(metaTimeTick, dataTimeTick)` is used only to detect
-cleanup opportunities for VChannel and partition tombstones. If cleanup is
-possible, VChannelModule marks a new dirty snapshot and notifies
-RecoveryStorage. The actual catalog update still flows through
-`ConsumeDirtySnapshots` and `DirtySnapshot.MarkPersisted`.
+`VChannelRecoveryModule` may build a `VChannelWALView` and create one shared
+QueryRuntime for active QueryViews. It forwards live DML events after updating
+recovery state.
 
-### SchemaProvider
+Before capturing a WAL view, it waits for bounded RecoveryStorage replay to
+complete and resolves every retained `FLUSHED` SegmentView whose
+`SealedAtDataVersion` is nil. Resolution triggers or reuses the SegmentView's
+idempotent final-commit task. Once every flushed segment has its exact first
+DataView membership version, the module classifies segments independently
+against the target QueryView DataVersion. It does not maintain a VChannel-level
+DataVersion fence.
 
-`SchemaAt(vchannel, partitionID, timetick)` reads only VChannel-owned schema
-and partition history. It is the only supported cross-module read from
-VChannelModule.
+QueryView references protect temporary serving resources only. They do not:
 
-`VChannelModule` does not implement `DataCheckpointView` or `DataFrontierView`.
+- retain WAL message handles;
+- affect RecoveryStorage persist-batch boundaries;
+- affect broadcast acknowledgement;
+- own TransformLog object durability.
 
-## 7. Invariants
+See
+[StreamingNode Query Resource Design](../qviews/snview/streamingnode_resource_manager.md).
 
-1. VChannel metadata is the source for collection, partition, and schema state.
-2. Schema history is owned by VChannelModule.
-3. `SchemaAt` is the only required cross-module read from VChannelModule.
-4. VChannelModule does not own Insert or Delete data.
-5. VChannel tombstone and cleanup decisions are module-local.
-6. VChannel cleanup is gated by physical checkpoints, not by direct Segment or
-   TransformLog state reads.
+## 7. Tombstone And Cleanup
+
+VChannel cleanup is owned by the VChannel component and is independent from
+Segment and TransformLog private cleanup decisions:
+
+1. persist the VChannel tombstone;
+2. retain state while recovery or serving references require it;
+3. emit cleanup snapshots when VChannel-local conditions are satisfied;
+4. remove the VChannel index entry only after owned cleanup has completed.
+
+Segment and TransformLog catalog records are cleaned through their own retained
+state and snapshots.
+
+## 8. Recovery
+
+`PChannelRecoveryManager` creates VChannel modules from the union of persisted
+VChannel, Segment, TransformLog, and DataView records. This allows recovery even
+when one component's base metadata has already entered tombstone cleanup while
+another component still has retained state.
+
+After construction:
+
+1. metadata replay rebuilds in-memory state;
+2. modules switch into MetaAndData mode;
+3. data replay starts from the persisted Data checkpoint;
+4. replay creates new Tracker entries and ref-counted wrappers for unfinished
+   messages;
+5. bounded replay reaches the recovery boundary;
+6. QueryView state recovery independently reacquires query resources, waiting
+   for any recovered final commits before WAL view capture.
+
+## 9. Invariants
+
+1. One `VChannelRecoveryModule` owns all recovery components for one VChannel.
+2. SegmentView and TransformLog are internal components, not sibling top-level
+   recovery modules.
+3. VChannel metadata publication is part of the frozen persist batch.
+4. Data checkpoint advancement is Message Ack based and bounded by the batch
+   MetaPoint.
+5. QueryRuntime borrows the underlying immutable message; its observation does
+   not participate in Message Ack.
+6. Every broadcast-related Segment/TransformLog consumer retains its own message
+   handle.
+7. Async VChannel-owned consumers mark metadata dirty before releasing a handle.
+8. QueryView readiness requires no retained `FLUSHED` SegmentView with a nil
+   `SealedAtDataVersion`; it does not require an aggregate DataVersion fence.

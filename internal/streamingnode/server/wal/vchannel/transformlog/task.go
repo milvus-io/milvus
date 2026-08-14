@@ -64,6 +64,7 @@ func (t *transformFlushTask) Execute(ctx context.Context) error {
 			t.log.submitMaterializeTask(t.log.dataCheckpointTimeTick())
 		}
 		t.log.notifyUpdated()
+		releaseMessages(result.CompletedMessages)
 		return nil
 	})
 }
@@ -84,36 +85,42 @@ func (t *transformMaterializeTask) Execute(ctx context.Context) error {
 }
 
 func (t *TransformLog) submitFlushTask(timetick uint64) {
-	if t.runtime.Scheduler == nil {
+	scheduler := t.runtime.Scheduler
+	if scheduler == nil {
 		return
 	}
+	t.mu.Lock()
 	task := &transformFlushTask{
 		transformTaskBase: transformTaskBase{
 			log:          t,
 			timetick:     timetick,
-			predecessors: t.taskPredecessors(),
+			predecessors: t.taskPredecessorsLocked(),
 		},
 	}
 	t.flushTasks = append(t.flushTasks, task)
-	t.runtime.Scheduler.Submit(task)
+	t.mu.Unlock()
+	scheduler.Submit(task)
 }
 
 func (t *TransformLog) submitMaterializeTask(timetick uint64) {
-	if t.runtime.Scheduler == nil {
+	scheduler := t.runtime.Scheduler
+	if scheduler == nil {
 		return
 	}
+	t.mu.Lock()
 	task := &transformMaterializeTask{
 		transformTaskBase: transformTaskBase{
 			log:          t,
 			timetick:     timetick,
-			predecessors: t.taskPredecessors(),
+			predecessors: t.taskPredecessorsLocked(),
 		},
 	}
 	t.materializeTasks = append(t.materializeTasks, task)
-	t.runtime.Scheduler.Submit(task)
+	t.mu.Unlock()
+	scheduler.Submit(task)
 }
 
-func (t *TransformLog) taskPredecessors() []transformTask {
+func (t *TransformLog) taskPredecessorsLocked() []transformTask {
 	t.flushTasks = compactTransformFlushTasks(t.flushTasks)
 	t.materializeTasks = compactTransformMaterializeTasks(t.materializeTasks)
 	predecessors := make([]transformTask, 0, len(t.flushTasks)+len(t.materializeTasks))
@@ -127,11 +134,15 @@ func (t *TransformLog) taskPredecessors() []transformTask {
 }
 
 func (t *TransformLog) HasPendingFlushTask() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.flushTasks = compactTransformFlushTasks(t.flushTasks)
 	return len(t.flushTasks) > 0
 }
 
 func (t *TransformLog) HasPendingMaterializeTask() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.materializeTasks = compactTransformMaterializeTasks(t.materializeTasks)
 	return len(t.materializeTasks) > 0
 }
@@ -141,7 +152,6 @@ func (t *TransformLog) notifyUpdated() {
 		return
 	}
 	t.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameTransformLog)
-	t.runtime.Notifier.NotifyBarrierUpdated()
 }
 
 func compactTransformFlushTasks(tasks []*transformFlushTask) []*transformFlushTask {

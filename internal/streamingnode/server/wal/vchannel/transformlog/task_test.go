@@ -18,6 +18,7 @@ package transformlog
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,6 +43,36 @@ func TestTransformLogRegistersTaskBeforeSubmitting(t *testing.T) {
 	}
 
 	transformLog.submitFlushTask(10)
+}
+
+func TestTransformTaskRegistrySupportsConcurrentSubmissionAndInspection(t *testing.T) {
+	scheduler := &inspectingTransformTaskScheduler{onSubmit: func(nodescheduler.Task) {}}
+	transformLog := New(Config{
+		VChannel: "v1",
+		Runtime:  moduleapi.Runtime{Scheduler: scheduler},
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(3)
+		go func(timetick uint64) {
+			defer wg.Done()
+			transformLog.submitFlushTask(timetick)
+		}(uint64(i + 1))
+		go func(timetick uint64) {
+			defer wg.Done()
+			transformLog.submitMaterializeTask(timetick)
+		}(uint64(i + 1))
+		go func() {
+			defer wg.Done()
+			_ = transformLog.HasPendingFlushTask()
+			_ = transformLog.HasPendingMaterializeTask()
+		}()
+	}
+	wg.Wait()
+
+	assert.True(t, transformLog.HasPendingFlushTask())
+	assert.True(t, transformLog.HasPendingMaterializeTask())
 }
 
 func TestTransformTaskDelaysUntilPredecessorCompletes(t *testing.T) {

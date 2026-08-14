@@ -4,12 +4,13 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/stretchr/testify/require"
-
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
@@ -29,6 +30,30 @@ func newTestInsertMessage(t *testing.T, vchannel string, timetick uint64) messag
 	mutable, err := message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		BuildMutable()
+	require.NoError(t, err)
+	return mutable.WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick)))
+}
+
+func newTestAssignedInsertMessage(t *testing.T, vchannel string, segmentID int64, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	mutable, err := message.NewInsertMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&message.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{
+					PartitionId: 10,
+					Rows:        1,
+					SegmentAssignment: &messagespb.SegmentAssignment{
+						SegmentId: segmentID,
+					},
+				},
+			},
+		}).
 		WithBody(&msgpb.InsertRequest{}).
 		BuildMutable()
 	require.NoError(t, err)
@@ -144,13 +169,56 @@ func newTestTransformDeleteMessage(t *testing.T, vchannel string, timetick uint6
 		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
 }
 
+func newTestInsertDeleteTxnMessage(t *testing.T, vchannel string, segmentID int64, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	txnContext := message.TxnContext{TxnID: message.TxnID(timetick), Keepalive: time.Second}
+	begin := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnContext).
+		WithTimeTick(timetick - 2).
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick - 2))).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick - 2)))
+	beginMessage, err := message.AsImmutableBeginTxnMessageV2(begin)
+	require.NoError(t, err)
+
+	insert := newTestAssignedInsertMessage(t, vchannel, segmentID, timetick-1)
+	deleteMessage := newTestTransformDeleteMessage(t, vchannel, timetick-1)
+
+	commit := message.NewCommitTxnMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnContext).
+		WithTimeTick(timetick).
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick))).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
+	commitMessage, err := message.AsImmutableCommitTxnMessageV2(commit)
+	require.NoError(t, err)
+
+	txn, err := message.NewImmutableTxnMessageBuilder(beginMessage).
+		Add(insert).
+		Add(deleteMessage).
+		Build(commitMessage)
+	require.NoError(t, err)
+	return txn
+}
+
 func TestDrainDeleteReplayUsesSharedTransformLogStream(t *testing.T) {
 	ctx := context.Background()
 	manager := transformlog.NewStreamManager("p1")
 	for _, vchannel := range []string{"v1", "v2"} {
 		log := transformlog.New(transformlog.Config{VChannel: vchannel})
 		log.SwitchIntoMetaAndData()
-		require.NotNil(t, log.ObserveMessage(ctx, newTestTransformDeleteMessage(t, vchannel, 10)).Data)
+		raw := newTestTransformDeleteMessage(t, vchannel, 10)
+		owner := message.NewOwnedImmutableMessage(raw, nil)
+		dispatch := owner.Clone()
+		log.ObserveMessage(ctx, dispatch)
+		dispatch.Release()
+		owner.Release()
 		manager.Register(vchannel, log)
 	}
 	stream, err := manager.AcquireStream(ctx, "p1")
@@ -182,6 +250,48 @@ func TestRecoveryBarrierAdvancesBothRuntimeFrontiers(t *testing.T) {
 
 	require.Equal(t, uint64(30), runtime.AppliedGrowingTimeTick())
 	require.Equal(t, uint64(30), runtime.AppliedTransformTimeTick())
+}
+
+func TestRuntimeSkipsInsertAtOrBelowGrowingFrontier(t *testing.T) {
+	runtime := newRuntime()
+	runtime.markGrowingTimeTick(30)
+
+	runtime.applyLiveMessage(context.Background(), newTestAssignedInsertMessage(t, "ch", 100, 20))
+
+	require.Empty(t, runtime.SegmentIDs())
+	require.Equal(t, uint64(30), runtime.AppliedGrowingTimeTick())
+}
+
+func TestRuntimeSkipsFlushAtOrBelowGrowingFrontier(t *testing.T) {
+	runtime := newRuntime()
+	runtime.addSegment(newGrowingSegment(nil, 100, 10))
+	runtime.markGrowingTimeTick(30)
+
+	runtime.applyLiveMessage(context.Background(), newTestFlushMessage(t, "ch", 100, 20))
+
+	require.False(t, runtime.SegmentFlushed(100))
+	require.Equal(t, uint64(30), runtime.AppliedGrowingTimeTick())
+}
+
+func TestRuntimeTxnGatesGrowingAndTransformEffectsIndependently(t *testing.T) {
+	runtime := newRuntime()
+	runtime.markGrowingTimeTick(50)
+	runtime.markTransformTimeTick(20)
+
+	runtime.applyLiveMessage(context.Background(), newTestInsertDeleteTxnMessage(t, "ch", 100, 40))
+
+	require.Empty(t, runtime.SegmentIDs())
+	require.Equal(t, uint64(50), runtime.AppliedGrowingTimeTick())
+	require.Equal(t, uint64(40), runtime.AppliedTransformTimeTick())
+}
+
+func TestRuntimeDeleteAdvancesBothFrontiers(t *testing.T) {
+	runtime := newRuntime()
+
+	runtime.applyLiveMessage(context.Background(), newTestTransformDeleteMessage(t, "ch", 40))
+
+	require.Equal(t, uint64(40), runtime.AppliedGrowingTimeTick())
+	require.Equal(t, uint64(40), runtime.AppliedTransformTimeTick())
 }
 
 func TestTransformBarrierMessagesAdvanceRuntimeTransformFrontier(t *testing.T) {
@@ -266,6 +376,48 @@ func TestRuntimeFlushedSegmentSkipsReplayUntilSafeToRelease(t *testing.T) {
 
 	runtime.applyLiveMessage(context.Background(), newTestRecoveryBarrierMessage(t, 51))
 	require.Empty(t, runtime.SegmentIDs())
+}
+
+func TestRuntimeSkipsInsertCoveredBySegmentDataCheckpoint(t *testing.T) {
+	initSegcoreForRuntimeTest(t)
+
+	schema := mock_segcore.GenTestCollectionSchema("snview-segment-replay", schemapb.DataType_Int64, false)
+	runtime := newRuntime()
+	err := runtime.Prepare(context.Background(), walview.VChannelWALView{
+		CollectionID:        1,
+		VChannel:            "ch",
+		Schema:              schema,
+		BaseGrowingTimeTick: 30,
+		SegmentSnapshot: walview.VisibleSegmentSnapshot{
+			CollectionID:        1,
+			VChannel:            "ch",
+			BaseGrowingTimeTick: 30,
+			Segments: []walview.VisibleSegment{
+				{
+					SegmentID:   100,
+					PartitionID: 10,
+					Assignment: &streamingpb.SegmentAssignmentMeta{
+						CollectionId:           1,
+						Vchannel:               "ch",
+						DataCheckpointTimeTick: 100,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer runtime.Close()
+
+	require.NotPanics(t, func() {
+		runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 80, schema))
+	})
+	_, ok := runtime.Segment(100)
+	require.False(t, ok)
+
+	runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 120, schema))
+	segment, ok := runtime.Segment(100)
+	require.True(t, ok)
+	require.Equal(t, int64(2), segment.RowNum())
 }
 
 func TestNewCollectionAppliesIndexMetaFromWALView(t *testing.T) {

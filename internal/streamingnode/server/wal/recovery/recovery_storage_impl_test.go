@@ -2,17 +2,16 @@ package recovery
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
@@ -24,94 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-type testRecoveryModule struct {
-	result   moduleapi.ObserveResult
-	snapshot moduleapi.ModuleSnapshot
-}
-
-func (m *testRecoveryModule) Name() moduleapi.ModuleName {
-	return moduleapi.ModuleName("test")
-}
-
-func (m *testRecoveryModule) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
-	return m.result
-}
-
-func (m *testRecoveryModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
-	return m.snapshot
-}
-
-func (m *testRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
-	return nil
-}
-
-type testDurableFrontierView struct {
-	partition walcheckpoint.Barrier
-	vchannel  walcheckpoint.Barrier
-	all       walcheckpoint.Barrier
-}
-
-func (v testDurableFrontierView) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
-	switch scope.Type {
-	case moduleapi.ScopeAll:
-		return v.all
-	case moduleapi.ScopeVChannel:
-		return v.vchannel
-	case moduleapi.ScopePartition:
-		return v.partition
-	default:
-		return nil
-	}
-}
-
-type recordingFrontierView struct {
-	barrier walcheckpoint.Barrier
-	scopes  []moduleapi.Scope
-}
-
-func (v *recordingFrontierView) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
-	v.scopes = append(v.scopes, scope)
-	return v.barrier
-}
-
-type notifyingDirtyModule struct {
-	testRecoveryModule
-	notify func()
-}
-
-type recordingCleanupModule struct {
-	testRecoveryModule
-	cleanup moduleapi.CleanupContext
-}
-
-func (m *recordingCleanupModule) ConsumeCleanupSnapshots(cleanup moduleapi.CleanupContext) []moduleapi.DirtySnapshot {
-	m.cleanup = cleanup
-	return nil
-}
-
-type pendingCleanupModule struct {
-	testRecoveryModule
-	pending  bool
-	consumed int
-}
-
-func (m *pendingCleanupModule) ConsumeCleanupSnapshots(moduleapi.CleanupContext) []moduleapi.DirtySnapshot {
-	m.consumed++
-	m.pending = false
-	return nil
-}
-
-func (m *pendingCleanupModule) HasPendingCleanup() bool {
-	return m.pending
-}
-
-func (m *notifyingDirtyModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
-	if m.notify != nil {
-		m.notify()
-	}
-	return nil
-}
-
 type recordingRecoveryStreamBuilder struct {
 	param BuildRecoveryStreamParam
 }
@@ -120,11 +31,23 @@ func newTestRecoveryStorage(t *testing.T, checkpoint *utility.WALCheckpoint) *re
 	t.Helper()
 	nodeScheduler := nodescheduler.New(4)
 	t.Cleanup(nodeScheduler.Close)
-	return newRecoveryStorage(
+	storage := newRecoveryStorage(
 		types.PChannelInfo{Name: "test-pchannel"},
 		checkpoint,
 		WithNodeScheduler(nodeScheduler),
 	)
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel:      "test-pchannel",
+		NodeScheduler: nodeScheduler,
+		Runtime: moduleapi.Runtime{
+			Scheduler: storage.taskScheduler,
+			Notifier:  storage,
+		},
+	})
+	require.NoError(t, err)
+	storage.vchannelManager = manager
+	t.Cleanup(manager.Close)
+	return storage
 }
 
 func TestConsumeDirtySnapshotUsesLastPersistedPhysicalCheckpointsForCleanup(t *testing.T) {
@@ -136,14 +59,21 @@ func TestConsumeDirtySnapshotUsesLastPersistedPhysicalCheckpointsForCleanup(t *t
 			TimeTick:  9,
 		},
 	})
-	module := &recordingCleanupModule{}
-	storage.modules = []moduleapi.Module{module}
 	storage.checkpoint.TimeTick = 100
 	storage.checkpoint.DataCheckpoint.TimeTick = 90
+	var cleanup moduleapi.CleanupContext
+	mock := mockey.Mock((*vchannel.PChannelRecoveryManager).ConsumeCleanupSnapshots).To(func(
+		_ *vchannel.PChannelRecoveryManager,
+		current moduleapi.CleanupContext,
+	) []moduleapi.DirtySnapshot {
+		cleanup = current
+		return nil
+	}).Build()
+	defer mock.UnPatch()
 
 	assert.Nil(t, storage.consumeDirtySnapshot())
-	assert.Equal(t, uint64(10), module.cleanup.MetaPhysicalTimeTick)
-	assert.Equal(t, uint64(9), module.cleanup.DataPhysicalTimeTick)
+	assert.Equal(t, uint64(10), cleanup.MetaPhysicalTimeTick)
+	assert.Equal(t, uint64(9), cleanup.DataPhysicalTimeTick)
 }
 
 func TestRecoveryStorageCloseDrainsPendingCleanup(t *testing.T) {
@@ -155,11 +85,25 @@ func TestRecoveryStorageCloseDrainsPendingCleanup(t *testing.T) {
 			TimeTick:  9,
 		},
 	})
-	module := &pendingCleanupModule{pending: true}
-	storage.modules = []moduleapi.Module{module}
-
+	pending := true
+	consumed := 0
+	pendingMock := mockey.Mock((*vchannel.PChannelRecoveryManager).HasPendingCleanup).To(func(
+		*vchannel.PChannelRecoveryManager,
+	) bool {
+		return pending
+	}).Build()
+	defer pendingMock.UnPatch()
+	consumeMock := mockey.Mock((*vchannel.PChannelRecoveryManager).ConsumeCleanupSnapshots).To(func(
+		_ *vchannel.PChannelRecoveryManager,
+		_ moduleapi.CleanupContext,
+	) []moduleapi.DirtySnapshot {
+		consumed++
+		pending = false
+		return nil
+	}).Build()
+	defer consumeMock.UnPatch()
 	require.NoError(t, storage.persistDritySnapshotWhenClosing())
-	assert.Equal(t, 1, module.consumed)
+	assert.Equal(t, 1, consumed)
 }
 
 func (b *recordingRecoveryStreamBuilder) WALName() message.WALName {
@@ -221,7 +165,7 @@ func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 	assert.Equal(t, uint64(0), builder.param.EndTimeTick)
 }
 
-func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *testing.T) {
+func TestRecoveryStorageCompletesMessageWithoutConsumerRefs(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
@@ -233,8 +177,6 @@ func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *tes
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
-	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
-
 	lastConfirmed := walimplstest.NewTestMessageID(2)
 	mutableMsg, err := message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -247,13 +189,11 @@ func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *tes
 
 	storage.observeDataScannerMessage(context.Background(), msg)
 
-	snapshot := storage.checkpointManager.Snapshot()
-	assert.True(t, lastConfirmed.EQ(snapshot.MessageID))
-	assert.Equal(t, uint64(2), snapshot.TimeTick)
-	require.NotNil(t, snapshot.DataCheckpoint)
-	assert.True(t, lastConfirmed.EQ(snapshot.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(2), snapshot.DataCheckpoint.TimeTick)
-	assert.True(t, storage.checkpointManager.HasDirty())
+	assert.True(t, lastConfirmed.EQ(storage.checkpoint.MessageID))
+	assert.Equal(t, uint64(2), storage.checkpoint.TimeTick)
+	completed := storage.ackTracker.CompletedPoint()
+	assert.True(t, lastConfirmed.EQ(completed.MessageID))
+	assert.Equal(t, uint64(2), completed.TimeTick)
 }
 
 func TestRecoveryStorageUsesVChannelRecoveryManagerForQueryResourcesAndTransformLog(t *testing.T) {
@@ -280,13 +220,12 @@ func TestRecoveryStorageUsesVChannelRecoveryManagerForQueryResourcesAndTransform
 	require.NoError(t, err)
 	manager.SwitchIntoMetaAndData()
 	storage.vchannelManager = manager
-	storage.modules = []moduleapi.Module{manager}
 
 	assert.Same(t, manager, storage.TransformLog())
 	assert.Same(t, manager, storage.VChannelManager())
 }
 
-func TestRecoveryStorageSwitchModulesMergesModuleSnapshots(t *testing.T) {
+func TestRecoveryStorageSwitchesVChannelManagerIntoMetaAndData(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
@@ -295,35 +234,28 @@ func TestRecoveryStorageSwitchModulesMergesModuleSnapshots(t *testing.T) {
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 
-	storage.modules = []moduleapi.Module{
-		&testRecoveryModule{snapshot: moduleapi.CompositeModuleSnapshot{
-			&moduleapi.VChannelModuleSnapshot{VChannels: map[string]*streamingpb.VChannelMeta{
-				"v1": {Vchannel: "v1"},
-			}},
-			&moduleapi.SegmentModuleSnapshot{
-				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
-					1: {SegmentId: 1, Vchannel: "v1"},
-				},
-			},
-		}},
-		&testRecoveryModule{snapshot: moduleapi.CompositeModuleSnapshot{
-			&moduleapi.VChannelModuleSnapshot{VChannels: map[string]*streamingpb.VChannelMeta{
-				"v2": {Vchannel: "v2"},
-			}},
-			&moduleapi.SegmentModuleSnapshot{
-				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
-					2: {SegmentId: 2, Vchannel: "v2"},
-				},
-			},
-		}},
-	}
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel: "test-pchannel",
+		VChannelMetas: map[string]*streamingpb.VChannelMeta{
+			"v1": newRecoveryTestVChannelMeta("v1", 1),
+			"v2": newRecoveryTestVChannelMeta("v2", 2),
+		},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: newRecoveryTestGrowingSegment("v1", 1, 1),
+			2: newRecoveryTestGrowingSegment("v2", 2, 2),
+		},
+		NodeScheduler: storage.nodeScheduler,
+	})
+	require.NoError(t, err)
+	storage.vchannelManager = manager
 
 	snapshot := storage.switchModulesIntoMetaAndData()
 
-	assert.Contains(t, snapshot.VChannels, "v1")
-	assert.Contains(t, snapshot.VChannels, "v2")
-	assert.Contains(t, snapshot.SegmentAssignments, int64(1))
-	assert.Contains(t, snapshot.SegmentAssignments, int64(2))
+	require.NotNil(t, snapshot.WritePathRecovery)
+	assert.Contains(t, snapshot.WritePathRecovery.VChannels, "v1")
+	assert.Contains(t, snapshot.WritePathRecovery.VChannels, "v2")
+	assert.Contains(t, snapshot.WritePathRecovery.GrowingSegments, int64(1))
+	assert.Contains(t, snapshot.WritePathRecovery.GrowingSegments, int64(2))
 }
 
 func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T) {
@@ -338,8 +270,6 @@ func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
-	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
-
 	lastConfirmed := walimplstest.NewTestMessageID(2)
 	mutableMsg, err := message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -352,36 +282,11 @@ func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T
 
 	storage.observeMetaScannerMessage(context.Background(), msg)
 
-	snapshot := storage.checkpointManager.Snapshot()
-	assert.True(t, lastConfirmed.EQ(snapshot.MessageID))
-	assert.Equal(t, uint64(2), snapshot.TimeTick)
-	require.NotNil(t, snapshot.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(1).EQ(snapshot.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(1), snapshot.DataCheckpoint.TimeTick)
-	assert.True(t, storage.checkpointManager.HasDirty())
-}
-
-func TestRecoveryStorageNotifyBarrierUpdatedDoesNotAdvanceDataCheckpointWithoutDataBarrier(t *testing.T) {
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(10),
-		TimeTick:  100,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(5),
-			TimeTick:  50,
-		},
-	}
-	storage := newTestRecoveryStorage(t, checkpoint)
-	defer storage.metrics.Close()
-	defer storage.taskScheduler.Close()
-	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
-
-	storage.NotifyBarrierUpdated()
-
-	snapshot := storage.checkpointManager.Snapshot()
-	require.NotNil(t, snapshot.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(5).EQ(snapshot.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(50), snapshot.DataCheckpoint.TimeTick)
-	assert.False(t, storage.checkpointManager.HasDirty())
+	assert.True(t, lastConfirmed.EQ(storage.checkpoint.MessageID))
+	assert.Equal(t, uint64(2), storage.checkpoint.TimeTick)
+	completed := storage.ackTracker.CompletedPoint()
+	assert.True(t, walimplstest.NewTestMessageID(1).EQ(completed.MessageID))
+	assert.Equal(t, uint64(1), completed.TimeTick)
 }
 
 func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {
@@ -396,11 +301,13 @@ func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModule
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
-	storage.modules = []moduleapi.Module{&notifyingDirtyModule{
-		notify: func() {
-			storage.NotifyModuleUpdated(moduleapi.ModuleName("test"))
-		},
-	}}
+	mock := mockey.Mock((*vchannel.PChannelRecoveryManager).ConsumeDirtySnapshots).To(func(
+		*vchannel.PChannelRecoveryManager,
+	) []moduleapi.DirtySnapshot {
+		storage.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+		return nil
+	}).Build()
+	defer mock.UnPatch()
 
 	done := make(chan struct{})
 	go func() {
@@ -416,6 +323,30 @@ func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModule
 			return false
 		}
 	}, time.Second, 10*time.Millisecond)
+	assert.True(t, storage.isDirty())
+}
+
+func newRecoveryTestVChannelMeta(vchannel string, collectionID int64) *streamingpb.VChannelMeta {
+	return &streamingpb.VChannelMeta{
+		Vchannel: vchannel,
+		State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+			CollectionId: collectionID,
+			Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+				{Schema: &schemapb.CollectionSchema{}},
+			},
+		},
+	}
+}
+
+func newRecoveryTestGrowingSegment(vchannel string, collectionID, segmentID int64) *streamingpb.SegmentAssignmentMeta {
+	return &streamingpb.SegmentAssignmentMeta{
+		Vchannel:     vchannel,
+		CollectionId: collectionID,
+		SegmentId:    segmentID,
+		State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		Stat:         &streamingpb.SegmentAssignmentStat{},
+	}
 }
 
 func TestValidateRecoveredViewMetaNormalizesBackwardCompatibleDefaults(t *testing.T) {
@@ -473,7 +404,7 @@ func TestEnsureDataCheckpointInitializesLegacyCheckpoint(t *testing.T) {
 	require.NotNil(t, storage.checkpoint.DataCheckpoint)
 	assert.True(t, checkpoint.MessageID.EQ(storage.checkpoint.DataCheckpoint.MessageID))
 	assert.Equal(t, checkpoint.TimeTick, storage.checkpoint.DataCheckpoint.TimeTick)
-	assert.True(t, storage.checkpointManager.HasDirty())
+	assert.True(t, storage.checkpointDirty)
 }
 
 func TestInitialCheckpointFromLastTimeTickMessage(t *testing.T) {
@@ -497,192 +428,54 @@ func TestInitialCheckpointFromLastTimeTickMessage(t *testing.T) {
 	assert.Equal(t, uint64(200), checkpoint.DataCheckpoint.TimeTick)
 }
 
-func TestBroadcastAckModulePreconditionsFollowMessageFlow(t *testing.T) {
-	blockingBarrier := walcheckpoint.BarrierFunc(func() uint64 { return 9 })
-	module := newBroadcastAckModule("test-pchannel", testDurableFrontierView{
-		partition: blockingBarrier,
-		vchannel:  blockingBarrier,
-		all:       blockingBarrier,
-	}, moduleapi.Runtime{})
-	module.ack = func(context.Context, message.ImmutableMessage) error {
-		return nil
-	}
-
-	tests := []struct {
-		name  string
-		msg   message.ImmutableMessage
-		ready bool
-	}{
-		{
-			name: "commit import has no data frontier",
-			msg: newAckPreconditionMessage(t, message.NewCommitImportMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.CommitImportMessageHeader{CollectionId: 1, JobId: 10}).
-				WithBody(&message.CommitImportMessageBody{})),
-			ready: true,
-		},
-		{
-			name: "manual flush waits for vchannel frontier",
-			msg: newAckPreconditionMessage(t, message.NewManualFlushMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
-				WithBody(&message.ManualFlushMessageBody{})),
-			ready: false,
-		},
-		{
-			name: "schema-changing alter collection waits for vchannel frontier",
-			msg: newAckPreconditionMessage(t, message.NewAlterCollectionMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.AlterCollectionMessageHeader{
-					CollectionId: 1,
-					UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}},
-				}).
-				WithBody(&message.AlterCollectionMessageBody{
-					Updates: &message.AlterCollectionMessageUpdates{Schema: &schemapb.CollectionSchema{}},
-				})),
-			ready: false,
-		},
-		{
-			name: "alter wal waits for all local growing frontier",
-			msg: newAckPreconditionMessage(t, message.NewAlterWALMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.AlterWALMessageHeader{TargetWalName: commonpb.WALName_RocksMQ}).
-				WithBody(&message.AlterWALMessageBody{})),
-			ready: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			task := module.newTask(test.msg)
-			err := task.Execute(context.Background())
-			if test.ready {
-				require.NoError(t, err)
-			} else {
-				require.ErrorIs(t, err, nodescheduler.ErrDelay)
-			}
-		})
-	}
-}
-
-func TestBroadcastAckModuleUsesMaterializedFrontierForSynchronousFlushAndDrop(t *testing.T) {
-	blockingBarrier := walcheckpoint.BarrierFunc(func() uint64 { return 9 })
-	view := &recordingFrontierView{barrier: blockingBarrier}
-	module := newBroadcastAckModule("test-pchannel", view, moduleapi.Runtime{})
-	module.ack = func(context.Context, message.ImmutableMessage) error {
-		return nil
-	}
-
-	tests := []struct {
-		name string
-		msg  message.ImmutableMessage
-		kind moduleapi.DataProgressKind
-	}{
-		{
-			name: "drop collection waits for materialized frontier",
-			msg: newAckPreconditionMessage(t, message.NewDropCollectionMessageBuilderV1().
-				WithVChannel("v1").
-				WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
-				WithBody(&msgpb.DropCollectionRequest{})),
-			kind: moduleapi.DataProgressMaterialized,
-		},
-		{
-			name: "manual flush waits for materialized frontier",
-			msg: newAckPreconditionMessage(t, message.NewManualFlushMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
-				WithBody(&message.ManualFlushMessageBody{})),
-			kind: moduleapi.DataProgressMaterialized,
-		},
-		{
-			name: "flush all waits for materialized frontier",
-			msg: newAckPreconditionMessage(t, message.NewFlushAllMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.FlushAllMessageHeader{}).
-				WithBody(&message.FlushAllMessageBody{})),
-			kind: moduleapi.DataProgressMaterialized,
-		},
-		{
-			name: "alter wal waits for durable frontier",
-			msg: newAckPreconditionMessage(t, message.NewAlterWALMessageBuilderV2().
-				WithVChannel("v1").
-				WithHeader(&message.AlterWALMessageHeader{TargetWalName: commonpb.WALName_RocksMQ}).
-				WithBody(&message.AlterWALMessageBody{})),
-			kind: moduleapi.DataProgressDurable,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			view.scopes = nil
-			require.ErrorIs(t, module.newTask(test.msg).Execute(context.Background()), nodescheduler.ErrDelay)
-			require.Len(t, view.scopes, 1)
-			assert.Equal(t, test.kind, view.scopes[0].Kind)
-		})
-	}
-}
-
-func TestBroadcastAckModuleReturnsBarrierForEveryBroadcastHeader(t *testing.T) {
-	module := newBroadcastAckModule("test-pchannel", nil, moduleapi.Runtime{})
-	module.SwitchIntoMetaAndData()
-
-	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
-		WithBroadcast([]string{"v1"}).
-		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{10}}).
-		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{}}))
-
-	result := module.ObserveMessage(context.Background(), msg)
-
-	require.NotNil(t, result.Data)
-}
-
-func TestBroadcastAckModuleSchedulesOnlyQueueHead(t *testing.T) {
-	frontierTimeTick := uint64(9)
-	scheduler := &recordingAckTaskScheduler{}
-	module := newBroadcastAckModule("test-pchannel", &recordingFrontierView{
-		barrier: walcheckpoint.BarrierFunc(func() uint64 { return frontierTimeTick }),
-	}, moduleapi.Runtime{Scheduler: scheduler})
-	module.SwitchIntoMetaAndData()
-
-	acked := make([]message.MessageType, 0, 2)
-	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
-		acked = append(acked, msg.MessageType())
-		return nil
-	}
-
-	flush := newBroadcastAckMessage(t, message.NewManualFlushMessageBuilderV2().
-		WithBroadcast([]string{"v1"}).
-		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
-		WithBody(&message.ManualFlushMessageBody{}))
-	create := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
-		WithBroadcast([]string{"v1"}).
-		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 2, PartitionIds: []int64{10}}).
-		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{}}))
-
-	module.ObserveMessage(context.Background(), flush)
-	module.ObserveMessage(context.Background(), create)
-	require.Len(t, scheduler.tasks, 1)
-
-	require.ErrorIs(t, scheduler.tasks[0].Execute(context.Background()), nodescheduler.ErrDelay)
-	require.Len(t, scheduler.tasks, 1)
-
-	frontierTimeTick = flush.TimeTick()
-	require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
-	require.Len(t, scheduler.tasks, 2)
-	require.NoError(t, scheduler.tasks[1].Execute(context.Background()))
-	assert.Equal(t, []message.MessageType{
-		message.MessageTypeManualFlush,
-		message.MessageTypeCreateCollection,
-	}, acked)
-}
-
 type recordingAckTaskScheduler struct {
+	mu    sync.Mutex
 	tasks []nodescheduler.Task
+	ready chan struct{}
 }
 
 func (s *recordingAckTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	s.mu.Lock()
 	s.tasks = append(s.tasks, task)
+	if s.ready != nil {
+		close(s.ready)
+	}
+	s.ready = make(chan struct{})
+	s.mu.Unlock()
 	return recordingAckTaskHandle{}
+}
+
+func (s *recordingAckTaskScheduler) snapshot() []nodescheduler.Task {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]nodescheduler.Task(nil), s.tasks...)
+}
+
+func (s *recordingAckTaskScheduler) waitTask(t *testing.T) nodescheduler.Task {
+	return s.waitTaskAfter(t, 0)
+}
+
+func (s *recordingAckTaskScheduler) waitTaskAfter(t *testing.T, index int) nodescheduler.Task {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		s.mu.Lock()
+		if len(s.tasks) > index {
+			task := s.tasks[index]
+			s.mu.Unlock()
+			return task
+		}
+		if s.ready == nil {
+			s.ready = make(chan struct{})
+		}
+		ready := s.ready
+		s.mu.Unlock()
+		select {
+		case <-ready:
+		case <-deadline:
+			t.Fatalf("timed out waiting for scheduled task %d", index)
+		}
+	}
 }
 
 type recordingAckTaskHandle struct{}
@@ -691,23 +484,24 @@ func (recordingAckTaskHandle) Cancel() {}
 
 func (recordingAckTaskHandle) Wait(context.Context) error { return nil }
 
-func newAckPreconditionMessage(t *testing.T, builder interface{ MustBuildMutable() message.MutableMessage }) message.ImmutableMessage {
-	t.Helper()
-	return builder.MustBuildMutable().
-		WithTimeTick(10).
-		IntoImmutableMessage(nil)
-}
-
 func newBroadcastAckMessage(t *testing.T, builder interface {
 	MustBuildBroadcast() message.BroadcastMutableMessage
 },
 ) message.ImmutableMessage {
+	return newBroadcastAckMessageWith(t, builder, 1, 10)
+}
+
+func newBroadcastAckMessageWith(t *testing.T, builder interface {
+	MustBuildBroadcast() message.BroadcastMutableMessage
+}, broadcastID, timeTick uint64, resourceKeys ...message.ResourceKey,
+) message.ImmutableMessage {
 	t.Helper()
 	msgs := builder.MustBuildBroadcast().
-		WithBroadcastID(1).
+		OverwriteBroadcastHeader(broadcastID, resourceKeys...).
 		SplitIntoMutableMessage()
 	require.Len(t, msgs, 1)
 	return msgs[0].
-		WithTimeTick(10).
+		WithTimeTick(timeTick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(9)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(10))
 }

@@ -7,7 +7,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -114,15 +113,15 @@ func NewVChannelViewFromCreateCollectionMessage(msg message.ImmutableCreateColle
 // ObserveCreateCollectionMessageV1 observes a CreateCollection message against
 // an existing view. It returns a replacement view when the message starts a new
 // collection after the old view has been tombstoned.
-func (info *VChannelView) ObserveCreateCollectionMessageV1(msg message.ImmutableCreateCollectionMessageV1) (*VChannelView, moduleapi.ObserveResult) {
-	decision, result := info.ObserveExistingCreateCollectionMessageV1(msg)
+func (info *VChannelView) ObserveCreateCollectionMessageV1(msg message.ImmutableCreateCollectionMessageV1) (*VChannelView, bool) {
+	decision := info.ObserveExistingCreateCollectionMessageV1(msg)
 	if decision != existingCreateCollectionStartNew {
-		return nil, result
+		return nil, false
 	}
 	info.mu.Lock()
 	metaAndData := info.metaAndData
 	info.mu.Unlock()
-	return NewVChannelView(NewVChannelMetaFromCreateCollectionMessage(msg), 0, true, runtimeConfig{metaAndData: metaAndData}), moduleapi.ObserveResult{}
+	return NewVChannelView(NewVChannelMetaFromCreateCollectionMessage(msg), 0, true, runtimeConfig{metaAndData: metaAndData}), true
 }
 
 func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
@@ -188,16 +187,6 @@ func (info *VChannelView) buildWALViewSnapshotLocked() *WALViewSnapshot {
 
 func (info *VChannelView) invalidateWALViewSnapshotLocked() {
 	info.walViewSnapshot = nil
-}
-
-func (info *VChannelView) metaTimeTick() uint64 {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	return info.persistedMetaTimeTick
-}
-
-func (info *VChannelView) MetaBarrier() walcheckpoint.Barrier {
-	return walcheckpoint.BarrierFunc(info.metaTimeTick)
 }
 
 func (info *VChannelView) markMetaPersistedLocked(timetick uint64) {
@@ -288,20 +277,20 @@ const (
 	existingCreateCollectionInconsistent
 )
 
-func (info *VChannelView) ObserveExistingCreateCollectionMessageV1(msg message.ImmutableCreateCollectionMessageV1) (existingCreateCollectionDecision, moduleapi.ObserveResult) {
+func (info *VChannelView) ObserveExistingCreateCollectionMessageV1(msg message.ImmutableCreateCollectionMessageV1) existingCreateCollectionDecision {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	timetick := msg.TimeTick()
 	if shouldSkipTombstonedVChannelMeta(info.meta, timetick) {
-		return existingCreateCollectionIgnored, emptyObserveResult()
+		return existingCreateCollectionIgnored
 	}
 	if info.canStartNewCollectionAtLocked(timetick) {
-		return existingCreateCollectionStartNew, emptyObserveResult()
+		return existingCreateCollectionStartNew
 	}
 	if !info.canReplayAtLocked(timetick) {
-		return existingCreateCollectionIgnored, emptyObserveResult()
+		return existingCreateCollectionIgnored
 	}
-	return existingCreateCollectionInconsistent, moduleapi.ObserveResult{Meta: walcheckpoint.BarrierFunc(info.metaTimeTick)}
+	return existingCreateCollectionInconsistent
 }
 
 func (info *VChannelView) canStartNewCollectionAtLocked(timetick uint64) bool {
@@ -499,17 +488,17 @@ func (info *VChannelView) GetSchemaLocked(timetick uint64) (int, *schemapb.Colle
 	return -1, nil
 }
 
-func (info *VChannelView) ObserveSchemaChangeMessageV2(msg message.ImmutableSchemaChangeMessageV2) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveSchemaChangeMessageV2(msg message.ImmutableSchemaChangeMessageV2) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		return emptyObserveResult()
+		return false
 	}
 	if info.hasSchemaVersionLocked(msg.TimeTick(), msg.MustBody().Schema) {
-		return emptyObserveResult()
+		return false
 	}
 
 	info.meta.CollectionInfo.Schemas = append(info.meta.CollectionInfo.Schemas, &streamingpb.CollectionSchemaOfVChannel{
@@ -521,23 +510,23 @@ func (info *VChannelView) ObserveSchemaChangeMessageV2(msg message.ImmutableSche
 	info.dirty = true
 	info.schemaDirty = true
 	info.invalidateWALViewSnapshotLocked()
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
-func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableAlterCollectionMessageV2) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableAlterCollectionMessageV2) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		return emptyObserveResult()
+		return false
 	}
 	schemaChange := messageutil.IsSchemaChange(msg.Header())
 	if schemaChange {
 		schema := msg.MustBody().Updates.Schema
 		if info.hasSchemaVersionLocked(msg.TimeTick(), schema) {
-			return emptyObserveResult()
+			return false
 		}
 		info.meta.CollectionInfo.Schemas = append(info.meta.CollectionInfo.Schemas, &streamingpb.CollectionSchemaOfVChannel{
 			Schema:             schema,
@@ -549,7 +538,7 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 	info.invalidateWALViewSnapshotLocked()
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
 func (info *VChannelView) hasSchemaVersionLocked(timetick uint64, schema *schemapb.CollectionSchema) bool {
@@ -561,103 +550,103 @@ func (info *VChannelView) hasSchemaVersionLocked(timetick uint64, schema *schema
 	return false
 }
 
-func (info *VChannelView) ObserveDropCollectionMessageV1(msg message.ImmutableDropCollectionMessageV1) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveDropCollectionMessageV1(msg message.ImmutableDropCollectionMessageV1) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if isVChannelClosed(info.meta.GetState()) {
 		// make it idempotent, only the first drop collection message can be observed.
-		return emptyObserveResult()
+		return false
 	}
 	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 	info.invalidateWALViewSnapshotLocked()
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
-func (info *VChannelView) ObserveTruncateCollectionMessageV2(msg message.ImmutableTruncateCollectionMessageV2) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveTruncateCollectionMessageV2(msg message.ImmutableTruncateCollectionMessageV2) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		return emptyObserveResult()
+		return false
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 	info.invalidateWALViewSnapshotLocked()
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
-func (info *VChannelView) ObserveAlterLoadConfigMessageV2(msg message.ImmutableAlterLoadConfigMessageV2) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveAlterLoadConfigMessageV2(msg message.ImmutableAlterLoadConfigMessageV2) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetCollectionInfo().GetCollectionId() != msg.Header().GetCollectionId() {
-		return emptyObserveResult()
+		return false
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
-func (info *VChannelView) ObserveDropLoadConfigMessageV2(msg message.ImmutableDropLoadConfigMessageV2) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveDropLoadConfigMessageV2(msg message.ImmutableDropLoadConfigMessageV2) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetCollectionInfo().GetCollectionId() != msg.Header().GetCollectionId() {
-		return emptyObserveResult()
+		return false
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
-func (info *VChannelView) ObserveDropPartitionMessageV1(msg message.ImmutableDropPartitionMessageV1) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveDropPartitionMessageV1(msg message.ImmutableDropPartitionMessageV1) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	for _, partition := range info.meta.CollectionInfo.Partitions {
 		if partition.PartitionId == msg.Header().PartitionId {
 			// make it idempotent, only the first drop partition message can be observed.
 			if !isPartitionNormal(partition.GetState()) {
-				return emptyObserveResult()
+				return false
 			}
 			partition.State = streamingpb.PartitionState_PARTITION_STATE_DROPPED
 			partition.TombstoneTimeTick = msg.TimeTick()
 			info.meta.CheckpointTimeTick = msg.TimeTick()
 			info.dirty = true
 			info.invalidateWALViewSnapshotLocked()
-			return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+			return true
 		}
 	}
-	return emptyObserveResult()
+	return false
 }
 
-func (info *VChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableCreatePartitionMessageV1) moduleapi.ObserveResult {
+func (info *VChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableCreatePartitionMessageV1) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
-		return emptyObserveResult()
+		return false
 	}
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		return emptyObserveResult()
+		return false
 	}
 	for _, partition := range info.meta.CollectionInfo.Partitions {
 		if partition.PartitionId == msg.Header().PartitionId {
@@ -667,9 +656,9 @@ func (info *VChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableC
 				info.meta.CheckpointTimeTick = msg.TimeTick()
 				info.dirty = true
 				info.invalidateWALViewSnapshotLocked()
-				return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+				return true
 			}
-			return emptyObserveResult()
+			return false
 		}
 	}
 	info.meta.CollectionInfo.Partitions = append(info.meta.CollectionInfo.Partitions, &streamingpb.PartitionInfoOfVChannel{
@@ -679,7 +668,7 @@ func (info *VChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableC
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 	info.invalidateWALViewSnapshotLocked()
-	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+	return true
 }
 
 // ConsumeDirtyAndGetSnapshot returns the current stable dirty snapshot of the

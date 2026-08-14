@@ -31,6 +31,7 @@ type growingSegment struct {
 	segmentID              int64
 	partitionID            int64
 	segment                segcore.CSegment
+	replaySkipThrough      uint64
 	flushed                bool
 	flushTimeTick          uint64
 	sealedAtDataVersion    qviews.DataVersion
@@ -49,6 +50,7 @@ func newGrowingSegment(collection *segcore.CCollection, segmentID int64, partiti
 
 func newGrowingSegmentFromVisible(ctx context.Context, collection *segcore.CCollection, visible walview.VisibleSegment) (*growingSegment, error) {
 	segment := newGrowingSegment(collection, visible.SegmentID, visible.PartitionID)
+	segment.replaySkipThrough = visible.Assignment.GetDataCheckpointTimeTick()
 	if visible.Data.PersistedStorage != nil {
 		if err := segment.loadPersisted(ctx, visible); err != nil {
 			segment.release()
@@ -198,6 +200,10 @@ func (s *growingSegment) applyInsert(ctx context.Context, insert walview.Segment
 	if s.released {
 		s.mu.Unlock()
 		return errors.Errorf("growing segment %d released", s.segmentID)
+	}
+	if insert.TimeTick <= s.replaySkipThrough {
+		s.mu.Unlock()
+		return nil
 	}
 	if s.flushed {
 		if s.shouldSkipFlushedReplayLocked(insert.TimeTick) {
@@ -397,6 +403,7 @@ func loadInfoFromVisibleSegment(segment walview.VisibleSegment) *querypb.Segment
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:      segment.SegmentID,
 		PartitionID:    segment.PartitionID,
+		NumOfRows:      persistedRowCount(segment),
 		Level:          datapb.SegmentLevel_L1,
 		BinlogPaths:    make([]*datapb.FieldBinlog, 0),
 		Statslogs:      make([]*datapb.FieldBinlog, 0),
@@ -420,6 +427,30 @@ func loadInfoFromVisibleSegment(segment walview.VisibleSegment) *querypb.Segment
 		loadInfo.Statslogs = append(loadInfo.Statslogs, persisted.GetMergedStatsBinlog())
 	}
 	return loadInfo
+}
+
+func persistedRowCount(segment walview.VisibleSegment) int64 {
+	var total int64
+	for _, batch := range segment.Data.PersistedStorage.GetBinlogs() {
+		var batchRows int64
+		for _, field := range batch.GetFieldBinlog() {
+			var fieldRows int64
+			for _, binlog := range field.GetBinlogs() {
+				fieldRows += binlog.GetEntriesNum()
+			}
+			if fieldRows > batchRows {
+				batchRows = fieldRows
+			}
+		}
+		total += batchRows
+	}
+	if total > 0 || segment.Assignment == nil {
+		return total
+	}
+	if segment.Assignment.GetDataCheckpointTimeTick() >= segment.Assignment.GetCheckpointTimeTick() {
+		return int64(segment.Assignment.GetStat().GetModifiedRows())
+	}
+	return 0
 }
 
 func repeatedTimeTicks(timeTick uint64, n int) []typeutil.Timestamp {

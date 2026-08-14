@@ -8,7 +8,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -29,6 +28,7 @@ type Config struct {
 type appendResult struct {
 	Appended     bool
 	ShouldFlush  bool
+	HasFlushWork bool
 	DataTimeTick uint64
 }
 
@@ -51,6 +51,7 @@ type flushResult struct {
 	Started            bool
 	DurableTimeTick    uint64
 	NextTargetTimeTick uint64
+	CompletedMessages  []message.RetainedImmutableMessage
 }
 
 type materializeOption struct {
@@ -97,6 +98,7 @@ type TransformLog struct {
 	metaAndData           bool
 	flushTasks            []*transformFlushTask
 	materializeTasks      []*transformMaterializeTask
+	pendingMessages       []pendingMessage
 	streamNotifier        streamNotifier
 
 	chunks []*chunkDescriptor
@@ -126,42 +128,58 @@ func (t *TransformLog) SwitchIntoMetaAndData() {
 	t.metaAndData = true
 }
 
-func (t *TransformLog) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
+func (t *TransformLog) ObserveMessage(
+	ctx context.Context,
+	retained message.RetainedImmutableMessage,
+) {
+	msg := retained.Message()
+	t.observeMessage(ctx, msg, retained.Clone)
+}
+
+func (t *TransformLog) observeMessage(
+	ctx context.Context,
+	msg message.ImmutableMessage,
+	clone func() message.RetainedImmutableMessage,
+) {
 	if t == nil || msg == nil || !t.isMetaAndData() {
-		return moduleapi.ObserveResult{}
+		return
 	}
 	kind := messageutil.ClassifyTransformLogMessage(msg)
 	if kind == messageutil.TransformLogKindNone {
-		return moduleapi.ObserveResult{}
+		return
 	}
 	var result appendResult
 	switch kind {
 	case messageutil.TransformLogKindDelete:
-		if msg.TimeTick() <= t.dataCheckpointTimeTick() {
-			return moduleapi.ObserveResult{}
-		}
-		result = t.append(msg, appendOption{})
+		result = t.appendWithMessage(msg, appendOption{}, clone)
 	case messageutil.TransformLogKindBarrier:
 		if msg.TimeTick() <= t.latestTimeTick() && !t.HasPendingWork() {
-			return moduleapi.ObserveResult{}
+			return
 		}
-		result = t.syncUp(msg.TimeTick())
+		result = t.syncUpWithMessage(msg.TimeTick(), clone)
 	}
-	if !result.Appended && !t.HasPendingWork() {
-		return moduleapi.ObserveResult{}
+	if !result.Appended && !result.HasFlushWork {
+		return
 	}
 	if result.Appended && result.ShouldFlush {
 		t.submitFlushTask(result.DataTimeTick)
-	} else if kind == messageutil.TransformLogKindBarrier && t.hasFlushWork() {
+	} else if kind == messageutil.TransformLogKindBarrier && result.HasFlushWork {
 		t.submitFlushTask(result.DataTimeTick)
 	}
 	if t.shouldMaterializeByMessage(msg) {
 		t.submitMaterializeTask(msg.TimeTick())
 	}
-	return moduleapi.ObserveResult{Data: t.dataBarrier()}
 }
 
 func (t *TransformLog) append(msg message.ImmutableMessage, opt appendOption) appendResult {
+	return t.appendWithMessage(msg, opt, nil)
+}
+
+func (t *TransformLog) appendWithMessage(
+	msg message.ImmutableMessage,
+	opt appendOption,
+	clone func() message.RetainedImmutableMessage,
+) appendResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if msg.TimeTick() <= t.meta.GetCheckpointTimeTick() || msg.TimeTick() <= t.buffer.DataTimeTick() {
@@ -170,26 +188,50 @@ func (t *TransformLog) append(msg message.ImmutableMessage, opt appendOption) ap
 	if !t.buffer.append(msg, opt) {
 		return appendResult{DataTimeTick: t.buffer.DataTimeTick()}
 	}
+	t.retainMessageLocked(msg.TimeTick(), cloneMessage(clone))
 	t.notifyStreamLocked()
 	return appendResult{
 		Appended:     true,
 		ShouldFlush:  t.buffer.ShouldFlush(),
+		HasFlushWork: true,
 		DataTimeTick: t.buffer.DataTimeTick(),
 	}
 }
 
 func (t *TransformLog) syncUp(timeTick uint64) appendResult {
+	return t.syncUpWithMessage(timeTick, nil)
+}
+
+func (t *TransformLog) syncUpWithMessage(
+	timeTick uint64,
+	clone func() message.RetainedImmutableMessage,
+) appendResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	appended := false
 	if timeTick <= t.syncUpTimeTick {
-		return appendResult{DataTimeTick: t.buffer.DataTimeTick()}
+		return t.syncUpResultLocked(false, clone)
 	}
 	t.syncUpTimeTick = timeTick
+	appended = true
 	t.notifyStreamLocked()
+	return t.syncUpResultLocked(appended, clone)
+}
+
+func (t *TransformLog) syncUpResultLocked(
+	appended bool,
+	clone func() message.RetainedImmutableMessage,
+) appendResult {
+	hasFlushWork := !t.buffer.IsEmpty() || t.buffer.IsFlushing()
+	dataTimeTick := t.buffer.DataTimeTick()
+	if hasFlushWork {
+		t.retainMessageLocked(dataTimeTick, cloneMessage(clone))
+	}
 	return appendResult{
-		Appended:     true,
+		Appended:     appended,
 		ShouldFlush:  t.buffer.ShouldFlush(),
-		DataTimeTick: t.buffer.DataTimeTick(),
+		HasFlushWork: hasFlushWork,
+		DataTimeTick: dataTimeTick,
 	}
 }
 
@@ -329,24 +371,6 @@ func (t *TransformLog) dataCheckpointTimeTick() uint64 {
 	return t.meta.GetCheckpointTimeTick()
 }
 
-func (t *TransformLog) DataBarrierTimeTick() uint64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.persistedDataTimeTick < t.meta.GetCheckpointTimeTick() {
-		return t.persistedDataTimeTick
-	}
-	if t.buffer.HasFlushWorkThrough(t.syncUpTimeTick) {
-		return t.persistedDataTimeTick
-	}
-	return maxTimeTick(t.persistedDataTimeTick, t.syncUpTimeTick)
-}
-
-func (t *TransformLog) MaterializedBarrierTimeTick() uint64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.persistedMaterialized
-}
-
 func (t *TransformLog) HasDirty() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -431,10 +455,6 @@ func (t *TransformLog) shouldMaterializeByMessage(msg message.ImmutableMessage) 
 	}
 }
 
-func (t *TransformLog) dataBarrier() walcheckpoint.Barrier {
-	return walcheckpoint.BarrierFunc(t.DataBarrierTimeTick)
-}
-
 type flushWork struct {
 	TargetTimeTick uint64
 	Chunk          *streamingpb.TransformLogChunk
@@ -461,6 +481,7 @@ func (t *TransformLog) commitFlushLocked(work flushWork) flushResult {
 		if result.DurableTimeTick > t.meta.GetCheckpointTimeTick() {
 			t.meta.CheckpointTimeTick = result.DurableTimeTick
 		}
+		result.CompletedMessages = t.takeMessagesThroughLocked(result.DurableTimeTick)
 	}
 
 	currentFlushTarget := t.buffer.FlushTargetTimeTick()
@@ -473,6 +494,55 @@ func (t *TransformLog) commitFlushLocked(work flushWork) flushResult {
 		result.NextTargetTimeTick = t.buffer.DataTimeTick()
 	}
 	return result
+}
+
+func (t *TransformLog) retainMessageLocked(timetick uint64, retained message.RetainedImmutableMessage) {
+	if retained == nil {
+		return
+	}
+	t.pendingMessages = append(t.pendingMessages, pendingMessage{
+		timetick: timetick,
+		message:  retained,
+	})
+}
+
+func (t *TransformLog) takeMessagesThroughLocked(timetick uint64) []message.RetainedImmutableMessage {
+	completed := make([]message.RetainedImmutableMessage, 0)
+	pending := t.pendingMessages[:0]
+	for _, item := range t.pendingMessages {
+		if item.timetick <= timetick {
+			completed = append(completed, item.message)
+			continue
+		}
+		pending = append(pending, item)
+	}
+	clear(t.pendingMessages[len(pending):])
+	t.pendingMessages = pending
+	return completed
+}
+
+func releaseMessages(messages []message.RetainedImmutableMessage) {
+	for _, msg := range messages {
+		msg.Release()
+	}
+}
+
+func releaseMessage(msg message.RetainedImmutableMessage) {
+	if msg != nil {
+		msg.Release()
+	}
+}
+
+func cloneMessage(clone func() message.RetainedImmutableMessage) message.RetainedImmutableMessage {
+	if clone == nil {
+		return nil
+	}
+	return clone()
+}
+
+type pendingMessage struct {
+	timetick uint64
+	message  message.RetainedImmutableMessage
 }
 
 type materializeWork struct {

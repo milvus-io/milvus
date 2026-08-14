@@ -141,6 +141,13 @@ The local `sealedAtDataVersion` is still recorded because it determines when a
 growing segment can stop contributing to the oracle and when its local growing
 BM25 stats can be removed.
 
+Initial `VChannelWALView` construction contains no flushed segment with an
+absent `sealedAtDataVersion`; the owning VChannel module resolves those final
+commits before runtime preparation. The `absent` case above is retained for a
+live Flush observed after WAL view capture and before its final-commit event is
+delivered. Such a segment continues contributing as growing until the exact
+first DataView membership version arrives.
+
 ### 3.4 Invariants
 
 1. `IDFOracleRuntime` implements `QueryRuntimeModule`.
@@ -153,6 +160,8 @@ BM25 stats can be removed.
 7. The initialized oracle DataVersion is the `VChannelWALView` base
    DataVersion.
 8. Initial sealed BM25 resources are fetched from QueryCoord.
+9. Initial preparation does not use a VChannel-level maximum DataVersion fence;
+   it consumes the same per-segment classification as `GrowingRuntime`.
 9. Initial growing BM25 stats are generated from the WALView segment snapshot.
 10. Live growing BM25 stats are generated from events forwarded by
     `QueryRuntime` in WAL order.

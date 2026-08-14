@@ -690,6 +690,42 @@ func TestSNHandler_Recover_AcquiresUpViewsInVersionOrder(t *testing.T) {
 	assert.True(t, keys[1].QueryViewVersion.GT(keys[0].QueryViewVersion))
 }
 
+func TestSNHandler_Recover_ReleasesSupersededRecoveredUpView(t *testing.T) {
+	cat := newMockCatalog()
+	mgr := newMockResourceManager()
+
+	meta := buildHandlerTestMeta(1)
+	meta.State = viewpb.QueryViewState_QueryViewStateUp
+	persistedView := &viewpb.QueryViewOfShard{
+		Meta:          meta,
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+	h := recoverSNQueryViewHandler(testPChannel, cat, mgr, []*viewpb.QueryViewOfShard{persistedView})
+
+	oldKey := newPreparingSNView(1).QueryViewKey()
+	oldAcquire, ok := mgr.getAcquired(oldKey)
+	require.True(t, ok)
+	oldAcquire.OnReady()
+
+	newView := newPreparingSNView(3)
+	newKey := newView.QueryViewKey()
+	h.ApplyViews([]handler.ApplyView{{View: newView}})
+	newAcquire, ok := mgr.getAcquired(newKey)
+	require.True(t, ok)
+	newAcquire.OnReady()
+	h.ApplyViews([]handler.ApplyView{{
+		View: newSNViewWithState(3, viewpb.QueryViewState_QueryViewStateUp),
+	}})
+
+	require.Equal(t, 1, mgr.releasedCount())
+	mgr.invokeReleaseCallback(oldKey)
+
+	lease, err := h.AcquireLatestUpView(context.Background(), newView.ShardID())
+	require.NoError(t, err)
+	defer lease.Release()
+	assert.Equal(t, newKey.QueryViewVersion, lease.Version)
+}
+
 // ---------------------------------------------------------------------------
 // 8. Callback replacement on re-apply
 // ---------------------------------------------------------------------------

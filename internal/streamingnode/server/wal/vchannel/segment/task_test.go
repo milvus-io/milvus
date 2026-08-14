@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -108,7 +109,7 @@ func TestRecoveredFinalCommitIsNotRepeated(t *testing.T) {
 	segment := NewSegmentViewFromMeta(
 		meta,
 		&schemapb.CollectionSchema{},
-		runtimeConfig{lifecycle: recorder, metaAndData: true},
+		runtimeConfig{lifecycle: recorder, metaAndData: true, owner: &recordingSegmentViewOwner{}},
 	)
 	task := &commitL1SegmentTask{
 		segmentTaskBase: segmentTaskBase{segment: segment},
@@ -129,7 +130,7 @@ func TestRecoveredDataCheckpointDoesNotProveFinalCommit(t *testing.T) {
 	segment := NewSegmentViewFromMeta(
 		meta,
 		&schemapb.CollectionSchema{},
-		runtimeConfig{lifecycle: recorder, metaAndData: true},
+		runtimeConfig{lifecycle: recorder, metaAndData: true, owner: &recordingSegmentViewOwner{}},
 	)
 	segment.mu.Lock()
 	task := segment.newRecoveredCommitL1SegmentTaskLocked(30)
@@ -142,6 +143,35 @@ func TestRecoveredDataCheckpointDoesNotProveFinalCommit(t *testing.T) {
 
 	assert.True(t, recovered.Done())
 	assert.Equal(t, []int64{100}, recorder.commitSegmentIDs)
+}
+
+func TestEnsureFinalCommitSchedulesOneTaskUntilSealedVersionIsInstalled(t *testing.T) {
+	scheduler := &recordingSegmentScheduler{}
+	recorder := &segmentTaskRecorder{}
+	meta := newFinalCommitTestMeta(100)
+	meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	meta.CheckpointTimeTick = 30
+	meta.DataCheckpointTimeTick = 20
+	segment := NewSegmentViewFromMeta(
+		meta,
+		&schemapb.CollectionSchema{},
+		runtimeConfig{
+			lifecycle:   recorder,
+			metaAndData: true,
+			runtime:     moduleapi.Runtime{Scheduler: scheduler},
+			owner:       &recordingSegmentViewOwner{},
+		},
+	)
+
+	assert.False(t, segment.EnsureFinalCommit())
+	require.Len(t, scheduler.tasks, 1)
+	assert.False(t, segment.EnsureFinalCommit())
+	require.Len(t, scheduler.tasks, 1)
+
+	require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
+	assert.True(t, segment.EnsureFinalCommit())
+	require.Len(t, scheduler.tasks, 1)
+	require.NotNil(t, segment.AssignmentMeta().GetSealedAtDataVersion())
 }
 
 type testSegmentTask struct {
@@ -180,7 +210,7 @@ func newFinalCommitTestSegment(recorder *segmentTaskRecorder, segmentID int64) *
 	return NewSegmentViewFromMeta(
 		newFinalCommitTestMeta(segmentID),
 		&schemapb.CollectionSchema{},
-		runtimeConfig{lifecycle: recorder, metaAndData: true},
+		runtimeConfig{lifecycle: recorder, metaAndData: true, owner: &recordingSegmentViewOwner{}},
 	)
 }
 

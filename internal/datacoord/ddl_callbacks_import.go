@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -312,7 +313,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// importing twice. The broadcaster adds the message type; everything else about
 		// the dedup identity is this scope.
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
-		WithBroadcast(vchannels).
+		WithBroadcast(importBroadcastChannels(vchannels)).
 		MustBuildBroadcast()
 
 	// Broadcast the message
@@ -355,8 +356,26 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 }
 
 func (c *DDLCallbacks) commitImportV2AckOnceCallback(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
+	if funcutil.IsControlChannel(result.Message.VChannel()) {
+		return nil
+	}
 	header := result.Message.Header()
 	return c.handleCommitImportV2Ack(ctx, header.GetJobId())
+}
+
+func importBroadcastChannels(vchannels []string) []string {
+	controlChannel := streaming.WAL().ControlChannel()
+	channels := make([]string, 0, len(vchannels)+1)
+	for _, vchannel := range vchannels {
+		channels = append(channels, vchannel)
+		if vchannel == controlChannel {
+			controlChannel = ""
+		}
+	}
+	if controlChannel != "" {
+		channels = append(channels, controlChannel)
+	}
+	return channels
 }
 
 func (c *DDLCallbacks) handleCommitImportV2Ack(ctx context.Context, jobID int64) error {

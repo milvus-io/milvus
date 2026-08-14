@@ -62,12 +62,15 @@ func (r *Runtime) segmentsSnapshot() []*growingSegment {
 	return segments
 }
 
-func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMessage) error {
+func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMessage, applyGrowing, applyTransform bool) error {
 	if r == nil || msg == nil {
 		return nil
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeCreateSegment:
+		if !applyGrowing {
+			return nil
+		}
 		created := message.MustAsImmutableCreateSegmentMessageV2(msg)
 		segment := r.getOrCreateSegment(created.Header().GetSegmentId(), created.Header().GetPartitionId())
 		if segment == nil {
@@ -75,15 +78,29 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 		}
 		return segment.ensureCSegment(msg.TimeTick())
 	case message.MessageTypeInsert:
+		if !applyGrowing {
+			return nil
+		}
 		return r.applyInsertMessage(ctx, msg)
 	case message.MessageTypeTxn:
-		if err := r.applyInsertMessage(ctx, msg); err != nil {
-			return err
+		if applyGrowing {
+			if err := r.applyInsertMessage(ctx, msg); err != nil {
+				return err
+			}
+		}
+		if applyTransform {
+			return r.applyLiveDeleteMessage(ctx, msg)
+		}
+		return nil
+	case message.MessageTypeDelete:
+		if !applyTransform {
+			return nil
 		}
 		return r.applyLiveDeleteMessage(ctx, msg)
-	case message.MessageTypeDelete:
-		return r.applyLiveDeleteMessage(ctx, msg)
 	case message.MessageTypeFlush:
+		if !applyGrowing {
+			return nil
+		}
 		flushed := message.MustAsImmutableFlushMessageV2(msg)
 		segment := r.getOrCreateSegment(flushed.Header().GetSegmentId(), flushed.Header().GetPartitionId())
 		if segment == nil {
