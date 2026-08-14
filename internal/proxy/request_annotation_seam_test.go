@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -47,7 +47,7 @@ import (
 // testReservedParamKey is the DQL parameter the form below reserves for itself.
 // It is deliberately a word milvus has no notion of: the seam must strip
 // whatever an extension says it strips, and the tests must fail if milvus ever
-// starts recognising a key of its own.
+// starts recognizing a key of its own.
 const testReservedParamKey = "x-form-reserved"
 
 // formAnnotationKey is the fake form's private context key. It stands for the
@@ -59,7 +59,7 @@ type formAnnotationKey struct{}
 // deployment form does - it takes its own parameter off the request, carries
 // what it found under its own context key, reads it back when milvus asks
 // whether the query may run, and answers with a routing decision of its own -
-// so the seams are exercised against behaviour rather than against a recorder
+// so the seams are exercised against behavior rather than against a recorder
 // that answers constants.
 //
 // Its decision is deliberately not its input: a request that declared "in07-a"
@@ -261,7 +261,7 @@ func TestStartProxyExtensionIsInertWithNoProvider(t *testing.T) {
 
 // TestObserveResourceGroupSQLatencyEmitsNoSeriesWithNoProvider is the inertness
 // proof for the attribution site. A metric family that gained a series in a
-// stock binary would be a behaviour change even though no request behaves
+// stock binary would be a behavior change even though no request behaves
 // differently, so the assertion is on the family's series count, not on a
 // value.
 func TestObserveResourceGroupSQLatencyEmitsNoSeriesWithNoProvider(t *testing.T) {
@@ -276,7 +276,7 @@ func TestObserveResourceGroupSQLatencyEmitsNoSeriesWithNoProvider(t *testing.T) 
 
 // TestObserveResourceGroupSQLatencyEmitsNoSeriesForAnUnscopedRequest covers the
 // other half: a provider is installed, but nothing scoped this request. An
-// unscoped request must not land in a series labelled with an empty resource
+// unscoped request must not land in a series labeled with an empty resource
 // group, which would silently pool every unrouted call into one bucket.
 func TestObserveResourceGroupSQLatencyEmitsNoSeriesForAnUnscopedRequest(t *testing.T) {
 	installFormExtension(t)
@@ -291,7 +291,7 @@ func TestObserveResourceGroupSQLatencyEmitsNoSeriesForAnUnscopedRequest(t *testi
 // TestObserveResourceGroupSQLatencyAttributesToTheScopeRoutingUsed pins which
 // of the two candidate values the label carries: the scope the query was
 // actually routed with, which is the only one milvus itself decided on and
-// honoured.
+// honored.
 func TestObserveResourceGroupSQLatencyAttributesToTheScopeRoutingUsed(t *testing.T) {
 	installFormExtension(t)
 	metrics.ProxyResourceGroupSQLatency.Reset()
@@ -537,7 +537,7 @@ func TestStartProxyExtensionCancelsWithTheProxyContext(t *testing.T) {
 	select {
 	case <-ext.startCtxWasDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the context handed to Start must be cancelled when the proxy stops, or its background work outlives the proxy")
+		t.Fatal("the context handed to Start must be canceled when the proxy stops, or its background work outlives the proxy")
 	}
 }
 
@@ -588,7 +588,7 @@ func TestSearchInstallsTheRewrittenRequestAndAttributesIt(t *testing.T) {
 // TestSearchIsNotAttributedToWhatTheClientDeclared is the other half of the same
 // assertion, stated so that it cannot pass by accident. The label must carry the
 // form's decision, not the client's declaration: on a form where the two differ,
-// labelling by the declaration would report a query against a resource group it
+// labeling by the declaration would report a query against a resource group it
 // never touched.
 func TestSearchIsNotAttributedToWhatTheClientDeclared(t *testing.T) {
 	installFormExtension(t)

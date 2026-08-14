@@ -391,14 +391,14 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 // gone, which is the same condition under which the unscoped path drops them.
 func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context, key string, task LoadTask) {
 	replicaIDs := make([]int64, 0)
-	for _, replica := range ob.meta.ReplicaManager.GetByCollection(ctx, task.CollectionID) {
+	for _, replica := range ob.meta.GetByCollection(ctx, task.CollectionID) {
 		if replica.GetResourceGroup() == task.ResourceGroup {
 			replicaIDs = append(replicaIDs, replica.GetID())
 		}
 	}
 
 	if len(replicaIDs) > 0 {
-		if err := ob.meta.ReplicaManager.RemoveReplicas(ctx, task.CollectionID, replicaIDs...); err != nil {
+		if err := ob.meta.RemoveReplicas(ctx, task.CollectionID, replicaIDs...); err != nil {
 			// Leave the task in place so the next tick retries the teardown;
 			// dropping it here would leak the stalled replicas forever.
 			mlog.Warn(ctx, "failed to remove replicas of timed out resource group",
@@ -410,7 +410,7 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 		}
 	}
 
-	if remaining := ob.meta.ReplicaManager.GetByCollection(ctx, task.CollectionID); len(remaining) == 0 {
+	if remaining := ob.meta.GetByCollection(ctx, task.CollectionID); len(remaining) == 0 {
 		ob.meta.CollectionManager.RemoveCollection(ctx, task.CollectionID)
 		ob.targetObserver.ReleaseCollection(task.CollectionID)
 	}

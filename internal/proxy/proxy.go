@@ -300,7 +300,7 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
-	// node.ctx is cancelled by Stop, which is what stops whatever the
+	// node.ctx is canceled by Stop, which is what stops whatever the
 	// extension started here.
 	startProxyExtension(node.ctx)
 

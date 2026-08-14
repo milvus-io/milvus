@@ -36,7 +36,7 @@ func (s *Server) checkFileResourceReadyForResourceGroups(ctx context.Context, rg
 		if rgName == "" {
 			continue
 		}
-		rgNodes, err := s.meta.ResourceManager.GetNodes(ctx, rgName)
+		rgNodes, err := s.meta.GetNodes(ctx, rgName)
 		if err != nil {
 			continue
 		}

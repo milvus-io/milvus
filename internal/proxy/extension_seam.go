@@ -163,7 +163,7 @@ func onConnect(identifier int64, info *commonpb.ClientInfo) error {
 }
 
 // startProxyExtension starts the extension's proxy-side background work. It is
-// called once from Proxy.Start; the work stops when ctx is cancelled, which
+// called once from Proxy.Start; the work stops when ctx is canceled, which
 // Proxy.Stop does.
 func startProxyExtension(ctx context.Context) {
 	if ext := extension.Caps().ProxyExt; ext != nil {
@@ -254,7 +254,7 @@ func ensureQueryReady(ctx context.Context, node *Proxy, dbName, collectionName s
 // It labels the query with the scope ensureQueryReady decided on, not with
 // anything the client declared. The two are the same value on the form that has
 // both, but only the decision is milvus's own concept and only the decision is
-// what routing actually used - a query labelled with a request it did not honour
+// what routing actually used - a query labeled with a request it did not honor
 // would be a metric that agrees with the client and disagrees with the cluster.
 //
 // It reads the context rather than asking the extension: the scope is already
@@ -284,7 +284,7 @@ func apiKeyVerifier() extension.APIKeyVerifier {
 
 // ExternalListenerRequiresAPIKey reports whether the external listener must
 // refuse username and password authentication. False with no verifier
-// installed, which is milvus's own behaviour.
+// installed, which is milvus's own behavior.
 func ExternalListenerRequiresAPIKey() bool {
 	if v := apiKeyVerifier(); v != nil {
 		return v.RequireAPIKeyOnExternalListener()

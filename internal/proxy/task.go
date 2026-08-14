@@ -484,7 +484,7 @@ func (t *createCollectionTask) validateTTL() error {
 
 // collectionAlreadyExists reports whether the collection is already
 // resolvable in the metadata cache. Guards globalMetaCache being nil, which
-// is not always initialised in tests.
+// is not always initialized in tests.
 func collectionAlreadyExists(ctx context.Context, database, collectionName string) bool {
 	if globalMetaCache == nil {
 		return false

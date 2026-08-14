@@ -16,7 +16,7 @@ import (
 // coordinator's per-resource-group shard-leader readiness is answered by
 // querycoord itself, not by a stub: a Server that has not been initialized
 // answers not-ready with the coordinator-not-ready reason and no panic, which
-// is querycoord's own documented behaviour for that state.
+// is querycoord's own documented behavior for that state.
 func TestGetShardLeaderReadinessByResourceGroupReachesQueryCoord(t *testing.T) {
 	s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 

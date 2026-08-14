@@ -120,12 +120,14 @@ func installEngine(t *testing.T, e extension.CoordinatorEngine) {
 	assert.NoError(t, extension.SetProvider(fakeEngineProvider{engine: e}))
 }
 
-func newTestServer(coord *engineTestCoord) *Server {
+func newTestServer(t *testing.T, coord *engineTestCoord) *Server {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	return &Server{ctx: ctx, cancel: cancel, mixCoord: coord, grpcErrChan: make(chan error)}
 }
 
-// TestCoordinatorEngineSeamIsInertWithoutProvider is the zero-behaviour-change
+// TestCoordinatorEngineSeamIsInertWithoutProvider is the zero-behavior-change
 // proof: with no provider installed, nothing is registered on the coordinator's
 // gRPC server, no adapter is built over the coordinator, and stopping is a
 // no-op.
@@ -188,7 +190,7 @@ func TestServerStartHandsEngineAdapterOverCoordinator(t *testing.T) {
 			},
 		},
 	}
-	svr := newTestServer(coord)
+	svr := newTestServer(t, coord)
 	assert.NoError(t, svr.start())
 	assert.Equal(t, 1, engine.startCount, "the coordinator must start the engine exactly once")
 
@@ -245,7 +247,7 @@ func TestServerStartPropagatesEngineStartFailure(t *testing.T) {
 	want := errors.New("engine failed to start")
 	installEngine(t, &recordingEngine{startErr: want})
 
-	svr := newTestServer(&engineTestCoord{})
+	svr := newTestServer(t, &engineTestCoord{})
 	assert.ErrorIs(t, svr.start(), want)
 }
 
@@ -288,7 +290,7 @@ func TestServerStopStopsEngine(t *testing.T) {
 	engine := &recordingEngine{stopErr: errors.New("engine stop failed")}
 	installEngine(t, engine)
 
-	svr := newTestServer(&engineTestCoord{})
+	svr := newTestServer(t, &engineTestCoord{})
 	assert.NoError(t, svr.Stop(),
 		"an engine that fails to stop must not fail the coordinator shutdown")
 	assert.Equal(t, 1, engine.stopCount, "the coordinator must stop the engine exactly once")
@@ -306,7 +308,7 @@ func TestServerGrpcSetupRegistersEngineServices(t *testing.T) {
 	listener, err := netutil.NewListener(netutil.OptIP("127.0.0.1"), netutil.OptPort(0))
 	assert.NoError(t, err)
 
-	svr := newTestServer(&engineTestCoord{})
+	svr := newTestServer(t, &engineTestCoord{})
 	svr.listener = listener
 	t.Cleanup(func() {
 		svr.grpcServer.Stop()

@@ -18,10 +18,10 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -382,7 +382,7 @@ func TestReleasePartitionsReachesTheNativePathWithNoProviderInstalled(t *testing
 // A refresh is not a load: querycoord answers it from a branch of its own that
 // re-pulls the target of an already-loaded collection, and it is the only way a
 // client can ask for that re-read. So an extension that answers ordinary loads
-// returns nil for a refresh, and the seam has to honour the nil by carrying on
+// returns nil for a refresh, and the seam has to honor the nil by carrying on
 // into the native path even though an extension IS installed.
 //
 // Both halves are asserted against the same extension in the same test: the

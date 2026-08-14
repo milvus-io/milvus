@@ -18,11 +18,11 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

@@ -34,7 +34,7 @@ import (
 // is the cumulative request a native caller would have sent, so the
 // reconciliation leaves those replicas where they are - and the record it
 // builds describes a placement that grew rather than one that moved, which is
-// what lets the load job downstream recognise it as an incremental expansion
+// what lets the load job downstream recognize it as an incremental expansion
 // and keep the collection's serving state intact.
 //
 // expected is the non-nil map utils.AssignReplica just returned. It is never

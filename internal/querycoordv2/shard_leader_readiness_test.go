@@ -68,14 +68,14 @@ func (f *shardLeaderReadinessFixture) server() *Server {
 // (checkLoadStatus) reports the collection ready.
 func (f *shardLeaderReadinessFixture) putLoadedCollection(t *testing.T, collectionID, partitionID int64, channelNames ...string) {
 	ctx := context.Background()
-	require.NoError(t, f.meta.CollectionManager.PutCollectionWithoutSave(ctx, &meta.Collection{
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID: collectionID,
 			Status:       querypb.LoadStatus_Loaded,
 		},
 		LoadPercentage: 100,
 	}))
-	require.NoError(t, f.meta.CollectionManager.PutPartitionWithoutSave(ctx, &meta.Partition{
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
@@ -100,7 +100,7 @@ func (f *shardLeaderReadinessFixture) putLoadedCollection(t *testing.T, collecti
 // silently clobber the earlier replica.
 func (f *shardLeaderReadinessFixture) putReplica(t *testing.T, collectionID int64, rgName string, nodeIDs ...int64) {
 	require.NotEmpty(t, nodeIDs)
-	require.NoError(t, f.meta.ReplicaManager.Put(context.Background(), meta.NewReplica(&querypb.Replica{
+	require.NoError(t, f.meta.Put(context.Background(), meta.NewReplica(&querypb.Replica{
 		ID:            nodeIDs[0],
 		CollectionID:  collectionID,
 		ResourceGroup: rgName,
@@ -362,7 +362,7 @@ func TestShardLeaderReadinessByRG_EmptyRGSpansEveryReplica(t *testing.T) {
 func TestShardLeaderReadinessByRG_NoChannelTarget(t *testing.T) {
 	ctx := context.Background()
 	f := newShardLeaderReadinessFixture(t)
-	require.NoError(t, f.meta.CollectionManager.PutCollectionWithoutSave(ctx, &meta.Collection{
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 900, Status: querypb.LoadStatus_Loaded},
 		LoadPercentage:     100,
 	}))
@@ -412,7 +412,7 @@ func TestShardLeaderReadinessByRG_UninitializedServer(t *testing.T) {
 }
 
 // TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged is the
-// zero-behaviour-change proof on the querycoord side: asking the
+// zero-behavior-change proof on the querycoord side: asking the
 // per-resource-group question is a pure read, so the native, collection-wide
 // shard-leader answer is byte-for-byte the same before and after, for every
 // resource group asked about including ones that do not exist.
@@ -427,7 +427,7 @@ func TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged(t *testing.T
 
 	// The native answer is built by walking a map of channels, so its order is
 	// not stable across calls. Compare it keyed by channel, or this test would
-	// fail on shuffling rather than on a behaviour change.
+	// fail on shuffling rather than on a behavior change.
 	nativeShards := func() map[string]*querypb.ShardLeadersList {
 		lists, err := utils.GetShardLeaders(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 1100, false)
 		require.NoError(t, err)

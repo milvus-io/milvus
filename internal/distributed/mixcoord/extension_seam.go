@@ -19,12 +19,12 @@ package grpcmixcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // This file is the coordinator-side seam. It declares WHERE the coordinator
@@ -111,15 +111,15 @@ func (c mixCoordEngineClient) InvalidateShardLeaderCache(ctx context.Context, co
 func newMixCoordEngineClient(coord types.MixCoordComponent) (extension.MixCoord, error) {
 	loadPercentage, ok := coord.(loadPercentageByResourceGroupProvider)
 	if !ok {
-		return nil, errors.New("extension: coordinator does not provide GetLoadPercentageByResourceGroup, cannot serve the coordinator engine")
+		return nil, merr.WrapErrServiceInternal("extension: coordinator does not provide GetLoadPercentageByResourceGroup, cannot serve the coordinator engine")
 	}
 	shardLeaders, ok := coord.(shardLeaderReadinessByResourceGroupProvider)
 	if !ok {
-		return nil, errors.New("extension: coordinator does not provide GetShardLeaderReadinessByResourceGroup, cannot serve the coordinator engine")
+		return nil, merr.WrapErrServiceInternal("extension: coordinator does not provide GetShardLeaderReadinessByResourceGroup, cannot serve the coordinator engine")
 	}
 	shardLeaderCache, ok := coord.(shardLeaderCacheInvalidatorProvider)
 	if !ok {
-		return nil, errors.New("extension: coordinator does not provide InvalidateShardLeaderCache, cannot serve the coordinator engine")
+		return nil, merr.WrapErrServiceInternal("extension: coordinator does not provide InvalidateShardLeaderCache, cannot serve the coordinator engine")
 	}
 	return mixCoordEngineClient{
 		MixCoordComponent:    coord,

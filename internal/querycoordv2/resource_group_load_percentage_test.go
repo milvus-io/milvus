@@ -70,10 +70,10 @@ func (f *rgLoadPercentageFixture) freeFn(ctx context.Context, collectionID int64
 // GetDmChannelsByCollection (both read with meta.NextTarget) will report.
 func (f *rgLoadPercentageFixture) putTarget(t *testing.T, collectionID, partitionID int64, channelName string, segmentIDs ...int64) {
 	ctx := context.Background()
-	require.NoError(t, f.meta.CollectionManager.PutCollectionWithoutSave(ctx, &meta.Collection{
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID},
 	}))
-	require.NoError(t, f.meta.CollectionManager.PutPartitionWithoutSave(ctx, &meta.Partition{
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: collectionID, PartitionID: partitionID},
 	}))
 
@@ -105,7 +105,7 @@ func (f *rgLoadPercentageFixture) putReplica(t *testing.T, collectionID, nodeID 
 		ResourceGroup: rgName,
 		Nodes:         []int64{nodeID},
 	})
-	require.NoError(t, f.meta.ReplicaManager.Put(context.Background(), replica))
+	require.NoError(t, f.meta.Put(context.Background(), replica))
 }
 
 // putDelegator records nodeID as the delegator for channelName, holding
@@ -231,7 +231,7 @@ func TestGetLoadPercentageByResourceGroup_ChannelWatchedNoSegments(t *testing.T)
 func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.meta.CollectionManager.PutCollectionWithoutSave(ctx, &meta.Collection{
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 500},
 	}))
 	f.putReplica(t, 500, 50, "rg-target")

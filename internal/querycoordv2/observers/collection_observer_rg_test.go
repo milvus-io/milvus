@@ -171,7 +171,7 @@ func (s *CollectionObserverRGSuite) registerLoadingCollection(collectionID, part
 // putReplica adds a replica of collectionID in rgName owning exactly nodeID.
 func (s *CollectionObserverRGSuite) putReplica(collectionID, replicaID, nodeID int64, rgName string) {
 	s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
-	s.Require().NoError(s.meta.ReplicaManager.Put(s.ctx, meta.NewReplica(&querypb.Replica{
+	s.Require().NoError(s.meta.Put(s.ctx, meta.NewReplica(&querypb.Replica{
 		ID:            replicaID,
 		CollectionID:  collectionID,
 		ResourceGroup: rgName,
@@ -233,7 +233,7 @@ func (s *CollectionObserverRGSuite) taskKey(collectionID int64, rgName string) s
 
 func (s *CollectionObserverRGSuite) replicaIDsInRG(collectionID int64, rgName string) []int64 {
 	ids := make([]int64, 0)
-	for _, replica := range s.meta.ReplicaManager.GetByCollection(s.ctx, collectionID) {
+	for _, replica := range s.meta.GetByCollection(s.ctx, collectionID) {
 		if replica.GetResourceGroup() == rgName {
 			ids = append(ids, replica.GetID())
 		}
@@ -271,7 +271,7 @@ func (s *CollectionObserverRGSuite) TestUnscopedTaskKeepsCollectionWideTimeout()
 	s.ob.observeTimeout(s.ctx, progress)
 
 	s.Nil(s.meta.GetCollection(s.ctx, 100), "unscoped task must still time out on the stale collection.UpdatedAt")
-	s.Empty(s.meta.ReplicaManager.GetByCollection(s.ctx, 100))
+	s.Empty(s.meta.GetByCollection(s.ctx, 100))
 	s.False(s.ob.loadTasks.Contain(key))
 }
 
@@ -348,7 +348,7 @@ func (s *CollectionObserverRGSuite) TestFreshResourceGroupTaskSurvivesStaleColle
 		s.backdateCollectionUpdatedAt(collectionID, time.Hour)
 	}
 
-	s.ob.LoadCollection(s.ctx, 200, "") // control: pre-change behaviour
+	s.ob.LoadCollection(s.ctx, 200, "") // control: pre-change behavior
 	s.ob.LoadCollection(s.ctx, 201, rgB)
 	scopedKey := s.taskKey(201, rgB)
 
@@ -457,7 +457,7 @@ func (s *CollectionObserverRGSuite) TestLastResourceGroupTimeoutReleasesCollecti
 
 	s.ob.observeTimeout(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
 
-	s.Empty(s.meta.ReplicaManager.GetByCollection(s.ctx, 500))
+	s.Empty(s.meta.GetByCollection(s.ctx, 500))
 	s.Nil(s.meta.GetCollection(s.ctx, 500), "the last resource group's timeout must release the collection")
 	s.False(s.ob.loadTasks.Contain(key))
 }

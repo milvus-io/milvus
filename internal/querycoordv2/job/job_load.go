@@ -124,7 +124,7 @@ func (job *LoadCollectionJob) Execute() error {
 	// resource group this request adds would never get an observer task.
 	preSpawnRGs := typeutil.NewSet[string]()
 	if incrementalExpansion {
-		for _, replica := range job.meta.ReplicaManager.GetByCollection(job.ctx, req.GetCollectionId()) {
+		for _, replica := range job.meta.GetByCollection(job.ctx, req.GetCollectionId()) {
 			preSpawnRGs.Insert(replica.GetResourceGroup())
 		}
 	}
@@ -339,7 +339,7 @@ func requestedLoadFields(req *messagespb.AlterLoadConfigMessageHeader) (map[int6
 //     group. An extra replica in a resource group that is already loaded would
 //     be left with no task at all, so that request keeps the overwrite.
 func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadConfigMessageHeader, newReplicas []*messagespb.LoadReplicaConfig) bool {
-	existing := job.meta.CollectionManager.GetCollection(job.ctx, req.GetCollectionId())
+	existing := job.meta.GetCollection(job.ctx, req.GetCollectionId())
 	if existing == nil || existing.GetStatus() != querypb.LoadStatus_Loaded {
 		return false
 	}
@@ -351,7 +351,7 @@ func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadCo
 	}
 
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
-	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
 	if len(currentPartitions) != incomingPartitions.Len() {
 		return false
 	}
@@ -369,7 +369,7 @@ func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadCo
 		return false
 	}
 
-	existingReplicas := job.meta.ReplicaManager.GetByCollection(job.ctx, req.GetCollectionId())
+	existingReplicas := job.meta.GetByCollection(job.ctx, req.GetCollectionId())
 	if len(newReplicas) <= len(existingReplicas) {
 		return false
 	}

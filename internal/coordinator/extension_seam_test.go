@@ -11,7 +11,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -117,7 +116,7 @@ func installDrainer(t *testing.T, drainer extension.IndexDrainer) {
 	installCaps(t, extension.Capabilities{IndexDrain: drainer})
 }
 
-// TestResourceGroupSeamIsInertWithoutProvider is the zero-behaviour-change
+// TestResourceGroupSeamIsInertWithoutProvider is the zero-behavior-change
 // proof for the three resource-group call sites: querycoord receives the very
 // request objects the caller passed in, and its answer reaches the caller
 // unchanged.
@@ -349,7 +348,7 @@ func TestResourceGroupPathIgnoresDrainerOnlyProvider(t *testing.T) {
 	})
 }
 
-// TestIndexSeamIsInertWithoutProvider is the zero-behaviour-change proof for
+// TestIndexSeamIsInertWithoutProvider is the zero-behavior-change proof for
 // the index call site.
 func TestIndexSeamIsInertWithoutProvider(t *testing.T) {
 	extension.ResetForTest()

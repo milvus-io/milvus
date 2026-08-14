@@ -21,7 +21,7 @@ import (
 // and does not import the querycoordv2 root package.
 //
 // rgName == "" means "every replica of the collection", which is the
-// collection-wide question and the behaviour every upstream caller wants: an
+// collection-wide question and the behavior every upstream caller wants: an
 // empty resource group is not a filter that matches nothing, it is the absence
 // of a filter. This keeps the resource-group concept inert for callers that do
 // not use it.
@@ -100,7 +100,7 @@ func LoadPercentageByResourceGroup(
 	return percentage, nil
 }
 
-// replicaLoadPercentage is the per-replica analogue of what
+// replicaLoadPercentage is the per-replica analog of what
 // CollectionObserver.observePartitionLoadStatus computes for a whole
 // collection: it reads the collection's segment and channel targets from
 // meta.NextTarget -- the target the observer itself measures progress

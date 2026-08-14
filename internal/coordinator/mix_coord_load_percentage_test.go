@@ -15,7 +15,7 @@ import (
 // coordinator's per-resource-group load progress is answered by querycoord
 // itself, not by a stub: a Server that has not been initialized answers -1
 // ("no replica of this collection lives in this resource group") without
-// panicking, which is querycoord's own documented behaviour for that state.
+// panicking, which is querycoord's own documented behavior for that state.
 func TestGetLoadPercentageByResourceGroupReachesQueryCoord(t *testing.T) {
 	s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 

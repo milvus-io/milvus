@@ -505,7 +505,7 @@ func (suite *IncrementalExpansionSuite) seedLoadedCollection(replicaID int64, rg
 }
 
 func (suite *IncrementalExpansionSuite) seedCollection(status querypb.LoadStatus, loadType querypb.LoadType, dbID int64) {
-	err := suite.meta.CollectionManager.PutCollection(suite.ctx, &meta.Collection{
+	err := suite.meta.PutCollection(suite.ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  expansionCollectionID,
 			DbID:          dbID,
@@ -532,7 +532,7 @@ func (suite *IncrementalExpansionSuite) seedCollection(status querypb.LoadStatus
 }
 
 func (suite *IncrementalExpansionSuite) seedReplica(replicaID int64, rg string, nodes ...int64) {
-	err := suite.meta.ReplicaManager.Put(suite.ctx, meta.NewReplica(&querypb.Replica{
+	err := suite.meta.Put(suite.ctx, meta.NewReplica(&querypb.Replica{
 		ID:            replicaID,
 		CollectionID:  expansionCollectionID,
 		ResourceGroup: rg,
@@ -618,7 +618,7 @@ func (suite *IncrementalExpansionSuite) TestFirstLoadOverwritesMetaAndRegistersU
 	suite.NoError(err)
 	suite.Equal(1, putCalls, "a first load must store the collection meta")
 
-	collection := suite.meta.CollectionManager.GetCollection(suite.ctx, expansionCollectionID)
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Require().NotNil(collection)
 	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus())
 	suite.EqualValues(1, collection.GetReplicaNumber())
@@ -639,7 +639,7 @@ func (suite *IncrementalExpansionSuite) TestReloadOverwritesMeta() {
 	suite.NoError(err)
 	suite.Equal(1, putCalls, "a reload must still store the collection meta")
 
-	collection := suite.meta.CollectionManager.GetCollection(suite.ctx, expansionCollectionID)
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus())
 	suite.Require().Len(tasks, 1)
 	suite.Equal("", tasks[0].resourceGroup)
@@ -657,7 +657,7 @@ func (suite *IncrementalExpansionSuite) TestReplicaNumberIncreaseInSameResourceG
 	suite.NoError(err)
 	suite.Equal(1, putCalls, "a replica-number change must still store the collection meta")
 
-	collection := suite.meta.CollectionManager.GetCollection(suite.ctx, expansionCollectionID)
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus())
 	suite.EqualValues(2, collection.GetReplicaNumber())
 	suite.Require().Len(tasks, 1)
@@ -681,22 +681,22 @@ func (suite *IncrementalExpansionSuite) TestReplicaNumberDecreaseOverwritesMeta(
 // a collection loaded into rgA hours ago is loaded again to also cover rgB.
 func (suite *IncrementalExpansionSuite) TestIncrementalExpansionKeepsLoadedResourceGroupIntact() {
 	suite.seedLoadedCollection(1, rgA, 1)
-	before := suite.meta.CollectionManager.GetCollection(suite.ctx, expansionCollectionID)
-	beforePartition := suite.meta.CollectionManager.GetPartition(suite.ctx, expansionPartitionID)
+	before := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
+	beforePartition := suite.meta.GetPartition(suite.ctx, expansionPartitionID)
 
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
 		replicaConfig(1, rgA), replicaConfig(2, rgB)))
 	suite.NoError(err)
 	suite.Equal(0, putCalls, "an incremental resource group expansion must not overwrite the collection meta")
 
-	collection := suite.meta.CollectionManager.GetCollection(suite.ctx, expansionCollectionID)
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Require().NotNil(collection)
 	suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus(), "rgA must stay loaded")
 	suite.EqualValues(100, collection.LoadPercentage, "rgA's load percentage must survive")
 	suite.Equal(before.CreatedAt, collection.CreatedAt, "the collection must not be recreated")
 	suite.EqualValues(2, collection.GetReplicaNumber(), "the replica count must follow the expansion")
 
-	partition := suite.meta.CollectionManager.GetPartition(suite.ctx, expansionPartitionID)
+	partition := suite.meta.GetPartition(suite.ctx, expansionPartitionID)
 	suite.Require().NotNil(partition)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
 	suite.EqualValues(100, partition.LoadPercentage)
@@ -902,13 +902,13 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 
 	collectionObserver.Observe(suite.ctx)
 
-	collection := suite.meta.CollectionManager.GetCollection(suite.ctx, expansionCollectionID)
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Require().NotNil(collection, "the observer must not release the collection")
 	suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus())
-	suite.EqualValues(100, suite.meta.CollectionManager.CalculateLoadPercentage(suite.ctx, expansionCollectionID),
+	suite.EqualValues(100, suite.meta.CalculateLoadPercentage(suite.ctx, expansionCollectionID),
 		"the serving resource group must not be averaged down by the loading one")
-	suite.EqualValues(100, suite.meta.CollectionManager.GetPartitionLoadPercentage(suite.ctx, expansionPartitionID))
-	suite.Len(suite.meta.ReplicaManager.GetByCollection(suite.ctx, expansionCollectionID), 2,
+	suite.EqualValues(100, suite.meta.GetPartitionLoadPercentage(suite.ctx, expansionPartitionID))
+	suite.Len(suite.meta.GetByCollection(suite.ctx, expansionCollectionID), 2,
 		"neither resource group's replica may be torn down")
 }
 
