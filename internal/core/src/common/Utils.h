@@ -46,6 +46,40 @@ namespace milvus {
 #define VEC_FIELD_DATA(data_array, type) \
     (data_array->vectors().type##_vector().data())
 
+inline const google::protobuf::RepeatedField<bool>&
+GetFieldDataRowValidData(const DataArray& field_data) {
+    // New payloads normally store validity in the field-specific ScalarField
+    // or VectorField. FieldData.valid_data is kept as a fallback for legacy
+    // payloads that do not contain field-specific validity.
+    if (field_data.has_scalars() &&
+        field_data.scalars().valid_data_size() > 0) {
+        return field_data.scalars().valid_data();
+    }
+    if (field_data.has_vectors() &&
+        field_data.vectors().valid_data_size() > 0) {
+        return field_data.vectors().valid_data();
+    }
+    return field_data.valid_data();
+}
+
+inline google::protobuf::RepeatedField<bool>*
+MutableFieldDataRowValidData(DataArray* field_data) {
+    field_data->clear_valid_data();
+    if (field_data->has_scalars()) {
+        return field_data->mutable_scalars()->mutable_valid_data();
+    }
+    if (field_data->has_vectors()) {
+        return field_data->mutable_vectors()->mutable_valid_data();
+    }
+    auto data_type = static_cast<DataType>(field_data->type());
+    AssertInfo(data_type != DataType::NONE,
+               "cannot set valid_data without FieldData type");
+    if (IsVectorDataType(data_type)) {
+        return field_data->mutable_vectors()->mutable_valid_data();
+    }
+    return field_data->mutable_scalars()->mutable_valid_data();
+}
+
 using CheckDataValid = std::function<bool(size_t)>;
 using SparseValueType = typename knowhere::sparse_u32_f32::ValueType;
 

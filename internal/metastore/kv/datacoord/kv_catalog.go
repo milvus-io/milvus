@@ -1319,3 +1319,31 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 	}
 	return snapshots, nil
 }
+
+func (kc *Catalog) SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error {
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, buildExportSnapshotJobKey(job.GetJobId()), string(value))
+}
+
+func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error) {
+	jobs := make([]*datapb.ExportSnapshotJob, 0)
+	applyFn := func(key []byte, value []byte) error {
+		job := &datapb.ExportSnapshotJob{}
+		if err := proto.Unmarshal(value, job); err != nil {
+			return err
+		}
+		jobs = append(jobs, job)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ExportSnapshotJobPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
+	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
+}

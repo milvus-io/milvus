@@ -1030,8 +1030,10 @@ TEST(TextMatch, GrowingNaiveNullable) {
                        .mutable_scalars()
                        ->mutable_string_data()
                        ->mutable_data();
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
@@ -1233,8 +1235,10 @@ TEST(TextMatch, SealedNaiveNullable) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = raw_str_valid[i];
     }
@@ -1422,8 +1426,10 @@ TEST(TextMatch, GrowingJieBaNullable) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = raw_str_valid[i];
     }
@@ -1604,8 +1610,10 @@ TEST(TextMatch, SealedJieBaNullable) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = raw_str_valid[i];
     }
@@ -1708,8 +1716,10 @@ TEST(TextMatch, GrowingLoadData) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = true;
     }
@@ -1746,8 +1756,10 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
     int64_t N = 1000;
     uint64_t seed = 19190504;
     auto raw_data = DataGen(schema, N, seed);
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     auto str_col = raw_data.raw_->mutable_fields_data()
                        ->at(1)
                        .mutable_scalars()

@@ -2396,18 +2396,10 @@ func TestNullableVectorUpsert(t *testing.T) {
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, upsert3Nb, upsertRes3.UpsertCount)
 
-			// For AutoID=true, upsert returns new IDs for the upserted rows
+			// AutoID partial update keeps the existing primary keys.
 			if autoID {
 				upsertedIDs := upsertRes3.IDs.(*column.ColumnInt64)
-				newPkData := upsertedIDs.Data()
-				// Update actualPkData for rows 0 to nullPercent-1
-				for i := range upsert3Nb {
-					// Remove old expected state
-					delete(expectedVectorMap, actualPkData[i])
-					delete(expectedScalarMap, actualPkData[i])
-					// Update to new PK
-					actualPkData[i] = newPkData[i]
-				}
+				require.Equal(t, upsert3PkData, upsertedIDs.Data())
 			}
 
 			// Update expected state: rows 0 to nullPercent-1 scalar updated, vector preserved (null)

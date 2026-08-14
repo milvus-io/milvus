@@ -17,15 +17,18 @@
 package session
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -36,6 +39,19 @@ import (
 
 func init() {
 	paramtable.Init()
+}
+
+type querySlotDataNodeClient struct {
+	types.DataNodeClient
+	response *datapb.QuerySlotResponse
+}
+
+func (c *querySlotDataNodeClient) QuerySlot(
+	context.Context,
+	*datapb.QuerySlotRequest,
+	...grpc.CallOption,
+) (*datapb.QuerySlotResponse, error) {
+	return c.response, nil
 }
 
 func TestCluster_createTask(t *testing.T) {
@@ -185,6 +201,23 @@ func TestCluster_QuerySlot(t *testing.T) {
 		assert.NotNil(t, result)
 		assert.Empty(t, result)
 	})
+}
+
+func TestCluster_QuerySlotReportsVersion(t *testing.T) {
+	client := &querySlotDataNodeClient{
+		response: &datapb.QuerySlotResponse{
+			Status:         merr.Success(),
+			AvailableSlots: 5,
+			Version:        "3.0.1",
+		},
+	}
+
+	manager := &nodeManager{
+		nodeClients: map[int64]types.DataNodeClient{1: client},
+	}
+	result := NewCluster(manager).QuerySlot()
+
+	assert.Equal(t, "3.0.1", result[1].Version)
 }
 
 func TestCluster_Compaction(t *testing.T) {

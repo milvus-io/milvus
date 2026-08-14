@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -84,6 +85,35 @@ func init() {
 	streaming.SetupNoopWALForTest()
 }
 
+type httpServerLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*httpServerLogBuffer) Sync() error {
+	return nil
+}
+
+func captureHTTPServerLogs(t *testing.T) *httpServerLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &httpServerLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
 func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
 	t.Run(testName, func(t *testing.T) {
 		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))
@@ -101,7 +131,7 @@ func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method str
 }
 
 func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
-	externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 	testCases := []struct {
 		name string
 		req  any
@@ -133,7 +163,149 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 			request := fmt.Sprint(field.Interface)
 			assert.NotContains(t, request, "AKIAEXAMPLE")
 			assert.NotContains(t, request, "SUPERSECRET")
+			assert.NotContains(t, request, "FUTURE_SECRET_SENTINEL")
 			assert.Contains(t, request, "***")
+			assert.Contains(t, request, "parquet")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTExternalCollectionCredentials(t *testing.T) {
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIA_EXTERNAL_SENTINEL","access_key_value":"SECRET_EXTERNAL_SENTINEL","future_password":"FUTURE_SPEC_REST_SENTINEL","region":"us-east-1"}}`
+	externalSource := "s3://SOURCE_ACCESS_REST_SENTINEL:SOURCE_SECRET_REST_SENTINEL@bucket/path"
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "create external collection",
+			req: &CollectionReq{
+				CollectionName: "external_collection",
+				Schema: CollectionSchema{
+					ExternalSource: externalSource,
+					ExternalSpec:   externalSpec,
+				},
+				TopLevelExternalSource: externalSource,
+				TopLevelExternalSpec:   externalSpec,
+			},
+		},
+		{
+			name: "refresh external collection",
+			req: &RefreshExternalCollectionReq{
+				CollectionName: "external_collection",
+				ExternalSource: externalSource,
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "SOURCE_ACCESS_REST_SENTINEL")
+			assert.NotContains(t, request, "SOURCE_SECRET_REST_SENTINEL")
+			assert.NotContains(t, request, "AKIA_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "SECRET_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "FUTURE_SPEC_REST_SENTINEL")
+			assert.Contains(t, request, "<redacted>")
+		})
+	}
+}
+
+func TestCreateExternalCollectionValidationDoesNotLogExternalSpec(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.TraceLogMode.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(proxy.Params.CommonCfg.TraceLogMode.Key))
+	})
+
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "top-level config rejected",
+			body: `{
+				"collectionName": "external_books",
+				"externalSource": "s3://bucket/books",
+				"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}",
+				"schema": {"fields": []}
+			}`,
+		},
+		{
+			name: "quick create rejected",
+			body: `{
+				"collectionName": "external_books",
+				"dimension": 2,
+				"schema": {
+					"externalSource": "s3://bucket/books",
+					"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}"
+				}
+			}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			logs := captureHTTPServerLogs(t)
+			testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(testCase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			output := logs.String()
+			assert.NotContains(t, output, "AKIA_LOG_SENTINEL")
+			assert.NotContains(t, output, "SECRET_LOG_SENTINEL")
+			assert.NotContains(t, output, "FUTURE_LOG_SECRET_SENTINEL")
+			assert.Contains(t, output, "***")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTPasswords(t *testing.T) {
+	description := "account description"
+	testCases := []struct {
+		name    string
+		req     any
+		secrets []string
+	}{
+		{
+			name: "create user",
+			req: &PasswordReq{
+				UserName:    "alice",
+				Password:    "CREATE_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{"CREATE_PASSWORD_SENTINEL_DO_NOT_LOG"},
+		},
+		{
+			name: "update password",
+			req: &NewPasswordReq{
+				UserName:    "alice",
+				Password:    "OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				NewPassword: "NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{
+				"OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				"NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.Contains(t, request, "alice")
+			for _, secret := range testCase.secrets {
+				assert.NotContains(t, request, secret)
+			}
 		})
 	}
 }
@@ -2591,6 +2763,7 @@ type externalCollectionRESTProxy struct {
 	progressReq                *milvuspb.GetRefreshExternalCollectionProgressRequest
 	restoreReq                 *milvuspb.RestoreExternalSnapshotRequest
 	exportReq                  *milvuspb.ExportSnapshotRequest
+	getExportSnapshotStateReq  *milvuspb.GetExportSnapshotStateRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
 }
@@ -2681,8 +2854,27 @@ func (m *externalCollectionRESTProxy) RestoreExternalSnapshot(ctx context.Contex
 func (m *externalCollectionRESTProxy) ExportSnapshot(ctx context.Context, request *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
 	m.exportReq = request
 	return &milvuspb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: request.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+		Status: merr.Success(),
+		JobId:  3001,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) GetExportSnapshotState(ctx context.Context, request *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	m.getExportSnapshotStateReq = request
+	return &milvuspb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &milvuspb.ExportSnapshotInfo{
+			JobId:               request.GetJobId(),
+			SnapshotName:        "snapshot_1",
+			DbName:              "default",
+			CollectionName:      "source_books",
+			State:               milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+			Progress:            100,
+			TotalFiles:          10,
+			CopiedFiles:         10,
+			TotalBytes:          4096,
+			SnapshotMetadataUri: "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+		},
 	}, nil
 }
 
@@ -2958,6 +3150,25 @@ func TestExportSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "snapshot_1", proxy.exportReq.GetName())
 	assert.Equal(t, "s3://foreign-bucket/export-root", proxy.exportReq.GetTargetS3Path())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.exportReq.GetExternalSpec())
+	assert.Contains(t, w.Body.String(), `"jobId":3001`)
+}
+
+func TestGetExportSnapshotStateRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, DescribeExportAction), bytes.NewReader([]byte(`{"jobId":"3001"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(3001), proxy.getExportSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"state":"ExportSnapshotCompleted"`)
+	assert.Contains(t, w.Body.String(), `"progress":100`)
+	assert.Contains(t, w.Body.String(), `"totalBytes":4096`)
 	assert.Contains(t, w.Body.String(), `"snapshotMetadataURI":"s3://foreign-bucket/export-root/snapshots/100/metadata/1.json"`)
 }
 

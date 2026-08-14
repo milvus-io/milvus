@@ -77,9 +77,9 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
 	globalMetaCache = mockCache
 
@@ -120,11 +120,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesReque
 	// is mocked, so any redundant identifier round-trip would fail the test.
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		dbName:    dbName,
-		dbID:      dbID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		DBName:    dbName,
+		DBID:      dbID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
 	globalMetaCache = mockCache
 
@@ -183,9 +183,9 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
 	globalMetaCache = mockCache
 
@@ -229,12 +229,12 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t
 
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
-		collID: collectionID,
+		CollID: collectionID,
 		// resolved by the coordinator and carried in the cache entry
-		dbID:      7,
-		dbName:    "db1",
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		DBID:      7,
+		DBName:    "db1",
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
 	globalMetaCache = mockCache
 
@@ -319,9 +319,9 @@ func TestCachedProxyServiceProvider_DescribeCollection_NameOnlyDoesNotMutateRequ
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
 	globalMetaCache = mockCache
 
@@ -518,20 +518,20 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, database, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, database, collectionName, collectionID).Return(&collectionInfo{
-		collID:              collectionID,
-		dbID:                raw.GetDbId(),
-		dbName:              database,
-		schema:              mustNewSchemaInfo(cacheSchema),
-		createdTimestamp:    raw.GetCreatedTimestamp(),
-		createdUtcTimestamp: raw.GetCreatedUtcTimestamp(),
-		consistencyLevel:    raw.GetConsistencyLevel(),
-		updateTimestamp:     raw.GetUpdateTimestamp(),
-		vChannels:           raw.GetVirtualChannelNames(),
-		pChannels:           raw.GetPhysicalChannelNames(),
-		numPartitions:       raw.GetNumPartitions(),
-		shardsNum:           raw.GetShardsNum(),
-		aliases:             raw.GetAliases(),
-		properties:          raw.GetProperties(),
+		CollID:              collectionID,
+		DBID:                raw.GetDbId(),
+		DBName:              database,
+		Schema:              mustNewSchemaInfo(cacheSchema),
+		CreatedTimestamp:    raw.GetCreatedTimestamp(),
+		CreatedUtcTimestamp: raw.GetCreatedUtcTimestamp(),
+		ConsistencyLevel:    raw.GetConsistencyLevel(),
+		UpdateTimestamp:     raw.GetUpdateTimestamp(),
+		VChannels:           raw.GetVirtualChannelNames(),
+		PChannels:           raw.GetPhysicalChannelNames(),
+		NumPartitions:       raw.GetNumPartitions(),
+		ShardsNum:           raw.GetShardsNum(),
+		Aliases:             raw.GetAliases(),
+		Properties:          raw.GetProperties(),
 	}, nil)
 	oldCache := globalMetaCache
 	globalMetaCache = cache

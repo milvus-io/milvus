@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
@@ -1507,7 +1508,7 @@ func TestProxy(t *testing.T) {
 			mask[i] = true
 		}
 		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
-			sf.ValidData = mask
+			typeutil.SetFieldDataValidData(sf, mask)
 		}
 		mixedReq := &milvuspb.InsertRequest{
 			DbName:         dbName,
@@ -1877,7 +1878,7 @@ func TestProxy(t *testing.T) {
 			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 				continue
 			}
-			for i, v := range fd.GetValidData() {
+			for i, v := range typeutil.GetFieldDataValidData(fd) {
 				assert.False(t, v, "row %d of sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
@@ -1905,7 +1906,7 @@ func TestProxy(t *testing.T) {
 				if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 					continue
 				}
-				for i, v := range fd.GetValidData() {
+				for i, v := range typeutil.GetFieldDataValidData(fd) {
 					assert.Equal(t, !c.expectNull, v,
 						"%s: sub-field %s row %d ValidData", c.label, fd.GetFieldName(), i)
 				}
@@ -2504,7 +2505,7 @@ func TestProxy(t *testing.T) {
 			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 				continue
 			}
-			for i, v := range fd.GetValidData() {
+			for i, v := range typeutil.GetFieldDataValidData(fd) {
 				assert.False(t, v, "upserted row %d sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
@@ -2522,7 +2523,7 @@ func TestProxy(t *testing.T) {
 			mask[i] = true
 		}
 		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
-			sf.ValidData = mask
+			typeutil.SetFieldDataValidData(sf, mask)
 		}
 		mixedUpsertReq := &milvuspb.UpsertRequest{
 			DbName:         dbName,
@@ -4447,6 +4448,28 @@ func Test_GetFlushState(t *testing.T) {
 	})
 }
 
+func TestProxy_SyncFileResource(t *testing.T) {
+	oldManager := fileresource.GlobalFileManager
+	defer func() { fileresource.GlobalFileManager = oldManager }()
+
+	t.Run("unhealthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(status))
+	})
+}
+
 func TestProxy_GetComponentStates(t *testing.T) {
 	n := &Proxy{}
 	n.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -4488,7 +4511,7 @@ func TestProxy_Import(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
 		globalMetaCache = mc
 

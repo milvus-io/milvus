@@ -568,22 +568,22 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
                   num_inserted);
 
-        EXPECT_EQ(bool_result->valid_data_size(), 0);
-        EXPECT_EQ(int8_result->valid_data_size(), 0);
-        EXPECT_EQ(int16_result->valid_data_size(), 0);
-        EXPECT_EQ(int32_result->valid_data_size(), 0);
-        EXPECT_EQ(int64_result->valid_data_size(), 0);
-        EXPECT_EQ(float_result->valid_data_size(), 0);
-        EXPECT_EQ(double_result->valid_data_size(), 0);
-        EXPECT_EQ(timestamptz_result->valid_data_size(), 0);
-        EXPECT_EQ(varchar_result->valid_data_size(), 0);
-        EXPECT_EQ(json_result->valid_data_size(), 0);
-        EXPECT_EQ(int_array_result->valid_data_size(), 0);
-        EXPECT_EQ(long_array_result->valid_data_size(), 0);
-        EXPECT_EQ(bool_array_result->valid_data_size(), 0);
-        EXPECT_EQ(string_array_result->valid_data_size(), 0);
-        EXPECT_EQ(double_array_result->valid_data_size(), 0);
-        EXPECT_EQ(float_array_result->valid_data_size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*int32_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*int64_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*float_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*double_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*timestamptz_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*varchar_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*json_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*int_array_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*long_array_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*bool_array_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*string_array_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*double_array_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*float_array_result).size(), 0);
     }
 }
 
@@ -712,21 +712,30 @@ TEST(Growing, FillNullableData) {
                   num_inserted);
         EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
                   num_inserted);
-        EXPECT_EQ(bool_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(int8_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(int16_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(int32_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(float_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(double_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(timestamptz_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(varchar_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(json_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(int_array_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(long_array_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(bool_array_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(string_array_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(double_array_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(float_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*int32_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*float_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*double_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*timestamptz_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*varchar_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*json_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*int_array_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*long_array_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*bool_array_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*string_array_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*double_array_result).size(),
+                  num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*float_array_result).size(),
+                  num_inserted);
     }
 }
 
@@ -1127,8 +1136,9 @@ TEST_P(GrowingTest, FillVectorArrayData) {
             }
         }
 
-        EXPECT_EQ(int64_result->valid_data_size(), 0);
-        EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*int64_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*array_float_vector_result).size(),
+                  0);
     }
 }
 
@@ -1185,9 +1195,9 @@ TEST(GrowingTest, QueryNullableVectorArrayUsesPhysicalOffsets) {
     auto array_data = insert_record_proto->add_fields_data();
     array_data->set_field_id(array_float_vector.get());
     array_data->set_type(proto::schema::DataType::ArrayOfVector);
-    array_data->add_valid_data(false);
-    array_data->add_valid_data(true);
     array_data->mutable_vectors()->set_dim(4);
+    array_data->mutable_vectors()->add_valid_data(false);
+    array_data->mutable_vectors()->add_valid_data(true);
     auto vector_array = array_data->mutable_vectors()->mutable_vector_array();
     vector_array->set_dim(4);
     vector_array->set_element_type(proto::schema::DataType::FloatVector);
@@ -1213,9 +1223,10 @@ TEST(GrowingTest, QueryNullableVectorArrayUsesPhysicalOffsets) {
             nullptr, array_float_vector, offsets.data(), offsets.size()));
     ASSERT_NE(result, nullptr);
 
-    ASSERT_EQ(result->valid_data_size(), 2);
-    EXPECT_FALSE(result->valid_data(0));
-    EXPECT_TRUE(result->valid_data(1));
+    const auto& result_valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(result_valid_data.size(), 2);
+    EXPECT_FALSE(result_valid_data[0]);
+    EXPECT_TRUE(result_valid_data[1]);
     ASSERT_EQ(result->vectors().vector_array().data_size(), 2);
     EXPECT_TRUE(
         result->vectors().vector_array().data(0).float_vector().data().empty());
@@ -1256,9 +1267,9 @@ TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
     auto array_data = insert_record_proto->add_fields_data();
     array_data->set_field_id(array_float_vector.get());
     array_data->set_type(proto::schema::DataType::ArrayOfVector);
-    array_data->add_valid_data(false);
-    array_data->add_valid_data(true);
     array_data->mutable_vectors()->set_dim(4);
+    array_data->mutable_vectors()->add_valid_data(false);
+    array_data->mutable_vectors()->add_valid_data(true);
     auto vector_array = array_data->mutable_vectors()->mutable_vector_array();
     vector_array->set_dim(4);
     vector_array->set_element_type(proto::schema::DataType::FloatVector);
@@ -1287,9 +1298,10 @@ TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
             nullptr, array_float_vector, offsets.data(), offsets.size()));
     ASSERT_NE(result, nullptr);
 
-    ASSERT_EQ(result->valid_data_size(), 2);
-    EXPECT_FALSE(result->valid_data(0));
-    EXPECT_TRUE(result->valid_data(1));
+    const auto& result_valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(result_valid_data.size(), 2);
+    EXPECT_FALSE(result_valid_data[0]);
+    EXPECT_TRUE(result_valid_data[1]);
     ASSERT_EQ(result->vectors().vector_array().data_size(), 2);
     EXPECT_TRUE(
         result->vectors().vector_array().data(0).float_vector().data().empty());
@@ -1624,12 +1636,12 @@ TEST(Growing, TestMaskWithNullableTTLField) {
         // Add valid_data for nullable field
         // Note: valid_data[i] = false means null, valid_data[i] = true means non-null
         for (size_t i = 0; i < valid_data.size(); ++i) {
-            field_data->add_valid_data(valid_data[i]);
+            scalars->add_valid_data(valid_data[i]);
         }
         // Verify valid_data was added correctly
-        ASSERT_EQ(field_data->valid_data_size(), test_data_count)
+        ASSERT_EQ(scalars->valid_data_size(), test_data_count)
             << "valid_data size mismatch: expected " << test_data_count
-            << ", got " << field_data->valid_data_size();
+            << ", got " << scalars->valid_data_size();
     }
 
     // Insert data

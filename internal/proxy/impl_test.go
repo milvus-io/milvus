@@ -65,6 +65,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
+	validData := []bool{true, false}
+	newField := func(name string) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: name,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: validData},
+			},
+		}
+	}
+	outputField := newField("output")
+	legacyGroupBy := newField("legacy_group_by")
+	groupBy := newField("group_by")
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{outputField},
+			GroupByFieldValue:  legacyGroupBy,
+			GroupByFieldValues: []*schemapb.FieldData{groupBy},
+		},
+	}
+
+	projectSearchResultValidDataForLegacy(result)
+
+	for _, field := range []*schemapb.FieldData{outputField, legacyGroupBy, groupBy} {
+		assert.Equal(t, validData, field.GetValidData())
+		assert.Equal(t, validData, field.GetScalars().GetValidData())
+	}
+}
+
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	paramtable.Init()
 	cache := globalMetaCache
@@ -349,6 +378,28 @@ func TestProxyRoleDescriptionValidation(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func TestRestoreRBACDoesNotLogPasswordHash(t *testing.T) {
+	logs := captureProxyLogs(t)
+	node := &Proxy{mixCoord: NewMixCoordMock()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	hashSentinel := "$2a$10$RESTORE_RBAC_DIRECT_LOG_SENTINEL"
+	req := &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Users: []*milvuspb.UserInfo{{
+				User:     "restore-user",
+				Password: hashSentinel,
+			}},
+		},
+	}
+
+	status, err := node.RestoreRBAC(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	assert.Equal(t, hashSentinel, req.GetRBACMeta().GetUsers()[0].GetPassword())
+	assert.NotContains(t, logs.String(), hashSentinel)
+	assert.Contains(t, logs.String(), "restore-user")
 }
 
 func TestProxyRoleDescriptionForwarding(t *testing.T) {
@@ -1546,7 +1597,7 @@ func TestProxy_Delete(t *testing.T) {
 	}
 	schema := mustNewSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
-		collID: collectionID,
+		CollID: collectionID,
 	}
 	paramtable.Init()
 
@@ -1563,7 +1614,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
-		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -1748,7 +1799,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
 		globalMetaCache = mc
 
@@ -1973,7 +2024,7 @@ func TestRunAnalyzer(t *testing.T) {
 					Name:    "test_text",
 				}},
 			},
-			fieldMap: fieldMap,
+			FieldMap: fieldMap,
 		}, nil)
 
 		lb := shardclient.NewMockLBPolicy(t)
@@ -2364,7 +2415,7 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(&collectionInfo{schema: mustNewSchemaInfo(schema)}, nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
 		globalMetaCache = cache
 
 		var capturedNamespace *string
@@ -2439,7 +2490,7 @@ func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 
 	m1 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
 	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		schema: mustNewSchemaInfo(externalSchema),
+		Schema: mustNewSchemaInfo(externalSchema),
 	}, nil).Build()
 	defer m1.UnPatch()
 	defer m2.UnPatch()
@@ -3333,17 +3384,20 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cases := []struct {
-		name       string
-		src, spec  string
-		wantSubstr string
+		name          string
+		src, spec     string
+		wantSubstr    string
+		secretSubstrs []string
 	}{
-		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
-		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
-		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
-		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
-		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
-		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
-		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
+		{"source only rejected", "s3://SOURCE_ACCESS_SENTINEL:SOURCE_SECRET_SENTINEL@bucket/p", "", "both provided or both omitted", []string{"SOURCE_ACCESS_SENTINEL", "SOURCE_SECRET_SENTINEL"}},
+		{"spec only rejected", "", `{"format":"parquet","extfs":{"access_key_id":"AKIA_ERROR_SENTINEL","access_key_value":"SECRET_ERROR_SENTINEL"}}`, "both provided or both omitted", []string{"AKIA_ERROR_SENTINEL", "SECRET_ERROR_SENTINEL"}},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"invalid format includes validation detail", "s3://bucket/prefix", `{"format":"FORMAT_REFRESH_SECRET_SENTINEL"}`, "external_spec is invalid", nil},
+		{"invalid extfs includes validation detail", "s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_refresh_secret_sentinel"}}`, "external_spec is invalid", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3356,6 +3410,9 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 			if tc.wantSubstr != "" {
 				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
+			}
+			for _, secret := range tc.secretSubstrs {
+				assert.NotContains(t, resp.GetStatus().GetReason(), secret)
 			}
 		})
 	}
@@ -3378,8 +3435,8 @@ func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t 
 			},
 		}
 		return &collectionInfo{
-			collID: 1,
-			schema: &schemaInfo{CollectionSchema: schema},
+			CollID: 1,
+			Schema: &schemaInfo{CollectionSchema: schema},
 		}
 	}
 
@@ -3489,8 +3546,8 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 		},
 	}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		collID: 101,
-		schema: &schemaInfo{
+		CollID: 101,
+		Schema: &schemaInfo{
 			CollectionSchema: schema,
 		},
 	}, nil).Build()

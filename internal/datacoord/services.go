@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -2467,10 +2469,22 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 			Status: merr.Status(err),
 		}, nil
 	}
+	if snapshotData == nil || snapshotData.SnapshotInfo == nil {
+		err := merr.WrapErrDataIntegrityMsg("snapshot info cannot be nil")
+		return &datapb.DescribeSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	snapshotInfo := proto.Clone(snapshotData.SnapshotInfo).(*datapb.SnapshotInfo)
+	snapshotInfo.S3Location, err = snapshotstorage.BuildInstanceSnapshotURI(
+		snapshotstorage.InstanceConfigFromParamtable(Params),
+		snapshotInfo.GetS3Location(),
+	)
+	if err != nil {
+		return &datapb.DescribeSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 
 	resp := &datapb.DescribeSnapshotResponse{
 		Status:       merr.Success(),
-		SnapshotInfo: snapshotData.SnapshotInfo,
+		SnapshotInfo: snapshotInfo,
 	}
 	if req.GetIncludeCollectionInfo() {
 		resp.CollectionInfo = snapshotData.Collection
@@ -2487,20 +2501,26 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 			Status: merr.Status(err),
 		}, nil
 	}
-	mlog.Info(context.TODO(), "receive RestoreSnapshot request")
+	mlog.Info(ctx, "receive RestoreSnapshot request",
+		mlog.String("snapshot", req.GetName()),
+		mlog.Int64("sourceCollectionID", req.GetSourceCollectionId()),
+		mlog.String("targetDbName", req.GetTargetDbName()),
+		mlog.String("targetCollectionName", req.GetTargetCollectionName()),
+		mlog.Bool("external", req.GetExternal()),
+		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(req.GetSnapshotS3Location())),
+		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""))
 
-	if req.GetExternal() {
-		err := merr.WrapErrServiceUnimplemented(errors.New("RestoreExternalSnapshot is not implemented"))
-		mlog.Warn(ctx, "restore external snapshot is not implemented", mlog.Err(err))
+	// Validate parameters
+	if !req.GetExternal() && req.GetName() == "" {
+		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
+		mlog.Warn(ctx, "invalid request", mlog.Err(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	// Validate parameters
-	if req.GetName() == "" {
-		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
-		mlog.Warn(context.TODO(), "invalid request", mlog.Err(err))
+	if req.GetExternal() && req.GetSnapshotS3Location() == "" {
+		err := merr.WrapErrParameterInvalidMsg("snapshot_s3_location is required")
+		mlog.Warn(ctx, "invalid request", mlog.Err(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2510,6 +2530,32 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		mlog.Warn(context.TODO(), "invalid request", mlog.Err(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
+		}, nil
+	}
+
+	if req.GetExternal() {
+		jobID, err := s.snapshotManager.RestoreExternalSnapshot(
+			ctx,
+			req.GetSnapshotS3Location(),
+			req.GetTargetCollectionName(),
+			req.GetTargetDbName(),
+			req.GetExternalSpec(),
+			s.startExternalRestoreSnapshotLock,
+			s.startBroadcastForRestoreSnapshot,
+			s.rollbackRestoreSnapshot,
+			s.validateRestoredCollectionResources,
+		)
+		if err != nil {
+			mlog.Error(ctx, "restore external snapshot failed", mlog.Err(err))
+			return &datapb.RestoreSnapshotResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		mlog.Info(ctx, "restore external snapshot completed", mlog.Int64("jobID", jobID))
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Success(),
+			JobId:  jobID,
 		}, nil
 	}
 
@@ -2543,8 +2589,90 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
+	if req == nil {
+		err := merr.WrapErrParameterInvalidMsg("export snapshot request is nil")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	mlog.Info(ctx, "receive ExportSnapshot request",
+		mlog.String("snapshot", req.GetName()),
+		mlog.Int64("collectionID", req.GetCollectionId()),
+		mlog.String("targetS3Path", snapshotstorage.RedactSnapshotObjectPath(req.GetTargetS3Path())),
+		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""))
+
+	if req.GetName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetCollectionId() == 0 {
+		err := merr.WrapErrParameterInvalidMsg("collection_id is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetTargetS3Path() == "" {
+		err := merr.WrapErrParameterInvalidMsg("target_s3_path is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
+	if err != nil {
+		mlog.Warn(ctx, "ExportSnapshot failed to resolve collection", mlog.Err(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if coll == nil {
+		mlog.Warn(ctx, "ExportSnapshot: collection not found")
+		return &datapb.ExportSnapshotResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())),
+		}, nil
+	}
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
+	locker, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
+		message.NewSharedSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
+	)
+	if err != nil {
+		mlog.Warn(ctx, "ExportSnapshot failed to acquire resource key lock", mlog.Err(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	defer locker.Close()
+
+	jobID, err := s.snapshotManager.ExportSnapshot(
+		ctx,
+		req.GetCollectionId(),
+		req.GetName(),
+		dbName,
+		collectionName,
+		req.GetTargetS3Path(),
+		req.GetExternalSpec(),
+	)
+	if err != nil {
+		mlog.Warn(ctx, "export snapshot failed", mlog.Err(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 	return &datapb.ExportSnapshotResponse{
-		Status: merr.Status(merr.WrapErrServiceUnimplemented(errors.New("ExportSnapshot is not implemented"))),
+		Status: merr.Success(),
+		JobId:  jobID,
+	}, nil
+}
+
+func (s *Server) GetExportSnapshotState(
+	ctx context.Context,
+	req *datapb.GetExportSnapshotStateRequest,
+) (*datapb.GetExportSnapshotStateResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	if req == nil || req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("valid snapshot export job_id is required")
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	info, err := s.snapshotManager.GetExportSnapshotState(req.GetJobId())
+	if err != nil {
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info:   info,
 	}, nil
 }
 

@@ -3437,7 +3437,7 @@ ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
               "chunk_data_impl only used for chunk column field ");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 ChunkedSegmentSealedImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -3453,7 +3453,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
               "chunk_array_view_impl only used for chunk column field ");
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -3469,7 +3469,7 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
               "chunk_vector_array_view_impl only used for chunk column field ");
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 ChunkedSegmentSealedImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -5880,7 +5880,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     }
 
     if (!field_meta.is_vector() && column->IsNullable()) {
-        auto dst = ret->mutable_valid_data()->mutable_data();
+        auto dst = MutableFieldDataRowValidData(ret.get())->mutable_data();
         column->BulkIsValid(
             op_ctx,
             [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
@@ -6277,7 +6277,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(
                field_id.get());
     auto ret = fill_with_empty(field_id, count);
     if (column->IsNullable()) {
-        auto dst = ret->mutable_valid_data()->mutable_data();
+        auto dst = MutableFieldDataRowValidData(ret.get())->mutable_data();
         column->BulkIsValid(
             op_ctx,
             [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
@@ -7960,7 +7960,7 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 
             // Add each string view to the geometry cache
             for (size_t i = 0; i < string_views.size(); ++i) {
-                if (valid_data.empty() || valid_data[i]) {
+                if (!valid_data || valid_data[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
                     geometry_cache.AppendData(
@@ -9408,7 +9408,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
 
     // Populate valid_data for nullable fields so clients can identify nulls.
     if (field_meta.is_nullable()) {
-        auto* vd = data_array->mutable_valid_data();
+        auto* vd = MutableFieldDataRowValidData(data_array.get());
         vd->Reserve(size);
         for (int64_t i = 0; i < size; i++) {
             vd->Add(arr->IsValid(result_mapping[i]));
