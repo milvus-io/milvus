@@ -228,6 +228,37 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 	return c.quotaCenter
 }
 
+func (c *Core) GetProxyClientManager() proxyutil.ProxyClientManagerInterface {
+	return c.proxyClientManager
+}
+
+func (c *Core) ServerExist(serverID int64) bool {
+	sessions, _, err := c.session.GetSessions(c.ctx, typeutil.ProxyRole)
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to get sessions", mlog.Err(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
+func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
+	c.proxyClientManager.SetProxyClients(sessions)
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
+}
+
+func (c *Core) addProxyClient(session *sessionutil.Session) {
+	c.proxyClientManager.AddProxyClient(session)
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
+}
+
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 	pc := c.chanTimeTick.listDmlChannels()
 	pt := make([]uint64, len(pc))
@@ -497,9 +528,9 @@ func (c *Core) initInternal() error {
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.SetProxyClients,
+		c.setProxyClients,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.addProxyClient)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	mlog.Info(context.TODO(), "init proxy manager done")
 
@@ -3080,22 +3111,53 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
 	}
 
-	id, err := c.tsoAllocator.GenerateTSO(1)
-	if err != nil {
-		return merr.Status(err), nil
+	alreadyExists := false
+	if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
+		resources, _ := c.meta.ListFileResource(ctx)
+		for _, resource := range resources {
+			if resource.GetName() != req.GetName() {
+				continue
+			}
+			if resource.GetPath() != req.GetPath() {
+				return merr.Status(merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())), nil
+			}
+			alreadyExists = true
+			break
+		}
+
+		if !alreadyExists {
+			size, err := c.storage.Size(ctx, req.GetPath())
+			if err != nil {
+				return merr.Status(err), nil
+			}
+			if size < 0 {
+				return merr.Status(merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)), nil
+			}
+			if size > maxFileSize {
+				return merr.Status(merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
+					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))), nil
+			}
+		}
 	}
-	resource := &internalpb.FileResourceInfo{
-		Id:   int64(id),
-		Name: req.GetName(),
-		Path: req.GetPath(),
-	}
-	err = c.meta.AddFileResource(ctx, resource)
-	if err != nil {
-		return merr.Status(err), nil
+
+	if !alreadyExists {
+		id, err := c.tsoAllocator.GenerateTSO(1)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		resource := &internalpb.FileResourceInfo{
+			Id:   int64(id),
+			Name: req.GetName(),
+			Path: req.GetPath(),
+		}
+		err = c.meta.AddFileResource(ctx, resource)
+		if err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	if c.fileResourceObserver != nil {
-		err = c.fileResourceObserver.Sync()
+		err := c.fileResourceObserver.Sync()
 		if err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil

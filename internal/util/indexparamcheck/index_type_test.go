@@ -30,6 +30,10 @@ func TestIsScalarIndexType_NGRAM(t *testing.T) {
 	assert.True(t, IsScalarIndexType(IndexNGRAM))
 }
 
+func TestIsScalarIndexType_FMINDEX(t *testing.T) {
+	assert.True(t, IsScalarIndexType(IndexFMINDEX))
+}
+
 func TestIsScalarMmapIndex(t *testing.T) {
 	t.Run("inverted index", func(t *testing.T) {
 		assert.True(t, IsScalarMmapIndex(IndexINVERTED))

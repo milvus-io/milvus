@@ -310,7 +310,10 @@ message AnalyzeTask {
 message SegmentStats {
     int64 ID = 1;
     int64 num_rows = 2;
+    // logIDs (V1) and manifest_path (V3) are mutually exclusive: the producer
+    // sets exactly one. A non-empty manifest_path marks a StorageV3 segment.
     repeated int64 logIDs = 3;
+    string manifest_path = 4;
 }
 
 message FieldLogPath {

@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -920,9 +921,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_Int64() {
 				Type:      schemapb.DataType_Int64,
 				FieldName: "nullable_col",
 				FieldId:   100,
-				ValidData: []bool{true, false, true, false, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true, false, true},
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{10, 0, 30, 0, 50}},
 						},
@@ -971,9 +972,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_String() {
 				Type:      schemapb.DataType_VarChar,
 				FieldName: "nullable_str",
 				FieldId:   100,
-				ValidData: []bool{true, true, false, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, true, false, true},
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{Data: []string{"a", "b", "", "d"}},
 						},
@@ -1016,9 +1017,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_Int8() {
 				Type:      schemapb.DataType_Int8,
 				FieldName: "nullable_int8",
 				FieldId:   100,
-				ValidData: []bool{false, true, false},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{false, true, false},
 						Data: &schemapb.ScalarField_IntData{
 							IntData: &schemapb.IntArray{Data: []int32{0, 20, 0}},
 						},
@@ -1058,9 +1059,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_Int16() {
 				Type:      schemapb.DataType_Int16,
 				FieldName: "nullable_int16",
 				FieldId:   100,
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true},
 						Data: &schemapb.ScalarField_IntData{
 							IntData: &schemapb.IntArray{Data: []int32{100, 0, 300}},
 						},
@@ -1101,9 +1102,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_MultipleChunks()
 				Type:      schemapb.DataType_Float,
 				FieldName: "nullable_float",
 				FieldId:   100,
-				ValidData: []bool{true, false, true, false, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true, false, true},
 						Data: &schemapb.ScalarField_FloatData{
 							FloatData: &schemapb.FloatArray{Data: []float32{1.1, 0, 3.3, 0, 5.5}},
 						},
@@ -1150,9 +1151,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_AllTypes() {
 				Type:      schemapb.DataType_Bool,
 				FieldName: "nullable_bool",
 				FieldId:   1,
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true},
 						Data: &schemapb.ScalarField_BoolData{
 							BoolData: &schemapb.BoolArray{Data: []bool{true, false, false}},
 						},
@@ -1163,9 +1164,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_AllTypes() {
 				Type:      schemapb.DataType_Int32,
 				FieldName: "nullable_int32",
 				FieldId:   2,
-				ValidData: []bool{false, true, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{false, true, true},
 						Data: &schemapb.ScalarField_IntData{
 							IntData: &schemapb.IntArray{Data: []int32{0, 200, 300}},
 						},
@@ -1176,9 +1177,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_AllTypes() {
 				Type:      schemapb.DataType_Double,
 				FieldName: "nullable_double",
 				FieldId:   3,
-				ValidData: []bool{true, true, false},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, true, false},
 						Data: &schemapb.ScalarField_DoubleData{
 							DoubleData: &schemapb.DoubleArray{Data: []float64{1.11, 2.22, 0}},
 						},
@@ -1736,9 +1737,9 @@ func (s *ConverterSuite) TestExportValidData_AllValid() {
 				Type:      schemapb.DataType_Int64,
 				FieldName: "nullable_col",
 				FieldId:   100,
-				ValidData: []bool{true, true, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, true, true},
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
 						},
@@ -1758,7 +1759,7 @@ func (s *ConverterSuite) TestExportValidData_AllValid() {
 
 	// Since all values are valid, exportValidData should return nil → ValidData is nil
 	s.Require().Len(exported.FieldsData, 1)
-	s.Nil(exported.FieldsData[0].ValidData)
+	s.Nil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 }
 
 func (s *ConverterSuite) TestFromSearchResultData_NilScalars() {
@@ -1943,9 +1944,9 @@ func (s *ConverterSuite) TestFromSearchResultData_ValidDataTooShort() {
 				Type:      schemapb.DataType_Int64,
 				FieldName: "col",
 				FieldId:   100,
-				ValidData: []bool{true}, // Only 1, need 3
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true}, // Only 1, need 3
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
 						},
@@ -2293,9 +2294,9 @@ func (s *ConverterSuite) TestNullableRoundTrip_WithNulls() {
 				Type:      schemapb.DataType_Int64,
 				FieldName: "nullable_col",
 				FieldId:   100,
-				ValidData: []bool{true, false, true}, // second value is null
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true}, // second value is null
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{10, 0, 30}},
 						},
@@ -2314,8 +2315,9 @@ func (s *ConverterSuite) TestNullableRoundTrip_WithNulls() {
 
 	// ValidData should be exported since there are actual null values
 	s.Require().Len(exported.FieldsData, 1)
-	s.Require().NotNil(exported.FieldsData[0].ValidData)
-	s.Equal([]bool{true, false, true}, exported.FieldsData[0].ValidData)
+	s.Require().NotNil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
+	s.Equal([]bool{true, false, true}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
+	s.Nil(exported.FieldsData[0].GetValidData())
 
 	// Verify data values
 	longData := exported.FieldsData[0].GetScalars().GetLongData().GetData()
@@ -2339,9 +2341,9 @@ func (s *ConverterSuite) TestNullableRoundTrip_TimestamptzWithNulls() {
 				Type:      schemapb.DataType_Timestamptz,
 				FieldName: "ts",
 				FieldId:   101,
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true},
 						Data: &schemapb.ScalarField_TimestamptzData{
 							TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{1000, 0, 3000}},
 						},
@@ -2362,7 +2364,7 @@ func (s *ConverterSuite) TestNullableRoundTrip_TimestamptzWithNulls() {
 	fieldData := exported.FieldsData[0]
 	s.Equal(schemapb.DataType_Timestamptz, fieldData.GetType())
 	s.Equal([]int64{1000, 0, 3000}, fieldData.GetScalars().GetTimestamptzData().GetData())
-	s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+	s.Equal([]bool{true, false, true}, typeutil.GetFieldDataValidData(fieldData))
 }
 
 func (s *ConverterSuite) TestNullableRoundTrip_BoolWithNulls() {
@@ -2381,9 +2383,9 @@ func (s *ConverterSuite) TestNullableRoundTrip_BoolWithNulls() {
 				Type:      schemapb.DataType_Bool,
 				FieldName: "nullable_bool",
 				FieldId:   100,
-				ValidData: []bool{false, true}, // first is null
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{false, true}, // first is null
 						Data: &schemapb.ScalarField_BoolData{
 							BoolData: &schemapb.BoolArray{Data: []bool{false, true}},
 						},
@@ -2400,8 +2402,8 @@ func (s *ConverterSuite) TestNullableRoundTrip_BoolWithNulls() {
 	exported, err := ToSearchResultData(df)
 	s.Require().NoError(err)
 	s.Require().Len(exported.FieldsData, 1)
-	s.NotNil(exported.FieldsData[0].ValidData)
-	s.Equal([]bool{false, true}, exported.FieldsData[0].ValidData)
+	s.NotNil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
+	s.Equal([]bool{false, true}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 }
 
 func (s *ConverterSuite) TestNullableRoundTrip_StringWithNulls() {
@@ -2420,9 +2422,9 @@ func (s *ConverterSuite) TestNullableRoundTrip_StringWithNulls() {
 				Type:      schemapb.DataType_VarChar,
 				FieldName: "nullable_str",
 				FieldId:   100,
-				ValidData: []bool{true, false}, // second is null
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false}, // second is null
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{Data: []string{"hello", ""}},
 						},
@@ -2439,8 +2441,8 @@ func (s *ConverterSuite) TestNullableRoundTrip_StringWithNulls() {
 	exported, err := ToSearchResultData(df)
 	s.Require().NoError(err)
 	s.Require().Len(exported.FieldsData, 1)
-	s.NotNil(exported.FieldsData[0].ValidData)
-	s.Equal([]bool{true, false}, exported.FieldsData[0].ValidData)
+	s.NotNil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
+	s.Equal([]bool{true, false}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 }
 
 // =============================================================================
@@ -2521,9 +2523,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableInt8() {
 				Type:      schemapb.DataType_Int8,
 				FieldName: "int8_col",
 				FieldId:   100,
-				ValidData: []bool{true, false, true}, // second is null
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false, true}, // second is null
 						Data: &schemapb.ScalarField_IntData{
 							IntData: &schemapb.IntArray{Data: []int32{10, 0, 30}},
 						},
@@ -2549,8 +2551,8 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableInt8() {
 	exported, err := ToSearchResultData(df)
 	s.Require().NoError(err)
 	s.Require().Len(exported.FieldsData, 1)
-	s.NotNil(exported.FieldsData[0].ValidData)
-	s.Equal([]bool{true, false, true}, exported.FieldsData[0].ValidData)
+	s.NotNil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
+	s.Equal([]bool{true, false, true}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 }
 
 // =============================================================================

@@ -23,6 +23,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1180,12 +1181,11 @@ BuildFixedWidthVectorArrayFromBulkSubscript(
             return arrow::Status::Invalid("not a fixed-width vector field");
     }
 
-    bool has_valid_data = data_array.valid_data_size() > 0;
-    int64_t valid_count = has_valid_data
-                              ? std::count(data_array.valid_data().begin(),
-                                           data_array.valid_data().end(),
-                                           true)
-                              : num_rows;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(data_array);
+    bool has_valid_data = !valid_data.empty();
+    int64_t valid_count =
+        has_valid_data ? std::count(valid_data.begin(), valid_data.end(), true)
+                       : num_rows;
     if (data_size != valid_count * byte_width) {
         return arrow::Status::Invalid(fmt::format(
             "bulk_subscript vector payload size mismatch, field={}, bytes={}, "
@@ -1202,7 +1202,7 @@ BuildFixedWidthVectorArrayFromBulkSubscript(
         auto bytes = static_cast<const uint8_t*>(data);
         int64_t physical = 0;
         for (int64_t i = 0; i < num_rows; i++) {
-            bool is_valid = !has_valid_data || data_array.valid_data(i);
+            bool is_valid = !has_valid_data || valid_data[i];
             if (!is_valid) {
                 ARROW_RETURN_NOT_OK(builder.AppendNull());
                 continue;
@@ -1229,12 +1229,11 @@ arrow::Result<std::shared_ptr<arrow::Array>>
 BuildSparseVectorArrayFromBulkSubscript(
     const milvus::proto::schema::FieldData& data_array, int64_t num_rows) {
     const auto& sparse = data_array.vectors().sparse_float_vector();
-    bool has_valid_data = data_array.valid_data_size() > 0;
-    int64_t valid_count = has_valid_data
-                              ? std::count(data_array.valid_data().begin(),
-                                           data_array.valid_data().end(),
-                                           true)
-                              : num_rows;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(data_array);
+    bool has_valid_data = !valid_data.empty();
+    int64_t valid_count =
+        has_valid_data ? std::count(valid_data.begin(), valid_data.end(), true)
+                       : num_rows;
     if (sparse.contents_size() != valid_count) {
         return arrow::Status::Invalid(
             fmt::format("bulk_subscript sparse payload size mismatch, rows={}, "
@@ -1248,7 +1247,7 @@ BuildSparseVectorArrayFromBulkSubscript(
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
     int64_t physical = 0;
     for (int64_t i = 0; i < num_rows; i++) {
-        bool is_valid = !has_valid_data || data_array.valid_data(i);
+        bool is_valid = !has_valid_data || valid_data[i];
         if (!is_valid) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
@@ -1407,21 +1406,30 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
 
+    // One batch conversion for the contiguous range instead of a validity
+    // lock plus a logical->physical search per row: flush walks the whole
+    // segment through here, and per-row lookups made that O(rows * log
+    // valid). Validity and physical offsets come from one mapping snapshot;
+    // for a non-mapping column this is the identity.
+    std::vector<int64_t> logical_offsets(num_rows);
+    std::iota(logical_offsets.begin(), logical_offsets.end(), start_offset);
+    auto row_valid = std::make_unique<bool[]>(num_rows);
+    std::vector<int64_t> physical_offsets;
+    field_info.vec_base->get_offset_mapping().FilterValidLogicalOffsets(
+        logical_offsets.data(), num_rows, row_valid.get(), physical_offsets);
+
+    size_t next_physical = 0;
     for (int64_t i = 0; i < num_rows; i++) {
-        auto logical_offset = start_offset + i;
-        if (field_info.valid_data &&
-            !field_info.valid_data->is_valid(logical_offset)) {
+        if (!row_valid[i]) {
+            if (field_info.valid_data == nullptr) {
+                return arrow::Status::Invalid(
+                    "valid nullable vector array row missing physical data");
+            }
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
         }
 
-        auto physical_offset =
-            field_info.vec_base->get_physical_offset(logical_offset);
-        if (physical_offset < 0) {
-            return arrow::Status::Invalid(
-                "valid nullable vector array row missing physical data");
-        }
-
+        const auto physical_offset = physical_offsets[next_physical++];
         const auto& vector_array = (*vector_array_vec)[physical_offset];
         if (vector_array.get_element_type() != field_info.element_type) {
             return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");

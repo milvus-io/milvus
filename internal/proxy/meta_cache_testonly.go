@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -65,4 +66,20 @@ func InitEmptyGlobalCache() {
 
 func SetGlobalMetaCache(metaCache *MetaCache) {
 	globalMetaCache = metaCache
+}
+
+func mustNewMetaCacheForTest(mixCoord types.MixCoordClient) *MetaCache {
+	cache, err := NewMetaCache(mixCoord)
+	if err != nil {
+		panic(err)
+	}
+	return cache
+}
+
+func mustNewMetaCacheWithDBInfoForTest(mixCoord types.MixCoordClient, dbInfo map[string]*databaseInfo) *MetaCache {
+	cache := mustNewMetaCacheForTest(mixCoord)
+	for db, info := range dbInfo {
+		cache.SeedDBInfoForTest(db, info)
+	}
+	return cache
 }

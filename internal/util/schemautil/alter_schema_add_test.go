@@ -34,6 +34,25 @@ func TestValidateAlterSchemaAddFunctionPlan_StandaloneAddRejected(t *testing.T) 
 	assert.Contains(t, err.Error(), "adding a function over existing fields is not supported")
 }
 
+// Empty index params on a vector output field are accepted at the plan level:
+// the bound index is still always materialized, resolved via AutoIndex at prepare.
+func TestValidateAlterSchemaAddFunctionPlan_EmptyIndexParamsAllowed(t *testing.T) {
+	plan := &AlterSchemaAddPlan{
+		Kind: AlterSchemaAddFunctionField,
+		Field: &schemapb.FieldSchema{
+			Name:     "sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+		},
+		Function: &schemapb.FunctionSchema{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		},
+	}
+	assert.NoError(t, ValidateAlterSchemaAddFunctionPlan(plan))
+}
+
 func TestCheckNoFunctionCascade(t *testing.T) {
 	existing := []*schemapb.FunctionSchema{
 		{Name: "bm25", OutputFieldNames: []string{"sparse"}},

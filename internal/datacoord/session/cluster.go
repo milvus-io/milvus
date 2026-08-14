@@ -36,6 +36,7 @@ import (
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
+	Version        string
 }
 
 // Cluster defines the interface for tasks
@@ -199,6 +200,7 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			availableNodeSlots[nodeID] = &WorkerSlots{
 				NodeID:         nodeID,
 				AvailableSlots: resp.GetAvailableSlots(),
+				Version:        resp.GetVersion(),
 			}
 		}()
 	}
@@ -638,7 +640,7 @@ func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.
 	}
 
 	properties := taskcommon.NewProperties(nil)
-	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendClusterID(req.GetClusterID())
 	properties.AppendTaskID(req.GetTaskID())
 	properties.AppendType(taskcommon.RefreshExternalCollection)
 	properties.AppendTaskSlot(1)

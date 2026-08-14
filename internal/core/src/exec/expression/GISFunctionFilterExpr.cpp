@@ -27,6 +27,7 @@
 #include "common/OpContext.h"
 #include "common/PreparedGeometry.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "geos_c.h"
 #include "index/Index.h"
 #include "index/Meta.h"
@@ -42,7 +43,7 @@ namespace exec {
 
 #define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(_DataType, method)       \
     auto execute_sub_batch = [this](const _DataType* data,                  \
-                                    const bool* valid_data,                 \
+                                    ValidityView valid_data,                \
                                     const int32_t* offsets,                 \
                                     const int32_t* segment_offsets,         \
                                     const int size,                         \
@@ -57,7 +58,7 @@ namespace exec {
         if (geometry_cache) {                                               \
             auto cache_lock = geometry_cache->AcquireReadLock();            \
             for (int i = 0; i < size; ++i) {                                \
-                if (valid_data != nullptr && !valid_data[i]) {              \
+                if (valid_data && !valid_data[i]) {                         \
                     res[i] = valid_res[i] = false;                          \
                     continue;                                               \
                 }                                                           \
@@ -71,7 +72,7 @@ namespace exec {
         } else {                                                            \
             GEOSContextHandle_t ctx_ = GEOS_init_r();                       \
             for (int i = 0; i < size; ++i) {                                \
-                if (valid_data != nullptr && !valid_data[i]) {              \
+                if (valid_data && !valid_data[i]) {                         \
                     res[i] = valid_res[i] = false;                          \
                     continue;                                               \
                 }                                                           \
@@ -92,7 +93,7 @@ namespace exec {
 // Specialized macro for distance-based operations (ST_DWITHIN)
 #define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(_DataType, method) \
     auto execute_sub_batch = [this](const _DataType* data,                     \
-                                    const bool* valid_data,                    \
+                                    ValidityView valid_data,                   \
                                     const int32_t* offsets,                    \
                                     const int32_t* segment_offsets,            \
                                     const int size,                            \
@@ -107,7 +108,7 @@ namespace exec {
         if (geometry_cache) {                                                  \
             auto cache_lock = geometry_cache->AcquireReadLock();               \
             for (int i = 0; i < size; ++i) {                                   \
-                if (valid_data != nullptr && !valid_data[i]) {                 \
+                if (valid_data && !valid_data[i]) {                            \
                     res[i] = valid_res[i] = false;                             \
                     continue;                                                  \
                 }                                                              \
@@ -122,7 +123,7 @@ namespace exec {
         } else {                                                               \
             GEOSContextHandle_t ctx_ = GEOS_init_r();                          \
             for (int i = 0; i < size; ++i) {                                   \
-                if (valid_data != nullptr && !valid_data[i]) {                 \
+                if (valid_data && !valid_data[i]) {                            \
                     res[i] = valid_res[i] = false;                             \
                     continue;                                                  \
                 }                                                              \
@@ -144,7 +145,7 @@ namespace exec {
 // Macro for unary operations (like IsValid) that don't need a right_source
 #define GEOMETRY_EXECUTE_SUB_BATCH_UNARY(_DataType, method)                  \
     auto execute_sub_batch = [this](const _DataType* data,                   \
-                                    const bool* valid_data,                  \
+                                    ValidityView valid_data,                 \
                                     const int32_t* offsets,                  \
                                     const int32_t* segment_offsets,          \
                                     const int size,                          \
@@ -158,7 +159,7 @@ namespace exec {
         if (geometry_cache) {                                                \
             auto cache_lock = geometry_cache->AcquireReadLock();             \
             for (int i = 0; i < size; ++i) {                                 \
-                if (valid_data != nullptr && !valid_data[i]) {               \
+                if (valid_data && !valid_data[i]) {                          \
                     res[i] = valid_res[i] = false;                           \
                     continue;                                                \
                 }                                                            \
@@ -172,7 +173,7 @@ namespace exec {
         } else {                                                             \
             GEOSContextHandle_t ctx_ = GEOS_init_r();                        \
             for (int i = 0; i < size; ++i) {                                 \
-                if (valid_data != nullptr && !valid_data[i]) {               \
+                if (valid_data && !valid_data[i]) {                          \
                     res[i] = valid_res[i] = false;                           \
                     continue;                                                \
                 }                                                            \
@@ -528,7 +529,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 auto geometry_array =
                     static_cast<const milvus::proto::schema::GeometryArray*>(
                         &data_array->scalars().geometry_data());
-                const auto& valid_data = data_array->valid_data();
+                const auto& valid_data = GetFieldDataRowValidData(*data_array);
 
                 GEOSContextHandle_t local_ctx = GetThreadLocalGEOSContext();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {

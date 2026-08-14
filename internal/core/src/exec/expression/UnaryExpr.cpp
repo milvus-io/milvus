@@ -392,7 +392,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
         [ pointer, bound, op_type, &bitmap_input, &
           processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -407,7 +407,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
             if constexpr (filter_type == FilterType::random) {
                 offset = offsets ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -474,7 +474,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
         [ op_type, &processed_cursor, &
           bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -923,7 +923,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
         [ op_type, pointer, &processed_cursor, &
           bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -941,7 +941,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -963,7 +963,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -985,7 +985,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1007,7 +1007,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1029,7 +1029,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1057,7 +1057,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1087,7 +1087,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1112,7 +1112,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         if constexpr (filter_type == FilterType::random) {
                             offset = (offsets) ? offsets[i] : i;
                         }
-                        if (valid_data != nullptr && !valid_data[offset]) {
+                        if (valid_data && !valid_data[offset]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
@@ -1136,7 +1136,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         if constexpr (filter_type == FilterType::random) {
                             offset = (offsets) ? offsets[i] : i;
                         }
-                        if (valid_data != nullptr && !valid_data[offset]) {
+                        if (valid_data && !valid_data[offset]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
@@ -1254,12 +1254,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 if constexpr (kNumericColumn && kNumericValue) {
                     auto executor = [op_type, &numeric_bound](
                                         const ColType* src,
-                                        const bool* valid,
+                                        ValidityView valid,
                                         size_t size,
                                         TargetBitmapView res,
                                         TargetBitmapView valid_res) {
                         for (size_t i = 0; i < size; ++i) {
-                            if (valid != nullptr && !valid[i]) {
+                            if (valid && !valid[i]) {
                                 res[i] = valid_res[i] = false;
                                 continue;
                             }
@@ -1807,7 +1807,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             like_matcher_ptr
         ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -1955,16 +1955,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         // there is a batch operation in BinaryRangeElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
-        if (valid_data != nullptr) {
-            bool has_bitmap_input = !bitmap_input.empty();
+        if constexpr (filter_type == FilterType::sequential) {
+            if (bitmap_input.empty()) {
+                ApplyValidMask(valid_data, res, valid_res, size);
+            } else if (valid_data) {
+                for (int i = 0; i < size; i++) {
+                    if (!bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
+                    if (!valid_data[i]) {
+                        res[i] = valid_res[i] = false;
+                    }
+                }
+            }
+        } else if (valid_data) {
             for (int i = 0; i < size; i++) {
-                if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
+                if (!bitmap_input.empty() &&
+                    !bitmap_input[i + processed_cursor]) {
                     continue;
                 }
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
+                auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
                     res[i] = valid_res[i] = false;
                 }
@@ -2011,6 +2021,22 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                num_data_chunk_,
                current_data_chunk_pos_);
     return res_vec;
+}
+
+std::string
+PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
+    switch (expr_->op_type_) {
+        // Anchored pattern ops: FMINDEX's count-first guard uses the literal
+        // (CountPrefix/Suffix/Count) to decline degenerate high-hit patterns.
+        // Equality (Equal/IN) is intentionally NOT accelerated by FMINDEX
+        // (ShouldUseOp declines it), so it needs no literal here.
+        case proto::plan::PrefixMatch:
+        case proto::plan::PostfixMatch:
+        case proto::plan::InnerMatch:
+            return GetValueFromProto<std::string>(expr_->val_);
+        default:
+            return "";
+    }
 }
 
 void
@@ -2144,10 +2170,11 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
             break;
         case DataType::VARCHAR:
-        case DataType::TEXT:
-            can_use =
-                SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
+        case DataType::TEXT: {
+            can_use = SegmentExpr::CanUseIndexForOp<std::string>(
+                expr_->op_type_, StringLiteralForCostGuard());
             break;
+        }
         case DataType::JSON: {
             const auto val_case = expr_->val_.val_case();
             if (val_case == proto::plan::GenericValue::ValCase::kInt64Val &&
@@ -2163,6 +2190,9 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             switch (val_type) {
                 case DataType::STRING:
                 case DataType::VARCHAR:
+                    // FMINDEX is VARCHAR-only in this release; JSON string
+                    // paths never carry it, so no cost-guard literal is needed
+                    // here (other JSON string indexes judge on the op alone).
                     can_use = SegmentExpr::CanUseIndexForOp<std::string>(
                         expr_->op_type_);
                     break;

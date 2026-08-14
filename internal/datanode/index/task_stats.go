@@ -75,6 +75,8 @@ type statsTask struct {
 	binlogIO io.BinlogIO
 	cm       storage.ChunkManager
 
+	pluginContext *indexcgopb.StoragePluginContext
+
 	logIDOffset  int64
 	currentTime  time.Time
 	manifestPath string // current manifest version, updated after each AddStatsToManifest
@@ -92,18 +94,20 @@ func NewStatsTask(ctx context.Context,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
 	cm storage.ChunkManager,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *statsTask {
 	return &statsTask{
-		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
-		ctx:         ctx,
-		cancel:      cancel,
-		req:         req,
-		manager:     manager,
-		binlogIO:    io.NewBinlogIO(cm),
-		cm:          cm,
-		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
-		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
-		logIDOffset: 0,
+		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:           ctx,
+		cancel:        cancel,
+		req:           req,
+		manager:       manager,
+		binlogIO:      io.NewBinlogIO(cm),
+		cm:            cm,
+		pluginContext: pluginContext,
+		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		currentTime:   tsoutil.PhysicalTime(req.GetCurrentTs()),
+		logIDOffset:   0,
 	}
 }
 
@@ -141,6 +145,29 @@ func (st *statsTask) GetSlot() int64 {
 
 func (st *statsTask) IsVectorIndex() bool {
 	return false
+}
+
+func redactStorageCredentialsForLog(accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON *string) {
+	for _, secret := range []*string{accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON} {
+		if *secret != "" {
+			*secret = "<redacted>"
+		}
+	}
+}
+
+func redactStorageConfigForLog(config *indexpb.StorageConfig) *indexpb.StorageConfig {
+	if config == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(config).(*indexpb.StorageConfig)
+	redactStorageCredentialsForLog(
+		&redacted.AccessKeyID,
+		&redacted.SecretAccessKey,
+		&redacted.SslCACert,
+		&redacted.GcpCredentialJSON,
+	)
+	return redacted
 }
 
 func (st *statsTask) PreExecute(ctx context.Context) error {
@@ -182,7 +209,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		mlog.FieldSegmentID(st.req.GetSegmentID()),
 		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
 		mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-		mlog.Any("storageConfig", st.req.StorageConfig),
+		mlog.Any("storageConfig", redactStorageConfigForLog(st.req.GetStorageConfig())),
 	)
 	return nil
 }
@@ -428,6 +455,7 @@ func (st *statsTask) Reset() {
 	st.cancel = nil
 	st.tr = nil
 	st.manager = nil
+	st.pluginContext = nil
 }
 
 func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -530,7 +558,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	var analyzerExtraInfo string
-	if len(st.req.GetFileResources()) > 0 {
+	if len(st.req.GetFileResources()) > 0 && fileresource.GlobalFileManager.Mode() == fileresource.RefMode {
 		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
 		if err != nil {
 			return err
@@ -563,7 +591,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil, statsBasePath)
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil, statsBasePath, st.pluginContext)
 			buildIndexParams.IndexParams = []*commonpb.KeyValuePair{
 				{Key: "index_type", Value: "INVERTED"},
 				{Key: "is_text_match", Value: "true"},
@@ -746,7 +774,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath)
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath, st.pluginContext)
 
 			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
 			if err != nil {
@@ -867,6 +895,7 @@ func buildIndexParams(
 	storageConfig *indexcgopb.StorageConfig,
 	options *BuildIndexOptions,
 	statsBasePath string,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *indexcgopb.BuildIndexInfo {
 	if options == nil {
 		options = &BuildIndexOptions{}
@@ -889,6 +918,9 @@ func buildIndexParams(
 		JsonStatsWriteBatchSize:          options.JSONStatsWriteBatchSize,
 		Manifest:                         req.GetManifestPath(),
 		StatsBasePath:                    statsBasePath,
+	}
+	if pluginContext != nil {
+		params.StoragePluginContext = pluginContext
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 || req.GetStorageVersion() == storage.StorageV3 {

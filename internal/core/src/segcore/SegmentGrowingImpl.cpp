@@ -52,6 +52,7 @@
 #include "common/Span.h"
 #include "common/Decimal.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/VectorArray.h"
 #include "glog/logging.h"
 #include "index/Index.h"
@@ -233,6 +234,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                     int64_t num_rows,
                     int32_t* array_lengths) {
     auto data_type = field_meta.get_data_type();
+    const auto& valid_data = GetFieldDataRowValidData(field_data);
     if (data_type == DataType::VECTOR_ARRAY) {
         const auto& vector_array = field_data.vectors().vector_array();
         int64_t dim = field_meta.get_dim();
@@ -240,15 +242,15 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         bool compact_nullable = false;
         if (field_meta.is_nullable()) {
             int64_t valid_count = 0;
-            if (field_data.valid_data_size() == num_rows) {
+            if (valid_data.size() == num_rows) {
                 for (int64_t i = 0; i < num_rows; ++i) {
-                    if (field_data.valid_data(i)) {
+                    if (valid_data[i]) {
                         ++valid_count;
                     }
                 }
             }
             auto dense_aligned = vector_array.data_size() == num_rows;
-            compact_nullable = field_data.valid_data_size() == num_rows &&
+            compact_nullable = valid_data.size() == num_rows &&
                                vector_array.data_size() == valid_count;
             AssertInfo(
                 dense_aligned || compact_nullable,
@@ -258,7 +260,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                 "got data_size {}, valid_data_size {}, num_rows {}, "
                 "valid_count {}",
                 vector_array.data_size(),
-                field_data.valid_data_size(),
+                valid_data.size(),
                 num_rows,
                 valid_count);
             compact_nullable = compact_nullable && !dense_aligned;
@@ -270,11 +272,10 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                        num_rows);
         }
         int64_t physical_row = 0;
-        auto has_valid_data = field_data.valid_data_size() == num_rows;
+        auto has_valid_data = valid_data.size() == num_rows;
 
         for (int i = 0; i < num_rows; ++i) {
-            if (field_meta.is_nullable() && has_valid_data &&
-                !field_data.valid_data(i)) {
+            if (field_meta.is_nullable() && has_valid_data && !valid_data[i]) {
                 array_lengths[i] = 0;
                 continue;
             }
@@ -327,8 +328,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     }
 
     // Handle nullable fields
-    if (field_meta.is_nullable() && field_data.valid_data_size() > 0) {
-        const auto& valid_data = field_data.valid_data();
+    if (field_meta.is_nullable() && !valid_data.empty()) {
         for (int i = 0; i < num_rows; ++i) {
             if (!valid_data[i]) {
                 array_lengths[i] = 0;  // null → empty array
@@ -402,12 +402,6 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 }
 
 void
-SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
-    auto schema = get_schema_snapshot();
-    try_remove_chunks(fieldId, *schema);
-}
-
-void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     //remove the chunk data to reduce memory consumption
     auto& field_meta = schema.operator[](fieldId);
@@ -415,10 +409,15 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     if (IsVectorDataType(data_type)) {
         if (indexing_record_.HasRawData(fieldId)) {
             auto vec_data_base = insert_record_.get_data_base(fieldId);
-            if (vec_data_base && vec_data_base->num_chunk() > 0 &&
-                chunk_mutex_.try_lock()) {
+            if (vec_data_base && vec_data_base->num_chunk() > 0) {
+                // No lock, and no try_lock: clear() swaps the container's
+                // internal chunk collection under the container's own mutex,
+                // and every reader holds a ChunkSnapshot pinning the
+                // generation it is walking. Reclamation therefore always
+                // proceeds -- the previous try_lock made it fail under query
+                // load and only retry on the next insert, so a segment that
+                // stopped taking writes never got its memory back.
                 vec_data_base->clear();
-                chunk_mutex_.unlock();
             }
         }
     }
@@ -653,6 +652,24 @@ SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
     tracked_resource_ = new_resource;
 }
 
+// THREADING CONTRACT
+//
+// Plain schemas tolerate concurrent Insert calls: each batch writes only the
+// logical range PreInsert reserved for it, so batches never overlap in storage.
+//
+// A schema holding a NULLABLE VECTOR field does not. Those fields store only
+// non-null rows, and the physical offset of a batch is derived from how many
+// valid rows exist right now (ConcurrentVectorImpl::set_data_raw reads
+// offset_mapping_.GetValidCount()). Two batches racing there would claim the
+// same physical range, and out-of-order batches would break the monotonic
+// physical->logical order that GrowingOffsetMapping::ValidCountBelow binary
+// searches. Segcore does not serialize this for the caller; it asserts on it in
+// GrowingOffsetMapping::Append.
+//
+// The contract holds because the querynode pipeline drives each vchannel from a
+// single goroutine (streamPipeline::work -> insertNode::Operate ->
+// shardDelegator::ProcessInsert), delivering a growing segment's inserts one at
+// a time in reserved logical order.
 void
 SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            int64_t num_rows,
@@ -735,6 +752,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         auto data_offset = field_id_to_offset[field_id];
         if (field_meta.is_nullable()) {
             insert_record_.get_valid_data(field_id)->set_data_raw(
+                reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
@@ -824,13 +842,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                     .string_data()
                     .data()
                     .end());
-            FixedVector<bool> texts_valid_data(
-                insert_record_proto->fields_data(data_offset)
-                    .valid_data()
-                    .begin(),
-                insert_record_proto->fields_data(data_offset)
-                    .valid_data()
-                    .end());
+            const auto& row_valid_data = GetFieldDataRowValidData(
+                insert_record_proto->fields_data(data_offset));
+            FixedVector<bool> texts_valid_data(row_valid_data.begin(),
+                                               row_valid_data.end());
             AddTexts(field_id,
                      texts.data(),
                      texts_valid_data.data(),
@@ -1394,7 +1409,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     }
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1404,7 +1419,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1414,7 +1429,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1471,25 +1486,26 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
 
     std::vector<VectorArrayView> views;
     views.reserve(len);
-    FixedVector<bool> valid_data;
-    ThreadSafeValidDataPtr valid_vec_ptr = nullptr;
-    if (field_meta.is_nullable()) {
-        valid_vec_ptr = insert_record_.get_valid_data(field_id);
-        valid_data.reserve(len);
-    }
+    const bool nullable = field_meta.is_nullable();
 
-    for (int64_t i = 0; i < len; ++i) {
-        auto logical_offset = logical_start + i;
-        if (field_meta.is_nullable()) {
-            auto valid = valid_vec_ptr->is_valid(logical_offset);
-            valid_data.push_back(valid);
-            if (!valid) {
-                views.emplace_back();
-                continue;
-            }
-        }
+    // One batch conversion for the whole contiguous range instead of a
+    // logical->physical search (plus a validity lock) per row: the
+    // expression layer walks every chunk of the segment through here, so
+    // per-row lookups made one full scan O(rows * log valid). The mapping
+    // walks an ascending batch with a cursor, and row validity comes from
+    // the same counts snapshot as the physical offsets. For a non-mapping
+    // column this is the identity.
+    std::vector<int64_t> logical_offsets(len);
+    std::iota(logical_offsets.begin(), logical_offsets.end(), logical_start);
+    auto row_valid = std::make_unique<bool[]>(len);
+    std::vector<int64_t> physical_offsets;
+    vector_data->get_offset_mapping().FilterValidLogicalOffsets(
+        logical_offsets.data(), len, row_valid.get(), physical_offsets);
 
-        auto vector_array = vector_data->get_element(logical_offset);
+    size_t next_physical = 0;
+    auto append_valid_view = [&](int64_t logical_offset) {
+        auto vector_array = vector_data->get_physical_element(
+            physical_offsets[next_physical++]);
         AssertInfo(vector_array != nullptr,
                    "Cannot find VECTOR_ARRAY data at segment offset {}",
                    logical_offset);
@@ -1498,12 +1514,36 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                            vector_array->length(),
                            vector_array->byte_size(),
                            vector_array->get_element_type());
+    };
+
+    if (nullable) {
+        auto valid_data = std::make_shared<FixedVector<bool>>();
+        valid_data->reserve(len);
+        for (int64_t i = 0; i < len; ++i) {
+            valid_data->push_back(row_valid[i]);
+            if (!row_valid[i]) {
+                views.emplace_back();
+                continue;
+            }
+            append_valid_view(logical_offsets[i]);
+        }
+        std::pair<std::vector<VectorArrayView>, ValidityView> content{
+            std::move(views), ValidityView::FromExpanded(valid_data->data())};
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, ValidityView>>(
+            std::move(valid_data), std::move(content));
     }
 
-    std::pair<std::vector<VectorArrayView>, FixedVector<bool>> content{
-        std::move(views), std::move(valid_data)};
-    return PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+    AssertInfo(physical_offsets.size() == static_cast<size_t>(len),
+               "Cannot find VECTOR_ARRAY data in segment offset range [{}, {})",
+               logical_start,
+               logical_start + len);
+    for (int64_t i = 0; i < len; ++i) {
+        append_valid_view(logical_offsets[i]);
+    }
+    std::pair<std::vector<VectorArrayView>, ValidityView> content{
+        std::move(views), ValidityView{}};
+    return PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>(
         std::move(content));
 }
 
@@ -1664,7 +1704,7 @@ SegmentGrowingImpl::bulk_subscript(
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        auto res = result->mutable_valid_data()->mutable_data();
+        auto res = MutableFieldDataRowValidData(result.get())->mutable_data();
         for (int64_t i = 0; i < count; ++i) {
             auto offset = seg_offsets[i];
             res[i] = valid_data_ptr->is_valid(offset);
@@ -1787,7 +1827,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        auto res = result->mutable_valid_data()->mutable_data();
+        auto res = MutableFieldDataRowValidData(result.get())->mutable_data();
         for (int64_t i = 0; i < count; ++i) {
             auto offset = seg_offsets[i];
             res[i] = valid_data_ptr->is_valid(offset);
@@ -1982,26 +2022,24 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
             field_id, seg_offsets, count, 0, output);
         return;
     }
-    {
-        std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
-        // Check again after lock to make sure: if index has finished building
-        // and can provide raw data after the above check but before we grabbed
-        // the lock, we should grab from index as the data in chunk may have
-        // been removed in try_remove_chunks.
-        if (!indexing_record_.HasRawData(field_id)) {
-            // copy from raw data
-            SparseRowsToProto(
-                [&](size_t i) {
-                    auto offset = seg_offsets[i];
-                    return offset != INVALID_SEG_OFFSET
-                               ? vec_raw->get_physical_element(offset)
-                               : nullptr;
-                },
-                count,
-                output);
-            return;
-        }
-        // else: release lock and copy from index
+    // Pin the chunk generation before deciding. Whatever we choose, the
+    // generation we read cannot be reclaimed under us; an empty snapshot means
+    // try_remove_chunks already ran, and that is gated on HasRawData, so the
+    // index can answer. This replaces an exclusive chunk lock that serialized
+    // concurrent retrieves against each other for a read-only operation.
+    auto chunks = vec_raw->acquire_chunks();
+    if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
+        // copy from raw data
+        SparseRowsToProto(
+            [&](size_t i) {
+                auto offset = seg_offsets[i];
+                return offset != INVALID_SEG_OFFSET
+                           ? vec_raw->get_physical_element(chunks, offset)
+                           : nullptr;
+            },
+            count,
+            output);
+        return;
     }
     indexing_record_.GetDataFromIndex(field_id, seg_offsets, count, 0, output);
 }
@@ -2065,23 +2103,18 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
             field_id, seg_offsets, count, element_sizeof, output_raw);
         return;
     }
-    {
-        std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
-        // check again after lock to make sure: if index has finished building
-        // after the above check but before we grabbed the lock, we should grab
-        // from index as the data in chunk may have been removed in
-        // try_remove_chunks.
-        if (!indexing_record_.HasRawData(field_id)) {
-            auto output_base = reinterpret_cast<char*>(output_raw);
-            for (int i = 0; i < count; ++i) {
-                auto dst = output_base + i * element_sizeof;
-                auto offset = seg_offsets[i];
-                auto src = (const uint8_t*)vec.get_physical_element(offset);
-                milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
-            }
-            return;
+    // Pin the chunk generation before deciding; see the sparse variant above
+    // for why the snapshot replaces the chunk lock here.
+    auto chunks = vec.acquire_chunks();
+    if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
+        auto output_base = reinterpret_cast<char*>(output_raw);
+        for (int i = 0; i < count; ++i) {
+            auto dst = output_base + i * element_sizeof;
+            auto offset = seg_offsets[i];
+            auto src = (const uint8_t*)vec.get_physical_element(chunks, offset);
+            milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
         }
-        // else: release lock and copy from index
+        return;
     }
     indexing_record_.GetDataFromIndex(
         field_id, seg_offsets, count, element_sizeof, output_raw);
@@ -2136,16 +2169,27 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
     auto vec_ptr = dynamic_cast<const ConcurrentVector<VectorArray>*>(&vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
+    // One batch conversion instead of a logical->physical search per row:
+    // flush and retrieve hand in ascending seg_offsets, which the mapping
+    // walks with a cursor. For a non-mapping column this is the identity,
+    // and a null row (mapping-invalid) is skipped like INVALID_SEG_OFFSET.
+    std::vector<int64_t> physical_offsets;
+    auto mapping_valid = std::make_unique<bool[]>(count);
+    vec.get_offset_mapping().FilterValidLogicalOffsets(
+        seg_offsets, count, mapping_valid.get(), physical_offsets);
+    size_t next_physical = 0;
     for (int64_t i = 0; i < count; ++i) {
-        auto offset = seg_offsets[i];
-        if (offset == INVALID_SEG_OFFSET ||
-            (valid_data != nullptr && !valid_data[i])) {
+        if (!mapping_valid[i]) {
             continue;
         }
-        auto value = vec.get_element(offset);
+        const auto physical_offset = physical_offsets[next_physical++];
+        if (valid_data != nullptr && !valid_data[i]) {
+            continue;
+        }
+        auto value = vec.get_physical_element(physical_offset);
         AssertInfo(value != nullptr,
                    "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   offset);
+                   seg_offsets[i]);
         dst->at(i) = value->output_data();
     }
 }
@@ -3098,13 +3142,52 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
 
     auto total_row_num = insert_record_.row_count();
 
-    auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
-    if (insert_record_.is_valid_data_exist(field_id)) {
-        insert_record_.get_valid_data(field_id)->set_data_raw(
-            total_row_num, data.get(), field_meta);
+    // Reopen publishes schema_ LAST, so a text-index build failure after this
+    // fill leaves the column already backfilled while the segment still
+    // reports the old schema -- the retry re-enters here for the same field.
+    // A nullable vector's offset mapping is append-only and order-asserted,
+    // so refill only the rows the column does not hold yet. The fill content
+    // is uniform (nulls or the field's default value), so the missing suffix
+    // is identical to what a full fill would write there. Inserts hold
+    // sch_mutex_ shared while Reopen holds it unique, so row_count cannot
+    // advance under this fill.
+    auto* column = insert_record_.get_data_base(field_id);
+    // Only a real mapping knows how much of the column is already filled;
+    // NoOpOffsetMapping's counts carry no row information (they are 0 by
+    // definition), so a column without one is refilled from 0. That refill is
+    // offset-addressed and therefore idempotent, which is what keeps the retry
+    // correct -- the suffix optimisation below is what a mapping buys, not
+    // what correctness depends on.
+    const auto& column_mapping = column->get_offset_mapping();
+    const int64_t filled =
+        column_mapping.IsEnabled() ? column_mapping.GetTotalCount() : 0;
+    AssertInfo(filled <= total_row_num,
+               "field {} backfill holds {} rows, more than segment row count "
+               "{} for growing segment {}",
+               field_id.get(),
+               filled,
+               total_row_num,
+               id_);
+    const auto missing = total_row_num - filled;
+    if (missing == 0) {
+        LOG_INFO(
+            "field {} (data type {}) already backfilled for growing segment "
+            "{}, skip",
+            field_id.get(),
+            field_meta.get_data_type(),
+            id_);
+        return;
     }
-    insert_record_.get_data_base(field_id)->set_data_raw(
-        0, total_row_num, data.get(), field_meta);
+
+    auto data = bulk_subscript_not_exist_field(field_meta, missing);
+    if (insert_record_.is_valid_data_exist(field_id)) {
+        // Offset-addressed write: idempotent when `filled` is 0 for a
+        // non-mapping column being refilled, unlike the appending overload,
+        // which would double the validity length on a Reopen retry.
+        insert_record_.get_valid_data(field_id)->set_data_raw(
+            filled, missing, data.get(), field_meta);
+    }
+    column->set_data_raw(filled, missing, data.get(), field_meta);
 
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
              field_meta.get_data_type(),
@@ -3178,7 +3261,7 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
 
         // Process geometry data from DataArray
         const auto& geometry_data = data_array->scalars().geometry_data();
-        const auto& valid_data = data_array->valid_data();
+        const auto& valid_data = GetFieldDataRowValidData(*data_array);
 
         for (int64_t i = 0; i < num_rows; ++i) {
             if (valid_data.empty() ||

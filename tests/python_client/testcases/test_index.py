@@ -2789,10 +2789,15 @@ class TestBitmapIndex(TestcaseBase):
         # load collection
         self.collection_wrap.load()
 
-        # prepare 3k data (> 1024 triggering index building)
-        self.collection_wrap.insert(
-            data=cf.gen_values(self.collection_wrap.schema, nb=nb), check_task=CheckTasks.check_insert_result
-        )
+        # prepare 3k data (> 1024 triggering index building). Keep each insert
+        # below small segment boundaries while preserving the total row count.
+        insert_batch_size = 500
+        for start_id in range(0, nb, insert_batch_size):
+            batch_size = min(insert_batch_size, nb - start_id)
+            self.collection_wrap.insert(
+                data=cf.gen_values(self.collection_wrap.schema, nb=batch_size, start_id=start_id),
+                check_task=CheckTasks.check_insert_result,
+            )
 
         # check no indexed segments
         res, _ = self.utility_wrap.get_query_segment_info(collection_name=collection_name)

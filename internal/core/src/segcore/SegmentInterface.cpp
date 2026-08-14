@@ -838,7 +838,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
         auto create_count = IsVectorArrayDataType(data_type) ? count : 0;
         auto result = CreateEmptyVectorDataArray(create_count, field_meta);
 
-        auto valid_data = result->mutable_valid_data();
+        auto valid_data = MutableFieldDataRowValidData(result.get());
         for (int64_t i = 0; i < count; ++i) {
             valid_data->Add(false);
         }
@@ -848,7 +848,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         if (field_meta.is_nullable()) {
-            auto res = result->mutable_valid_data()->mutable_data();
+            auto res =
+                MutableFieldDataRowValidData(result.get())->mutable_data();
             for (int64_t i = 0; i < count; ++i) {
                 res[i] = true;
             }
@@ -924,14 +925,16 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 break;
             }
             case DataType::DECIMAL: {
-                // Default value and query result are both decimal text —
-                // no decode/encode needed here, just a direct copy.
+                // The default value is already stored as the canonical 8-byte
+                // little-endian unscaled int64 (the same wire form query
+                // results use), so this is a direct copy, not text.
                 auto dst = result->mutable_scalars()
                                ->mutable_bytes_data()
                                ->mutable_data();
-                const auto& text = field_meta.default_value()->bytes_data();
+                const auto& canonical_bytes =
+                    field_meta.default_value()->bytes_data();
                 for (int64_t i = 0; i < count; ++i) {
-                    dst->at(i) = text;
+                    dst->at(i) = canonical_bytes;
                 }
                 break;
             }

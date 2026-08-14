@@ -21,6 +21,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// generatedFieldIDBase is the offset newTestSchema adds to each schemapb.DataType
+// enum value to derive that type's field ID, so the generated block spans
+// generatedFieldIDBase+0 .. generatedFieldIDBase+max(DataType) and grows on its
+// own whenever a DataType is added.
+const generatedFieldIDBase = 100
+
+// Field IDs for the fields newTestSchema writes by hand. They must stay clear of
+// the generated block above: these used to start at 130, which collided the
+// moment DataType gained values 30 and 31 (Decimal, UUID). Keep them well past
+// generatedFieldIDBase+max(DataType) -- 301 today, via DataType_Struct(201).
+const (
+	dynamicFieldID      = 1000
+	stringArrayFieldID  = 1001
+	structArrayFieldID  = 1002
+	structSubStrFieldID = 1003
+	structSubIntFieldID = 1004
+	legacyNullFieldID   = 1005
+)
+
 func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 	fields := []*schemapb.FieldSchema{
 		{FieldID: 0, Name: "FieldID", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
@@ -29,7 +48,7 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 	for name, value := range schemapb.DataType_value {
 		dataType := schemapb.DataType(value)
 		newField := &schemapb.FieldSchema{
-			FieldID: int64(100 + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
+			FieldID: int64(generatedFieldIDBase + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
 		}
 		if dataType == schemapb.DataType_Array {
 			newField.ElementType = schemapb.DataType_Int64
@@ -42,32 +61,28 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		}
 		fields = append(fields, newField)
 	}
-	// Field IDs below start at 1000, well clear of the 100+DataType_value range the loop
-	// above uses (schemapb.DataType enum values run up to ~200 today), so a newly added
-	// DataType can never collide with these hardcoded IDs the way DataType_Decimal (30)
-	// used to collide with FieldID 130 here.
 	if EnableDynamicField {
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: 1000, Name: common.MetaFieldName, IsPrimaryKey: false, Description: "dynamic field", DataType: schemapb.DataType_JSON,
+			FieldID: dynamicFieldID, Name: common.MetaFieldName, IsPrimaryKey: false, Description: "dynamic field", DataType: schemapb.DataType_JSON,
 			IsDynamic: true,
 		})
 	}
 
 	fields = append(fields, &schemapb.FieldSchema{
-		FieldID: 1001, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
+		FieldID: stringArrayFieldID, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_VarChar,
 	})
 
 	structArrayField := &schemapb.StructArrayFieldSchema{
-		FieldID: 1002, Name: "struct_array", Fields: []*schemapb.FieldSchema{
+		FieldID: structArrayFieldID, Name: "struct_array", Fields: []*schemapb.FieldSchema{
 			{
-				FieldID: 1003, Name: "struct_array[sub_str]", IsPrimaryKey: false, Description: "sub struct array field for string",
+				FieldID: structSubStrFieldID, Name: "struct_array[sub_str]", IsPrimaryKey: false, Description: "sub struct array field for string",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_VarChar,
 			},
 			{
-				FieldID: 1004, Name: "struct_array[sub_int]", IsPrimaryKey: false, Description: "sub struct array field for int",
+				FieldID: structSubIntFieldID, Name: "struct_array[sub_int]", IsPrimaryKey: false, Description: "sub struct array field for int",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_Int32,
 			},
@@ -256,7 +271,7 @@ func TestExpr_NullLiteral_LegacyNullField(t *testing.T) {
 	withNullField := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
 		schema := newTestSchema(true)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-			FieldID: 199, Name: "null", Description: "legacy field literally named null", DataType: dataType,
+			FieldID: legacyNullFieldID, Name: "null", Description: "legacy field literally named null", DataType: dataType,
 		})
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
@@ -1425,7 +1440,7 @@ func TestExpr_StructArrayParentIsNull(t *testing.T) {
 	nullExpr := expr.GetNullExpr()
 	require.NotNil(t, nullExpr)
 	assert.Equal(t, planpb.NullExpr_IsNull, nullExpr.GetOp())
-	assert.Equal(t, int64(1003), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), nullExpr.GetColumnInfo().GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
 	assert.Equal(t, schemapb.DataType_VarChar, nullExpr.GetColumnInfo().GetElementType())
 	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
@@ -1435,7 +1450,7 @@ func TestExpr_StructArrayParentIsNull(t *testing.T) {
 	nullExpr = expr.GetNullExpr()
 	require.NotNil(t, nullExpr)
 	assert.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
-	assert.Equal(t, int64(1003), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), nullExpr.GetColumnInfo().GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
 	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
 }
@@ -2698,7 +2713,7 @@ func Test_JSONContainsStructFieldUsesSubFieldNullable(t *testing.T) {
 			require.NotNil(t, jsonContainsExpr)
 			columnInfo := jsonContainsExpr.GetColumnInfo()
 			require.NotNil(t, columnInfo)
-			assert.Equal(t, schema.StructArrayFields[0].Fields[1].GetFieldID(), columnInfo.GetFieldId())
+			assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId())
 			assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 			assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 			assert.Equal(t, testcase.wantNullable, columnInfo.GetNullable())
@@ -3955,7 +3970,7 @@ func TestExpr_StructIndexField_PlanShape(t *testing.T) {
 
 	columnInfo := ure.GetColumnInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(1004), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 	assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath())
@@ -3972,7 +3987,7 @@ func TestExpr_StructIndexField_PlanShape(t *testing.T) {
 
 	columnInfo = te.GetColumnInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(1003), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
 	assert.Equal(t, []string{"1"}, columnInfo.GetNestedPath())
@@ -3993,7 +4008,7 @@ func TestExpr_StructFieldArrayLength(t *testing.T) {
 
 	columnInfo := bae.GetLeft().GetColumnExpr().GetInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(1003), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
 	assert.Empty(t, columnInfo.GetNestedPath())
@@ -4010,7 +4025,7 @@ func TestExpr_StructFieldArrayLength(t *testing.T) {
 
 	columnInfo = bae.GetLeft().GetColumnExpr().GetInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(1004), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 	assert.Empty(t, columnInfo.GetNestedPath())
@@ -4144,7 +4159,7 @@ func TestExpr_StructIndexField_RangeForms(t *testing.T) {
 
 		columnInfo := bre.GetColumnInfo()
 		require.NotNil(t, columnInfo, tc.expr)
-		assert.Equal(t, int64(1004), columnInfo.GetFieldId(), tc.expr)
+		assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId(), tc.expr)
 		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType(), tc.expr)
 		assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType(), tc.expr)
 		assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath(), tc.expr)

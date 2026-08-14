@@ -44,7 +44,7 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	s.Require().Len(req.GetFieldsData(), 1)
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
-	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+	s.ElementsMatch([]bool{true, true, true}, fd.GetScalars().GetValidData())
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
@@ -159,7 +159,11 @@ func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumn() {
 	subs := clipsFD.GetStructArrays().GetFields()
 	s.Require().Len(subs, 2)
 	for _, sub := range subs {
-		s.Equal([]bool{true, false, true}, sub.GetValidData())
+		if sub.GetScalars() != nil {
+			s.Equal([]bool{true, false, true}, sub.GetScalars().GetValidData())
+		} else {
+			s.Equal([]bool{true, false, true}, sub.GetVectors().GetValidData())
+		}
 	}
 	s.Len(subs[0].GetScalars().GetArrayData().GetData(), 2)
 	s.Len(subs[1].GetVectors().GetVectorArray().GetData(), 2)
@@ -285,6 +289,41 @@ func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 	upsertReq, err := upsertOpt.UpsertRequest(coll)
 	s.Require().NoError(err)
 	s.Equal(namespace, upsertReq.GetNamespace())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestTextColumnInsertAndUpsertRequests() {
+	const collectionName = "text_write_option"
+	values := []string{"short text", "长文本", "large payload"}
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collectionName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("content").WithDataType(entity.FieldTypeText)),
+	}
+
+	opt := NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", []int64{1, 2, 3}).
+		WithTextColumn("content", values)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(3, insertReq.GetNumRows())
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(3, upsertReq.GetNumRows())
+
+	for _, fieldsData := range [][]*schemapb.FieldData{insertReq.GetFieldsData(), upsertReq.GetFieldsData()} {
+		var textData *schemapb.FieldData
+		for _, fd := range fieldsData {
+			if fd.GetFieldName() == "content" {
+				textData = fd
+				break
+			}
+		}
+		s.Require().NotNil(textData)
+		s.Equal(schemapb.DataType_Text, textData.GetType())
+		s.Equal(values, textData.GetScalars().GetStringData().GetData())
+	}
 }
 
 func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {

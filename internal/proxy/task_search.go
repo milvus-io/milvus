@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -152,7 +151,7 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 	}
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
@@ -190,8 +189,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
 		return err2
 	}
-	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
-	t.partitionKeyIsolation = collectionInfo.partitionKeyIsolation
+	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
+	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -225,7 +224,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
-		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.Any("schema", t.schema))
+		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
 	}
 	if len(aggs) > 0 {
@@ -263,6 +262,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
 	t.traceEnabled = strings.EqualFold(traceVal, "true")
+	timezone, err := resolveTimezone(ctx, t.request.GetSearchParams(), collectionInfo)
+	if err != nil {
+		return err
+	}
+	t.resolvedTimezoneStr = timezone
 	// initSearchAggregation must run before init{,Advanced}SearchRequest so
 	// that t.SearchRequest.GroupByFieldIds and t.aggCtx are populated before
 	// queryInfo is built and captured — otherwise queryInfo.GroupByFieldIds
@@ -287,7 +291,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
@@ -306,8 +310,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
+	if collectionInfo.UpdateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.UpdateTimestamp
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
@@ -330,28 +334,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	if collectionInfo.collectionTTL != 0 {
+	if collectionInfo.CollectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
-
-	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
-	if exist {
-		if !timestamptz.IsTimezoneValid(timezone) {
-			log.Info(ctx, "get invalid timezone from request", mlog.String("timezone", timezone))
-			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
-		}
-		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
-	} else {
-		timezone = getColTimezone(collectionInfo)
-		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", timezone))
-	}
-	t.resolvedTimezoneStr = timezone
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
@@ -1182,7 +1173,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
+	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
 			mlog.String("dsl", dsl), // may be very large if large term passed.

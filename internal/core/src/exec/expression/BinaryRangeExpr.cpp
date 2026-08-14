@@ -272,7 +272,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
             &processed_cursor
         ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -287,7 +287,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
             if constexpr (filter_type == FilterType::random) {
                 offset = offsets ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -522,7 +522,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         [ lower_inclusive, upper_inclusive, &processed_cursor, &
           bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -582,7 +582,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         if constexpr (filter_type == FilterType::sequential) {
             // contiguous rows: reuse the vectorized shared helper
             ApplyValidMask(valid_data, res, valid_res, size);
-        } else if (valid_data != nullptr) {
+        } else if (valid_data) {
             // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
                 auto offset = (offsets) ? offsets[i] : i;
@@ -699,7 +699,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             &processed_cursor
         ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -853,12 +853,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
                                            &lower_bound,
                                            &upper_bound](
                                               const ColType* src,
-                                              const bool* valid,
+                                              ValidityView valid,
                                               size_t size,
                                               TargetBitmapView res,
                                               TargetBitmapView valid_res) {
                     for (size_t i = 0; i < size; ++i) {
-                        if (valid != nullptr && !valid[i]) {
+                        if (valid && !valid[i]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
@@ -1050,7 +1050,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
         [ lower_inclusive, upper_inclusive, &processed_cursor, &
           bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -1257,6 +1257,23 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
             SegmentExpr::CanUseIndexForOp<std::string>(
                 proto::plan::OpType::LessEqual);
         if (!supports_range) {
+            exec_path_ = ExprExecPath::RawData;
+        }
+    }
+
+    // A binary range needs both one-sided range operations. String indexes can
+    // decline individual operations through ShouldUseOp; FMINDEX declines all
+    // lexicographic ranges and must fall back before its Range() overload is
+    // reached.
+    if (data_type == DataType::VARCHAR) {
+        const auto lower_op = expr_->lower_inclusive_
+                                  ? proto::plan::OpType::GreaterEqual
+                                  : proto::plan::OpType::GreaterThan;
+        const auto upper_op = expr_->upper_inclusive_
+                                  ? proto::plan::OpType::LessEqual
+                                  : proto::plan::OpType::LessThan;
+        if (!SegmentExpr::CanUseIndexForOp<std::string>(lower_op) ||
+            !SegmentExpr::CanUseIndexForOp<std::string>(upper_op)) {
             exec_path_ = ExprExecPath::RawData;
         }
     }

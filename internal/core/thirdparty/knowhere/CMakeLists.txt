@@ -14,10 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# zilliztech/knowhere#1699 (iterator error-code interface) that this segcore
-# adaptation depends on has landed on knowhere main and is included in the
-# v3.0.6 release tag, so pin to the tagged release instead of a raw commit.
-set( KNOWHERE_VERSION v3.0.6 )
+# Pins the short zilliztech/knowhere#1761 commit without nullable ID mapping.
+# It retains the COSINE/IP CalcDistByIDs fix for fully cached DiskANN vectors.
+set( KNOWHERE_VERSION 6a3b7df1 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")

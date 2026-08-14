@@ -37,15 +37,22 @@ type CommandReply struct {
 	ReceivedAt     int64  `json:"received_at"`
 }
 
-// ClientMetrics wraps client telemetry data for JSON API responses
+// ClientMetrics wraps client telemetry data for JSON API responses.
+//
+// The three collection fields are always present and always an array, never null and never
+// absent. Metrics in particular reset every heartbeat window, so an idle client legitimately
+// reports none -- and "no operations this window" must not be indistinguishable from a
+// missing or broken field. Consumers can rely on `metrics` existing and branch on its
+// length; combined with `status`, an empty array plus "active" means idle, while "inactive"
+// means the client stopped heartbeating.
 type ClientMetrics struct {
 	ClientID          string                       `json:"client_id"`
 	ClientInfo        *commonpb.ClientInfo         `json:"client_info"`
 	LastHeartbeatTime int64                        `json:"last_heartbeat_time"`
 	Status            string                       `json:"status"`
 	Databases         []string                     `json:"databases"`
-	Metrics           []*commonpb.OperationMetrics `json:"metrics,omitempty"`
-	CommandReplies    []*CommandReply              `json:"command_replies,omitempty"`
+	Metrics           []*commonpb.OperationMetrics `json:"metrics"`
+	CommandReplies    []*CommandReply              `json:"command_replies"`
 }
 
 // ClientTelemetryResponse wraps GetClientTelemetry response for JSON API
@@ -62,6 +69,14 @@ type CommandResponse struct {
 	CreateTime  int64  `json:"create_time"`
 	Persistent  bool   `json:"persistent"`
 	PayloadSize int    `json:"payload_size"`
+}
+
+// orEmpty returns s, or an empty slice when s is nil, so it marshals to [] rather than null.
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
 
 // ConvertClientTelemetryResponse converts proto GetClientTelemetryResponse to API response
@@ -95,9 +110,11 @@ func ConvertClientTelemetryResponse(resp *milvuspb.GetClientTelemetryResponse) *
 			ClientInfo:        ct.ClientInfo,
 			LastHeartbeatTime: ct.LastHeartbeatTime,
 			Status:            ct.Status,
-			Databases:         ct.Databases,
-			Metrics:           ct.Metrics,
-			CommandReplies:    commandReplies,
+			// A nil slice marshals to null; emit an empty array so every consumer sees
+			// the same shape whether or not the client had anything to report.
+			Databases:      orEmpty(ct.Databases),
+			Metrics:        orEmpty(ct.Metrics),
+			CommandReplies: orEmpty(commandReplies),
 		}
 	}
 

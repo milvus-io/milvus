@@ -29,6 +29,7 @@
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
@@ -2470,10 +2471,11 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     auto array_data = insert_record_proto->add_fields_data();
     array_data->set_field_id(int_array_fid.get());
     array_data->set_type(proto::schema::DataType::Array);
-    array_data->add_valid_data(true);
-    array_data->add_valid_data(false);
-    array_data->add_valid_data(true);
-    auto arrays = array_data->mutable_scalars()->mutable_array_data();
+    auto* array_scalars = array_data->mutable_scalars();
+    array_scalars->add_valid_data(true);
+    array_scalars->add_valid_data(false);
+    array_scalars->add_valid_data(true);
+    auto arrays = array_scalars->mutable_array_data();
     arrays->set_element_type(proto::schema::DataType::Int32);
     auto row0 = arrays->mutable_data()->Add();
     row0->mutable_int_data()->mutable_data()->Add(10);
@@ -3773,7 +3775,7 @@ MakeNullableElementSearchFixture() {
             }
         }
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         for (int row = 0; row < kNullableElemN; ++row) {
             valid_data->Add(true);
@@ -3801,9 +3803,10 @@ BuildFieldValidBitmap(const GeneratedData& data, FieldId field_id) {
         if (fd.field_id() != field_id.get()) {
             continue;
         }
+        const auto& row_valid_data = GetFieldDataRowValidData(fd);
         for (int row = 0; row < row_count; ++row) {
             const bool valid =
-                fd.valid_data_size() == 0 ? true : fd.valid_data(row);
+                row_valid_data.empty() ? true : row_valid_data[row];
             if (valid) {
                 valid_bitmap[row >> 3] |= (1 << (row & 0x07));
             }
@@ -3852,7 +3855,7 @@ MakeNullableElementSearchWithNullAndEmptyRowsFixture() {
             target_values{7.0F, 7.0F, 7.0F, 7.0F, 1.0F, 0.0F, 0.0F, 0.0F};
         target_row->Add(target_values.begin(), target_values.end());
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         valid_data->Add(false);  // row 0: null
         valid_data->Add(true);   // row 1: empty
@@ -3895,7 +3898,7 @@ MakeNullableElementSearchWithOnlyNullRowsFixture() {
                 ->Clear();
         }
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         for (int row = 0; row < kNullableElemN; ++row) {
             valid_data->Add(false);
@@ -4623,4 +4626,123 @@ TEST(ElementFilterSealed, NonNativeFilterOnElementLevelSearch) {
     ASSERT_TRUE(ordinary->element_level_);
     EXPECT_EQ(iterative->seg_offsets_, ordinary->seg_offsets_);
     EXPECT_EQ(iterative->element_indices_, ordinary->element_indices_);
+}
+
+// Nullable embedding-list regression. Null rows exist logically (as empty
+// placeholders) but are NOT stored physically -- the column uses
+// mapping/compact storage -- so the flattened element count (1) runs below
+// the row count (3) and the physical row count (2) runs below the logical
+// one. chunk_rows=1 puts every stored row in its own physical chunk. The
+// only element in the segment lives at logical doc 2, element 0; both the
+// brute-force and the iterator-v2 paths must find it, and bulk_subscript
+// must hand back null / valid-empty / valid rows unchanged.
+TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
+    constexpr int64_t N = 3;
+    constexpr int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, dim, "L2", true);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 1);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != vec_fid.get()) {
+            continue;
+        }
+        auto* rows = field_data->mutable_vectors()
+                         ->mutable_vector_array()
+                         ->mutable_data();
+        rows->Clear();
+        // doc 0: null placeholder; doc 1: valid but empty.
+        for (int r = 0; r < 2; ++r) {
+            auto* row = rows->Add();
+            row->set_dim(dim);
+            row->mutable_float_vector();
+        }
+        // doc 2: the single element in the whole segment.
+        auto* target = rows->Add();
+        target->set_dim(dim);
+        for (int d = 0; d < dim; ++d) {
+            target->mutable_float_vector()->add_data(1.0f + d);
+        }
+        auto* valid_data = field_data->mutable_vectors()->mutable_valid_data();
+        valid_data->Clear();
+        valid_data->Add(false);
+        valid_data->Add(true);
+        valid_data->Add(true);
+        break;
+    }
+
+    SegcoreConfig config;
+    config.set_chunk_rows(1);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing_impl, nullptr);
+    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    ASSERT_NE(offsets, nullptr);
+    ASSERT_EQ(offsets->GetRowCount(), N);
+    ASSERT_EQ(offsets->GetTotalElementCount(), 1);
+
+    ScopedSchemaHandle handle(*schema);
+    const int topK = 3;
+
+    auto run_and_check =
+        [&](std::vector<char> plan_bytes) {
+            auto plan = CreateSearchPlanByExpr(
+                schema, plan_bytes.data(), plan_bytes.size());
+            ASSERT_NE(plan, nullptr);
+            auto ph_group_raw =
+                CreatePlaceholderGroup<milvus::FloatVector>(1, dim, 1024);
+            auto ph_group = ParsePlaceholderGroup(
+                plan.get(), ph_group_raw.SerializeAsString());
+            auto search_result =
+                segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            ASSERT_NE(search_result, nullptr);
+            ASSERT_TRUE(search_result->element_level_);
+            bool found = false;
+            for (size_t i = 0; i < search_result->seg_offsets_.size(); ++i) {
+                const auto doc = search_result->seg_offsets_[i];
+                if (doc == INVALID_SEG_OFFSET) {
+                    continue;
+                }
+                EXPECT_EQ(doc, 2);
+                EXPECT_EQ(search_result->element_indices_[i], 0);
+                found = true;
+            }
+            EXPECT_TRUE(found)
+                << "the single element (doc 2, elem 0) was not returned";
+        };
+
+    // Brute-force path.
+    run_and_check(handle.ParseSearch(
+        "id >= 0", "structA[array_vec]", topK, "L2", R"({"ef": 50})"));
+    // Iterator-v2 path.
+    run_and_check(handle.ParseSearchIterator(
+        "id >= 0", "structA[array_vec]", topK, "L2", R"({"ef": 50})", 3));
+
+    // bulk_subscript across the null / valid-empty / target rows (the
+    // retrieve and flush read path).
+    const int64_t seg_offsets[] = {0, 1, 2};
+    auto data_array =
+        segment->bulk_subscript(/*op_ctx=*/nullptr, vec_fid, seg_offsets, N);
+    ASSERT_NE(data_array, nullptr);
+    const auto& valid_data = GetFieldDataRowValidData(*data_array);
+    ASSERT_EQ(valid_data.size(), N);
+    EXPECT_FALSE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
+    const auto& out_rows = data_array->vectors().vector_array().data();
+    ASSERT_EQ(out_rows.size(), N);
+    EXPECT_EQ(out_rows[1].float_vector().data_size(), 0);
+    ASSERT_EQ(out_rows[2].float_vector().data_size(), dim);
+    EXPECT_FLOAT_EQ(out_rows[2].float_vector().data(0), 1.0f);
 }

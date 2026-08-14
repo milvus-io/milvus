@@ -1910,6 +1910,77 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }
 
+func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
+	properties := []*commonpb.KeyValuePair{
+		{Key: common.CollectionTTLConfigKey, Value: "360"},
+		{Key: common.CollectionAutoCompactionKey, Value: "false"},
+		{Key: common.MmapEnabledKey, Value: "false"},
+		{Key: common.AllowInsertAutoIDKey, Value: "false"},
+	}
+	schema := newTestSchema()
+	schema.Properties = common.CloneKeyValuePairs(properties)
+
+	mixCoord := newMockMixCoord()
+	mockMeta := &meta{indexMeta: &indexMeta{}}
+	handler := &ServerHandler{
+		s: &Server{
+			broker: broker.NewCoordinatorBroker(mixCoord),
+			meta:   mockMeta,
+		},
+	}
+
+	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
+		func(_ *mockMixCoord, _ context.Context, _ *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				Schema:              schema,
+				ShardsNum:           1,
+				NumPartitions:       1,
+				ConsistencyLevel:    commonpb.ConsistencyLevel_Bounded,
+				Properties:          properties,
+				CollectionID:        200,
+				VirtualChannelNames: []string{"ch-1"},
+			}, nil
+		}).Build()
+	defer mockDescribe.UnPatch()
+
+	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
+		func(_ *mockMixCoord, _ context.Context, _ *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			return &milvuspb.ShowPartitionsResponse{
+				Status:         merr.Success(),
+				PartitionIDs:   []int64{0},
+				PartitionNames: []string{"_default"},
+			}, nil
+		}).Build()
+	defer mockShowPartitions.UnPatch()
+
+	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
+		func(_ *ServerHandler, _ context.Context, _ UniqueID, _ ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
+			return []*msgpb.MsgPosition{
+				{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+			}, uint64(100), nil
+		}).Build()
+	defer mockSeekPositions.UnPatch()
+
+	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).
+		Return([]*model.Index{}).
+		Build()
+	defer mockIndexes.UnPatch()
+
+	mockSelectSegments := mockey.Mock((*meta).SelectSegments).
+		Return([]*SegmentInfo{}).
+		Build()
+	defer mockSelectSegments.UnPatch()
+
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	require.NoError(t, err)
+	require.NotNil(t, snapshotData.Collection)
+	assert.Equal(t, commonpb.ConsistencyLevel_Bounded, snapshotData.Collection.GetConsistencyLevel())
+	assert.Equal(t, properties, snapshotData.Collection.GetProperties())
+	require.NotEmpty(t, snapshotData.Collection.GetProperties())
+	assert.NotSame(t, properties[0], snapshotData.Collection.GetProperties()[0])
+}
+
 func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	schema := newTestSchema()
 	segCh1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -2030,14 +2101,80 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	assert.Equal(t, "ch-2", snapshotData.Segments[0].GetChannelName())
 }
 
+func TestHasCommittedManifest(t *testing.T) {
+	tests := []struct {
+		name        string
+		segment     *SegmentInfo
+		expected    bool
+		expectedErr error
+	}{
+		{
+			name: "empty manifest path",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+			}),
+		},
+		{
+			name: "non-v3 manifest path",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				ManifestPath: packed.MarshalManifestPath("/data/segments/2000", 1),
+			}),
+		},
+		{
+			name: "earliest manifest",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", packed.ManifestEarliest),
+			}),
+		},
+		{
+			name: "committed manifest version one",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/data/segments/2002", 1),
+			}),
+			expected: true,
+		},
+		{
+			name: "committed manifest version three",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/data/segments/2003", 3),
+			}),
+			expected: true,
+		},
+		{
+			name: "invalid manifest path",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				ID:             2004,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "invalid",
+			}),
+			expectedErr: merr.ErrDataIntegrity,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := hasCommittedManifest(test.segment)
+			if test.expectedErr != nil {
+				require.ErrorIs(t, err, test.expectedErr)
+				assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
+
 // TestGenSnapshot_IncludesV3ManifestOnlySegment guards the snapshot filter: a
 // V3 segment that reloaded from etcd with empty Binlogs/Deltalogs (per-field
-// KVs are not persisted for V3) but a non-empty ManifestPath still carries
-// data and must not be dropped from the snapshot. An empty segment with no
-// manifest is the negative control.
+// KVs are not persisted for V3) must be retained only after its manifest is
+// committed. A growing segment's earliest manifest is only a placeholder.
 func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	schema := newTestSchema()
-	// V3 segment: empty binlog arrays but a live manifest path — must be kept.
+	// Committed V3 manifest with empty legacy arrays must be kept.
 	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2001,
 		CollectionID:   200,
@@ -2049,9 +2186,21 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", 3),
 	})
+	// A growing V3 segment only has an allocation placeholder and must be dropped.
+	growingSeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2002,
+		CollectionID:   200,
+		PartitionID:    0,
+		InsertChannel:  "ch-1",
+		State:          commonpb.SegmentState_Growing,
+		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/2002", packed.ManifestEarliest),
+	})
 	// Empty segment with no manifest — must be dropped.
 	emptySeg := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            2002,
+		ID:            2003,
 		CollectionID:  200,
 		PartitionID:   0,
 		InsertChannel: "ch-1",
@@ -2059,6 +2208,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
 		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
 	})
+	candidates := []*SegmentInfo{manifestSeg, growingSeg, emptySeg}
 
 	mockMeta := &meta{indexMeta: &indexMeta{}}
 	handler := &ServerHandler{
@@ -2108,7 +2258,6 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 
 	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
 		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			candidates := []*SegmentInfo{manifestSeg, emptySeg}
 			var result []*SegmentInfo
 			for _, seg := range candidates {
 				pass := true
@@ -2143,6 +2292,22 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	require.Len(t, snapshotData.Segments, 1)
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
+
+	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2004,
+		CollectionID:   200,
+		PartitionID:    0,
+		InsertChannel:  "ch-1",
+		State:          commonpb.SegmentState_Flushed,
+		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "invalid",
+	})}
+	snapshotData, err = handler.GenSnapshot(context.Background(), 200)
+	assert.Nil(t, snapshotData)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {

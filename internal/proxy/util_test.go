@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -55,6 +57,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type proxyLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*proxyLogBuffer) Sync() error {
+	return nil
+}
+
+func captureProxyLogs(t *testing.T) *proxyLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &proxyLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
 
 func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
 	info := &SearchInfo{
@@ -1104,6 +1135,76 @@ func TestGetRole(t *testing.T) {
 	assert.Equal(t, 1, len(roles))
 }
 
+func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
+	logs := captureProxyLogs(t)
+	rawToken := "API_KEY_SENTINEL_DO_NOT_LOG"
+	encodedToken := crypto.Base64Encode(rawToken)
+	hookutil.SetMockAPIHook("", errors.New("API key provider unavailable"))
+	t.Cleanup(func() {
+		hookutil.SetTestHook(hookutil.DefaultHook{})
+	})
+
+	_, err := VerifyAPIKey(rawToken)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), rawToken)
+
+	oldMetaCache := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	t.Cleanup(func() {
+		globalMetaCache = oldMetaCache
+	})
+	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
+	t.Cleanup(func() {
+		paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	})
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		util.HeaderAuthorize,
+		encodedToken,
+	))
+	_, err = AuthenticationInterceptor(ctx)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), rawToken)
+	assert.NotContains(t, err.Error(), encodedToken)
+	output := logs.String()
+	assert.Contains(t, output, "fail to verify apikey")
+	assert.Contains(t, output, "API key provider unavailable")
+	assert.NotContains(t, output, rawToken)
+	assert.NotContains(t, output, encodedToken)
+}
+
+func TestPasswordVerifyDoesNotLogCredential(t *testing.T) {
+	ctx := context.Background()
+	username := "USERNAME_SENTINEL_DO_NOT_LOG"
+	password := "PASSWORD_SENTINEL_DO_NOT_LOG"
+	encryptedPassword, err := crypto.PasswordEncrypt(password)
+	require.NoError(t, err)
+	sha256Password := crypto.SHA256(password, username)
+
+	privilege.ResetPrivilegeCacheForTest()
+	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	mockedRootCoord := NewMixCoordMock()
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+		return &rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: username,
+			Password: encryptedPassword,
+		}, nil
+	}
+	privilege.InitPrivilegeCache(ctx, mockedRootCoord)
+
+	logs := captureProxyLogs(t)
+	assert.True(t, passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()))
+
+	output := logs.String()
+	assert.Contains(t, output, "credential cache populated")
+	assert.NotContains(t, output, username)
+	assert.NotContains(t, output, password)
+	assert.NotContains(t, output, encryptedPassword)
+	assert.NotContains(t, output, sha256Password)
+	assert.NotContains(t, output, "encrypted_password")
+	assert.NotContains(t, output, "sha256_password")
+}
+
 func TestPasswordVerify(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1149,6 +1250,32 @@ func TestPasswordVerify(t *testing.T) {
 	// Sha256Password already exists within cache
 	assert.True(t, passwordVerify(ctx, username, password, privilegeCache))
 	assert.Equal(t, 2, invokedCount)
+}
+
+func BenchmarkPasswordVerifyCacheHit(b *testing.B) {
+	ctx := context.Background()
+	const (
+		username = "benchmark-user"
+		password = "benchmark-password"
+	)
+
+	privilege.ResetPrivilegeCacheForTest()
+	b.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	require.NoError(b, privilege.InitPrivilegeCache(ctx, NewMixCoordMock()))
+
+	privilegeCache := privilege.GetPrivilegeCache()
+	privilegeCache.UpdateCredential(&internalpb.CredentialInfo{
+		Username:       username,
+		Sha256Password: crypto.SHA256(password, username),
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !passwordVerify(ctx, username, password, privilegeCache) {
+			b.Fatal("cached password verification failed")
+		}
+	}
 }
 
 func Test_isCollectionIsLoaded(t *testing.T) {
@@ -2011,7 +2138,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2055,7 +2182,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2096,7 +2223,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2141,7 +2268,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2192,7 +2319,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2233,7 +2360,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NoError(t, nil, err)
 
 		// autoid==false
@@ -2272,11 +2399,11 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NoError(t, nil, err)
 	})
 
-	t.Run("will generate new pk when autoid == true", func(t *testing.T) {
+	t.Run("handle autoid primary key modes", func(t *testing.T) {
 		// autoid==true
 		task := insertTask{
 			schema: &schemapb.CollectionSchema{
@@ -2323,10 +2450,16 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		ids, oldIDs, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{2}, task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData())
+		assert.Equal(t, []int64{2}, ids.GetIntId().GetData())
+		assert.Equal(t, []int64{2}, oldIDs.GetIntId().GetData())
+
+		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		newPK := task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData()
 		assert.Equal(t, newPK, task.insertMsg.RowIDs)
-		assert.NoError(t, nil, err)
+		assert.NoError(t, err)
 	})
 }
 
@@ -6051,9 +6184,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 									FieldName: subFieldName,
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: validData,
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: validData,
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6082,7 +6215,8 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 	for _, fd := range insertMsg.GetFieldsData() {
 		if fd.FieldName == transformedName {
 			found = true
-			assert.Equal(t, validData, fd.GetValidData(), "ValidData should be preserved in flattened sub-field")
+			assert.Equal(t, validData, typeutil.GetFieldDataValidData(fd), "ValidData should be preserved in flattened sub-field")
+			assert.Nil(t, fd.GetValidData(), "flattened sub-field should use only field-specific ValidData")
 			break
 		}
 	}
@@ -6246,9 +6380,9 @@ func TestCheckAndFlattenStructFieldData_RequiredMissingButNullablePresent(t *tes
 									FieldName: "sub_b",
 									FieldId:   301,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6331,16 +6465,18 @@ func TestCheckAndFlattenStructFieldData_AllNullWithInitializedVectorsOneof(t *te
 									FieldName: "tag",
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{false, false},
+									Field: &schemapb.FieldData_Scalars{
+										Scalars: &schemapb.ScalarField{ValidData: []bool{false, false}},
+									},
 								},
 								{
 									FieldName: "vec",
 									FieldId:   202,
 									Type:      schemapb.DataType_ArrayOfVector,
-									ValidData: []bool{false, false},
 									Field: &schemapb.FieldData_Vectors{
 										Vectors: &schemapb.VectorField{
-											Dim: 4,
+											ValidData: []bool{false, false},
+											Dim:       4,
 										},
 									},
 								},
@@ -6602,9 +6738,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataMaskMismatch(t *testing.T) {
 								{
 									FieldName: "a",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6620,9 +6756,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataMaskMismatch(t *testing.T) {
 								{
 									FieldName: "b",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{false, true},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{false, true},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6691,9 +6827,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataNilVsNonNil(t *testing.T) {
 								{
 									FieldName: "a",
 									Type:      schemapb.DataType_Array,
-									ValidData: nil, // no ValidData
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: nil, // no ValidData
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6709,9 +6845,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataNilVsNonNil(t *testing.T) {
 								{
 									FieldName: "b",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false}, // has ValidData
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false}, // has ValidData
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6781,8 +6917,10 @@ func TestCheckAndFlattenStructFieldData_ValidDataWithoutPayload(t *testing.T) {
 									FieldName: "a",
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false}, // claims row 0 is valid
-									// but no Field/payload
+									Field: &schemapb.FieldData_Scalars{
+										// Claims row 0 is valid, but provides no payload.
+										Scalars: &schemapb.ScalarField{ValidData: []bool{true, false}},
+									},
 								},
 							},
 						},
@@ -6888,4 +7026,47 @@ func TestFailMetricLabel(t *testing.T) {
 	// client cancellation is neither party's failure
 	assertLabels(metrics.CauseCancel, context.Canceled)
 	assertLabels(metrics.CauseCancel, errors.Wrap(context.Canceled, "rpc aborted"))
+}
+
+func TestResolveTimezone(t *testing.T) {
+	ctx := context.Background()
+	colInfoWithTz := &collectionInfo{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.TimezoneKey, Value: "America/New_York"},
+		},
+	}
+	colInfoWithoutTz := &collectionInfo{}
+
+	t.Run("request timezone wins over collection timezone", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: "Asia/Shanghai"}}
+		tz, err := resolveTimezone(ctx, params, colInfoWithTz)
+		assert.NoError(t, err)
+		assert.Equal(t, "Asia/Shanghai", tz)
+	})
+
+	t.Run("invalid request timezone is rejected as ParameterInvalid", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: "Not/AZone"}}
+		_, err := resolveTimezone(ctx, params, colInfoWithTz)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("absent request timezone falls back to collection timezone", func(t *testing.T) {
+		tz, err := resolveTimezone(ctx, nil, colInfoWithTz)
+		assert.NoError(t, err)
+		assert.Equal(t, "America/New_York", tz)
+	})
+
+	t.Run("empty request timezone is treated as unspecified", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: ""}}
+		tz, err := resolveTimezone(ctx, params, colInfoWithTz)
+		assert.NoError(t, err)
+		assert.Equal(t, "America/New_York", tz)
+	})
+
+	t.Run("no request or collection timezone defaults to UTC", func(t *testing.T) {
+		tz, err := resolveTimezone(ctx, nil, colInfoWithoutTz)
+		assert.NoError(t, err)
+		assert.Equal(t, common.DefaultTimezone, tz)
+	})
 }

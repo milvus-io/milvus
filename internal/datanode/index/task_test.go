@@ -20,14 +20,20 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -47,6 +53,23 @@ type IndexBuildTaskSuite struct {
 
 	numRows int
 	dim     int
+}
+
+type emptyIndex struct {
+	deleted bool
+}
+
+func (*emptyIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
+func (*emptyIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
+func (*emptyIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
+func (*emptyIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
+func (index *emptyIndex) Delete() error {
+	index.deleted = true
+	return nil
+}
+func (*emptyIndex) CleanLocalData() error { return nil }
+func (*emptyIndex) UpLoad() (*cgopb.IndexStats, error) {
+	return &cgopb.IndexStats{}, nil
 }
 
 func (suite *IndexBuildTaskSuite) SetupSuite() {
@@ -129,6 +152,151 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 	err = t.PostExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
+	logs := captureStatsTaskLogs(suite.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	accessKey := statsLogSentinel("INDEX", "ACCESS", "KEY", "SENTINEL")
+	secretKey := statsLogSentinel("INDEX", "SECRET", "KEY", "SENTINEL")
+	caCert := statsLogSentinel("INDEX", "CA", "CERT", "SENTINEL")
+	gcpCredential := statsLogSentinel("INDEX", "GCP", "CREDENTIAL", "SENTINEL")
+	externalSpecSecret := statsLogSentinel("INDEX", "EXTERNAL", "SPEC", "SENTINEL")
+	externalSpec := `{"format":"parquet","extfs":{"future_secret":"` + externalSpecSecret + `"}}`
+
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, params *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+		suite.Equal(accessKey, params.GetStorageConfig().GetAccessKeyID())
+		suite.Equal(secretKey, params.GetStorageConfig().GetSecretAccessKey())
+		suite.Equal(caCert, params.GetStorageConfig().GetSslCACert())
+		suite.Contains(params.GetStorageConfig().GetGcpCredentialJSON(), gcpCredential)
+		suite.Equal(externalSpec, params.GetExternalSpec())
+		return nil, nil
+	}).Build()
+	defer createIndexPatch.UnPatch()
+
+	req := &workerpb.CreateJobRequest{
+		ClusterID:    "test-cluster",
+		BuildID:      1,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		SegmentID:    suite.segmentID,
+		NumRows:      int64(suite.numRows),
+		Dim:          int64(suite.dim),
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+		},
+		StorageConfig: &indexpb.StorageConfig{
+			Address:           "storage.example.test",
+			StorageType:       "s3",
+			BucketName:        "index-bucket",
+			RootPath:          "index/root",
+			AccessKeyID:       accessKey,
+			SecretAccessKey:   secretKey,
+			SslCACert:         caCert,
+			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
+		},
+		StorageVersion: storage.StorageV2,
+		ExternalSource: "s3://index-bucket/data",
+		ExternalSpec:   externalSpec,
+	}
+
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(ctx), nil)
+	task.newIndexParams = map[string]string{
+		common.IndexTypeKey:  "FLAT",
+		common.MetricTypeKey: metric.L2,
+	}
+	task.newTypeParams = map[string]string{"dim": "128"}
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	output := logs.String()
+	suite.NotContains(output, accessKey)
+	suite.NotContains(output, secretKey)
+	suite.NotContains(output, caCert)
+	suite.NotContains(output, gcpCredential)
+	suite.NotContains(output, externalSpecSecret)
+	suite.Contains(output, "storage.example.test")
+	suite.Contains(output, "index-bucket")
+	suite.Contains(output, "index/root")
+	suite.Contains(output, "s3")
+	suite.Contains(output, "<redacted>")
+}
+
+func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		clusterID                 = "empty-nested-index"
+		buildID                   = int64(1)
+		currentIndexVersion       = int32(2)
+		currentScalarIndexVersion = int32(3)
+	)
+	manager := NewTaskManager(ctx)
+	manager.LoadOrStoreIndexTask(clusterID, buildID, &IndexTaskInfo{})
+
+	req := &workerpb.CreateJobRequest{
+		ClusterID:                 clusterID,
+		BuildID:                   buildID,
+		CurrentIndexVersion:       currentIndexVersion,
+		CurrentScalarIndexVersion: currentScalarIndexVersion,
+	}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	index := &emptyIndex{}
+	task.index = index
+
+	suite.NoError(task.PostExecute(ctx))
+	suite.True(index.deleted)
+
+	info := manager.GetIndexTaskInfo(clusterID, buildID)
+	suite.Require().NotNil(info)
+	suite.Empty(info.FileKeys)
+	suite.Zero(info.SerializedSize)
+	suite.Zero(info.MemSize)
+	suite.Equal(currentIndexVersion, info.CurrentIndexVersion)
+	suite.Equal(currentScalarIndexVersion, info.CurrentScalarIndexVersion)
+}
+
+func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var captured *indexcgopb.BuildIndexInfo
+	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+			captured = info
+			return nil, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	req := &workerpb.CreateJobRequest{
+		BuildID:     1,
+		NumRows:     int64(suite.numRows),
+		Dim:         int64(suite.dim),
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+		},
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType:    "minio",
+			MaxConnections: 237,
+		},
+	}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
+	task.newIndexParams = map[string]string{common.IndexTypeKey: "FLAT"}
+	task.newTypeParams = map[string]string{"dim": "128"}
+	task.tr = timerecord.NewTimeRecorder("test-max-connections")
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	suite.Require().NotNil(captured)
+	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
 }
 
 func TestIndexBuildTask(t *testing.T) {
@@ -233,6 +401,44 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var capturedMaxConnections uint32
+	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
+		func(_ context.Context, info *clusteringpb.AnalyzeInfo, _ *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
+			capturedMaxConnections = info.GetStorageConfig().GetMaxConnections()
+			return nil, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	req := &workerpb.AnalyzeRequest{
+		TaskID:       suite.taskID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		FieldID:      suite.fieldID,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_FloatVector,
+		Dim:          128,
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType:    "minio",
+			RootPath:       "files",
+			MaxConnections: 237,
+		},
+	}
+	task := &analyzeTask{
+		ctx:    ctx,
+		cancel: cancel,
+		req:    req,
+		tr:     timerecord.NewTimeRecorder("test-analyze-max-connections"),
+	}
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	suite.Equal(uint32(237), capturedMaxConnections)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

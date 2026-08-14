@@ -208,11 +208,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
-    std::shared_mutex&
-    get_chunk_mutex() const {
-        return chunk_mutex_;
-    }
-
     const Schema&
     get_schema() const override {
         // Compatibility path for the legacy reference API; readers should keep
@@ -279,9 +274,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
         return chunk_id * segcore_config_.get_chunk_rows();
     }
-
-    void
-    try_remove_chunks(FieldId fieldId);
 
     void
     try_remove_chunks(FieldId fieldId, const Schema& schema);
@@ -744,21 +736,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
                     FieldId field_id,
                     int64_t chunk_id) const override;
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
@@ -901,7 +893,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;
 
-    mutable std::shared_mutex chunk_mutex_;
+    // No chunk lock. Readers pin the generation they walk via
+    // VectorBase::acquire_chunks(); try_remove_chunks swaps the container's
+    // collection out and lets the last pin holder free it. Reclamation and
+    // reads no longer exclude each other in either direction.
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;

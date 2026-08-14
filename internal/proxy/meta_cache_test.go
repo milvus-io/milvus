@@ -1048,15 +1048,15 @@ func TestMetaCache_GetCollectionByAliasHitsCache(t *testing.T) {
 
 	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1_alias", 0)
 	assert.NoError(t, err)
-	assert.Equal(t, typeutil.UniqueID(1), info.collID)
+	assert.Equal(t, typeutil.UniqueID(1), info.CollID)
 	assert.Equal(t, 1, rootCoord.GetAccessCount())
 
 	metaCache := globalMetaCache.(*MetaCache)
-	metaCache.mu.RLock()
-	defer metaCache.mu.RUnlock()
-	_, aliasCachedAsCollection := metaCache.nameIdx[dbName]["collection1_alias"]
+	aliasCachedAsCollection := metaCache.HasNameHintForTest(dbName, "collection1_alias")
 	assert.False(t, aliasCachedAsCollection, "the alias must not be registered as a collection-name hint")
-	assert.Equal(t, "collection1", metaCache.aliasInfo[dbName]["collection1_alias"])
+	aliasTarget, ok := metaCache.AliasTargetForTest(dbName, "collection1_alias")
+	assert.True(t, ok)
+	assert.Equal(t, "collection1", aliasTarget)
 }
 
 func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
@@ -1073,19 +1073,19 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 		defer wg.Done()
 		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 		assert.NoError(t, err)
-		assert.Equal(t, info.collID, int64(1))
-		_ = info.consistencyLevel
-		_ = info.createdTimestamp
-		_ = info.createdUtcTimestamp
+		assert.Equal(t, info.CollID, int64(1))
+		_ = info.ConsistencyLevel
+		_ = info.CreatedTimestamp
+		_ = info.CreatedUtcTimestamp
 	}()
 	go func() {
 		defer wg.Done()
 		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 		assert.NoError(t, err)
-		assert.Equal(t, info.collID, int64(1))
-		_ = info.consistencyLevel
-		_ = info.createdTimestamp
-		_ = info.createdUtcTimestamp
+		assert.Equal(t, info.CollID, int64(1))
+		_ = info.ConsistencyLevel
+		_ = info.CreatedTimestamp
+		_ = info.CreatedUtcTimestamp
 	}()
 	wg.Wait()
 }
@@ -1121,8 +1121,8 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
-		assert.Equal(t, c.collID, int64(1))
-		assert.Equal(t, c.schema.Name, "bar")
+		assert.Equal(t, c.CollID, int64(1))
+		assert.Equal(t, c.Schema.Name, "bar")
 	})
 
 	t.Run("update with name", func(t *testing.T) {
@@ -1148,8 +1148,8 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
-		assert.Equal(t, c.collID, int64(1))
-		assert.Equal(t, c.schema.Name, "bar")
+		assert.Equal(t, c.CollID, int64(1))
+		assert.Equal(t, c.Schema.Name, "bar")
 	})
 }
 
@@ -1234,13 +1234,12 @@ func TestMetaCache_ByIDIndexRealDBBucket(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
 
 	// entries live under their real databases; no "" bucket exists
-	cache.mu.RLock()
-	assert.Nil(t, cache.nameIdx[""])
+	snapshot := cache.SnapshotForTest()
+	assert.Nil(t, snapshot.NameIdx[""])
 	assert.NotNil(t, cachedEntryLocked(cache, "db1", "foo"))
 	assert.NotNil(t, cachedEntryLocked(cache, "db2", "foo"))
 	assert.Same(t, cachedEntryLocked(cache, "db1", "foo"), collByIDLive(cache, 101))
 	assert.Same(t, cachedEntryLocked(cache, "db2", "foo"), collByIDLive(cache, 202))
-	cache.mu.RUnlock()
 
 	// a by-name lookup reuses the by-id fill, no extra RPC
 	id, err := cache.GetCollectionID(ctx, "db1", "foo")
@@ -1257,10 +1256,8 @@ func TestMetaCache_ByIDIndexRealDBBucket(t *testing.T) {
 
 	// dropping a database drops its entries from the index too
 	cache.RemoveDatabase(ctx, "db2")
-	cache.mu.RLock()
 	assert.Nil(t, collByIDLive(cache, 202))
 	assert.NotNil(t, collByIDLive(cache, 101))
-	cache.mu.RUnlock()
 }
 
 // TestMetaCache_ByIDEmptyDBNameNotCached verifies that when an id-only describe
@@ -1302,11 +1299,9 @@ func TestMetaCache_ByIDEmptyDBNameNotCached(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
 
 	// nothing in the primary store, no name hint under any guessed bucket
-	cache.mu.RLock()
 	assert.Nil(t, collByIDLive(cache, 101))
 	assert.Nil(t, cachedEntryLocked(cache, "", "foo"))
 	assert.Nil(t, cachedEntryLocked(cache, "default", "foo"))
-	cache.mu.RUnlock()
 
 	// a later default.foo BY-NAME lookup issues its own describe (cross-db
 	// mis-hit protection preserved)
@@ -1357,10 +1352,8 @@ func TestMetaCache_ByIDDefaultedRequestDBNameNotCached(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
 
 	// nothing in the primary, and the defaulted request db planted no name hint
-	cache.mu.RLock()
 	assert.Nil(t, collByIDLive(cache, 101))
 	assert.Nil(t, cachedEntryLocked(cache, "default", "foo"))
-	cache.mu.RUnlock()
 
 	// a later default.foo BY-NAME lookup issues its own describe (it cannot
 	// silently mis-hit a collection of another database)
@@ -1398,13 +1391,13 @@ func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
 	// first id-only lookup primes the by-id index (one describe, recorded as a miss)
 	info, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, "foo", info.schema.GetName())
+	assert.Equal(t, "foo", info.Schema.GetName())
 
 	// a second id-only lookup must be served from the by-id index as a HIT, with
 	// no additional describe and no cache-miss metric
 	info, err = cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, UniqueID(1), info.collID)
+	assert.Equal(t, UniqueID(1), info.CollID)
 
 	assert.Equal(t, int32(1), atomic.LoadInt32(&describeCount), "cached id-only lookup should not re-describe")
 	assert.Equal(t, float64(1), testutil.ToFloat64(hitCounter)-hitBefore,
@@ -1842,13 +1835,13 @@ func TestGetDatabaseInfo(t *testing.T) {
 		{
 			dbInfo, err := cache.GetDatabaseInfo(ctx, "default")
 			assert.NoError(t, err)
-			assert.Equal(t, UniqueID(1), dbInfo.dbID)
+			assert.Equal(t, UniqueID(1), dbInfo.DBID)
 		}
 
 		{
 			dbInfo, err := cache.GetDatabaseInfo(ctx, "default")
 			assert.NoError(t, err)
-			assert.Equal(t, UniqueID(1), dbInfo.dbID)
+			assert.Equal(t, UniqueID(1), dbInfo.DBID)
 		}
 	})
 
@@ -1890,27 +1883,23 @@ func TestMetaCache_RemoveDatabaseInfoKeepsCollectionMetadata(t *testing.T) {
 	assert.NoError(t, err)
 	defer cache.Close()
 
-	cache.mu.Lock()
 	entry := seedCollection(cache, "db", "foo", 10)
-	entry.aliases = []string{"a"}
-	cache.setAliasLocked("db", "a", "foo")
-	cache.partitionCache[buildPartitionCacheKey(10)] = parsePartitionsInfo([]*partitionInfo{{name: "p", partitionID: 100}}, false)
-	cache.mu.Unlock()
+	entry.Aliases = []string{"a"}
+	cache.SetAliasLockedForTest("db", "a", "foo")
+	cache.SeedPartitionCacheForTest(10, []*partitionInfo{{Name: "p", PartitionID: 100}}, false)
 
 	info, err := cache.GetDatabaseInfo(ctx, "db")
 	assert.NoError(t, err)
-	assert.Equal(t, "old", info.properties[0].GetValue())
+	assert.Equal(t, "old", info.Properties[0].GetValue())
 
 	altered.Store(true)
 	cache.RemoveDatabaseInfo(ctx, "db")
 
-	cache.mu.RLock()
-	_, hasDBInfo := cache.dbInfo["db"]
+	hasDBInfo := cache.HasDBInfoForTest("db")
 	collection := collByIDLive(cache, 10)
 	nameEntry := cachedEntryLocked(cache, "db", "foo")
-	aliasTarget, hasAlias := cache.aliasInfo["db"]["a"]
-	_, hasPartitions := cache.partitionCache[buildPartitionCacheKey(10)]
-	cache.mu.RUnlock()
+	aliasTarget, hasAlias := cache.AliasTargetForTest("db", "a")
+	hasPartitions := cache.HasPartitionCacheForTest(10)
 	assert.False(t, hasDBInfo)
 	assert.Same(t, entry, collection)
 	assert.Same(t, entry, nameEntry)
@@ -1920,7 +1909,7 @@ func TestMetaCache_RemoveDatabaseInfoKeepsCollectionMetadata(t *testing.T) {
 
 	info, err = cache.GetDatabaseInfo(ctx, "db")
 	assert.NoError(t, err)
-	assert.Equal(t, "new", info.properties[0].GetValue())
+	assert.Equal(t, "new", info.Properties[0].GetValue())
 }
 
 func TestMetaCache_RemoveDatabaseInfoBlocksStaleResurrection(t *testing.T) {
@@ -1981,13 +1970,13 @@ func TestMetaCache_RemoveDatabaseInfoBlocksStaleResurrection(t *testing.T) {
 	close(release)
 	oldInfo := <-fillDone
 	assert.NoError(t, <-fillErr)
-	assert.Equal(t, "old", oldInfo.properties[0].GetValue())
+	assert.Equal(t, "old", oldInfo.Properties[0].GetValue())
 	<-invalidationDone
-	assert.Nil(t, cache.safeGetDBInfo("db"), "the pre-alter write-back must be removed")
+	assert.Nil(t, cache.SafeGetDBInfoForTest("db"), "the pre-alter write-back must be removed")
 
 	newInfo, err := cache.GetDatabaseInfo(ctx, "db")
 	assert.NoError(t, err)
-	assert.Equal(t, "new", newInfo.properties[0].GetValue())
+	assert.Equal(t, "new", newInfo.Properties[0].GetValue())
 }
 
 func TestMetaCache_AllocID(t *testing.T) {
@@ -2453,10 +2442,8 @@ func TestMetaCache_FillInvalidateOrdering(t *testing.T) {
 	<-fillDone
 	<-invalDone
 
-	cache.mu.RLock()
 	assert.Nil(t, cachedEntryLocked(cache, dbName, "collection1"), "the drained fill's pre-DDL write-back must not survive the eviction")
 	assert.Nil(t, collByIDLive(cache, 111))
-	cache.mu.RUnlock()
 	assertMetaCacheByIDConsistent(t, cache)
 }
 
@@ -2497,8 +2484,8 @@ func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
 
 	info1, err := cache.GetPartitionInfo(ctx, "db", "collection", "par1")
 	assert.NoError(t, err)
-	assert.Equal(t, int64(100), info1.partitionID)
-	assert.Equal(t, "par1", info1.name)
+	assert.Equal(t, int64(100), info1.PartitionID)
+	assert.Equal(t, "par1", info1.Name)
 
 	info2, err := cache.GetPartitionInfo(ctx, "db", "collection", "par1")
 	assert.NoError(t, err)
@@ -2539,8 +2526,8 @@ func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
 
 	info, err := cache.GetPartitionInfo(ctx, "db", "collection", "")
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1), info.partitionID)
-	assert.Equal(t, defaultPartitionName, info.name)
+	assert.Equal(t, int64(1), info.PartitionID)
+	assert.Equal(t, defaultPartitionName, info.Name)
 }
 
 func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
@@ -2606,7 +2593,7 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 
 	infos1, err := cache.GetPartitionInfos(ctx, "db", "collection")
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(infos1.partitionInfos))
+	assert.Equal(t, 2, len(infos1.PartitionInfos))
 
 	infos2, err := cache.GetPartitionInfos(ctx, "db", "collection")
 	assert.NoError(t, err)
@@ -2787,13 +2774,13 @@ func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {
 
 	info, err := cache.GetCollectionInfo(ctx, "db", "collection", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1), info.numPartitions)
+	assert.Equal(t, int64(1), info.NumPartitions)
 
 	cache.RemovePartition(ctx, "db", 1, "collection", "par1")
 
 	info, err = cache.GetCollectionInfo(ctx, "db", "collection", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), info.numPartitions)
+	assert.Equal(t, int64(2), info.NumPartitions)
 }
 
 // TestMetaCache_RemovePartitionStalesCollectionInfoUnconditionally: with fills
@@ -2833,14 +2820,14 @@ func TestMetaCache_RemovePartitionStalesCollectionInfoUnconditionally(t *testing
 
 	info, err := cache.GetCollectionInfo(ctx, "db", "collection", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1), info.numPartitions)
+	assert.Equal(t, int64(1), info.NumPartitions)
 
 	// even an older-timestamp partition broadcast evicts the collection entry
 	cache.RemovePartition(ctx, "db", 1, "collection", "par1")
 
 	info, err = cache.GetCollectionInfo(ctx, "db", "collection", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1), info.numPartitions)
+	assert.Equal(t, int64(1), info.NumPartitions)
 	assert.Equal(t, 2, describeCalls, "the entry was staled, so the lookup re-describes")
 }
 
@@ -2970,8 +2957,8 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 
 	for result := range results {
 		assert.NoError(t, result.err)
-		if assert.NotNil(t, result.infos) && assert.Len(t, result.infos.partitionInfos, 1) {
-			assert.Equal(t, result.db+"_par", result.infos.partitionInfos[0].name)
+		if assert.NotNil(t, result.infos) && assert.Len(t, result.infos.PartitionInfos, 1) {
+			assert.Equal(t, result.db+"_par", result.infos.PartitionInfos[0].Name)
 		}
 	}
 }
@@ -3019,7 +3006,7 @@ func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
 	// populate the collection-level partition cache via an empty-db request
 	infos1, err := cache.GetPartitionInfos(ctx, "", "collection")
 	assert.NoError(t, err)
-	assert.Len(t, infos1.partitionInfos, 1)
+	assert.Len(t, infos1.PartitionInfos, 1)
 
 	// the explicit-default request must hit the same canonical bucket with no
 	// extra RPC; without normalization it would miss and exceed the Once() mocks
@@ -3065,7 +3052,7 @@ func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
 
 	p1, err := cache.GetPartitionInfo(ctx, "", "collection", "par1")
 	assert.NoError(t, err)
-	assert.Equal(t, int64(100), p1.partitionID)
+	assert.Equal(t, int64(100), p1.PartitionID)
 
 	// explicit default resolves from the same normalized bucket — no extra RPC
 	p2, err := cache.GetPartitionInfo(ctx, "default", "collection", "par1")
@@ -3076,14 +3063,7 @@ func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
 // getAlias reads an alias hint (test helper; production reads chain through
 // getCollection).
 func getAlias(cache *MetaCache, database, alias string) (string, bool) {
-	cache.mu.RLock()
-	defer cache.mu.RUnlock()
-	if db, ok := cache.aliasInfo[normalizeDBName(database)]; ok {
-		if target, ok := db[alias]; ok {
-			return target, true
-		}
-	}
-	return "", false
+	return cache.AliasTargetForTest(database, alias)
 }
 
 // mustNewSchemaInfo builds a schemaInfo for tests, panicking on the schema-helper
@@ -3099,9 +3079,9 @@ func mustNewSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 }
 
 // collByIDLive returns the live primary entry for id (nil when absent —
-// liveness is presence). Callers must hold cache.mu (tests take RLock).
+// liveness is presence).
 func collByIDLive(cache *MetaCache, id UniqueID) *collectionInfo {
-	if e, ok := cache.liveLocked(id); ok {
+	if e, ok := cache.LiveLockedForTest(id); ok {
 		return e
 	}
 	return nil
@@ -3109,41 +3089,18 @@ func collByIDLive(cache *MetaCache, id UniqueID) *collectionInfo {
 
 // cachedEntryLocked resolves (db, name) exactly like a read would: name hint ->
 // primary, validated (id live, name still matches). nil = a lookup would miss.
-// Callers must hold cache.mu.
 func cachedEntryLocked(cache *MetaCache, db, name string) *collectionInfo {
-	db = normalizeDBName(db)
-	ids, ok := cache.nameIdx[db]
+	info, ok := cache.GetCollectionForTest(db, name, 0)
 	if !ok {
 		return nil
 	}
-	id, ok := ids[name]
-	if !ok {
-		return nil
-	}
-	e, ok := cache.liveLocked(id)
-	if !ok || e.schema.GetName() != name || normalizeDBName(e.dbName) != db {
-		return nil
-	}
-	return e
+	return info
 }
 
 // seedCollection plants a collection into the primary store + name hint the way
-// update() would, for tests that build MetaCache literals. The literal must have
-// collections/nameIdx maps initialized.
+// update() would, for tests that need hand-seeded cache state.
 func seedCollection(cache *MetaCache, db, name string, id UniqueID) *collectionInfo {
-	info := &collectionInfo{
-		collID: id,
-		dbName: db,
-		schema: mustNewSchemaInfo(&schemapb.CollectionSchema{Name: name}),
-	}
-	cache.collections[id] = info
-	ids, ok := cache.nameIdx[db]
-	if !ok {
-		ids = make(map[string]UniqueID)
-		cache.nameIdx[db] = ids
-	}
-	ids[name] = id
-	return info
+	return cache.SeedCollectionForTest(db, name, id)
 }
 
 // assertMetaCacheByIDConsistent verifies the post-unified-cleanup invariant
@@ -3159,78 +3116,77 @@ func seedCollection(cache *MetaCache, db, name string, id UniqueID) *collectionI
 //  4. primary keys equal entry ids.
 func assertMetaCacheByIDConsistent(t *testing.T, cache *MetaCache) {
 	t.Helper()
-	cache.mu.RLock()
 	v := metaCacheConsistencyViolations(cache)
-	cache.mu.RUnlock()
 	assert.Emptyf(t, v, "meta cache consistency violated:\n  %s", strings.Join(v, "\n  "))
 }
 
 // metaCacheConsistencyViolations returns every way the cache breaks the
 // post-unified-cleanup invariant "every hint has a live owner AND exact
 // ownership holds". Pure (no testify) so a test can construct a broken state
-// and prove the checker catches it. Caller holds cache.mu.
+// and prove the checker catches it.
 func metaCacheConsistencyViolations(cache *MetaCache) []string {
+	snapshot := cache.SnapshotForTest()
 	var v []string
 	// Forward: every live primary entry owns its hints EXACTLY (not merely
 	// "some live entry exists"). Exact ownership is what catches a ghost: if
 	// A and B both declare alias "a" while aliasInfo["a"] -> B, then A's "a" is
 	// a ghost that a by-id Describe of A would still expose -- A's declared "a"
 	// resolves to B's name, not A's.
-	for id, e := range cache.collections {
+	for id, e := range snapshot.Collections {
 		if e == nil {
 			v = append(v, fmt.Sprintf("primary id %d has a nil entry", id))
 			continue
 		}
-		if id != e.collID {
-			v = append(v, fmt.Sprintf("primary key %d != entry.collID %d", id, e.collID))
+		if id != e.CollID {
+			v = append(v, fmt.Sprintf("primary key %d != entry.CollID %d", id, e.CollID))
 		}
-		db := normalizeDBName(e.dbName)
-		name := e.schema.GetName()
-		if gotID, ok := cache.nameIdx[db][name]; !ok {
+		db := normalizeDBName(e.DBName)
+		name := e.Schema.GetName()
+		if gotID, ok := snapshot.NameIdx[db][name]; !ok {
 			v = append(v, fmt.Sprintf("primary %q/%q (id %d) has no name hint", db, name, id))
 		} else if gotID != id {
 			v = append(v, fmt.Sprintf("primary %q/%q: name hint points to id %d, not %d", db, name, gotID, id))
 		}
-		for _, a := range e.aliases {
-			if gotName, ok := cache.aliasInfo[db][a]; !ok {
+		for _, a := range e.Aliases {
+			if gotName, ok := snapshot.AliasInfo[db][a]; !ok {
 				v = append(v, fmt.Sprintf("declared alias %q of %q/%q (id %d) has no hint", a, db, name, id))
 			} else if gotName != name {
 				v = append(v, fmt.Sprintf("entry %q/%q (id %d) declares alias %q but aliasInfo[%q]=%q (ghost)", db, name, id, a, a, gotName))
 			}
 		}
 	}
-	// Reverse name: every name hint targets a live entry whose db AND real name
+	// Reverse Name: every name hint targets a live entry whose db AND real name
 	// match exactly.
-	for db, ids := range cache.nameIdx {
+	for db, ids := range snapshot.NameIdx {
 		for name, id := range ids {
-			e, live := cache.collections[id]
+			e, live := snapshot.Collections[id]
 			if !live {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d dangles to a dead entry (eviction bypassed unified cleanup)", db, name, id))
 				continue
 			}
-			if got := normalizeDBName(e.dbName); got != db {
+			if got := normalizeDBName(e.DBName); got != db {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d: entry db is %q", db, name, id, got))
 			}
-			if got := e.schema.GetName(); got != name {
+			if got := e.Schema.GetName(); got != name {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d: entry real name is %q", db, name, id, got))
 			}
 		}
 	}
 	// Reverse alias: every alias hint chains to a live entry that DECLARES it.
-	for db, aliases := range cache.aliasInfo {
+	for db, aliases := range snapshot.AliasInfo {
 		for alias, target := range aliases {
-			id, ok := cache.nameIdx[db][target]
+			id, ok := snapshot.NameIdx[db][target]
 			if !ok {
 				v = append(v, fmt.Sprintf("alias hint %q/%q -> %q has no name hint for its target", db, alias, target))
 				continue
 			}
-			e, live := cache.collections[id]
+			e, live := snapshot.Collections[id]
 			if !live {
 				v = append(v, fmt.Sprintf("alias hint %q/%q chains to dead id %d", db, alias, id))
 				continue
 			}
 			declared := false
-			for _, a := range e.aliases {
+			for _, a := range e.Aliases {
 				if a == alias {
 					declared = true
 					break
@@ -3296,10 +3252,8 @@ func TestMetaCache_RenameOldNameStopsResolving(t *testing.T) {
 	// the old name must no longer resolve (the dangling hint fails validation);
 	// note: we deliberately do NOT assert on the internal absence of the hint —
 	// stale name resolution is impossible either way
-	cache.mu.RLock()
 	hasFoo := cachedEntryLocked(cache, "db", "foo") != nil
 	hasBar := cachedEntryLocked(cache, "db", "bar") != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasFoo, "the old name must stop resolving the moment the rename is observed")
 	assert.True(t, hasBar)
 	assertMetaCacheByIDConsistent(t, cache)
@@ -3315,11 +3269,9 @@ func TestMetaCache_RenameOldNameStopsResolving(t *testing.T) {
 	// the rename broadcast evicts the primary entry by id
 	cache.RemoveCollectionsByID(ctx, 1)
 
-	cache.mu.RLock()
 	hasFoo = cachedEntryLocked(cache, "db", "foo") != nil
 	hasBar = cachedEntryLocked(cache, "db", "bar") != nil
 	hasID := collByIDLive(cache, 1) != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasFoo, "old name must not resolve (no stale read of the pre-rename name)")
 	assert.False(t, hasBar, "new name must not resolve either after the eviction")
 	assert.False(t, hasID, "the primary entry must be gone")
@@ -3376,25 +3328,21 @@ func TestMetaCache_CrossDBSameNameRenameRemovesOldHint(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, UniqueID(1), id)
 
-	cache.mu.RLock()
-	_, oldHint := cache.nameIdx["db1"]["foo"]
-	newID, newHint := cache.nameIdx["db2"]["foo"]
+	_, oldHint := cache.NameHintForTest("db1", "foo")
+	newID, newHint := cache.NameHintForTest("db2", "foo")
 	entry := collByIDLive(cache, 1)
-	cache.mu.RUnlock()
 	assert.False(t, oldHint, "the pre-rename db1/foo hint must be removed")
 	assert.True(t, newHint)
 	assert.Equal(t, UniqueID(1), newID)
 	assert.NotNil(t, entry)
-	assert.Equal(t, "db2", entry.dbName)
+	assert.Equal(t, "db2", entry.DBName)
 	assertMetaCacheByIDConsistent(t, cache)
 
 	// A delayed invalidation for the old location must not evict the collection
 	// from its new database.
 	cache.RemoveCollection(ctx, "db1", "foo")
-	cache.mu.RLock()
 	entry = collByIDLive(cache, 1)
-	newID, newHint = cache.nameIdx["db2"]["foo"]
-	cache.mu.RUnlock()
+	newID, newHint = cache.NameHintForTest("db2", "foo")
 	assert.NotNil(t, entry, "old-db invalidation must not evict live db2/foo")
 	assert.True(t, newHint)
 	assert.Equal(t, UniqueID(1), newID)
@@ -3504,11 +3452,9 @@ func TestMetaCache_DropCollectionClearsAllCaches(t *testing.T) {
 	assert.Equal(t, "collection", target)
 	assert.Equal(t, int32(1), showCount.Load(), "one merged partition cache: the by-name lookup answers from the list fetched once")
 
-	cache.mu.RLock()
 	hasColl := cachedEntryLocked(cache, "db", "collection") != nil
 	hasID := collByIDLive(cache, 1) != nil
-	aliasTarget, hasAlias := cache.aliasInfo["db"]["myalias"]
-	cache.mu.RUnlock()
+	aliasTarget, hasAlias := cache.AliasTargetForTest("db", "myalias")
 	assert.True(t, hasColl)
 	assert.True(t, hasID)
 	assert.True(t, hasAlias)
@@ -3516,16 +3462,14 @@ func TestMetaCache_DropCollectionClearsAllCaches(t *testing.T) {
 
 	cache.RemoveCollectionsByID(ctx, 1)
 
-	cache.mu.RLock()
 	hasColl = cachedEntryLocked(cache, "db", "collection") != nil
 	hasID = collByIDLive(cache, 1) != nil
-	_, hasAlias = cache.aliasInfo["db"]["myalias"]
-	cache.mu.RUnlock()
+	_, hasAlias = cache.AliasTargetForTest("db", "myalias")
 	assert.False(t, hasColl, "a by-name lookup must miss after the drop")
 	assert.False(t, hasID, "the primary entry must be deleted on drop")
 	// the alias was declared by the entry, so eviction cleaned its hint
 	assert.False(t, hasAlias, "a declared alias hint is cleaned at eviction")
-	_, ok := cache.getCollection("db", "myalias", 0)
+	_, ok := cache.GetCollectionForTest("db", "myalias", 0)
 	assert.False(t, ok, "a lookup through the alias must not reach the dropped collection")
 	assertMetaCacheByIDConsistent(t, cache)
 
@@ -3667,12 +3611,10 @@ func TestMetaCache_CrossDBSameNameDropIsolation(t *testing.T) {
 	// drop only db1/foo
 	cache.RemoveCollectionsByID(ctx, 1)
 
-	cache.mu.RLock()
 	hasDB1 := cachedEntryLocked(cache, "db1", "foo") != nil
 	coll2 := cachedEntryLocked(cache, "db2", "foo")
 	live1 := collByIDLive(cache, 1)
 	live2 := collByIDLive(cache, 2)
-	cache.mu.RUnlock()
 	assert.False(t, hasDB1, "dropped db1/foo must be gone")
 	assert.Nil(t, live1, "dropped id 1 must leave the primary store")
 	assert.NotNil(t, coll2, "db2/foo must be untouched")
@@ -3846,12 +3788,10 @@ func TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex(t *testin
 	// must populate the reverse alias index
 	info, err := cache.GetCollectionInfo(ctx, "db1", "A", 0)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{"a"}, info.aliases)
+	assert.Equal(t, []string{"a"}, info.Aliases)
 
-	cache.mu.RLock()
 	hasID := collByIDLive(cache, 1) != nil
-	aliasTarget, hasAlias := cache.aliasInfo["db1"]["a"]
-	cache.mu.RUnlock()
+	aliasTarget, hasAlias := cache.AliasTargetForTest("db1", "a")
 	assert.True(t, hasID, "collection must be live in the primary store")
 	if assert.True(t, hasAlias, "the collection's alias must be hinted") {
 		assert.Equal(t, "A", aliasTarget)
@@ -3861,10 +3801,8 @@ func TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex(t *testin
 	dropped.Store(true)
 	cache.RemoveCollection(ctx, "db1", "a")
 
-	cache.mu.RLock()
 	hasID = collByIDLive(cache, 1) != nil
 	hasA := cachedEntryLocked(cache, "db1", "A") != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasID, "DropAlias must evict the target's primary entry")
 	assert.False(t, hasA, "the target must no longer resolve by name")
 
@@ -3872,7 +3810,7 @@ func TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex(t *testin
 	// (without the dropped alias), not the stale cached [a]
 	info2, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Empty(t, info2.aliases, "id-only describe must not serve the dropped alias")
+	assert.Empty(t, info2.Aliases, "id-only describe must not serve the dropped alias")
 }
 
 // TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget verifies AlterAlias
@@ -3932,9 +3870,7 @@ func TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = cache.GetCollectionInfo(ctx, "db1", "B", 0)
 	assert.NoError(t, err)
-	cache.mu.RLock()
-	aliasTarget, hasAlias := cache.aliasInfo["db1"]["a"]
-	cache.mu.RUnlock()
+	aliasTarget, hasAlias := cache.AliasTargetForTest("db1", "a")
 	if assert.True(t, hasAlias, "alias of the old target must be reverse-indexed") {
 		assert.Equal(t, "A", aliasTarget)
 	}
@@ -3946,10 +3882,8 @@ func TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget(t *testing.T) {
 	cache.RemoveCollection(ctx, "db1", "a")
 	cache.RemoveCollectionsByID(ctx, 2)
 
-	cache.mu.RLock()
 	hasA := collByIDLive(cache, 1) != nil
 	hasB := collByIDLive(cache, 2) != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasA, "old target A must be evicted")
 	assert.False(t, hasB, "new target B must be evicted")
 	assertMetaCacheByIDConsistent(t, cache)
@@ -3957,10 +3891,10 @@ func TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget(t *testing.T) {
 	// fresh describes: A no longer reports the alias, B now does
 	infoA, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Empty(t, infoA.aliases, "old target must no longer report the moved alias")
+	assert.Empty(t, infoA.Aliases, "old target must no longer report the moved alias")
 	infoB, err := cache.GetCollectionInfo(ctx, "", "", 2)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{"a"}, infoB.aliases, "new target must report the moved alias")
+	assert.Equal(t, []string{"a"}, infoB.Aliases, "new target must report the moved alias")
 }
 
 // TestMetaCache_InvalidateCollectionMetaIsAtomic verifies that every O(1)
@@ -3985,25 +3919,19 @@ func TestMetaCache_InvalidateCollectionMetaIsAtomic(t *testing.T) {
 			}, nil
 		}).Once()
 
-	cache := &MetaCache{
-		mixCoord:       rootCoord,
-		collections:    map[UniqueID]*collectionInfo{},
-		nameIdx:        map[string]map[string]UniqueID{},
-		aliasInfo:      map[string]map[string]string{},
-		partitionCache: map[string]*partitionInfos{},
-	}
+	cache := mustNewMetaCacheForTest(rootCoord)
 	oldTarget := seedCollection(cache, "db", "A", 1)
-	oldTarget.aliases = []string{"a"}
+	oldTarget.Aliases = []string{"a"}
 	seedCollection(cache, "db", "B", 2)
-	cache.setAliasLocked("db", "a", "A")
+	cache.SetAliasLockedForTest("db", "a", "A")
 
 	midMutation := make(chan struct{})
 	continueMutation := make(chan struct{})
-	cache.testHookInvalidateCollectionMetaMidMutation = func() {
+	cleanupHook := cache.SetInvalidateCollectionMetaMidMutationHookForTest(func() {
 		close(midMutation)
 		<-continueMutation
-	}
-	defer func() { cache.testHookInvalidateCollectionMetaMidMutation = nil }()
+	})
+	defer cleanupHook()
 
 	removedCh := make(chan []string, 1)
 	go func() {
@@ -4037,8 +3965,8 @@ func TestMetaCache_InvalidateCollectionMetaIsAtomic(t *testing.T) {
 	info := <-fillDone
 	assert.NoError(t, <-fillErr)
 	if assert.NotNil(t, info) {
-		assert.Equal(t, UniqueID(2), info.collID)
-		assert.Equal(t, []string{"a"}, info.aliases)
+		assert.Equal(t, UniqueID(2), info.CollID)
+		assert.Equal(t, []string{"a"}, info.Aliases)
 	}
 	assertMetaCacheByIDConsistent(t, cache)
 }
@@ -4083,9 +4011,7 @@ func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
 	// cache A with no alias yet -> the reverse index has no entry for "a"
 	_, err = cache.GetCollectionInfo(ctx, "db1", "A", 0)
 	assert.NoError(t, err)
-	cache.mu.RLock()
-	_, hasAliasRev := cache.aliasInfo["db1"]["a"]
-	cache.mu.RUnlock()
+	_, hasAliasRev := cache.AliasTargetForTest("db1", "a")
 	assert.False(t, hasAliasRev, "A had no alias, so the reverse index has no entry for a")
 
 	// CreateAlias(a -> A): the proxy's RemoveCollection(db1, "a") cannot resolve a
@@ -4095,15 +4021,13 @@ func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
 	cache.RemoveCollection(ctx, "db1", "a")
 	cache.RemoveCollectionsByID(ctx, 1)
 
-	cache.mu.RLock()
 	hasID := collByIDLive(cache, 1) != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasID, "CreateAlias must evict the target via the forwarded id")
 
 	// id-only Describe now reports the newly created alias
 	info, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{"a"}, info.aliases, "target must report the newly created alias")
+	assert.Equal(t, []string{"a"}, info.Aliases, "target must report the newly created alias")
 }
 
 // TestMetaCache_DropAliasDefensiveDanglingHintCleanup: under the invariant
@@ -4115,23 +4039,15 @@ func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
 func TestMetaCache_DropAliasDefensiveDanglingHintCleanup(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
-	cache := &MetaCache{
-		mixCoord:       mockCoord,
-		collections:    map[UniqueID]*collectionInfo{},
-		nameIdx:        map[string]map[string]UniqueID{},
-		aliasInfo:      map[string]map[string]string{},
-		partitionCache: map[string]*partitionInfos{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// impossible-by-invariant state: a hint whose target is not in the primary
-	cache.setAliasLocked("db1", "a", "foo")
+	cache.SetAliasLockedForTest("db1", "a", "foo")
 
 	// DropAlias(a): the target is not in the primary store, so the dangling
 	// branch must delete the alias hint itself.
 	cache.RemoveCollection(ctx, "db1", "a")
 
-	cache.mu.RLock()
-	_, hasRev := cache.aliasInfo["db1"]["a"]
-	cache.mu.RUnlock()
+	_, hasRev := cache.AliasTargetForTest("db1", "a")
 	assert.False(t, hasRev, "the dangling alias hint must be cleaned even when the target is uncached")
 }
 
@@ -4207,11 +4123,9 @@ func TestMetaCache_ConcurrentAlterAliasRefreshEvictsOldTarget(t *testing.T) {
 	_, err = cache.GetCollectionInfo(ctx, "db1", "B", 0)
 	assert.NoError(t, err)
 
-	cache.mu.RLock()
-	singleVal, hasSingle := cache.aliasInfo["db1"]["a"]
+	singleVal, hasSingle := cache.AliasTargetForTest("db1", "a")
 	staleA := collByIDLive(cache, 1)
 	freshB := collByIDLive(cache, 2)
-	cache.mu.RUnlock()
 	// the race state: the single-valued alias resolution lost the old target A
 	// (the concurrent Describe of B overwrote it to B), yet BOTH A and B are
 	// cached, each holding "a" in its own Aliases list -- name-based resolution
@@ -4220,10 +4134,10 @@ func TestMetaCache_ConcurrentAlterAliasRefreshEvictsOldTarget(t *testing.T) {
 		assert.Equal(t, "B", singleVal, "the concurrent refresh overwrote the single-valued alias resolution to the new target")
 	}
 	if assert.NotNil(t, staleA, "old target A is still cached at this point") {
-		assert.Contains(t, staleA.aliases, "a", "old target A still holds the stale alias in its own Aliases list")
+		assert.Contains(t, staleA.Aliases, "a", "old target A still holds the stale alias in its own Aliases list")
 	}
 	if assert.NotNil(t, freshB, "new target B is cached") {
-		assert.Contains(t, freshB.aliases, "a", "new target B holds the refreshed alias")
+		assert.Contains(t, freshB.Aliases, "a", "new target B holds the refreshed alias")
 	}
 
 	// (3) the AlterAlias expiration arrives with the rootcoord-forwarded ids:
@@ -4234,10 +4148,8 @@ func TestMetaCache_ConcurrentAlterAliasRefreshEvictsOldTarget(t *testing.T) {
 	cache.RemoveCollectionsByID(ctx, 2)
 	cache.RemoveCollectionsByID(ctx, 1)
 
-	cache.mu.RLock()
 	hasA := collByIDLive(cache, 1) != nil
 	hasB := collByIDLive(cache, 2) != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasA, "old target A must be evicted via the forwarded old-target id (P2-1)")
 	assert.False(t, hasB, "new target B must be evicted too")
 	assertMetaCacheByIDConsistent(t, cache)
@@ -4245,7 +4157,7 @@ func TestMetaCache_ConcurrentAlterAliasRefreshEvictsOldTarget(t *testing.T) {
 	// a fresh id-only Describe of A must no longer report the moved alias
 	infoA, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Empty(t, infoA.aliases, "old target must no longer serve the stale moved alias")
+	assert.Empty(t, infoA.Aliases, "old target must no longer serve the stale moved alias")
 }
 
 // TestMetaCache_RemoveDatabaseBlocksStaleResurrection: RemoveDatabase must drain
@@ -4314,10 +4226,8 @@ func TestMetaCache_RemoveDatabaseBlocksStaleResurrection(t *testing.T) {
 	// assert via the read-path helpers: RemoveDatabase drained the fill first
 	// and then synchronously deleted the db's primary entries and hint buckets,
 	// so the written-back pre-DDL entry is gone
-	cache.mu.RLock()
 	hasFoo := cachedEntryLocked(cache, "db", "foo") != nil
 	hasID := collByIDLive(cache, 1) != nil
-	cache.mu.RUnlock()
 	assert.False(t, hasFoo, "a pre-DDL describe must not resurrect the evicted db entry")
 	assert.False(t, hasID, "a by-id lookup must not serve the resurrected entry")
 
@@ -4330,9 +4240,7 @@ func TestMetaCache_RemoveDatabaseBlocksStaleResurrection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Greater(t, describeCount.Load(), countBefore,
 		"the post-DDL lookup must re-describe instead of serving the generation-dead entry")
-	cache.mu.RLock()
 	hasFoo = cachedEntryLocked(cache, "db", "foo") != nil
-	cache.mu.RUnlock()
 	assert.True(t, hasFoo, "a post-DDL describe re-caches")
 	assertMetaCacheByIDConsistent(t, cache)
 }
@@ -4377,13 +4285,13 @@ func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
 	beforeSingleflightReturn := make(chan struct{})
 	releaseFirstFill := make(chan struct{})
 	var firstFill sync.Once
-	cache.testHookBeforeSingleflightReturn = func() {
+	cleanupBeforeReturnHook := cache.SetBeforeSingleflightReturnHookForTest(func() {
 		firstFill.Do(func() {
 			close(beforeSingleflightReturn)
 			<-releaseFirstFill
 		})
-	}
-	defer func() { cache.testHookBeforeSingleflightReturn = nil }()
+	})
+	defer cleanupBeforeReturnHook()
 
 	firstFillDone := make(chan *collectionInfo, 1)
 	firstFillErr := make(chan error, 1)
@@ -4398,11 +4306,11 @@ func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
 	postDDL.Store(true)
 	invalidationMidpoint := make(chan struct{})
 	releaseInvalidation := make(chan struct{})
-	cache.testHookInvalidateCollectionMetaMidMutation = func() {
+	cleanupMutationHook := cache.SetInvalidateCollectionMetaMidMutationHookForTest(func() {
 		close(invalidationMidpoint)
 		<-releaseInvalidation
-	}
-	defer func() { cache.testHookInvalidateCollectionMetaMidMutation = nil }()
+	})
+	defer cleanupMutationHook()
 
 	invalidationDone := make(chan struct{})
 	go func() {
@@ -4424,7 +4332,7 @@ func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
 	info := <-firstFillDone
 	assert.NoError(t, <-firstFillErr)
 	if assert.NotNil(t, info) {
-		assert.Equal(t, UniqueID(1), info.collID)
+		assert.Equal(t, UniqueID(1), info.CollID)
 	}
 
 	select {
@@ -4448,7 +4356,7 @@ func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
 		close(releaseInvalidation)
 		var id UniqueID
 		if info != nil {
-			id = info.collID
+			id = info.CollID
 		}
 		t.Fatalf("fill returned during invalidation with collection id %d", id)
 	case <-time.After(100 * time.Millisecond):
@@ -4460,8 +4368,8 @@ func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
 	info = <-postInvalidationFillDone
 	assert.NoError(t, <-postInvalidationFillErr)
 	if assert.NotNil(t, info) {
-		assert.Equal(t, UniqueID(2), info.collID)
-		assert.Equal(t, uint64(200), info.updateTimestamp)
+		assert.Equal(t, UniqueID(2), info.CollID)
+		assert.Equal(t, uint64(200), info.UpdateTimestamp)
 	}
 	assert.Equal(t, int32(2), describeCount.Load(), "post-invalidation lookup must start a fresh flight")
 	assertMetaCacheByIDConsistent(t, cache)
@@ -4508,11 +4416,9 @@ func TestMetaCache_DropRecreateReusingNameRelinksIDIndex(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, UniqueID(2), id)
 
-	cache.mu.RLock()
 	hasOld := collByIDLive(cache, 1) != nil
 	newLive := collByIDLive(cache, 2)
 	sameKey := cachedEntryLocked(cache, "db", "foo")
-	cache.mu.RUnlock()
 	assert.False(t, hasOld, "the old id must not be live after the drop")
 	assert.Same(t, sameKey, newLive, "the reused name must resolve to the recreated collection's new id")
 	assertMetaCacheByIDConsistent(t, cache)
@@ -4523,37 +4429,29 @@ func TestMetaCache_DropRecreateReusingNameRelinksIDIndex(t *testing.T) {
 // from the entry in hand: its name hint, its alias hints, and its partition
 // list. Living entries and their satellites must be untouched.
 func TestMetaCache_EvictionCleansEverythingSynchronously(t *testing.T) {
-	cache := &MetaCache{
-		collections:    map[UniqueID]*collectionInfo{},
-		nameIdx:        map[string]map[string]UniqueID{},
-		aliasInfo:      map[string]map[string]string{},
-		dbInfo:         map[string]*databaseInfo{},
-		partitionCache: map[string]*partitionInfos{},
-	}
+	cache := mustNewMetaCacheForTest(mocks.NewMockMixCoordClient(t))
 	doomed := seedCollection(cache, "db1", "foo", 1)
-	doomed.aliases = []string{"a"} // as a real fill would record it
+	doomed.Aliases = []string{"a"} // as a real fill would record it
 	seedCollection(cache, "db2", "bar", 2)
-	cache.setAliasLocked("db1", "a", "foo")
-	cache.partitionCache[buildPartitionCacheKey(1)] = parsePartitionsInfo([]*partitionInfo{{name: "p1", partitionID: 11}}, false)
-	cache.partitionCache[buildPartitionCacheKey(2)] = parsePartitionsInfo([]*partitionInfo{{name: "p1", partitionID: 21}}, false)
+	cache.SetAliasLockedForTest("db1", "a", "foo")
+	cache.SeedPartitionCacheForTest(1, []*partitionInfo{{Name: "p1", PartitionID: 11}}, false)
+	cache.SeedPartitionCacheForTest(2, []*partitionInfo{{Name: "p1", PartitionID: 21}}, false)
 
 	cache.RemoveCollectionsByID(context.Background(), 1)
 
-	cache.mu.RLock()
-	_, hasEntry := cache.collections[1]
-	_, hasNameHint := cache.nameIdx["db1"]["foo"]
-	_, hasAliasHint := cache.aliasInfo["db1"]["a"]
-	_, hasLive := cache.collections[2]
+	hasEntry := collByIDLive(cache, 1) != nil
+	hasNameHint := cache.HasNameHintForTest("db1", "foo")
+	_, hasAliasHint := cache.AliasTargetForTest("db1", "a")
+	hasLive := collByIDLive(cache, 2) != nil
 	liveName := cachedEntryLocked(cache, "db2", "bar")
-	cache.mu.RUnlock()
 	assert.False(t, hasEntry, "primary entry deleted")
 	assert.False(t, hasNameHint, "the entry's name hint is cleaned at eviction")
 	assert.False(t, hasAliasHint, "the entry's alias hints are cleaned at eviction")
 	assert.True(t, hasLive, "living entries untouched")
 	assert.NotNil(t, liveName, "living name hints untouched")
 
-	_, okDead := cache.partitionCache[buildPartitionCacheKey(1)]
-	_, okLive := cache.partitionCache[buildPartitionCacheKey(2)]
+	okDead := cache.HasPartitionCacheForTest(1)
+	okLive := cache.HasPartitionCacheForTest(2)
 	assert.False(t, okDead, "the entry's partition list is reclaimed at eviction")
 	assert.True(t, okLive, "living collections' partition entries untouched")
 }
@@ -4600,9 +4498,7 @@ func TestMetaCache_DroppedCascadeAliasCannotResurrectAfterRecreate(t *testing.T)
 	// cache foo (id 1) holding alias "a" -> the hint a->foo exists
 	_, err = cache.GetCollectionInfo(ctx, "db", "foo", 0)
 	assert.NoError(t, err)
-	cache.mu.RLock()
-	_, hasHint := cache.aliasInfo["db"]["a"]
-	cache.mu.RUnlock()
+	_, hasHint := cache.AliasTargetForTest("db", "a")
 	assert.True(t, hasHint)
 
 	// drop foo (cascade-drops alias "a" at rootcoord; broadcast carries only
@@ -4613,9 +4509,7 @@ func TestMetaCache_DroppedCascadeAliasCannotResurrectAfterRecreate(t *testing.T)
 	assert.NoError(t, err)
 
 	// the dead alias must NOT resolve through the stale hint to the new foo
-	cache.mu.RLock()
-	_, resurrected := cache.getCollection("db", "a", 0)
-	cache.mu.RUnlock()
+	_, resurrected := cache.GetCollectionForTest("db", "a", 0)
 	assert.False(t, resurrected, "a cascade-dropped alias must not resurrect after a same-name recreate")
 	got, err := cache.ResolveCollectionAlias(ctx, "db", "a")
 	assert.NoError(t, err)
@@ -4689,9 +4583,7 @@ func TestMetaCache_OldRootcoordAliasScanFallbackEvictsGhostHolder(t *testing.T) 
 	cache.RemoveAliasHolders(ctx, "db1", "a")
 	cache.RemoveAlias(ctx, "db1", "a")
 
-	cache.mu.RLock()
 	ghost := collByIDLive(cache, 1)
-	cache.mu.RUnlock()
 	assert.Nil(t, ghost, "the fallback scan must evict the ghost holder the hint could no longer reach")
 	assertMetaCacheByIDConsistent(t, cache)
 }
@@ -4750,11 +4642,9 @@ func TestMetaCache_RemoveAliasHoldersEvictsAllHoldersAndRespectsDB(t *testing.T)
 	// and must not touch the same-named alias holder in db2.
 	cache.RemoveAliasHolders(ctx, "db1", "a")
 
-	cache.mu.RLock()
 	a := collByIDLive(cache, 1)
 	b := collByIDLive(cache, 2)
 	c := collByIDLive(cache, 3)
-	cache.mu.RUnlock()
 	assert.Nil(t, a, "db1 holder A must be evicted")
 	assert.Nil(t, b, "db1 holder B must be evicted (the scan must reach every holder, not stop at one)")
 	assert.NotNil(t, c, "db2 holder C must be spared (RemoveAliasHolders is db-scoped)")
@@ -4804,15 +4694,14 @@ func TestMetaCache_RemoveDatabaseEvictsAllCollectionsAcrossBatch(t *testing.T) {
 
 	cache.RemoveDatabase(ctx, "db")
 
-	cache.mu.RLock()
-	_, bucketExists := cache.nameIdx["db"]
+	snapshot := cache.SnapshotForTest()
+	_, bucketExists := snapshot.NameIdx["db"]
 	live := 0
 	for i := int64(1); i <= n; i++ {
 		if collByIDLive(cache, i) != nil {
 			live++
 		}
 	}
-	cache.mu.RUnlock()
 	assert.False(t, bucketExists, "the db's name-hint bucket must be dropped")
 	assert.Equal(t, 0, live, "every collection of the db must be evicted across the batch boundary")
 	assertMetaCacheByIDConsistent(t, cache)
@@ -4946,9 +4835,7 @@ func TestMetaCache_PartitionDDLThenDropCannotResurrectAlias(t *testing.T) {
 	assert.NoError(t, err)
 
 	// the cascade-dropped alias must NOT resolve to the recreated collection
-	cache.mu.RLock()
-	_, resurrected := cache.getCollection("db", "a", 0)
-	cache.mu.RUnlock()
+	_, resurrected := cache.GetCollectionForTest("db", "a", 0)
 	assert.False(t, resurrected, "partition DDL must not strand alias hints for a later resurrection")
 }
 
@@ -4993,14 +4880,12 @@ func TestMetaCache_RemoveDatabaseRacingFillLeavesNoDanglingAliases(t *testing.T)
 
 		// invariant: no dangling alias hint -- if the hint survives, its full
 		// chain (alias -> name -> live entry declaring it) must hold
-		cache.mu.RLock()
-		if target, ok := cache.aliasInfo["db"]["a"]; ok {
+		if target, ok := cache.AliasTargetForTest("db", "a"); ok {
 			entry := cachedEntryLocked(cache, "db", target)
 			if assert.NotNil(t, entry, "iteration %d: alias hint dangles -- target %q not live", i, target) {
-				assert.Contains(t, entry.aliases, "a", "iteration %d: surviving hint must be declared by its entry", i)
+				assert.Contains(t, entry.Aliases, "a", "iteration %d: surviving hint must be declared by its entry", i)
 			}
 		}
-		cache.mu.RUnlock()
 	}
 }
 
@@ -5035,30 +4920,26 @@ func TestMetaCache_RemoveDatabaseWalkEvictsMidWindowFill(t *testing.T) {
 	assert.NoError(t, err)
 
 	filled := false
-	cache.testHookRemoveDatabaseMidWindow = func() {
+	cleanupHook := cache.SetRemoveDatabaseMidWindowHookForTest(func() {
 		// exact mid-window fill: buckets are gone, walk has not run yet
 		_, err := cache.GetCollectionInfo(ctx, "db", "foo", 0)
 		assert.NoError(t, err)
 		// the fill rebuilt the entry WITH fresh hints
-		cache.mu.RLock()
-		_, hasHint := cache.aliasInfo["db"]["a"]
-		_, hasEntry := cache.collections[1]
-		cache.mu.RUnlock()
+		_, hasHint := cache.AliasTargetForTest("db", "a")
+		hasEntry := collByIDLive(cache, 1) != nil
 		assert.True(t, hasEntry, "mid-window fill must have rebuilt the entry")
 		assert.True(t, hasHint, "mid-window fill must have rebuilt the alias hint")
 		filled = true
-	}
-	defer func() { cache.testHookRemoveDatabaseMidWindow = nil }()
+	})
+	defer cleanupHook()
 
 	cache.RemoveDatabase(ctx, "db")
 	assert.True(t, filled, "the hook must have run")
 
 	// the walk must have evicted the mid-window rebuild TOGETHER with its hints
-	cache.mu.RLock()
-	_, hasEntry := cache.collections[1]
-	_, hasHint := cache.aliasInfo["db"]["a"]
-	_, hasName := cache.nameIdx["db"]["foo"]
-	cache.mu.RUnlock()
+	hasEntry := collByIDLive(cache, 1) != nil
+	_, hasHint := cache.AliasTargetForTest("db", "a")
+	hasName := cache.HasNameHintForTest("db", "foo")
 	assert.False(t, hasEntry, "the walk must evict the mid-window rebuilt entry")
 	assert.False(t, hasHint, "the walk must clean the rebuilt alias hint -- a raw delete would strand it")
 	assert.False(t, hasName, "the walk must clean the rebuilt name hint")
@@ -5069,20 +4950,14 @@ func TestMetaCache_RemoveDatabaseWalkEvictsMidWindowFill(t *testing.T) {
 // same alias while aliasInfo points at only one of them. Pointing-at-a-live-
 // entry alone would pass; exact ownership must not.
 func TestMetaCache_ConsistencyCheckerCatchesGhostAlias(t *testing.T) {
-	cache := &MetaCache{
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mocks.NewMockMixCoordClient(t))
 	a := seedCollection(cache, "db", "A", 1)
 	b := seedCollection(cache, "db", "B", 2)
-	a.aliases = []string{"a"}            // A declares "a" (ghost -- stale snapshot)
-	b.aliases = []string{"a"}            // B declares "a" (current target)
-	cache.setAliasLocked("db", "a", "B") // aliasInfo resolves "a" to B only
+	a.Aliases = []string{"a"}                   // A declares "a" (ghost -- stale snapshot)
+	b.Aliases = []string{"a"}                   // B declares "a" (current target)
+	cache.SetAliasLockedForTest("db", "a", "B") // aliasInfo resolves "a" to B only
 
-	cache.mu.RLock()
 	v := metaCacheConsistencyViolations(cache)
-	cache.mu.RUnlock()
 	found := false
 	for _, msg := range v {
 		if strings.Contains(msg, "ghost") && strings.Contains(msg, "id 1") {
@@ -5092,11 +4967,8 @@ func TestMetaCache_ConsistencyCheckerCatchesGhostAlias(t *testing.T) {
 	assert.Truef(t, found, "checker must flag A's ghost declaration of \"a\"; violations: %v", v)
 
 	// after A is evicted (its declaration gone), the state is consistent
-	delete(cache.collections, 1)
-	delete(cache.nameIdx["db"], "A")
-	cache.mu.RLock()
+	cache.DeleteCollectionAndNameHintForTest("db", "A", 1)
 	v = metaCacheConsistencyViolations(cache)
-	cache.mu.RUnlock()
 	assert.Empty(t, v, "with only B declaring \"a\", the cache is consistent")
 }
 
@@ -5147,19 +5019,14 @@ func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) 
 	defer cache.Close()
 
 	// seed the stale collection-cache entry foo->id 1 (as if cached before the drop)
-	cache.mu.Lock()
 	seedCollection(cache, "db", "foo", 1)
-	cache.mu.Unlock()
 
 	// partition fill resolves id 1, describes BY id 1 -> not-found -> error;
 	// NOTHING is cached under id 1.
 	_, err = cache.GetPartitionInfos(ctx, "db", "foo")
 	assert.Error(t, err, "the fill must fail rather than attach id 2's partitions to id 1")
 
-	deadKey := buildPartitionCacheKey(1)
-	cache.mu.RLock()
-	_, ok := cache.partitionCache[deadKey]
-	cache.mu.RUnlock()
+	ok := cache.HasPartitionCacheForTest(1)
 	assert.False(t, ok, "no partition entry may be cached under the stale old id")
 }
 
@@ -5183,9 +5050,7 @@ func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T
 			// The partition fill describes BY ID (empty name). At that exact
 			// moment simulate a concurrent invalidation evicting the primary.
 			if req.GetCollectionName() == "" && req.GetCollectionID() == 1 {
-				cache.mu.Lock()
-				delete(cache.collections, 1)
-				cache.mu.Unlock()
+				cache.DeleteCollectionForTest(1)
 			}
 			return &milvuspb.DescribeCollectionResponse{
 				Status:       merr.Success(),
@@ -5210,10 +5075,8 @@ func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T
 	assert.NotNil(t, info)
 
 	// ...but it must NOT be cached under the now-owner-less id 1.
-	cache.mu.RLock()
-	_, cached := cache.partitionCache[buildPartitionCacheKey(1)]
-	_, primary := cache.collections[1]
-	cache.mu.RUnlock()
+	cached := cache.HasPartitionCacheForTest(1)
+	primary := collByIDLive(cache, 1) != nil
 	assert.False(t, primary, "primary was evicted mid-fill")
 	assert.False(t, cached, "an owner-less partition list must not be cached")
 }
@@ -5223,21 +5086,13 @@ func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T
 // already gone -- removeCollectionByID's evictCollectionEntryLocked no-ops on an
 // absent primary, so RemovePartition stales the id's partition key directly.
 func TestMetaCache_RemovePartitionEvictsOwnerlessPartitionList(t *testing.T) {
-	cache := &MetaCache{
-		collections:    map[UniqueID]*collectionInfo{},
-		nameIdx:        map[string]map[string]UniqueID{},
-		aliasInfo:      map[string]map[string]string{},
-		partitionCache: map[string]*partitionInfos{},
-	}
+	cache := mustNewMetaCacheForTest(mocks.NewMockMixCoordClient(t))
 	// an owner-less partition list: cached under id 1 with NO primary entry.
-	cache.partitionCache[buildPartitionCacheKey(1)] = parsePartitionsInfo(
-		[]*partitionInfo{{name: "p_old", partitionID: 11}}, false)
+	cache.SeedPartitionCacheForTest(1, []*partitionInfo{{Name: "p_old", PartitionID: 11}}, false)
 
 	cache.RemovePartition(context.Background(), "db", 1, "foo", "p_old")
 
-	cache.mu.RLock()
-	_, cached := cache.partitionCache[buildPartitionCacheKey(1)]
-	cache.mu.RUnlock()
+	cached := cache.HasPartitionCacheForTest(1)
 	assert.False(t, cached, "RemovePartition must evict the partition list even when the primary is absent")
 }
 

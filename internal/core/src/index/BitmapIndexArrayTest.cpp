@@ -13,6 +13,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
@@ -48,13 +49,16 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
+#include "storage/PluginLoader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/PlannerCipherPlugin.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -803,6 +807,39 @@ TEST(BitmapIndexArrayNestedTest, FactoryCreatesNestedBitmapForStructSubField) {
     boost::filesystem::remove_all(root_path);
 }
 
+TEST(BitmapIndexArrayNestedTest, FactoryCreatesNestedHybridForStructSubField) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("struct_field[sub]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3002, 3002};
+
+    auto root_path =
+        fmt::format("{}/hybrid_nested_array_factory", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = DataType::ARRAY;
+    index_info.field_name = "struct_field[sub]";
+    index_info.tantivy_index_version = 7;
+
+    auto index =
+        index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_EQ(index->Type(), milvus::index::HYBRID_INDEX_TYPE);
+
+    boost::filesystem::remove_all(root_path);
+}
+
 struct BitmapIndexArrayRegressionParam {
     proto::schema::DataType element_type;
     bool use_v3;
@@ -1456,6 +1493,32 @@ TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
 
     boost::filesystem::remove_all(numeric_root_path);
     boost::filesystem::remove_all(string_root_path);
+}
+
+TEST(BitmapIndexLoadResourceTest,
+     EncryptedNonMmapIncludesTargetAndStreamMemory) {
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    auto cleanup = folly::makeGuard([&]() {
+        budget.SetCapacityBytes(old_capacity);
+        plugin_loader.unload("CipherPlugin");
+    });
+    budget.SetCapacityBytes(0);
+    plugin_loader.addPluginForTest(
+        std::make_shared<milvus::test::PlannerCipherPlugin>());
+
+    constexpr uint64_t index_size = 32 * 1024 * 1024;
+    std::map<std::string, std::string> index_params{
+        {index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
+        {index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64, 0, index_size, index_params, false, 1024);
+
+    EXPECT_EQ(request.final_memory_cost, index_size);
+    EXPECT_EQ(request.max_memory_cost, 4 * index_size);
+    EXPECT_EQ(request.final_disk_cost, 0);
+    EXPECT_EQ(request.max_disk_cost, 0);
 }
 
 // Bug #4: ArrayOffsetsSealed::BuildAllZeros is used in the add-field /
