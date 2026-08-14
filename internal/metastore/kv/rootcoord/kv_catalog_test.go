@@ -1683,7 +1683,7 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 		PrincipalName: "team/a user",
 		Tags: map[string]rlsutil.TagValue{
 			"dept":  rlsutil.NewStringTagValue("sales"),
-			"level": rlsutil.NewInt64TagValue(3),
+			"tier":  rlsutil.NewInt64TagValue(3),
 			"score": rlsutil.NewDoubleTagValue(0.75),
 		},
 	}

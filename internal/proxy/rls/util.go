@@ -18,6 +18,7 @@ package rls
 
 import (
 	"context"
+	"math"
 	"slices"
 	"strings"
 
@@ -146,7 +147,7 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, expr string,
 	}, nil
 }
 
-func (e *compiledExpression) Instantiate(principalName string, principalTags map[string]string) (*planpb.Expr, error) {
+func (e *compiledExpression) Instantiate(principalName string, principalTags map[string]rlsutil.TagValue) (*planpb.Expr, error) {
 	if e == nil {
 		return nil, nil
 	}
@@ -173,7 +174,7 @@ func (e *compiledExpression) Instantiate(principalName string, principalTags map
 	return rewriter.RewriteExpr(finalExpr), nil
 }
 
-func instantiatePolicyExprs(policies []*compiledPolicyExpression, principalName string, principalTags map[string]string) ([]*planpb.Expr, error) {
+func instantiatePolicyExprs(policies []*compiledPolicyExpression, principalName string, principalTags map[string]rlsutil.TagValue) ([]*planpb.Expr, error) {
 	exprs := make([]*planpb.Expr, 0, len(policies))
 	for _, policy := range policies {
 		expr, err := policy.Instantiate(principalName, principalTags)
@@ -187,7 +188,7 @@ func instantiatePolicyExprs(policies []*compiledPolicyExpression, principalName 
 	return exprs, nil
 }
 
-func (e *compiledPolicyExpression) Instantiate(principalName string, principalTags map[string]string) (*planpb.Expr, error) {
+func (e *compiledPolicyExpression) Instantiate(principalName string, principalTags map[string]rlsutil.TagValue) (*planpb.Expr, error) {
 	if e == nil || e.expr == nil {
 		return nil, nil
 	}
@@ -204,7 +205,14 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 		if !ok {
 			return alwaysFalsePredicate(), nil
 		}
-		values[variable] = planparserv2.NewString(tagValue)
+		if !rlsTemplateVariableMatchesTagType(e.expr, variable, tagValue.Kind) {
+			return alwaysFalsePredicate(), nil
+		}
+		normalizedTagValue, ok := normalizeRLSTagValue(e.expr, variable, tagValue)
+		if !ok {
+			return alwaysFalsePredicate(), nil
+		}
+		values[variable] = rlsTagValueToGenericValue(normalizedTagValue)
 	}
 
 	expr := proto.Clone(e.expr).(*planpb.Expr)
@@ -212,6 +220,137 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 		return nil, err
 	}
 	return rewriter.RewriteExpr(expr), nil
+}
+
+func rlsTagValueToGenericValue(value rlsutil.TagValue) *planpb.GenericValue {
+	switch value.Kind {
+	case rlsutil.TagValueKindString:
+		return planparserv2.NewString(value.StringValue)
+	case rlsutil.TagValueKindInt64:
+		return planparserv2.NewInt(value.Int64Value)
+	case rlsutil.TagValueKindDouble:
+		return planparserv2.NewFloat(value.DoubleValue)
+	default:
+		return nil
+	}
+}
+
+func rlsTemplateVariableMatchesTagType(expr *planpb.Expr, variable string, kind rlsutil.TagValueKind) bool {
+	found, matches := rlsTemplateVariableTagTypeMatch(expr, variable, kind)
+	return found && matches
+}
+
+func rlsTemplateVariableTagTypeMatch(expr *planpb.Expr, variable string, kind rlsutil.TagValueKind) (bool, bool) {
+	if expr == nil {
+		return false, true
+	}
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryExpr:
+		return rlsTemplateVariableTagTypeMatch(node.UnaryExpr.GetChild(), variable, kind)
+	case *planpb.Expr_BinaryExpr:
+		leftFound, leftMatches := rlsTemplateVariableTagTypeMatch(node.BinaryExpr.GetLeft(), variable, kind)
+		rightFound, rightMatches := rlsTemplateVariableTagTypeMatch(node.BinaryExpr.GetRight(), variable, kind)
+		return leftFound || rightFound, leftMatches && rightMatches
+	case *planpb.Expr_UnaryRangeExpr:
+		if node.UnaryRangeExpr.GetTemplateVariableName() != variable {
+			return false, true
+		}
+		return true, rlsDataTypeMatchesTagKind(rlsTemplateColumnDataType(node.UnaryRangeExpr.GetColumnInfo()), kind)
+	case *planpb.Expr_JsonContainsExpr:
+		if node.JsonContainsExpr.GetTemplateVariableName() != variable {
+			return false, true
+		}
+		return true, rlsDataTypeMatchesTagKind(node.JsonContainsExpr.GetColumnInfo().GetElementType(), kind)
+	default:
+		return false, true
+	}
+}
+
+func rlsDataTypeMatchesTagKind(dataType schemapb.DataType, kind rlsutil.TagValueKind) bool {
+	switch kind {
+	case rlsutil.TagValueKindString:
+		return typeutil.IsStringType(dataType)
+	case rlsutil.TagValueKindInt64:
+		return typeutil.IsIntegerType(dataType) || typeutil.IsFloatingType(dataType)
+	case rlsutil.TagValueKindDouble:
+		return typeutil.IsIntegerType(dataType) || typeutil.IsFloatingType(dataType)
+	default:
+		return false
+	}
+}
+
+func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType {
+	if columnInfo == nil {
+		return schemapb.DataType_None
+	}
+	dataType := columnInfo.GetDataType()
+	if typeutil.IsArrayType(dataType) &&
+		(len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
+		return columnInfo.GetElementType()
+	}
+	return dataType
+}
+
+// normalizeRLSTagValue chooses a representation that can be safely consumed by
+// every occurrence of a tag variable in an expression. Numeric conversions are
+// allowed only when they preserve the value exactly; otherwise the policy is
+// treated as not matching instead of risking an over-permissive comparison.
+func normalizeRLSTagValue(expr *planpb.Expr, variable string, value rlsutil.TagValue) (rlsutil.TagValue, bool) {
+	dataTypes := make([]schemapb.DataType, 0, 1)
+	collectRLSTemplateDataTypes(expr, variable, &dataTypes)
+	for _, dataType := range dataTypes {
+		if typeutil.IsIntegerType(dataType) {
+			switch value.Kind {
+			case rlsutil.TagValueKindInt64:
+				continue
+			case rlsutil.TagValueKindDouble:
+				if !isExactInt64(value.DoubleValue) {
+					return rlsutil.TagValue{}, false
+				}
+				value = rlsutil.NewInt64TagValue(int64(value.DoubleValue))
+			default:
+				return rlsutil.TagValue{}, false
+			}
+			continue
+		}
+		if typeutil.IsFloatingType(dataType) && value.Kind == rlsutil.TagValueKindInt64 {
+			if dataType == schemapb.DataType_Float {
+				if int64(float64(float32(value.Int64Value))) != value.Int64Value {
+					return rlsutil.TagValue{}, false
+				}
+			} else if int64(float64(value.Int64Value)) != value.Int64Value {
+				return rlsutil.TagValue{}, false
+			}
+		}
+	}
+	return value, true
+}
+
+func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *[]schemapb.DataType) {
+	if expr == nil {
+		return
+	}
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryExpr:
+		collectRLSTemplateDataTypes(node.UnaryExpr.GetChild(), variable, dataTypes)
+	case *planpb.Expr_BinaryExpr:
+		collectRLSTemplateDataTypes(node.BinaryExpr.GetLeft(), variable, dataTypes)
+		collectRLSTemplateDataTypes(node.BinaryExpr.GetRight(), variable, dataTypes)
+	case *planpb.Expr_UnaryRangeExpr:
+		if node.UnaryRangeExpr.GetTemplateVariableName() == variable {
+			*dataTypes = append(*dataTypes, rlsTemplateColumnDataType(node.UnaryRangeExpr.GetColumnInfo()))
+		}
+	case *planpb.Expr_JsonContainsExpr:
+		if node.JsonContainsExpr.GetTemplateVariableName() == variable {
+			*dataTypes = append(*dataTypes, node.JsonContainsExpr.GetColumnInfo().GetElementType())
+		}
+	}
+}
+
+func isExactInt64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) &&
+		value == math.Trunc(value) &&
+		value >= -9223372036854775808.0 && value < 9223372036854775808.0
 }
 
 func combinePredicates(exprs []*planpb.Expr, op planpb.BinaryExpr_BinaryOp) *planpb.Expr {

@@ -101,12 +101,21 @@ func refreshRLSOperationTestMetadata(t *testing.T, collectionID int64, policies 
 
 	coord := mocks.NewMockMixCoordClient(t)
 	coord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
-		Status:       merr.Success(),
-		CollectionId: collectionID,
-		Policies:     rlsPolicyInfos(policies),
+		Status:         merr.Success(),
+		DbName:         "default",
+		CollectionName: "rls_collection",
+		CollectionId:   collectionID,
+		Policies:       rlsPolicyInfos(policies),
+		Principals: []*rootcoordpb.RLSPrincipalInfo{{
+			CollectionId:  collectionID,
+			PrincipalName: "alice",
+			Tags:          "{}",
+		}},
 	}, nil).Twice()
+	require.NoError(t, rls.DefaultManager().Init(ctx, coord, func(context.Context) (uint64, error) {
+		return 1, nil
+	}))
 	require.NoError(t, rls.DefaultManager().RefreshPolicySnapshot(ctx, coord, "default", "rls_collection", collectionID, 1))
-	require.NoError(t, rls.DefaultManager().RefreshPrincipalTagsSnapshot(ctx, coord, "default", "rls_collection", collectionID, 1))
 }
 
 func rlsPolicyInfos(policies []*rlsutil.RowPolicy) []*rootcoordpb.RLSPolicyInfo {

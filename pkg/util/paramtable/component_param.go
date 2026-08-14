@@ -3161,7 +3161,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "3600",
 		PanicIfEmpty: true,
-		Doc:          "Maximum age in seconds of cached RLS metadata before an RLS-enforced request refreshes it from RootCoord.",
+		Doc:          "Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("3600"),
 	}

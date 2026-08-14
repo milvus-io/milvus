@@ -161,6 +161,7 @@ type RLSPrincipal struct {
 	CollectionID  int64
 	PrincipalName string
 	Tags          map[string]rlsutil.TagValue
+	IsNew         bool
 }
 
 // RLSMetadata is a point-in-time view of the RLS metadata cached for a
@@ -215,6 +216,7 @@ func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
 		CollectionID:  principal.CollectionID,
 		PrincipalName: principal.PrincipalName,
 		Tags:          cloneRLSTags(principal.Tags),
+		IsNew:         principal.IsNew,
 	}
 }
 

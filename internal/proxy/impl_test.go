@@ -2386,8 +2386,10 @@ func TestHandleIfSearchByPK_PreservesNamespaceAndSearchRLS(t *testing.T) {
 
 		mixCoord := mocks.NewMockMixCoordClient(t)
 		mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
-			Status:       merr.Success(),
-			CollectionId: collectionID,
+			Status:         merr.Success(),
+			DbName:         "default",
+			CollectionName: "test_collection",
+			CollectionId:   collectionID,
 			Policies: []*rootcoordpb.RLSPolicyInfo{
 				{
 					PolicyName: "search_by_pk",
@@ -2396,9 +2398,16 @@ func TestHandleIfSearchByPK_PreservesNamespaceAndSearchRLS(t *testing.T) {
 					UsingExpr:  "id == 1",
 				},
 			},
+			Principals: []*rootcoordpb.RLSPrincipalInfo{{
+				CollectionId:  collectionID,
+				PrincipalName: "alice",
+				Tags:          "{}",
+			}},
 		}, nil).Twice()
+		require.NoError(t, rls.DefaultManager().Init(ctx, mixCoord, func(context.Context) (uint64, error) {
+			return 1, nil
+		}))
 		require.NoError(t, rls.DefaultManager().RefreshPolicySnapshot(ctx, mixCoord, "default", "test_collection", collectionID, 1))
-		require.NoError(t, rls.DefaultManager().RefreshPrincipalTagsSnapshot(ctx, mixCoord, "default", "test_collection", collectionID, 1))
 
 		var capturedNamespace *string
 		var capturedSkipRuntimeRLS bool
