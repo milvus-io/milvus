@@ -18,10 +18,10 @@ package dataview
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
