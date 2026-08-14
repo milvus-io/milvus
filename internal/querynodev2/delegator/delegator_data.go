@@ -59,7 +59,13 @@ import (
 
 // delegator data related part
 
-const defaultAnalyzerName = "default"
+const (
+	defaultAnalyzerName = "default"
+
+	reopenBM25LoadRetryCount          = 5
+	reopenBM25LoadRetryInitialBackoff = 200 * time.Millisecond
+	reopenBM25LoadRetryMaxBackoff     = time.Minute
+)
 
 func normalizeAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
 	if textNum == 0 {
@@ -567,8 +573,17 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
-			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable); err != nil {
+			var activateIfReadable bool
+			err := retry.Do(ctx, func() error {
+				activateIfReadable = sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
+				return idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable)
+			},
+				retry.Attempts(reopenBM25LoadRetryCount+1),
+				retry.Sleep(reopenBM25LoadRetryInitialBackoff),
+				retry.MaxSleepTime(reopenBM25LoadRetryMaxBackoff),
+				retry.RetryErr(merr.IsRetryableErr),
+			)
+			if err != nil {
 				mlog.Warn(ctx, "failed to load reopened bm25 stats for segment",
 					mlog.FieldCollectionID(req.GetCollectionID()),
 					mlog.FieldSegmentID(info.GetSegmentID()),
@@ -587,32 +602,33 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	return nil
 }
 
-// syncCollectionIndexMeta refreshes the delegator node's CCollection IndexMeta after a
-// forwarded worker load. Worker LoadSegments already updates IndexMeta on the target
-// worker, but the delegator (which executes growing search locally) must stay in sync.
-func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if len(req.GetIndexInfoList()) == 0 {
-		return nil
-	}
-
-	schema := req.GetSchema()
-	if schema == nil {
-		schema = sd.collection.Schema()
-	}
-
-	loadMeta := req.GetLoadMeta()
-	if loadMeta == nil {
-		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID: req.GetCollectionID(),
+// syncCollectionMeta refreshes the delegator node's CCollection IndexMeta and
+// channel-local function runtime after a forwarded worker load. Worker LoadSegments
+// already updates IndexMeta on the target worker, but the delegator must stay in sync.
+func (sd *shardDelegator) syncCollectionMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if len(req.GetIndexInfoList()) > 0 {
+		schema := req.GetSchema()
+		if schema == nil {
+			schema = sd.collection.Schema()
 		}
+
+		loadMeta := req.GetLoadMeta()
+		if loadMeta == nil {
+			loadMeta = &querypb.LoadMetaInfo{
+				CollectionID: req.GetCollectionID(),
+			}
+		}
+
+		meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
+		if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
+			return err
+		}
+		sd.collectionManager.Unref(req.GetCollectionID(), 1)
 	}
 
-	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
-	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
-		return err
-	}
-	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
+	// Reopen and concurrent loads also provide a deterministic catch-up point when
+	// another channel has already advanced the shared Collection schema.
+	return sd.UpdateDelegatorSchema(ctx)
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -692,8 +708,8 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug(ctx, "work loads segments done")
 
-	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
-		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
+	if err := sd.syncCollectionMeta(ctx, req); err != nil {
+		log.Warn(ctx, "failed to sync collection metadata on delegator", mlog.Err(err))
 		return err
 	}
 
@@ -1467,6 +1483,11 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest, functionRu
 }
 
 func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return nil, err
+	}
+	defer sd.lifetime.Done()
+
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {

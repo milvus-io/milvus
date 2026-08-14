@@ -222,10 +222,14 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		DataType: schemapb.DataType_Timestamptz,
 		Nullable: true,
 		DefaultValue: &schemapb.ValueField{
-			Data: &schemapb.ValueField_StringData{StringData: "not-a-timestamp"},
+			Data: &schemapb.ValueField_StringData{StringData: "1234"},
 		},
 	}, false))
-	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	invalidTimestampErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, invalidTimestampErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, invalidTimestampErr, "invalid default value of field, name: invalid_created_at_tz")
+	require.ErrorContains(t, invalidTimestampErr, "invalid timestamp string: '1234'. Does not match any known format")
+	require.NotContains(t, invalidTimestampErr.Error(), "%!w")
 
 	// case 3.4: multiple function schemas remain unsupported.
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -446,14 +450,6 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 7.1: vector function output field without bound index params is rejected.
-	noIndexReq := buildAlterSchemaReq(dbName, collectionName, "field1", "sparse_no_index", "fn_no_index")
-	noIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = nil
-	resp, err = core.AlterCollectionSchema(ctx, noIndexReq)
-	noIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
-	require.ErrorIs(t, noIndexErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, noIndexErr, "index params are required")
-
 	// case 8: output field points to an existing field while FieldInfos adds a different field
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
@@ -492,16 +488,18 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
-	// case 7.2: AUTOINDEX is not accepted as the bound index type in V1
-	// (rejected at rootcoord prepare, after function validation passes).
+	// case 7.2: AUTOINDEX only tolerates an additional metric_type; any other
+	// build param is rejected (rejected at rootcoord prepare, after function
+	// validation passes), mirroring the create_index AUTOINDEX restriction.
 	autoIndexReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_auto_index", "fn_auto_index")
 	autoIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
 		{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+		{Key: "nlist", Value: "128"},
 	}
 	resp, err = core.AlterCollectionSchema(ctx, autoIndexReq)
 	autoIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
 	require.ErrorIs(t, autoIndexErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, autoIndexErr, "explicit index_type is required")
+	require.ErrorContains(t, autoIndexErr, "only metric type can be passed")
 
 	// case 7.3: an index type without a registered checker is rejected at prepare —
 	// it would otherwise be persisted via the ack callback and never build.
@@ -702,6 +700,29 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+
+	// case 12: no index params at all — the bound index resolves via AutoIndex:
+	// the sparse config supplies the index type, the BM25 function forces the
+	// metric (config default IP is not a user choice), and the persisted user
+	// params take the canonical AUTOINDEX shape so a later
+	// create_index(AUTOINDEX) dedupes as idempotent.
+	autoBoundReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_auto_bound", "fn_auto_bound")
+	autoBoundReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = nil
+	resp, err = core.AlterCollectionSchema(ctx, autoBoundReq)
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 9)
+	boundIndexes = recordedBoundIndexes()
+	autoBoundIndexInfo := boundIndexes[len(boundIndexes)-1].GetIndexInfo()
+	require.Equal(t, "sparse_auto_bound", autoBoundIndexInfo.GetIndexName())
+	autoBoundParams := funcutil.KeyValuePair2Map(autoBoundIndexInfo.GetIndexParams())
+	require.Equal(t, "SPARSE_INVERTED_INDEX", autoBoundParams[common.IndexTypeKey])
+	require.Equal(t, "BM25", autoBoundParams[common.MetricTypeKey])
+	require.Equal(t, "1.2", autoBoundParams["bm25_k1"])
+	require.Equal(t, []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+	}, autoBoundIndexInfo.GetUserIndexParams())
+	require.False(t, autoBoundIndexInfo.GetIsAutoIndex())
 }
 
 func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T) {
@@ -1505,6 +1526,220 @@ func TestPrepareBoundFieldIndex(t *testing.T) {
 		// convention), so a later create_index with identical params is
 		// treated as idempotent instead of a distinct index.
 		require.Equal(t, plan.IndexExtraParams, info.GetUserIndexParams())
+	})
+
+	t.Run("empty params resolve via AutoIndex with BM25 metric forced", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = nil
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		require.Equal(t, "SPARSE_INVERTED_INDEX", params[common.IndexTypeKey])
+		// The sparse autoindex config defaults to IP; the BM25 function type
+		// authoritatively overrides a non-user-specified metric.
+		require.Equal(t, "BM25", params[common.MetricTypeKey])
+		require.Equal(t, "1.2", params["bm25_k1"])
+		require.Equal(t, "0.75", params["bm25_b"])
+		require.Equal(t, "100", params["bm25_avgdl"])
+		require.Equal(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}, info.GetUserIndexParams())
+		require.False(t, info.GetIsAutoIndex())
+	})
+
+	t.Run("explicit AUTOINDEX with metric resolves identically", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		require.Equal(t, "SPARSE_INVERTED_INDEX", params[common.IndexTypeKey])
+		require.Equal(t, "BM25", params[common.MetricTypeKey])
+		require.Equal(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}, info.GetUserIndexParams())
+	})
+
+	t.Run("AUTOINDEX with non-metric build param rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: "nlist", Value: "128"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "only metric type can be passed")
+	})
+
+	t.Run("explicit empty index type rejected, not auto-resolved", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: ""},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "invalid index type")
+	})
+
+	t.Run("MinHash AutoIndex with dedup metric picks deduplicate config", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		require.Equal(t, "MINHASH_LSH", params[common.IndexTypeKey])
+		require.Equal(t, "MHJACCARD", params[common.MetricTypeKey])
+		require.Equal(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}, info.GetUserIndexParams())
+	})
+
+	t.Run("MinHash AutoIndex with non-dedup metric rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "HAMMING"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "must be MHJACCARD")
+	})
+
+	t.Run("MinHash empty params resolve to deduplicate config", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = nil
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		// The function type authoritatively selects the dedup config; the
+		// generic binary config cannot serve MinHash searches.
+		require.Equal(t, "MINHASH_LSH", params[common.IndexTypeKey])
+		require.Equal(t, "MHJACCARD", params[common.MetricTypeKey])
+		require.Equal(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}, info.GetUserIndexParams())
+	})
+
+	t.Run("cloud mode persists raw user params for auto-resolved index", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = nil
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		require.Equal(t, "SPARSE_INVERTED_INDEX", params[common.IndexTypeKey])
+		require.Equal(t, "BM25", params[common.MetricTypeKey])
+		// The cloud create_index branch does not canonicalize user params, so the
+		// bound index must not either — otherwise a later create_index would hit a
+		// UserIndexParams length mismatch in checkParams instead of deduping.
+		require.Empty(t, info.GetUserIndexParams())
+	})
+
+	t.Run("knowhere build defaults merged into persisted index params", func(t *testing.T) {
+		// Operator-configured build params must be persisted the same way
+		// create_index does, so QueryNode's brute-force fallback and the built
+		// index agree on MinHash settings.
+		paramtable.Get().Save("knowhere.MINHASH_LSH.build.mh_lsh_band", "6")
+		defer paramtable.Get().Reset("knowhere.MINHASH_LSH.build.mh_lsh_band")
+
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		params := funcutil.KeyValuePair2Map(fieldIndex.GetIndexInfo().GetIndexParams())
+		require.Equal(t, "6", params["mh_lsh_band"])
+	})
+
+	t.Run("oversized knowhere build default rejected after merge", func(t *testing.T) {
+		// The merged defaults must be validated (size, train), matching
+		// create_index, so an invalid operator default rejects the DDL instead
+		// of persisting an index that cannot build.
+		paramtable.Get().Save("knowhere.MINHASH_LSH.build.mh_lsh_band",
+			strings.Repeat("x", paramtable.Get().ProxyCfg.MaxIndexParamsSize.GetAsInt()+1))
+		defer paramtable.Get().Reset("knowhere.MINHASH_LSH.build.mh_lsh_band")
+
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "exceeds limit")
 	})
 
 	t.Run("index name conflict rejected", func(t *testing.T) {

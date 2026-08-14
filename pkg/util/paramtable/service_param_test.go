@@ -132,6 +132,9 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
+		assert.True(t, wpCfg.DirectReadEnabled.GetAsBool())
+		assert.Equal(t, int64(16*1024*1024), wpCfg.DirectReadMaxBatchSize.GetAsSize())
+		assert.Equal(t, 4, wpCfg.DirectReadMaxFetchThreads.GetAsInt())
 
 		// Test default quorum configuration values
 		// Buffer pools (should be empty by default)
@@ -352,6 +355,8 @@ func TestServiceParam(t *testing.T) {
 			assert.Empty(t, kc.KafkaTLSCert.GetValue())
 			assert.Empty(t, kc.KafkaTLSKey.GetValue())
 			assert.Empty(t, kc.KafkaTLSKeyPassword.GetValue())
+			assert.Equal(t, 10*1024*1024, kc.ProducerMessageMaxBytes.GetAsInt())
+			assert.True(t, base.mgr.IsImmutable(kc.ProducerMessageMaxBytes.Key))
 		}
 	})
 
@@ -392,6 +397,15 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, util.MetaStoreTypeEtcd, Params.MetaStoreType.GetValue())
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
+		assert.Equal(t, 64, Params.MaxEtcdTxnNum.GetAsInt())
+
+		for _, value := range []string{"0", "-1", "invalid"} {
+			assert.NoError(t, bt.Save(Params.MaxEtcdTxnNum.Key, value))
+			assert.Equal(t, 64, Params.MaxEtcdTxnNum.GetAsInt())
+		}
+		assert.NoError(t, bt.Save(Params.MaxEtcdTxnNum.Key, "2"))
+		assert.Equal(t, 2, Params.MaxEtcdTxnNum.GetAsInt())
+		assert.NoError(t, bt.Reset(Params.MaxEtcdTxnNum.Key))
 	})
 
 	t.Run("test profile config", func(t *testing.T) {

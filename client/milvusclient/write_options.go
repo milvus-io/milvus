@@ -119,7 +119,7 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 
 		mNameColumn[col.Name()] = col
 		if col.Type() != field.DataType {
-			return nil, 0, fmt.Errorf("param column %s has type %v but collection field definition is %v", col.Name(), col.Type(), field.DataType)
+			return nil, 0, fmt.Errorf("param column %s has type %s but collection field definition is %s", col.Name(), col.Type().Name(), field.DataType.Name())
 		}
 		if field.DataType == entity.FieldTypeFloatVector || field.DataType == entity.FieldTypeBinaryVector ||
 			field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector ||
@@ -239,6 +239,12 @@ func (opt *columnBasedDataOption) WithVarcharColumn(colName string, data []strin
 	return opt.WithColumns(column)
 }
 
+// WithTextColumn appends a native TEXT column to the write request.
+func (opt *columnBasedDataOption) WithTextColumn(colName string, data []string) *columnBasedDataOption {
+	column := column.NewColumnText(colName, data)
+	return opt.WithColumns(column)
+}
+
 func (opt *columnBasedDataOption) WithFloatVectorColumn(colName string, dim int, data [][]float32) *columnBasedDataOption {
 	column := column.NewColumnFloatVector(colName, dim, data)
 	return opt.WithColumns(column)
@@ -275,9 +281,10 @@ func (opt *columnBasedDataOption) WithInt8VectorColumn(colName string, dim int, 
 // WithStructArrayColumn appends a struct-array column built from a row-based representation,
 // inferring the per-sub-field array type from the corresponding field in `structSchema`.
 //
-// `rows` is a per-collection-row list; each entry is a map keyed by sub-field name. The value
-// for a scalar sub-field must be `[]<T>` (e.g. []int32, []string); the value for a vector
-// sub-field must be `[][]float32` / `[][]byte` / `[][]int8` matching the vector type.
+// `rows` is a per-collection-row list; a nil entry represents a null StructArray row. Each
+// non-null entry is a map keyed by sub-field name. The value for a scalar sub-field must be
+// `[]<T>` (e.g. []int32, []string); the value for a vector sub-field must be
+// `[][]float32` / `[][]byte` / `[][]int8` matching the vector type.
 //
 // Example:
 //
@@ -314,6 +321,12 @@ func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, r
 		subColumns = append(subColumns, subColumn)
 	}
 	structCol := column.NewColumnStructArray(colName, subColumns)
+	for _, row := range rows {
+		if row == nil {
+			structCol.SetNullable(true)
+			break
+		}
+	}
 	for i, row := range rows {
 		if err := structCol.AppendValue(row); err != nil {
 			return nil, errors.Wrapf(err, "row %d", i)

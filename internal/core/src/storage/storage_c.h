@@ -48,6 +48,19 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config);
 
+CStatus
+InitLoonReaderThreadPool(int32_t num_threads);
+
+// Returns the effective loon reader thread pool size: the number of threads
+// actually in use, which is 1 (no pool) until one is created. Needed because
+// the pool cannot be destroyed at runtime, so a requested size of 0 after
+// creation is a no-op and callers must report what is really in effect.
+int32_t
+GetLoonReaderThreadPoolSize();
+
+CStatus
+InitIndexBuildReadWindow(int64_t window_bytes);
+
 // Plugin related APIs
 CStatus
 InitPluginLoader(const char* plugin_path);

@@ -44,12 +44,12 @@ class ShreddingArrayBsonContainsArrayExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -92,12 +92,12 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -144,12 +144,12 @@ class ShreddingArrayBsonContainsAnyExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -198,12 +198,12 @@ class ShreddingArrayBsonContainsAllExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -252,12 +252,12 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -357,12 +357,12 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -514,6 +514,20 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         SegmentExpr::DetermineExecPath();
+        if (exec_path_ != ExprExecPath::ScalarIndex ||
+            expr_->column_.data_type_ != DataType::JSON ||
+            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
+            return;
+        }
+        const auto has_unsafe_int_literal = std::any_of(
+            expr_->vals_.begin(),
+            expr_->vals_.end(),
+            [this](const auto& value) {
+                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
+            });
+        if (has_unsafe_int_literal) {
+            exec_path_ = ExprExecPath::RawData;
+        }
     }
 
  private:

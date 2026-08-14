@@ -25,7 +25,17 @@ template <typename T>
 inline index::ScalarIndexPtr<T>
 generate_scalar_index(Span<T> data) {
     auto indexing = std::make_unique<index::ScalarIndexSort<T>>();
-    indexing->Build(data.row_count(), data.data(), data.valid_data());
+    const auto validity = data.validity();
+    FixedVector<bool> materialized_validity;
+    const bool* valid_data = validity.expanded_data();
+    if (validity && valid_data == nullptr) {
+        materialized_validity.reserve(data.row_count());
+        for (int64_t i = 0; i < data.row_count(); ++i) {
+            materialized_validity.emplace_back(validity[i]);
+        }
+        valid_data = materialized_validity.data();
+    }
+    indexing->Build(data.row_count(), data.data(), valid_data);
     return indexing;
 }
 

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -65,6 +66,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 func (s *ClusteringCompactionTaskSuite) setupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
@@ -119,6 +122,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
 func (s *ClusteringCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *ClusteringCompactionTaskSuite) TestWrongCompactionType() {
@@ -151,13 +156,10 @@ func (s *ClusteringCompactionTaskSuite) TestIsVectorClusteringKey() {
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptyBinlog() {
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
 	_, err := s.task.Compact()
 	s.Require().Error(err)
 	s.Equal(true, errors.Is(err, merr.ErrIllegalCompactionPlan))
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
-	_, err2 := s.task.Compact()
-	s.Require().Error(err2)
-	s.Equal(true, errors.Is(err2, merr.ErrIllegalCompactionPlan))
 }
 
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptySchema() {

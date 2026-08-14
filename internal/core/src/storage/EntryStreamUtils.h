@@ -31,12 +31,18 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
 constexpr size_t kMinStreamSliceSize = 64 * 1024;
 constexpr size_t kStreamSliceAlignment = 4 * 1024;
 constexpr size_t kTailMergeGrace = 1 * 1024 * 1024;
+constexpr size_t kFileStreamBufferMultiplier = 2;
+// Encrypted reads may simultaneously retain ciphertext, decrypted plaintext,
+// and the returned plaintext buffer.
+constexpr size_t kEncryptedStreamBufferMultiplier = 3;
 
 inline bool
 IsStreamSliceSizeAligned(size_t slice_size) {
@@ -59,7 +65,7 @@ ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
 /// A slice read from a V3 entry. `error` carries an exception captured in
 /// the producer task so the consumer can rethrow instead of hanging.
 struct StreamSliceResult {
-    size_t budget_bytes{0};
+    size_t slice_transient_bytes{0};
     std::vector<uint8_t> data;
     std::exception_ptr error = nullptr;
 };
@@ -69,8 +75,8 @@ struct StreamSliceResult {
 ///
 /// Usage:
 ///   - Call Acquire(bytes) to block until budget is available.
-///   - Call AcquireUntil(bytes, stop_waiting) to block until budget is
-///     available or the caller's lifecycle ends.
+///   - Call AcquireUntil(bytes, cancellation_token) to block until budget is
+///     available or cancellation is requested.
 ///   - Call TryAcquire(bytes) for non-blocking replenish in refill loops.
 ///   - Call Release(bytes) after the transient data has been consumed.
 ///   - Oversized requests are allowed to run exclusively to guarantee progress.
@@ -96,23 +102,34 @@ class TransientMemoryBudget {
         inflight_bytes_ += bytes;
     }
 
-    /// Block until enough budget is available, or stop_waiting returns true.
-    /// The callback must be cheap and non-blocking. Returning false means no
-    /// budget was acquired and the caller should stop its work.
-    template <typename StopWaiting>
+    /// Block until enough budget is available, or cancellation is requested.
+    /// Returning false means no budget was acquired and the caller should stop
+    /// its work.
     bool
-    AcquireUntil(size_t bytes, StopWaiting stop_waiting) {
-        std::unique_lock<std::mutex> lock(mu_);
-        while (true) {
-            if (stop_waiting()) {
-                return false;
-            }
-            if (CanAcquireLocked(bytes)) {
+    AcquireUntil(size_t bytes,
+                 const folly::CancellationToken& cancellation_token) {
+        folly::CancellationCallback cancel_callback(
+            cancellation_token, [this]() noexcept {
+                // Pair with wait(lock, predicate) to avoid losing a cancel
+                // notification between predicate check and wait.
+                std::lock_guard<std::mutex> lock(mu_);
+                cv_.notify_all();
+            });
+
+        bool acquired = false;
+        {
+            std::unique_lock<std::mutex> lock(mu_);
+            cv_.wait(lock, [this, bytes, &cancellation_token] {
+                return cancellation_token.isCancellationRequested() ||
+                       CanAcquireLocked(bytes);
+            });
+            if (!cancellation_token.isCancellationRequested()) {
                 inflight_bytes_ += bytes;
-                return true;
+                acquired = true;
             }
-            cv_.wait_for(lock, std::chrono::milliseconds(10));
         }
+
+        return acquired;
     }
 
     /// Try to claim budget. Returns true if under budget.
@@ -149,9 +166,20 @@ class TransientMemoryBudget {
 
     void
     SetCapacityBytes(size_t bytes) {
+        std::lock_guard<std::mutex> update_lock(capacity_update_mutex_);
+        auto old_capacity = CapacityBytes();
+        auto expanding =
+            old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
+        auto& overhead_controller = LoadMemoryOverheadController::GetInstance();
+        if (expanding && !overhead_controller.UpdateBudgetBytes(bytes)) {
+            return;
+        }
         {
             std::lock_guard<std::mutex> lock(mu_);
             capacity_bytes_ = bytes;
+        }
+        if (!expanding) {
+            overhead_controller.UpdateBudgetBytes(bytes);
         }
         cv_.notify_all();
     }
@@ -186,6 +214,7 @@ class TransientMemoryBudget {
                bytes <= capacity_bytes - inflight_bytes_;
     }
 
+    std::mutex capacity_update_mutex_;
     mutable std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
@@ -193,16 +222,60 @@ class TransientMemoryBudget {
 };
 
 inline size_t
-EntryStreamMaxTransientBytes() {
+SaturatingMultiply(size_t value, size_t multiplier) {
+    if (value == 0 || multiplier == 0) {
+        return 0;
+    }
+    if (value > std::numeric_limits<size_t>::max() / multiplier) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return value * multiplier;
+}
+
+inline size_t
+MaxEntryStreamTaskBytes() {
+    return DefaultStreamSliceSize() + kTailMergeGrace;
+}
+
+inline size_t
+EntryStreamTransientBytes(size_t stream_bytes, bool encrypted) {
+    // This is the compatibility fallback for callers that cannot inspect a
+    // concrete encrypted V3 directory. File-aware planning uses persisted
+    // ciphertext slice sizes instead.
+    auto buffer_multiplier =
+        encrypted ? kEncryptedStreamBufferMultiplier : size_t{1};
+    return SaturatingMultiply(stream_bytes, buffer_multiplier);
+}
+
+inline size_t
+EntryStreamMaxTransientBytes(size_t total_transient_bytes,
+                             size_t max_task_transient_bytes,
+                             size_t live_worker_count = 0) {
+    if (total_transient_bytes == 0 || max_task_transient_bytes == 0) {
+        return 0;
+    }
+
+    auto configured_threads =
+        std::max(milvus::ComputeThreadPoolMaxThreads(
+                     milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()),
+                 milvus::ComputeThreadPoolMaxThreads(
+                     milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto max_tasks =
+        std::max({static_cast<size_t>(configured_threads),
+                  std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()),
+                  live_worker_count});
+    auto pool_bound = SaturatingMultiply(max_task_transient_bytes, max_tasks);
     auto capacity =
         TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
-    if (capacity == 0) {
-        return std::numeric_limits<size_t>::max();
-    }
-    if (capacity > std::numeric_limits<size_t>::max() - kTailMergeGrace) {
-        return std::numeric_limits<size_t>::max();
-    }
-    return capacity + kTailMergeGrace;
+    auto budget_bound =
+        capacity == 0 ? pool_bound
+                      : std::min(std::max(capacity, max_task_transient_bytes),
+                                 pool_bound);
+    return std::min(total_transient_bytes, budget_bound);
 }
 
 }  // namespace milvus::storage

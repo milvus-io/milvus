@@ -37,6 +37,7 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
+        test_bloom_filter_expr.cpp
         test_loading.cpp
         test_exec.cpp
         test_timestamptz_arith_compare.cpp
@@ -74,6 +75,7 @@ set(MILVUS_TEST_FILES
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
         test_segment_read_lease.cpp
+        CipherPluginContextTest.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

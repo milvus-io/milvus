@@ -368,9 +368,8 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
-	// set analyzer resource for text match index if use ref mode.
 	// Namespace-enabled clustering compaction is routed to the namespace compactor on the
-	// DataNode, which builds the text index inline and needs the analyzer resources.
+	// DataNode, which builds the text index inline and needs the analyzer resources in ref mode.
 	taskSchema := taskProto.GetSchema()
 	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
 		taskSchema.GetEnableNamespace() &&

@@ -55,11 +55,13 @@ type FunctionRunnerManager interface {
 	// are closed only after all keys are released.
 	Release(collectionID int64, key string)
 
-	// Materialize fills missing function output fields for a WAL insert request.
+	// Materialize fills missing function output fields for a WAL insert message.
 	// The lifecycle key selects the managed schema snapshot. Passing
 	// LatestFunctionRunnerVersion uses the version currently registered by the key;
 	// an explicit schemaVersion verifies that the WAL and manager snapshots match.
-	Materialize(ctx context.Context, collectionID int64, key string, schemaVersion int32, body *msgpb.InsertRequest) (bool, error)
+	// The message body is parsed only when the selected schema has runner-backed
+	// function output fields.
+	Materialize(ctx context.Context, collectionID int64, key string, schemaVersion int32, message InsertMessage) (bool, error)
 
 	// TryMaterialize is used by compatibility paths for old insert messages. It
 	// uses the exact managed schema version when it is still retained. It returns
@@ -80,6 +82,12 @@ type FunctionRunnerManager interface {
 
 	// Close releases all cached runners managed by this manager.
 	Close()
+}
+
+// InsertMessage is the mutable insert message surface needed by Materialize.
+type InsertMessage interface {
+	MustBody() *msgpb.InsertRequest
+	OverwriteBody(*msgpb.InsertRequest)
 }
 
 type functionRunnerManager struct {
@@ -623,10 +631,10 @@ func (e *functionRunnerCollectionEntry) Materialize(
 	ctx context.Context,
 	key string,
 	schemaVersion int32,
-	body *msgpb.InsertRequest,
+	message InsertMessage,
 ) (bool, error) {
-	if body == nil {
-		return false, merr.WrapErrFunctionFailedMsg("insert request is nil")
+	if message == nil {
+		return false, merr.WrapErrFunctionFailedMsg("insert message is nil")
 	}
 
 	e.mu.RLock()
@@ -650,7 +658,18 @@ func (e *functionRunnerCollectionEntry) Materialize(
 	if !ok {
 		return false, merr.WrapErrServiceInternalMsg("function runner metadata not found for key %s at schema version %d", key, keyVersion)
 	}
+	if len(outputFieldIDs) == 0 {
+		return false, nil
+	}
+
+	body := message.MustBody()
+	if body == nil {
+		return false, merr.WrapErrFunctionFailedMsg("insert request is nil")
+	}
 	changed, err := materializeWithRunnerEntries(ctx, runnerEntries, outputFieldIDs, body)
+	if changed {
+		message.OverwriteBody(body)
+	}
 	return changed, err
 }
 
@@ -855,7 +874,7 @@ func (m *functionRunnerManager) Materialize(
 	collectionID int64,
 	key string,
 	schemaVersion int32,
-	body *msgpb.InsertRequest,
+	message InsertMessage,
 ) (bool, error) {
 	entry := m.getEntry(collectionID)
 	if entry == nil {
@@ -864,7 +883,7 @@ func (m *functionRunnerManager) Materialize(
 		}
 		return false, merr.WrapErrFunctionFailedMsg("function runners for collection %d are not allocated", collectionID)
 	}
-	changed, err := entry.Materialize(ctx, key, schemaVersion, body)
+	changed, err := entry.Materialize(ctx, key, schemaVersion, message)
 	return changed, wrapFunctionRunnerLifecycleError(collectionID, err)
 }
 

@@ -65,9 +65,14 @@ type fakeRecordReader struct {
 	records []storage.Record
 	errs    []error
 	idx     int
+	current storage.Record
 }
 
 func (r *fakeRecordReader) Next() (storage.Record, error) {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	if r.idx < len(r.errs) && r.errs[r.idx] != nil {
 		err := r.errs[r.idx]
 		r.idx++
@@ -78,10 +83,15 @@ func (r *fakeRecordReader) Next() (storage.Record, error) {
 	}
 	record := r.records[r.idx]
 	r.idx++
+	r.current = record
 	return record, nil
 }
 
 func (r *fakeRecordReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	return nil
 }
 
@@ -94,15 +104,17 @@ func (s *RefreshExternalCollectionTaskSuite) TestNewRefreshExternalCollectionTas
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:      "cluster-0",
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
 		ExternalSpec:   "test_spec",
 	}
 
-	task := s.newTask(ctx, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	s.NotNil(task)
+	s.Equal("cluster-0", task.req.GetClusterID())
 	s.Equal(s.collectionID, task.req.GetCollectionID())
 	s.Equal(s.taskID, task.req.GetTaskID())
 	s.Equal(indexpb.JobState_JobStateInit, task.GetState())
@@ -268,7 +280,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestReset() {
 		TaskID:       s.taskID,
 	}
 
-	task := s.newTask(ctx, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.Reset()
 
 	s.Nil(task.ctx)
@@ -1448,10 +1460,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment() {
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUsesInsertLogBasePath() {
-	paramtable.Init()
-
 	ctx := context.Background()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:     "in01-test",
 		CollectionID:  s.collectionID,
 		PartitionID:   2000,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
@@ -1470,10 +1481,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 			},
 		},
 	}
-	task := s.newTask(ctx, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
 	var gotBasePath string
+	var gotClusterID string
 	var gotStorageConfig *indexpb.StorageConfig
 	mockExec := mockey.Mock(ExecuteFunctionsForSegment).
 		To(func(
@@ -1488,6 +1500,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 			clusterID string,
 		) (string, error) {
 			gotBasePath = basePath
+			gotClusterID = clusterID
 			gotStorageConfig = storageConfig
 			return "manifest-path", nil
 		}).Build()
@@ -1497,6 +1510,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 	s.NoError(err)
 	s.Equal("manifest-path", manifestPath)
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
+	s.Equal("in01-test", gotClusterID)
 	s.Same(req.GetStorageConfig(), gotStorageConfig)
 }
 

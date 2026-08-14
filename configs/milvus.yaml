@@ -202,6 +202,10 @@ woodpecker:
       maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
+    directRead:
+      enabled: true # Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.
+      maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
+      maxFetchThreads: 4 # Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.
     quorum:
       # Quorum Buffer Pools: Define groups of nodes for different purposes
       # Example configuration below:
@@ -309,6 +313,10 @@ pulsar:
 #     tlsKey:  # path to client's private key (PEM) used for authentication
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
+#   producer:
+#     message:
+#       max:
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
@@ -360,9 +368,11 @@ proxy:
       bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
   maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
   maxCollectionDescriptionLength: 1024 # The maximum byte length of a collection description accepted by CreateCollection and AlterCollection. Existing collection metadata is not revalidated, but restore or replication flows that recreate a collection through CreateCollection must satisfy this limit or raise it first.
-  maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
+  maxFieldNum: 256 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
+  maxBloomFilterSize: 67108864 # The maximum byte size of the SBBF body in a client pre-built bloom_match filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-request memory/network amplification. Must not exceed the MBF1 format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
+  maxBloomFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of bloom-bearing expression plans in one Search, HybridSearch, or Query request. The proxy checks the assembled plans before proto.Marshal, so repeated references to one bloom_match template value and Bloom filters across hybrid sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -426,6 +436,23 @@ proxy:
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
+    # high-level restful api, restore the value handling of releases that predate the REST insert
+    # validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
+    # stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
+    # through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
+    # for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.
+    compatibilityMode: false
+    # high-level restful api, the deepest nesting an expression template parameter may use. Converting a
+    # parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
+    # bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
+    # itself is the risk the setting exists to remove; values below 1 are read as 1.
+    maxExprParamsDepth: 100
+    # high-level restful api, return a JSON field as the document it holds rather than as a string.
+    # A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
+    # Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
+    # hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
+    # form and a warning is logged, so a caller always sees one shape or the other and never a mixture.
+    nativeJSONResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
@@ -441,7 +468,7 @@ proxy:
   internalPort: 19529
   grpc:
     serverMaxSendSize: 268435456 # The maximum size of each RPC request that the proxy can send, unit: byte
-    serverMaxRecvSize: 67108864 # The maximum size of each RPC request that the proxy can receive, unit: byte
+    serverMaxRecvSize: 134217728 # The maximum size of each RPC request that the proxy can receive, unit: byte
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on proxy can send, unit: byte
     clientMaxRecvSize: 67108864 # The maximum size of each RPC request that the clients on proxy can receive, unit: byte
 
@@ -542,7 +569,7 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
-    enableGISSplitFusion: false # Enable GIS filter coarse/refine split + same-column fusion optimization
+    enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
     tieredStorage:
       warmup:
         # options: sync, async, disable.
@@ -586,6 +613,7 @@ queryNode:
     storageV2:
       cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
+  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -633,6 +661,7 @@ queryNode:
     nqMergeRatio: 16 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
+  standaloneMigrateDataTimeout: 10s # Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
@@ -750,6 +779,9 @@ dataCoord:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
+    enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
+    target:
+      maxEventsPerReconcile: 100 # Maximum number of compaction events emitted by one target reconciliation.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
@@ -820,6 +852,11 @@ dataCoord:
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
+    crossBucketEndpointAllowlist:  # Comma/space separated endpoint host[:port] allowlist for snapshot server-side cross-bucket copy with custom object storage endpoints. Canonical cloud endpoints derived from cloud_provider and region are allowed without this list.
+    exportCopyConcurrency: 16 # Maximum concurrent provider-side object copy requests for ExportSnapshot. Invalid or non-positive values are coerced to the default value 16.
+    exportJobTimeout: 43200 # Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time. Default 12 hours.
+    exportJobRetention: 10800 # Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.
+    exportMaxConcurrentJobs: 1 # Maximum number of snapshot export jobs executed concurrently by DataCoord.
   enableActiveStandby: false
   taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
@@ -907,6 +944,14 @@ dataNode:
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
+    # Initial backoff interval in seconds for import write retry. Must be a positive integer;
+    # a non-positive or unparseable value falls back to the default.
+    writeRetryInitialInterval: 1
+    # Maximum backoff interval in seconds for import write retry. Must be a positive integer;
+    # a non-positive or unparseable value falls back to the default. Set it to at least twice
+    # writeRetryInitialInterval, otherwise the effective cap is raised to twice the initial interval.
+    writeRetryMaxInterval: 60
+    copyObjectTimeout: 3600 # Timeout in seconds for copying one object during snapshot restore, including retries.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -1118,9 +1163,8 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
-    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
+    maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
   traceLogMode: 0 # trace request info
-  visibilityFilterEnabled: true # whether to apply row visibility filtering (timestamp, delete, and TTL) on querynode. When disabled, all rows are returned regardless of insert/delete timestamps.
   bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
@@ -1147,6 +1191,9 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+      proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
+    maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
+    downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 

@@ -17,6 +17,8 @@
 package column
 
 import (
+	"slices"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
@@ -27,6 +29,88 @@ import (
 type GColumn[T any] interface {
 	Value(idx int) T
 	AppendValue(v T)
+}
+
+func getFieldDataValidData(fd *schemapb.FieldData) []bool {
+	if legacy := fd.GetValidData(); len(legacy) > 0 {
+		return legacy
+	}
+	var current []bool
+	if scalars := fd.GetScalars(); scalars != nil {
+		current = scalars.GetValidData()
+	} else {
+		current = fd.GetVectors().GetValidData()
+	}
+	return current
+}
+
+func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
+	if fd == nil {
+		return
+	}
+
+	if scalars := fd.GetScalars(); scalars != nil {
+		scalars.ValidData = validData
+	} else if vectors := fd.GetVectors(); vectors != nil {
+		vectors.ValidData = validData
+	} else {
+		return
+	}
+
+	fd.ValidData = nil
+}
+
+func validateAndNormalizeFieldDataValidData(fd *schemapb.FieldData) bool {
+	if !fieldDataValidDataConsistent(fd) {
+		return false
+	}
+	normalizeFieldDataValidData(fd)
+	return true
+}
+
+func fieldDataValidDataConsistent(fd *schemapb.FieldData) bool {
+	if fd == nil {
+		return true
+	}
+
+	legacy := fd.GetValidData()
+	var current []bool
+	if scalars := fd.GetScalars(); scalars != nil {
+		current = scalars.GetValidData()
+	} else {
+		current = fd.GetVectors().GetValidData()
+	}
+	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
+		return false
+	}
+
+	for _, subField := range fd.GetStructArrays().GetFields() {
+		if !fieldDataValidDataConsistent(subField) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeFieldDataValidData(fd *schemapb.FieldData) {
+	if fd == nil {
+		return
+	}
+	switch fd.Field.(type) {
+	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
+		if validData := getFieldDataValidData(fd); len(validData) > 0 {
+			setFieldDataValidData(fd, validData)
+		} else {
+			fd.ValidData = nil
+		}
+	case *schemapb.FieldData_StructArrays:
+		fd.ValidData = nil
+		for _, subField := range fd.GetStructArrays().GetFields() {
+			normalizeFieldDataValidData(subField)
+		}
+	default:
+		fd.ValidData = nil
+	}
 }
 
 var _ Column = (*genericColumnBase[any])(nil)
@@ -94,26 +178,56 @@ func (c *genericColumnBase[T]) Slice(start, end int) Column {
 	return c.slice(start, end)
 }
 
-// WARNING: this methods works only for sparse mode column
 func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	l := c.Len()
+	if start < 0 {
+		start = 0
+	}
 	if start > l {
 		start = l
 	}
 	if end == -1 || end > l {
 		end = l
 	}
+	if start > end {
+		start = end
+	}
+
+	valueStart, valueEnd := start, end
+	if c.nullable && !c.sparseMode {
+		valueStart, valueEnd = compactValueRange(c.indexMapping, start, end)
+	}
 	result := &genericColumnBase[T]{
 		name:       c.name,
 		fieldType:  c.fieldType,
-		values:     c.values[start:end],
+		values:     slices.Clone(c.values[valueStart:valueEnd]),
 		nullable:   c.nullable,
 		sparseMode: c.sparseMode,
 	}
 	if c.nullable {
-		result.validData = c.validData[start:end]
+		result.validData = slices.Clone(c.validData[start:end])
+		if !c.sparseMode {
+			_ = result.validateNullableCompact()
+		}
 	}
 	return result
+}
+
+func compactValueRange(indexMapping []int, start, end int) (int, int) {
+	valueStart := 0
+	valueEnd := 0
+	found := false
+	for _, valueIndex := range indexMapping[start:end] {
+		if valueIndex < 0 {
+			continue
+		}
+		if !found {
+			valueStart = valueIndex
+			found = true
+		}
+		valueEnd = valueIndex + 1
+	}
+	return valueStart, valueEnd
 }
 
 func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
@@ -121,7 +235,7 @@ func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
 	fd.FieldName = c.name
 	fd.Type = schemapb.DataType(c.fieldType)
 	if c.nullable {
-		fd.ValidData = c.validData
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }
@@ -207,7 +321,10 @@ func (c *genericColumnBase[T]) AppendNull() error {
 	}
 
 	c.validData = append(c.validData, false)
-	if !c.sparseMode {
+	if c.sparseMode {
+		var zero T
+		c.values = append(c.values, zero)
+	} else {
 		c.indexMapping = append(c.indexMapping, -1)
 	}
 	return nil
@@ -235,10 +352,14 @@ func (c *genericColumnBase[T]) SetNullable(nullable bool) {
 	if c.nullable && c.validData == nil {
 		// set valid flag for all exisiting values
 		c.validData = lo.RepeatBy(len(c.values), func(_ int) bool { return true })
+		if !c.sparseMode {
+			_ = c.validateNullableCompact()
+		}
 	}
 
 	if !c.nullable {
 		c.validData = nil
+		c.indexMapping = nil
 	}
 }
 
@@ -299,6 +420,7 @@ func (c *genericColumnBase[T]) CompactNullableValues() {
 		cnt++
 	}
 	c.values = c.values[0:cnt]
+	c.sparseMode = false
 }
 
 func (c *genericColumnBase[T]) ValidCount() int {

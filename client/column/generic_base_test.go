@@ -188,6 +188,79 @@ func (s *GenericBaseSuite) TestSlice() {
 		agb := gb.Slice(10, 10)
 		s.Equal(0, agb.Len())
 	})
+
+	s.Run("compact nullable ranges", func() {
+		nullable := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     []int64{10, 40},
+			nullable:   true,
+			validData:  []bool{true, false, false, true},
+			sparseMode: false,
+		}
+		s.Require().NoError(nullable.ValidateNullable())
+
+		first := nullable.Slice(0, 2)
+		s.Equal(2, first.Len())
+		value, err := first.Get(0)
+		s.Require().NoError(err)
+		s.EqualValues(10, value)
+		isNull, err := first.IsNull(1)
+		s.Require().NoError(err)
+		s.True(isNull)
+
+		allNull := nullable.Slice(1, 3)
+		s.Equal(2, allNull.Len())
+		s.Zero(allNull.ValidCount())
+
+		last := nullable.Slice(2, 4)
+		s.Equal(2, last.Len())
+		isNull, err = last.IsNull(0)
+		s.Require().NoError(err)
+		s.True(isNull)
+		value, err = last.Get(1)
+		s.Require().NoError(err)
+		s.EqualValues(40, value)
+	})
+
+	s.Run("compacting slice does not mutate source", func() {
+		source := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     []int64{0, 10, 40},
+			nullable:   true,
+			validData:  []bool{false, true, true},
+			sparseMode: true,
+		}
+		s.Require().NoError(source.ValidateNullable())
+
+		sliced := source.Slice(0, -1)
+		sliced.CompactNullableValues()
+
+		value, err := source.Get(1)
+		s.Require().NoError(err)
+		s.EqualValues(10, value)
+		value, err = source.Get(2)
+		s.Require().NoError(err)
+		s.EqualValues(40, value)
+	})
+
+	s.Run("empty slice preserves initialized storage", func() {
+		source := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     []int64{10},
+			nullable:   true,
+			validData:  []bool{true},
+			sparseMode: true,
+		}
+
+		sliced := source.slice(0, 0)
+		s.NotNil(sliced.values)
+		s.Empty(sliced.values)
+		s.NotNil(sliced.validData)
+		s.Empty(sliced.validData)
+	})
 }
 
 func (s *GenericBaseSuite) TestFieldData() {

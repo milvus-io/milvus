@@ -91,11 +91,17 @@ class ProbeState {
 
     template <Operation op, typename Compare, typename Insert, typename Table>
     inline char*
-    fullProbe(Table& table, Compare compare, Insert insert) {
+    fullProbe(Table& table, Compare compare, Insert insert, bool extraCheck) {
         AssertInfo(op == Operation::kInsert,
                    "Only support insert operation for group cases");
         if (group_ && compare(group_, row_)) {
             return group_;
+        }
+        auto* alreadyChecked = group_;
+        if (extraCheck) {
+            tagsInTable_ = table.loadTags(bucketOffset_);
+            hits_ = static_cast<BaseHashTable::MaskType>(
+                milvus::toBitMask(tagsInTable_ == wantedTags_));
         }
         const auto kEmptyGroup = BaseHashTable::TagVector::broadcast(0);
         for (int64_t numProbedBuckets = 0;
@@ -103,7 +109,8 @@ class ProbeState {
              ++numProbedBuckets) {
             while (hits_ > 0) {
                 loadNextHit<op>(table);
-                if (compare(group_, row_)) {
+                if (!(extraCheck && group_ == alreadyChecked) &&
+                    compare(group_, row_)) {
                     return group_;
                 }
             }
@@ -245,7 +252,7 @@ HashTable::insertEntry(milvus::exec::HashLookup& lookup,
 }
 
 FOLLY_ALWAYS_INLINE void
-HashTable::fullProbe(HashLookup& lookup, ProbeState& state) {
+HashTable::fullProbe(HashLookup& lookup, ProbeState& state, bool extraCheck) {
     constexpr ProbeState::Operation op = ProbeState::Operation::kInsert;
     lookup.hits_[state.row()] = state.fullProbe<op>(
         *this,
@@ -254,21 +261,65 @@ HashTable::fullProbe(HashLookup& lookup, ProbeState& state) {
         },
         [&](int32_t row, uint64_t index) {
             return insertEntry(lookup, index, row);
-        });
+        },
+        extraCheck);
 }
 
 void
 HashTable::groupProbe(milvus::exec::HashLookup& lookup) {
     AssertInfo(hashMode_ == HashMode::kHash, "Only support kHash mode for now");
     checkSizeAndAllocateTable(0);
-    ProbeState state;
-    for (int32_t idx = 0; idx < lookup.hashes_.size(); idx++) {
+
+    constexpr int32_t kProbeBatchSize = 4;
+    ProbeState state1;
+    ProbeState state2;
+    ProbeState state3;
+    ProbeState state4;
+    int32_t probeIndex = 0;
+    const auto numProbes = static_cast<int32_t>(lookup.hashes_.size());
+
+    while (probeIndex + kProbeBatchSize <= numProbes) {
+        if (static_cast<uint64_t>(numDistinct_) + kProbeBatchSize >
+            rehashSize()) {
+            // Avoid rehashing speculatively when these rows may all hit existing
+            // groups. Probe one row at a time until rehashing is necessary or a
+            // four-row batch fits again.
+            if (numDistinct_ >= rehashSize()) {
+                rehash();
+                continue;
+            }
+
+            state1.preProbe(*this, lookup.hashes_[probeIndex], probeIndex);
+            state1.firstProbe<ProbeState::Operation::kInsert>(*this);
+            fullProbe(lookup, state1, false);
+            ++probeIndex;
+            continue;
+        }
+
+        state1.preProbe(*this, lookup.hashes_[probeIndex], probeIndex);
+        state2.preProbe(*this, lookup.hashes_[probeIndex + 1], probeIndex + 1);
+        state3.preProbe(*this, lookup.hashes_[probeIndex + 2], probeIndex + 2);
+        state4.preProbe(*this, lookup.hashes_[probeIndex + 3], probeIndex + 3);
+
+        state1.firstProbe<ProbeState::Operation::kInsert>(*this);
+        state2.firstProbe<ProbeState::Operation::kInsert>(*this);
+        state3.firstProbe<ProbeState::Operation::kInsert>(*this);
+        state4.firstProbe<ProbeState::Operation::kInsert>(*this);
+
+        fullProbe(lookup, state1, false);
+        fullProbe(lookup, state2, true);
+        fullProbe(lookup, state3, true);
+        fullProbe(lookup, state4, true);
+        probeIndex += kProbeBatchSize;
+    }
+
+    for (; probeIndex < numProbes; ++probeIndex) {
         if (numDistinct_ >= rehashSize()) {
             rehash();
         }
-        state.preProbe(*this, lookup.hashes_[idx], idx);
-        state.firstProbe<ProbeState::Operation::kInsert>(*this);
-        fullProbe(lookup, state);
+        state1.preProbe(*this, lookup.hashes_[probeIndex], probeIndex);
+        state1.firstProbe<ProbeState::Operation::kInsert>(*this);
+        fullProbe(lookup, state1, false);
     }
 }
 

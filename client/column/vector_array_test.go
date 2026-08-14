@@ -67,20 +67,30 @@ func (s *VectorArraySuite) TestFloatVectorArrayBasic() {
 	_, err = col.GetAsBool(0)
 	s.Error(err)
 
-	// Nullable helpers are no-ops / zero-valued for vector arrays.
+	// Nullable rows use logical indexes while payload rows stay compact.
 	isNull, err := col.IsNull(0)
 	s.NoError(err)
 	s.False(isNull)
 	s.Error(col.AppendNull())
 	col.SetNullable(true)
-	s.False(col.Nullable())
+	s.True(col.Nullable())
+	s.NoError(col.AppendNull())
+	s.Equal(3, col.Len())
+	s.Equal(2, col.ValidCount())
+	isNull, err = col.IsNull(2)
+	s.NoError(err)
+	s.True(isNull)
+	v, err = col.Get(2)
+	s.NoError(err)
+	s.Nil(v)
 	s.NoError(col.ValidateNullable())
 	col.CompactNullableValues()
 
 	// AppendValue via both canonical shapes.
 	s.NoError(col.AppendValue([]entity.FloatVector{entity.FloatVector([]float32{2.1, 2.2, 2.3, 2.4})}))
 	s.NoError(col.AppendValue([][]float32{{3.1, 3.2, 3.3, 3.4}}))
-	s.Equal(4, col.Len())
+	s.Equal(5, col.Len())
+	s.Equal(4, col.ValidCount())
 
 	// AppendValue rejects bad shapes.
 	s.Error(col.AppendValue([]int{1, 2, 3}))
@@ -94,6 +104,8 @@ func (s *VectorArraySuite) TestFloatVectorArrayBasic() {
 	s.EqualValues(dim, va.GetDim())
 	s.Equal(schemapb.DataType_FloatVector, va.GetElementType())
 	s.Equal(4, len(va.GetData()))
+	s.Equal([]bool{true, true, false, true, true}, getFieldDataValidData(fd))
+	s.Nil(fd.GetValidData())
 }
 
 func (s *VectorArraySuite) TestFloat16VectorArrayBasic() {
@@ -209,6 +221,72 @@ func (s *VectorArraySuite) TestParseVectorArrayDataFloatSuccess() {
 	s.Equal(dim, fv.Dim())
 }
 
+func (s *VectorArraySuite) TestParseNullableVectorArrayData() {
+	dim := 2
+	row := func(data []float32) *schemapb.VectorField {
+		return &schemapb.VectorField{
+			Dim:  int64(dim),
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: data}},
+		}
+	}
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: "emb",
+		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Dim:       int64(dim),
+			ValidData: []bool{true, false, true},
+			Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+				Dim:         int64(dim),
+				ElementType: schemapb.DataType_FloatVector,
+				Data: []*schemapb.VectorField{
+					row([]float32{0.1, 0.2}),
+					row(nil),
+					row(nil),
+				},
+			}},
+		}},
+	}
+
+	col, err := FieldDataColumn(fd, 0, -1)
+	s.Require().NoError(err)
+	s.True(col.Nullable())
+	s.Equal(3, col.Len())
+	s.Equal(2, col.ValidCount())
+	value, err := col.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+	isNull, err := col.IsNull(2)
+	s.Require().NoError(err)
+	s.False(isNull, "an empty vector array is distinct from null")
+
+	sliced := col.Slice(1, -1)
+	s.True(sliced.Nullable())
+	s.Equal(2, sliced.Len())
+	value, err = sliced.Get(0)
+	s.Require().NoError(err)
+	s.Nil(value)
+}
+
+func (s *VectorArraySuite) TestParseCompactNullableVectorArrayData() {
+	source := NewColumnFloatVectorArray("emb", 2, nil)
+	source.SetNullable(true)
+	s.Require().NoError(source.AppendValue([][]float32{{0.1, 0.2}}))
+	s.Require().NoError(source.AppendNull())
+	s.Require().NoError(source.AppendValue([][]float32{}))
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.True(parsed.Nullable())
+	s.Equal(3, parsed.Len())
+	s.Equal(2, parsed.ValidCount())
+	value, err := parsed.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+	isNull, err := parsed.IsNull(2)
+	s.Require().NoError(err)
+	s.False(isNull)
+}
+
 func (s *VectorArraySuite) TestParseVectorArrayDataByteTypes() {
 	dim := 4
 	// Build a single payload holding 2 inner vectors of `dim*2` bytes each.
@@ -290,7 +368,7 @@ func (s *VectorArraySuite) TestParseVectorArrayDataUnsupportedElement() {
 	s.Error(err)
 }
 
-func (s *VectorArraySuite) TestParseVectorArrayDataBeginEndClamping() {
+func (s *VectorArraySuite) TestParseVectorArrayDataRangeValidation() {
 	dim := 2
 	row := &schemapb.VectorField{
 		Dim: int64(dim),
@@ -314,15 +392,18 @@ func (s *VectorArraySuite) TestParseVectorArrayDataBeginEndClamping() {
 			},
 		},
 	}
-	// negative begin gets clamped to 0; end > len clamped to len.
-	col, err := FieldDataColumn(fd, -5, 10)
+	col, err := FieldDataColumn(fd, 1, -1)
 	s.NoError(err)
-	s.Equal(3, col.Len())
+	s.Equal(2, col.Len())
 
-	// begin > end collapses to empty.
-	col2, err := FieldDataColumn(fd, 10, 1)
-	s.NoError(err)
-	s.Equal(0, col2.Len())
+	_, err = FieldDataColumn(fd, -1, 2)
+	s.Error(err)
+	_, err = FieldDataColumn(fd, 0, 4)
+	s.Error(err)
+	_, err = FieldDataColumn(fd, 0, -2)
+	s.Error(err)
+	_, err = FieldDataColumn(fd, 2, 1)
+	s.Error(err)
 }
 
 func (s *VectorArraySuite) TestParseVectorArrayDataFallbackDim() {
@@ -356,6 +437,33 @@ func (s *VectorArraySuite) TestParseVectorArrayDataFallbackDim() {
 	s.Equal(4, fv.Dim())
 }
 
+func (s *VectorArraySuite) TestParseAllNullVectorArrayUsesOuterDim() {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: "emb",
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim:       2,
+				ValidData: []bool{false, false},
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						ElementType: schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		},
+	}
+
+	parsed, err := FieldDataColumn(fd, 0, -1)
+	s.Require().NoError(err)
+	vectorArray, ok := parsed.(*ColumnFloatVectorArray)
+	s.Require().True(ok)
+	s.Equal(2, vectorArray.Dim())
+	s.Equal(2, vectorArray.Len())
+	s.Zero(vectorArray.ValidCount())
+	s.Require().NoError(vectorArray.ValidateNullable())
+}
+
 func (s *VectorArraySuite) TestSlice() {
 	dim := 2
 	rows := [][][]float32{
@@ -380,6 +488,100 @@ func (s *VectorArraySuite) TestSlice() {
 	// start > end is clamped to end.
 	sliced4 := col.Slice(3, 1)
 	s.Equal(0, sliced4.Len())
+}
+
+func (s *VectorArraySuite) TestCompactSliceDoesNotMutateSource() {
+	row := func(data []float32) *schemapb.VectorField {
+		return &schemapb.VectorField{
+			Dim: 2,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: data},
+			},
+		}
+	}
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: "emb",
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim:       2,
+				ValidData: []bool{false, true, true},
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Dim:         2,
+						ElementType: schemapb.DataType_FloatVector,
+						Data: []*schemapb.VectorField{
+							row(nil),
+							row([]float32{1, 2}),
+							row([]float32{3, 4}),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	source, err := FieldDataColumn(fd, 0, -1)
+	s.Require().NoError(err)
+	sliced := source.Slice(0, -1)
+	sliced.CompactNullableValues()
+
+	value, err := source.Get(1)
+	s.Require().NoError(err)
+	s.Equal([]entity.FloatVector{{1, 2}}, value)
+	value, err = source.Get(2)
+	s.Require().NoError(err)
+	s.Equal([]entity.FloatVector{{3, 4}}, value)
+}
+
+func (s *VectorArraySuite) TestSlicePreservesConcreteTypeAndPublicAppendShape() {
+	byteVector := []byte{1, 2, 3, 4}
+	cases := []struct {
+		name        string
+		column      Column
+		wantType    Column
+		appendValue any
+	}{
+		{
+			name:        "float",
+			column:      NewColumnFloatVectorArray("emb", 2, [][][]float32{{{1, 2}}}),
+			wantType:    (*ColumnFloatVectorArray)(nil),
+			appendValue: [][]float32{{3, 4}},
+		},
+		{
+			name:        "float16",
+			column:      NewColumnFloat16VectorArray("emb", 2, [][][]byte{{byteVector}}),
+			wantType:    (*ColumnFloat16VectorArray)(nil),
+			appendValue: [][]byte{byteVector},
+		},
+		{
+			name:        "bfloat16",
+			column:      NewColumnBFloat16VectorArray("emb", 2, [][][]byte{{byteVector}}),
+			wantType:    (*ColumnBFloat16VectorArray)(nil),
+			appendValue: [][]byte{byteVector},
+		},
+		{
+			name:        "binary",
+			column:      NewColumnBinaryVectorArray("emb", 8, [][][]byte{{{1}}}),
+			wantType:    (*ColumnBinaryVectorArray)(nil),
+			appendValue: [][]byte{{2}},
+		},
+		{
+			name:        "int8",
+			column:      NewColumnInt8VectorArray("emb", 2, [][][]int8{{{1, 2}}}),
+			wantType:    (*ColumnInt8VectorArray)(nil),
+			appendValue: [][]int8{{3, 4}},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			sliced := tc.column.Slice(0, -1)
+			s.IsType(tc.wantType, sliced)
+			s.Require().NoError(sliced.AppendValue(tc.appendValue))
+			s.Equal(2, sliced.Len())
+		})
+	}
 }
 
 func TestVectorArray(t *testing.T) {

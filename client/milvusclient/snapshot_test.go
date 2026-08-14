@@ -21,9 +21,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -32,6 +35,10 @@ import (
 
 type SnapshotSuite struct {
 	MockSuiteBase
+}
+
+type snapshotServiceClientStub struct {
+	milvuspb.MilvusServiceClient
 }
 
 func (s *SnapshotSuite) TestCreateSnapshot() {
@@ -334,7 +341,7 @@ func (s *SnapshotSuite) TestExportSnapshot() {
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
 		targetS3Path := "s3://bucket/export-root"
-		expectedURI := "s3://bucket/export-root/snapshots/100/metadata/1.json"
+		expectedJobID := int64(9001)
 
 		s.mock.EXPECT().ExportSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
 			s.Equal(snapshotName, req.GetName())
@@ -342,15 +349,15 @@ func (s *SnapshotSuite) TestExportSnapshot() {
 			s.Equal(collectionName, req.GetCollectionName())
 			s.Equal(targetS3Path, req.GetTargetS3Path())
 			return &milvuspb.ExportSnapshotResponse{
-				Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				SnapshotMetadataUri: expectedURI,
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				JobId:  expectedJobID,
 			}, nil
 		}).Once()
 
-		metadataURI, err := s.client.ExportSnapshot(ctx,
+		jobID, err := s.client.ExportSnapshot(ctx,
 			NewExportSnapshotOption(snapshotName, collectionName, targetS3Path).WithDbName(dbName))
 		s.NoError(err)
-		s.Equal(expectedURI, metadataURI)
+		s.Equal(expectedJobID, jobID)
 	})
 
 	s.Run("failure", func() {
@@ -359,16 +366,75 @@ func (s *SnapshotSuite) TestExportSnapshot() {
 
 		s.mock.EXPECT().ExportSnapshot(mock.Anything, mock.Anything).Return((*milvuspb.ExportSnapshotResponse)(nil), errors.New("mocked error")).Once()
 
-		metadataURI, err := s.client.ExportSnapshot(ctx,
+		jobID, err := s.client.ExportSnapshot(ctx,
 			NewExportSnapshotOption(snapshotName, collectionName, "s3://bucket/export-root"))
 		s.Error(err)
-		s.Empty(metadataURI)
+		s.Zero(jobID)
 	})
 
 	s.Run("nil option", func() {
-		metadataURI, err := s.client.ExportSnapshot(ctx, nil)
+		jobID, err := s.client.ExportSnapshot(ctx, nil)
 		s.Error(err)
-		s.Empty(metadataURI)
+		s.Zero(jobID)
+	})
+}
+
+func (s *SnapshotSuite) TestGetExportSnapshotState() {
+	ctx := context.Background()
+	fakeService := &snapshotServiceClientStub{}
+	client := &Client{service: fakeService}
+
+	expected := &milvuspb.ExportSnapshotInfo{
+		JobId:               9001,
+		SnapshotName:        "snapshot-1",
+		State:               milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+		Progress:            100,
+		TotalBytes:          4096,
+		SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json",
+	}
+
+	s.Run("success", func() {
+		mockGetState := mockey.Mock((*snapshotServiceClientStub).GetExportSnapshotState).To(
+			func(_ *snapshotServiceClientStub, _ context.Context, req *milvuspb.GetExportSnapshotStateRequest, _ ...grpc.CallOption) (*milvuspb.GetExportSnapshotStateResponse, error) {
+				s.Equal(int64(9001), req.GetJobId())
+				return &milvuspb.GetExportSnapshotStateResponse{
+					Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					Info:   expected,
+				}, nil
+			}).Build()
+		defer mockGetState.UnPatch()
+
+		info, err := client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
+		s.NoError(err)
+		s.True(proto.Equal(expected, info))
+	})
+
+	s.Run("failure", func() {
+		mockGetState := mockey.Mock((*snapshotServiceClientStub).GetExportSnapshotState).
+			Return((*milvuspb.GetExportSnapshotStateResponse)(nil), errors.New("mocked error")).Build()
+		defer mockGetState.UnPatch()
+
+		info, err := client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
+		s.Error(err)
+		s.Nil(info)
+	})
+
+	s.Run("status error", func() {
+		mockGetState := mockey.Mock((*snapshotServiceClientStub).GetExportSnapshotState).
+			Return(&milvuspb.GetExportSnapshotStateResponse{
+				Status: merr.Status(merr.ErrParameterInvalid),
+			}, nil).Build()
+		defer mockGetState.UnPatch()
+
+		info, err := client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
+		s.Error(err)
+		s.Nil(info)
+	})
+
+	s.Run("nil option", func() {
+		info, err := client.GetExportSnapshotState(ctx, nil)
+		s.Error(err)
+		s.Nil(info)
 	})
 }
 

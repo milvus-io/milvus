@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -95,9 +96,13 @@ func newMixCompactionStorageV1SuiteForDirectTest(t *testing.T) *MixCompactionTas
 	s.SetupSuite()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 	t.Cleanup(func() {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+		initcore.CleanArrowFileSystem()
 		s.TearDownTest()
 	})
 	s.SetupTest()
@@ -185,6 +190,104 @@ func TestMixCompactionMaterializesMissingFieldWithDeleteFilter(t *testing.T) {
 	segment := result.GetSegments()[0]
 	s.EqualValues(1, segment.GetNumOfRows())
 	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetInsertLogs(), StringField))
+}
+
+const textFieldForAppendErrorTest = int64(130)
+
+func (s *MixCompactionTaskStorageV1Suite) setupTestWithTextField() {
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
+	s.meta = genTestCollectionMeta()
+	s.meta.Schema.Fields = append(s.meta.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  textFieldForAppendErrorTest,
+		Name:     "text_col",
+		DataType: schemapb.DataType_Text,
+		Nullable: true,
+	})
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
+	s.Require().NoError(err)
+	plan := &datapb.CompactionPlan{
+		PlanID:                 999,
+		Type:                   datapb.CompactionType_MixCompaction,
+		Schema:                 s.meta.GetSchema(),
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
+		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
+	}
+	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
+	s.Require().NoError(err)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams(), []int64{pk.FieldID})
+}
+
+// V1 binlogs deserialize TEXT as arrow String while the retained-row rebuilder
+// allocates a Binary builder for TEXT, so with any filtered row rb.Append fails
+// deterministically: the task must fail instead of silently dropping the
+// retained rows of that batch.
+func TestMixCompactionPropagatesRecordBuilderAppendError(t *testing.T) {
+	cases := []struct {
+		name           string
+		deletePKOffset int64
+	}{
+		// deleting the first row leaves the retained range open at record end,
+		// exercising the tail rb.Append; deleting the second row closes the
+		// retained range mid-record, exercising the in-loop rb.Append.
+		{name: "filtered_first_row_hits_tail_append", deletePKOffset: 0},
+		{name: "filtered_second_row_hits_mid_append", deletePKOffset: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMixCompactionStorageV1SuiteForDirectTest(t)
+			s.setupTestWithTextField()
+
+			segmentID := int64(700)
+			alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
+			segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
+			s.Require().NoError(err)
+			for i := int64(0); i < 2; i++ {
+				row := getRow(segmentID+i, 0)
+				row[textFieldForAppendErrorTest] = "text-payload"
+				err = segWriter.Write(&storage.Value{
+					PK:        storage.NewInt64PrimaryKey(segmentID + i),
+					Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
+					Value:     row,
+				})
+				s.Require().NoError(err)
+			}
+			segWriter.FlushAndIsFull()
+			s.segWriter = segWriter
+
+			kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+			s.Require().NoError(err)
+
+			deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
+			blob, err := getInt64DeltaBlobs(segmentID, []int64{segmentID + tc.deletePKOffset}, []uint64{deleteTs})
+			s.Require().NoError(err)
+			deltaPath := "deltalog/append-error-" + tc.name
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltaPath}).
+				Return([][]byte{blob.GetValue()}, nil).Once()
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+				left, right := lo.Difference(keys, lo.Keys(kvs))
+				return len(left) == 0 && len(right) == 0
+			})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+				return downloadValuesForPathsForTest(kvs, keys)
+			}).Once()
+			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{{
+				CollectionID: 1,
+				SegmentID:    segmentID,
+				FieldBinlogs: lo.Values(fBinlogs),
+				Deltalogs: []*datapb.FieldBinlog{{
+					Binlogs: []*datapb.Binlog{{LogPath: deltaPath}},
+				}},
+			}}
+
+			result, err := s.task.Compact()
+			s.Require().Error(err)
+			s.Require().ErrorContains(err, "failed to append value")
+			s.Require().Nil(result)
+		})
+	}
 }
 
 func TestMixCompactionMergeSortMaterializesMissingBM25Output(t *testing.T) {
@@ -1045,7 +1148,6 @@ func (s *MixCompactionTaskStorageV1Suite) initMultiRowsSegBuffer(magic, numRows,
 	}
 
 	segWriter.FlushAndIsFull()
-
 	s.segWriter = segWriter
 }
 
@@ -1061,7 +1163,6 @@ func (s *MixCompactionTaskStorageV1Suite) initSegBufferWithBM25(magic int64) {
 	err = segWriter.Write(&v)
 	s.Require().NoError(err)
 	segWriter.FlushAndIsFull()
-
 	s.segWriter = segWriter
 }
 
@@ -1079,7 +1180,6 @@ func (s *MixCompactionTaskStorageV1Suite) initSegBuffer(size int, seed int64) {
 		s.Require().NoError(err)
 	}
 	segWriter.FlushAndIsFull()
-
 	s.segWriter = segWriter
 }
 
@@ -1424,4 +1524,110 @@ func BenchmarkMixCompactor(b *testing.B) {
 	}
 
 	s.TearDownTest()
+}
+
+func TestCanMergeSort(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+	// EnableNamespace is false here, so the merge key is [pk] and IsSorted is
+	// the flag canMergeSort requires. TestCanMergeSortMatchesMergeKey covers
+	// the namespace-enabled half.
+	namespaceDisabledSchema := &schemapb.CollectionSchema{}
+
+	t.Run("disabled by param", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.False(t, canMergeSort(plan, compaction.Params{UseMergeSort: false, MaxSegmentMergeSort: 30}))
+	})
+
+	t.Run("unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1}},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("single sorted segment allowed", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("too many segments rejected", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort+1)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("exactly max segments allowed", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("later unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true},
+				{SegmentID: 2},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+}
+
+func TestCanMergeSortMatchesMergeKey(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+
+	t.Run("namespace enabled rejects pk-only sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true, IsSortedByNamespace: false},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("namespace enabled accepts namespace-sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
+			},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("namespace disabled rejects namespace-sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: false},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("mixed flags rejected when one does not match", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSortedByNamespace: true},
+				{SegmentID: 2, IsSorted: true},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
 }

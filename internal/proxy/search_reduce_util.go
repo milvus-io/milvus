@@ -443,9 +443,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 			if gbv == nil {
 				continue
 			}
-			if gbv.GetValidData() != nil {
+			if validData := typeutil.GetFieldDataValidData(gbv); validData != nil {
 				fieldName := gbv.GetFieldName()
-				totalRows := len(gbv.GetValidData())
+				totalRows := len(validData)
 				gpFieldBuilder, err := typeutil.NewFieldDataBuilder(gbv.GetType(), true, totalRows)
 				if err != nil {
 					return nil, err

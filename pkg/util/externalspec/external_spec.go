@@ -23,6 +23,9 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -58,6 +61,9 @@ const (
 	ExtfsKeyUseSSL                  = specutil.ExtfsKeyUseSSL
 	ExtfsKeyUseVirtualHost          = specutil.ExtfsKeyUseVirtualHost
 	ExtfsKeyLoadFrequency           = specutil.ExtfsKeyLoadFrequency
+	ExtfsKeyAzureClientID           = specutil.ExtfsKeyAzureClientID
+	ExtfsKeyAzureTenantID           = specutil.ExtfsKeyAzureTenantID
+	ExtfsKeyAzureCredentialEndpoint = specutil.ExtfsKeyAzureCredentialEndpoint
 )
 
 // Scheme* are URL schemes accepted in external_source.
@@ -140,6 +146,7 @@ var secretExtfsKeys = map[string]bool{
 	ExtfsKeyAccessKeyValue: true,
 	ExtfsKeySSLCACert:      true,
 	ExtfsKeyExternalID:     true, // STS shared secret; confused-deputy guard.
+	"credential_json":      true, // Snapshot request-level GCP service-account JSON.
 }
 
 // ParseExternalSpec parses the JSON external spec string
@@ -173,7 +180,7 @@ func ValidateExternalSource(source string) error {
 	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return merr.Wrap(err, "invalid external_source URL")
+		return merr.WrapErrParameterInvalidMsg("external_source is not a valid URL")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "" {
@@ -193,26 +200,85 @@ func ValidateExternalSource(source string) error {
 }
 
 // ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
-// Errors are wrapped via merr.WrapErrParameterInvalid for direct return.
+// Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
 func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
-		return merr.WrapErrParameterInvalid("valid external_source", externalSource, err.Error())
+		return merr.Wrap(err, "external_source is invalid")
 	}
 	spec, err := ParseExternalSpec(externalSpec)
 	if err != nil {
-		return merr.WrapErrParameterInvalid("valid external_spec", "<redacted>", err.Error())
+		return merr.Wrap(err, "external_spec is invalid")
 	}
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
-		return merr.WrapErrParameterInvalid("valid external_spec", "<redacted>", err.Error())
+		return merr.Wrap(err, "external_spec is invalid")
 	}
 	return nil
 }
 
+// RedactExternalSource returns a log-safe external source. Normal storage URIs
+// are preserved for diagnostics, while malformed URIs and URI components that
+// can carry credentials (userinfo, query, or fragment) are hidden completely.
+func RedactExternalSource(source string) string {
+	if source == "" {
+		return ""
+	}
+	u, err := url.Parse(source)
+	if err != nil || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" || ValidateExternalSource(source) != nil {
+		return "<redacted>"
+	}
+	return source
+}
+
+// RedactExternalSpecForLog preserves approved top-level metadata while
+// replacing the complete extfs authentication/configuration object. Unknown
+// top-level fields are dropped because future extensions may carry secrets.
+func RedactExternalSpecForLog(specStr string) string {
+	if specStr == "" {
+		return ""
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
+		return "<redacted>"
+	}
+
+	redacted := make(map[string]json.RawMessage, 4)
+	for _, key := range []string{"format", "columns", "snapshot_id"} {
+		if value, ok := spec[key]; ok {
+			redacted[key] = value
+		}
+	}
+	if _, ok := spec["extfs"]; ok {
+		redacted["extfs"] = json.RawMessage(`"***"`)
+	}
+
+	out, err := json.Marshal(redacted)
+	if err != nil {
+		return "<redacted>"
+	}
+	return string(out)
+}
+
+// RedactCollectionSchemaForLog returns a copy of schema with external storage
+// credentials removed. Callers can safely log the result without mutating the
+// schema used by request handling or distributed load paths.
+func RedactCollectionSchemaForLog(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	if schema == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(schema).(*schemapb.CollectionSchema)
+	redacted.ExternalSource = RedactExternalSource(redacted.GetExternalSource())
+	redacted.ExternalSpec = RedactExternalSpecForLog(redacted.GetExternalSpec())
+	return redacted
+}
+
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one
 // credential mode (AK/SK, role_arn, use_iam=true, gcp_target_service_account,
-// anonymous=true), and region for AWS-family schemes. role_arn subsumes
-// use_iam (do not double-count). No inheritance from Milvus fs.* config.
+// Azure credential broker, anonymous=true), and region for AWS-family
+// schemes. role_arn subsumes use_iam (do not double-count). No inheritance
+// from Milvus fs.* config.
 func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
 	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
 	u, err := url.Parse(externalSource)
@@ -226,7 +292,12 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// a local classification only; it is not written back to external_spec.
 	// Inferring cloud_provider from s3:// is ambiguous (AWS S3 vs self-hosted
 	// MinIO), so s3-family URIs still require the caller to be explicit.
-	cp := strings.ToLower(extfs[ExtfsKeyCloudProvider])
+	rawCP := extfs[ExtfsKeyCloudProvider]
+	cp := strings.ToLower(rawCP)
+	if rawCP != cp {
+		return merr.WrapErrParameterInvalidMsg(
+			"extfs.cloud_provider=%q must use the canonical lowercase value %q", rawCP, cp)
+	}
 	if scheme == SchemeMinIO && cp == "" {
 		cp = CloudProviderMinIO
 	}
@@ -240,8 +311,42 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		return merr.WrapErrParameterInvalidMsg("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
+	hasAzureBroker := extfs[ExtfsKeyAzureClientID] != "" ||
+		extfs[ExtfsKeyAzureTenantID] != "" ||
+		extfs[ExtfsKeyAzureCredentialEndpoint] != ""
+	if hasAzureBroker {
+		if cp != CloudProviderAzure || scheme != SchemeAzure {
+			return merr.WrapErrParameterInvalidMsg(
+				"Azure credential broker mode requires scheme=%q and extfs.cloud_provider=%q, got scheme=%q cloud_provider=%q",
+				SchemeAzure, CloudProviderAzure, scheme, cp)
+		}
+		for _, required := range []struct {
+			key   string
+			value string
+		}{
+			{ExtfsKeyAzureClientID, extfs[ExtfsKeyAzureClientID]},
+			{ExtfsKeyAzureTenantID, extfs[ExtfsKeyAzureTenantID]},
+			{ExtfsKeyAzureCredentialEndpoint, extfs[ExtfsKeyAzureCredentialEndpoint]},
+			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
+			{ExtfsKeyRegion, extfs[ExtfsKeyRegion]},
+		} {
+			if required.value == "" {
+				return merr.WrapErrParameterMissingMsg(
+					"extfs.%s is required for Azure credential broker mode", required.key)
+			}
+		}
+
+		brokerEndpoint, err := url.Parse(extfs[ExtfsKeyAzureCredentialEndpoint])
+		if err != nil || brokerEndpoint.Host == "" ||
+			(brokerEndpoint.Scheme != "http" && brokerEndpoint.Scheme != "https") {
+			return merr.WrapErrParameterInvalidMsg(
+				"extfs.%s must be a valid HTTP(S) URL", ExtfsKeyAzureCredentialEndpoint)
+		}
+	}
+
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
-	hasAKOnly := (extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != "")
+	hasAKOnly := !hasAzureBroker &&
+		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
 	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
 	hasGCPImpersonation := extfs[ExtfsKeyGCPTargetServiceAccount] != ""
@@ -252,16 +357,16 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 
 	modes := 0
-	for _, set := range []bool{hasAKSK, hasRoleARN, hasUseIAMAlone, hasGCPImpersonation, hasAnonymous} {
+	for _, set := range []bool{hasAKSK, hasRoleARN, hasUseIAMAlone, hasGCPImpersonation, hasAzureBroker, hasAnonymous} {
 		if set {
 			modes++
 		}
 	}
 	if modes == 0 {
-		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, Azure credential broker, or anonymous=true")
 	}
 	if modes > 1 {
-		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, Azure credential broker, or anonymous=true")
 	}
 
 	if hasGCPImpersonation {
@@ -408,13 +513,13 @@ var awsFamilyScheme = map[string]bool{
 	SchemeAWS: true,
 }
 
-// RedactExternalSpec returns a log-safe representation of an external spec
-// JSON string. Secret extfs values (see secretExtfsKeys) are replaced with
-// "***" so that AK/SK/PEM material never reaches log sinks. Unknown fields
-// are preserved so API callers can still observe extension metadata. On parse
-// failure it returns "<invalid spec>" rather than the raw input — the input
-// itself may already contain a partially-recognized credential blob, so we
-// never echo it back. Empty input returns empty string for log readability.
+// RedactExternalSpec returns a credential-redacted representation of a
+// validated external spec for user-visible responses. Known secret extfs
+// values (see secretExtfsKeys) are replaced with "***", while unknown fields
+// are preserved as extension metadata. Because unknown pre-validation fields
+// may themselves be sensitive, external-collection request logging uses
+// RedactExternalSpecForLog. On parse failure this returns "<invalid spec>"
+// rather than the raw input.
 func RedactExternalSpec(specStr string) string {
 	if specStr == "" {
 		return ""

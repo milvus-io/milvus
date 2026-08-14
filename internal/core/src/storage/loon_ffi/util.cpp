@@ -18,11 +18,14 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "arrow/result.h"
@@ -31,6 +34,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "common/type_c.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_internal/result.h"
@@ -40,6 +44,7 @@
 #include "nlohmann/json_fwd.hpp"
 #include "storage/Types.h"
 #include "storage/loon_ffi/external_spec_c.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
@@ -119,10 +124,18 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     keys.emplace_back(PROPERTY_FS_REQUEST_TIMEOUT_MS);
     values.emplace_back(timeout_str.c_str());
 
+    // 0 means "not set by the producer": leave the key absent so
+    // milvus-storage applies its registered default (100) instead of taking an
+    // explicit 0, which would drop the S3 connection cap to
+    // max(io_capacity, 25) and change the filesystem cache key. Same
+    // convention as ChunkManager.cpp / MinioChunkManager.cpp and the Go
+    // producer in storagev2/packed/ffi_common.go.
     std::string max_connections_str =
         std::to_string(c_storage_config.max_connections);
-    keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
-    values.emplace_back(max_connections_str.c_str());
+    if (c_storage_config.max_connections > 0) {
+        keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
+        values.emplace_back(max_connections_str.c_str());
+    }
 
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
@@ -238,10 +251,13 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_REQUEST_TIMEOUT_MS,
         std::to_string(c_storage_config.requestTimeoutMs).c_str());
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_MAX_CONNECTIONS,
-        std::to_string(c_storage_config.max_connections).c_str());
+    // Absent when unset -- see the note in MakePropertiesFromStorageConfig.
+    if (c_storage_config.max_connections > 0) {
+        milvus_storage::api::SetValue(
+            *properties_map,
+            PROPERTY_FS_MAX_CONNECTIONS,
+            std::to_string(c_storage_config.max_connections).c_str());
+    }
 
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
@@ -256,6 +272,16 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_USE_CRC32C_CHECKSUM,
         c_storage_config.use_crc32c_checksum ? "true" : "false");
+
+    // Carry the configured arrow reader prebuffer limits into every
+    // freshly-built properties map. Index build (index_c.cpp) and the FFI
+    // readers construct properties per task through this helper instead of
+    // going through LoonFFIPropertiesSingleton's cached map, so without this
+    // the common.arrow.reader.* configuration never reaches those reads and
+    // external-table index builds are stuck with arrow's default range
+    // coalescing (effectively one in-flight S3 range per file).
+    milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+        .ApplyArrowReaderConfig(*properties_map);
 
     return properties_map;
 }
@@ -289,6 +315,9 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "gcp_target_service_account",
     "bucket_name",
     "anonymous",
+    "azure_client_id",
+    "azure_tenant_id",
+    "azure_credential_endpoint",
 };
 
 // kExtfsFields is the contract with Go extfsFields in
@@ -311,6 +340,54 @@ static const std::vector<std::pair<std::string, bool /*is_bool*/>>
         {"use_virtual_host", true},
         {"anonymous", true},
 };
+
+// kExtfsInheritedFsFields lists fs.* properties that extfs.{collectionID}.*
+// inherits verbatim from the process-level storage config.
+//
+// milvus-storage builds each external filesystem purely from its own
+// extfs.<name>.* keys (ExtractExternalFsProperties) — there is no fallback to
+// fs.*, and a missing key silently takes the library's built-in default. So
+// anything that is server-side capacity/tuning config rather than part of the
+// external source's identity has to be copied across explicitly, or it is a
+// no-op on every external read.
+//
+// These are deliberately NOT in kAllowedExtfsSpecKeys: they come from
+// milvus.yaml, not from a user-supplied external_spec.
+static const std::vector<
+    std::pair<const char* /*fs key*/, const char* /*extfs suffix*/>>
+    kExtfsInheritedFsFields = {
+        {PROPERTY_FS_MAX_CONNECTIONS, "max_connections"},
+};
+
+// PropertyValueAsString renders a PropertyVariant back to the string form
+// SetValue accepts. Both variant shapes reach here: the C++ index-build path
+// goes through SetValue, which stores registry-typed values (max_connections
+// is UINT32), while loon_properties_inject_external_spec rebuilds the map
+// from a flat LoonProperties and stores everything as std::string.
+static std::optional<std::string>
+PropertyValueAsString(const milvus_storage::api::Properties& properties,
+                      const char* key) {
+    auto it = properties.find(key);
+    if (it == properties.end()) {
+        return std::nullopt;
+    }
+    return std::visit(
+        [](const auto& v) -> std::optional<std::string> {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+                return v.empty() ? std::nullopt : std::optional<std::string>(v);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return std::optional<std::string>(v ? "true" : "false");
+            } else if constexpr (std::is_integral_v<T>) {
+                return std::optional<std::string>(std::to_string(v));
+            } else {
+                // vector<string> / nullptr_t: no scalar rendering, and no
+                // inherited field uses them.
+                return std::nullopt;
+            }
+        },
+        it->second);
+}
 
 static std::string
 DeriveUseSSLFromScheme(const std::string& scheme) {
@@ -462,6 +539,29 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
         }
+    }
+
+    // Layer 0b: inherit process-level fs.* tuning. Position relative to the
+    // later layers is arbitrary — none of these keys is in
+    // kAllowedExtfsSpecKeys nor derived from the URI, so no other layer
+    // writes them; it sits next to Layer 0 because both are defaults rather
+    // than external-source-derived values.
+    // "0" is treated as unset, like the empty string: for every fs.* tunable
+    // inherited here, 0 means "producer did not set it" (the convention in
+    // ChunkManager.cpp, MinioChunkManager.cpp and the Go producer). Mirroring
+    // it would be worse than not mirroring at all — before this key existed on
+    // the extfs side, ExtractExternalFsProperties fell back to the library
+    // default (100 connections), whereas an explicit "0" overrides it and
+    // caps the external S3 client at max(io_capacity, 25). The producers are
+    // guarded too; this is the last line of defence for the read path this
+    // whole change exists to widen.
+    for (const auto& [fs_key, extfs_suffix] : kExtfsInheritedFsFields) {
+        auto value = PropertyValueAsString(properties, fs_key);
+        if (!value.has_value() || *value == "0") {
+            continue;
+        }
+        milvus_storage::api::SetValue(
+            properties, (extfs_prefix + extfs_suffix).c_str(), value->c_str());
     }
 
     // Layer 1: derive bucket / address / storage_type / use_ssl from URI.
@@ -747,9 +847,12 @@ GetLoonManifest(
 
         auto fs_result =
             milvus_storage::FilesystemCache::getInstance().get(*properties);
-        AssertInfo(fs_result.ok(),
-                   "Failed to get filesystem: {}",
-                   fs_result.status().ToString());
+        if (!fs_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(fs_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get filesystem: {}",
+                      error.what());
+        }
         auto fs = std::move(fs_result.ValueOrDie());
 
         auto transaction_result =
@@ -759,14 +862,22 @@ GetLoonManifest(
                 version,
                 milvus_storage::api::transaction::FailResolver,
                 1);
-        AssertInfo(transaction_result.ok(),
-                   "Failed to open transaction: {}",
-                   transaction_result.status().ToString());
+        if (!transaction_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(transaction_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to open transaction: {}",
+                      error.what());
+        }
         auto transaction = std::move(transaction_result.ValueOrDie());
         auto manifest_result = transaction->GetManifest();
-        AssertInfo(manifest_result.ok(),
-                   "Failed to get manifest: {}",
-                   manifest_result.status().ToString());
+        if (!manifest_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(manifest_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get manifest: {}",
+                      error.what());
+        }
         auto current_manifest = manifest_result.ValueOrDie();
         return current_manifest;
     } catch (const json::parse_error& e) {

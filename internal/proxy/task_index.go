@@ -52,8 +52,6 @@ const (
 	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey
 	IsSparseKey   = common.IsSparseKey
-
-	RefineTypeKey = "refine_type"
 )
 
 // mapVectorMetricToEmbListMetric maps element-level vector metrics to EmbList-level metrics for ArrayOfVector.
@@ -74,58 +72,6 @@ func mapVectorMetricToEmbListMetric(metricType string) string {
 	default:
 		return metricType
 	}
-}
-
-// adjustAutoIndexParamsByDataType adjusts autoindex params based on vector data type
-// If data_type is bf16 and refine_type is fp16/fp32, adjust to BF16
-// If data_type is fp16 and refine_type is bf16/fp32, adjust to FP16
-// Other refine_type values (e.g., sq8) are not modified
-func adjustAutoIndexParamsByDataType(config map[string]string, dataType schemapb.DataType) map[string]string {
-	if config == nil {
-		return config
-	}
-	refineType, hasRefine := config[RefineTypeKey]
-	if !hasRefine {
-		return config
-	}
-
-	refineTypeLower := strings.ToLower(refineType)
-	var requiredRefineType string
-
-	switch dataType {
-	case schemapb.DataType_Float16Vector:
-		// fp16 data requires fp16 refine, adjust if refine_type is bf16/fp32
-		if refineTypeLower == "bf16" || refineTypeLower == "fp32" {
-			requiredRefineType = "FP16"
-		}
-	case schemapb.DataType_BFloat16Vector:
-		// bf16 data requires bf16 refine, adjust if refine_type is fp16/fp32
-		if refineTypeLower == "fp16" || refineTypeLower == "fp32" {
-			requiredRefineType = "BF16"
-		}
-	}
-
-	if requiredRefineType == "" {
-		return config
-	}
-
-	adjusted := make(map[string]string, len(config))
-	for k, v := range config {
-		adjusted[k] = v
-	}
-	adjusted[RefineTypeKey] = requiredRefineType
-	return adjusted
-}
-
-func getDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair) map[string]string {
-	// autoindex is enabled only for cloud instance.
-	// and large_topk query mode is set in collection properties.
-	// we will use large_topk index params for dense float vector index when these two conditions are met.
-	if Params.AutoIndexConfig.Enable.GetAsBool() && common.IsQueryModeLargeTopK(collectionProperties...) {
-		return Params.AutoIndexConfig.LargeTopKIndexParams.GetAsJSONMap()
-	}
-
-	return Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 }
 
 type createIndexTask struct {
@@ -189,19 +135,6 @@ func (cit *createIndexTask) OnEnqueue() error {
 	return nil
 }
 
-func wrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
-	return []*commonpb.KeyValuePair{
-		{
-			Key:   common.IndexTypeKey,
-			Value: AutoIndexName,
-		},
-		{
-			Key:   common.MetricTypeKey,
-			Value: metricType,
-		},
-	}
-}
-
 func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string]string) error {
 	if !cit.fieldSchema.GetIsFunctionOutput() {
 		return nil
@@ -220,6 +153,9 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Whether the metric came from the USER (before any autoindex config merge)
+	// — a config-injected metric is not a user choice.
+	_, userMetricSpecified := indexParamsMap[common.MetricTypeKey]
 
 	if jsonCastType, exist := indexParamsMap[common.JSONCastTypeKey]; exist {
 		indexParamsMap[common.JSONCastTypeKey] = strings.ToUpper(strings.TrimSpace(jsonCastType))
@@ -318,14 +254,14 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				autoIndexParams := getDenseFloatAutoIndexParams(cit.collectionProperties)
+				autoIndexParams := indexparamcheck.GetDenseFloatAutoIndexParams(cit.collectionProperties)
 				// override float vector index params by autoindex
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
 				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 					dataType = cit.fieldSchema.ElementType
 				}
-				autoIndexParams = adjustAutoIndexParamsByDataType(autoIndexParams, dataType)
+				autoIndexParams = indexparamcheck.AdjustAutoIndexParamsByDataType(autoIndexParams, dataType)
 				for k, v := range autoIndexParams {
 					indexParamsMap[k] = v
 				}
@@ -387,7 +323,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				if len(indexParamsMap) == numberParams {
 					// though we already know there must be metric type, how to make this safer to avoid crash?
 					metricType := autoIndexConfig[common.MetricTypeKey]
-					cit.newExtraParams = wrapUserIndexParams(metricType)
+					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
 					useAutoIndex(autoIndexConfig)
 					return nil
 				}
@@ -402,7 +338,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					}
 
 					// only metric type is passed.
-					cit.newExtraParams = wrapUserIndexParams(metricType)
+					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
 					useAutoIndex(autoIndexConfig)
 					// make the users' metric type first class citizen.
 					indexParamsMap[common.MetricTypeKey] = metricType
@@ -415,13 +351,13 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			var config map[string]string
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				config = getDenseFloatAutoIndexParams(cit.collectionProperties)
+				config = indexparamcheck.GetDenseFloatAutoIndexParams(cit.collectionProperties)
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
 				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 					dataType = cit.fieldSchema.ElementType
 				}
-				config = adjustAutoIndexParamsByDataType(config, dataType)
+				config = indexparamcheck.AdjustAutoIndexParamsByDataType(config, dataType)
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
@@ -452,6 +388,24 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			if !metricTypeExist && typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 				if m, ok := indexParamsMap[common.MetricTypeKey]; ok {
 					indexParamsMap[common.MetricTypeKey] = mapVectorMetricToEmbListMetric(m)
+				}
+			}
+		}
+
+		// For a BM25 function output field the required metric is known
+		// authoritatively; when the metric in the map was injected by the
+		// autoindex config (not user-specified), force it to BM25 instead of
+		// failing the BM25 metric check below — same rule as the
+		// add_function_field bound-index resolution. The user-facing wrapped
+		// extra params must carry the same final metric.
+		if !userMetricSpecified && cit.fieldSchema.GetIsFunctionOutput() &&
+			cit.functionSchema.GetType() == schemapb.FunctionType_BM25 {
+			if m, ok := indexParamsMap[common.MetricTypeKey]; ok && m != metric.BM25 {
+				indexParamsMap[common.MetricTypeKey] = metric.BM25
+				for _, kv := range cit.newExtraParams {
+					if kv.GetKey() == common.MetricTypeKey {
+						kv.Value = metric.BM25
+					}
 				}
 			}
 		}
@@ -564,14 +518,14 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 		return merr.Wrap(err, "failed to get collection schema")
 	}
 
-	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
+	field, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
 	if err != nil {
 		mlog.Error(ctx, "create index on non-exist field", mlog.Err(err))
 		return merr.WrapErrParameterInvalidMsg("cannot create index on non-exist field: %s", cit.req.GetFieldName())
 	}
 
 	if field.IsFunctionOutput {
-		function, err := schema.schemaHelper.GetFunctionByOutputField(field)
+		function, err := schema.SchemaHelper.GetFunctionByOutputField(field)
 		if err != nil {
 			mlog.Error(ctx, "create index failed, cannot find function of function output field", mlog.Err(err))
 			return merr.WrapErrParameterInvalidMsg("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
@@ -640,7 +594,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cit.collectionProperties = collInfo.properties
+	cit.collectionProperties = collInfo.Properties
 
 	if err = validateIndexName(cit.req.GetIndexName()); err != nil {
 		return err
@@ -909,7 +863,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, indexInfo := range resp.IndexInfos {
-		field, err := schema.schemaHelper.GetFieldFromID(indexInfo.FieldID)
+		field, err := schema.SchemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
 			mlog.Error(ctx, "failed to get collection field", mlog.Err(err))
 			return merr.WrapErrParameterInvalidMsg("failed to get collection field: %d", indexInfo.FieldID)
@@ -918,7 +872,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		if params == nil {
 			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, indexInfo.GetIndexParams())
 			if err == nil {
-				params = wrapUserIndexParams(metricType)
+				params = indexparamcheck.WrapUserIndexParams(metricType)
 			}
 		}
 		fieldName := field.Name
@@ -1032,7 +986,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 		mlog.Error(ctx, "failed to get collection schema", mlog.String("collection_name", dit.GetCollectionName()), mlog.Err(err))
 		return merr.Wrap(err, "failed to get collection schema")
 	}
-	schemaHelper := schema.schemaHelper
+	schemaHelper := schema.SchemaHelper
 
 	resp, err := dit.mixCoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
 		CollectionID: dit.collectionID, IndexName: dit.IndexName,

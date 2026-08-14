@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // makePKField creates a PK field (position 0 in segcore layout).
@@ -113,12 +114,12 @@ func TestOrderByLimitOperator_NullableCompactVectorWithoutIDsUsesLogicalRows(t *
 				FieldName: "nullable_vec",
 				FieldId:   100,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
 					},
 				}},
-				ValidData: []bool{true, false, true},
 			},
 			{
 				Type:      schemapb.DataType_Int64,
@@ -139,7 +140,7 @@ func TestOrderByLimitOperator_NullableCompactVectorWithoutIDsUsesLogicalRows(t *
 	sorted := outputs[0].(*internalpb.RetrieveResults)
 	require.Len(t, sorted.GetFieldsData(), 2)
 	assert.Equal(t, []int64{10, 20, 30}, sorted.GetFieldsData()[1].GetScalars().GetLongData().GetData())
-	assert.Equal(t, []bool{false, true, true}, sorted.GetFieldsData()[0].GetValidData())
+	assert.Equal(t, []bool{false, true, true}, typeutil.GetFieldDataValidData(sorted.GetFieldsData()[0]))
 	assert.Equal(t, []float32{3, 4, 1, 2}, sorted.GetFieldsData()[0].GetVectors().GetFloatVector().GetData())
 }
 
@@ -562,9 +563,9 @@ func makeNullableInt64Field(fieldID int64, name string, vals []int64, validData 
 		Type:      schemapb.DataType_Int64,
 		FieldName: name,
 		FieldId:   fieldID,
-		ValidData: validData,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: validData,
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{Data: vals},
 				},

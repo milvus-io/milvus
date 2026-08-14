@@ -6816,7 +6816,7 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify schema contains StructArrayFields
-		assert.NotNil(t, task.schema)
+		assert.NotNil(t, task.Schema)
 		assert.Len(t, task.schema.StructArrayFields, 1)
 
 		structArrayField := task.schema.StructArrayFields[0]
@@ -7865,6 +7865,33 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 			},
 		}
 	}
+	buildValidMinHashRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+		req := buildValidRequest()
+		addRequest := req.GetAction().GetAddRequest()
+		addRequest.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
+			Name:     "binary_minhash",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "4096"},
+			},
+		}
+		addRequest.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}
+		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
+		functionSchema.Name = "minhash_func"
+		functionSchema.Type = schemapb.FunctionType_MinHash
+		functionSchema.OutputFieldNames = []string{"binary_minhash"}
+		functionSchema.Params = []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		}
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
+		return req
+	}
 
 	buildAddFieldRequest := func(fieldName string, nullable bool, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
 		return &milvuspb.AlterCollectionSchemaRequest{
@@ -8158,34 +8185,21 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 	})
 
 	t.Run("PreExecute supports MinHash function with new output field", func(t *testing.T) {
-		req := buildValidRequest()
-		addRequest := req.GetAction().GetAddRequest()
-		addRequest.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
-			Name:     "binary_minhash",
-			DataType: schemapb.DataType_BinaryVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "4096"},
-			},
-		}
-		addRequest.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
-			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
-		}
-		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
-		functionSchema.Name = "minhash_func"
-		functionSchema.Type = schemapb.FunctionType_MinHash
-		functionSchema.OutputFieldNames = []string{"binary_minhash"}
-		functionSchema.Params = []*commonpb.KeyValuePair{
-			{Key: "num_hashes", Value: "128"},
-			{Key: "shingle_size", Value: "3"},
-			{Key: "hash_function", Value: "xxhash64"},
-			{Key: "seed", Value: "42"},
-		}
-		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
-
-		task := buildTask(req, oldSchema)
+		task := buildTask(buildValidMinHashRequest(), oldSchema)
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects MinHash AutoIndex with non-MHJACCARD metric", func(t *testing.T) {
+		req := buildValidMinHashRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "HAMMING"},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must be MHJACCARD")
 	})
 
 	t.Run("PreExecute rejects unsupported function", func(t *testing.T) {
@@ -8265,6 +8279,52 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		// UserIndexParams stay aligned with the create_index convention and a
 		// later create_index with identical params remains idempotent.
 		assert.True(t, proto.Equal(original, req.GetAction().GetAddRequest().GetFieldInfos()[0]))
+	})
+
+	t.Run("PreExecute empty index params resolve via AutoIndex", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = nil
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+		// Validation-only: the request still carries no params; rootcoord
+		// resolves and persists the concrete index at prepare.
+		assert.Empty(t, req.GetAction().GetAddRequest().GetFieldInfos()[0].GetExtraParams())
+	})
+
+	t.Run("PreExecute AUTOINDEX with metric passes", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}
+		task := buildTask(req, oldSchema)
+		assert.NoError(t, task.PreExecute(ctx))
+	})
+
+	t.Run("PreExecute AUTOINDEX with non-metric param rejected", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: "drop_ratio_build", Value: "0.2"},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "only metric type can be passed")
+	})
+
+	t.Run("PreExecute AUTOINDEX with wrong metric for BM25 rejected", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "must be BM25")
 	})
 
 	t.Run("Execute leaves function output marker to RootCoord", func(t *testing.T) {

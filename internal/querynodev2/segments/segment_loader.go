@@ -152,10 +152,11 @@ type resourceEstimateFactor struct {
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
 	// externalRawDataFactor is the peak-memory safety factor for external
-	// segments. External tables always download, decompress and deserialize
-	// row groups into Arrow buffers regardless of mmap / TieredEviction
-	// settings, so peak transient memory = rawDataSize * factor. Defaults
-	// to 2.0 via paramtable queryNode.externalCollection.rawDataFactor.
+	// segments when tiered eviction is disabled. With tiered eviction enabled,
+	// the caching layer reserves transient loading overhead from the sampled
+	// external row size, so applying this factor in Go would reserve the same
+	// raw-data memory twice. Defaults to 2.0 via paramtable
+	// queryNode.externalCollection.rawDataFactor.
 	externalRawDataFactor float64
 }
 
@@ -1571,6 +1572,9 @@ func createStorageConfig() *indexpb.StorageConfig {
 		return &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	}
 	return &indexpb.StorageConfig{
@@ -1588,6 +1592,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
@@ -1901,6 +1906,48 @@ func (loader *segmentLoader) checkLoadingResource(
 	return nil
 }
 
+// resolveSegmentEstimateLogs returns the raw and delta metadata consumed by the
+// existing estimator. Internal Storage V3 descriptors are adapted to pathless
+// FieldBinlogs; all other SegmentLoadInfo metadata remains on the original proto.
+func resolveSegmentEstimateLogs(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog) {
+	binlogs := loadInfo.GetBinlogPaths()
+	deltalogs := loadInfo.GetDeltalogs()
+	if len(binlogs) > 0 {
+		return binlogs, deltalogs
+	}
+	if loadInfo.GetStorageVersion() != storage.StorageV3 || loadInfo.GetManifestPath() == "" || typeutil.IsExternalCollection(schema) {
+		return binlogs, deltalogs
+	}
+
+	stats := loadInfo.GetStats()
+	resource := stats.GetLoadResource()
+	if resource == nil {
+		return binlogs, deltalogs
+	}
+
+	groups := resource.GetColumnGroups()
+	binlogs = make([]*datapb.FieldBinlog, 0, len(groups))
+	for _, group := range groups {
+		binlogs = append(binlogs, &datapb.FieldBinlog{
+			FieldID:     group.GetGroupId(),
+			ChildFields: append([]int64(nil), group.GetFieldIds()...),
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum: loadInfo.GetNumOfRows(),
+				MemorySize: group.GetMemorySize(),
+			}},
+		})
+	}
+
+	deltalogs = nil
+	if deltaSize := stats.GetDeltaBinlogSize(); deltaSize > 0 {
+		deltalogs = []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{MemorySize: deltaSize}},
+		}}
+	}
+
+	return binlogs, deltalogs
+}
+
 // this function is used to estimate the logical resource usage of a segment, which should only be used when tiered eviction is enabled
 // the result is the final resource usage of the segment inevictable part plus the final usage of evictable part with cache ratio applied
 // TODO: the inevictable part is not correct, since we cannot know the final resource usage of interim index and default-value column before loading,
@@ -1909,7 +1956,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	var segmentInevictableMemorySize, segmentInevictableDiskSize uint64
 	var segmentEvictableMemorySize, segmentEvictableDiskSize uint64
 
-	id2Binlogs := lo.SliceToMap(loadInfo.BinlogPaths, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
+	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	id2Binlogs := lo.SliceToMap(binlogs, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
 		return fieldBinlog.GetFieldID(), fieldBinlog
 	})
 
@@ -1996,8 +2044,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			// get field schema from fieldID
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				mlog.Warn(context.TODO(), "failed to get field schema", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()), mlog.Err(err))
-				return nil, err
+				mlog.Info(ctx, "skip binlog for dropped field", mlog.FieldFieldID(fieldID), mlog.String("name", schema.GetName()))
+				continue
 			}
 
 			// missing mapping, shall be "0" group for storage v2
@@ -2053,7 +2101,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	}
 
 	// PART 4: calculate logical resource usage of delete data
-	for _, fieldBinlog := range loadInfo.Deltalogs {
+	for _, fieldBinlog := range deltalogs {
 		// MemorySize of filedBinlog is the actual size in memory, so the expansionFactor
 		//   should be 1, in most cases.
 		expansionFactor := float64(1)
@@ -2105,7 +2153,8 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	var mmapFieldCount int
 	var fieldGpuMemorySize []uint64
 
-	id2Binlogs := lo.SliceToMap(loadInfo.BinlogPaths, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
+	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	id2Binlogs := lo.SliceToMap(binlogs, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
 		return fieldBinlog.GetFieldID(), fieldBinlog
 	})
 
@@ -2284,17 +2333,19 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// External segments carry pre-computed MemorySize in fake binlogs (from
 	// DataNode Take sampling). Adjust the memory estimate for two external-
 	// specific behaviors:
-	//   1. Non-lazy path: apply externalRawDataFactor to cover the peak
-	//      transient memory during download + decompress + Arrow deserialize
-	//      (normal packed segments do not have this peak because their
-	//      binlogs are already in Arrow IPC format).
+	//   1. Non-lazy path without tiered eviction: apply externalRawDataFactor
+	//      to cover the peak transient memory during download + decompress +
+	//      Arrow deserialize (normal packed segments do not have this peak
+	//      because their binlogs are already in Arrow IPC format). When tiered
+	//      eviction is enabled, the caching layer reserves this loading
+	//      overhead, so Go must not reserve the same raw-data margin again.
 	//   2. Full-lazy path (all external fields warmup=disable): no eager
 	//      load, so subtract the raw data size that PART 2 added.
 	// Also propagate EstimatedBytesPerRow to the C++ ManifestGroupTranslator
 	// so the tiered-cache layer sizes chunks correctly.
 	if typeutil.IsExternalCollection(schema) && loadInfo.GetNumOfRows() > 0 {
 		var fakeBinlogMemSize int64
-		for _, fb := range loadInfo.BinlogPaths {
+		for _, fb := range binlogs {
 			fakeBinlogMemSize += getBinlogDataMemorySize(fb)
 		}
 		loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
@@ -2307,9 +2358,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			} else {
 				segMemoryLoadingSize = 0
 			}
-		} else if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
-			// Non-lazy → add peak margin on top of rawSize that PART 2 added.
-			segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+		} else if !multiplyFactor.TieredEvictionEnabled {
+			if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
+				// Non-lazy → add peak margin on top of rawSize that PART 2 added.
+				segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+			}
 		}
 	}
 
@@ -2323,7 +2376,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// PART 4: calculate size of delete data
 	// delete data isn't managed by the caching layer, so its size should always be included,
 	// regardless of the tiered eviction value
-	for _, fieldBinlog := range loadInfo.Deltalogs {
+	for _, fieldBinlog := range deltalogs {
 		// MemorySize of filedBinlog is the actual size in memory, but we should also consider
 		// the memcpy from golang to cpp side, so the expansionFactor is set to 2.
 		expansionFactor := float64(2)

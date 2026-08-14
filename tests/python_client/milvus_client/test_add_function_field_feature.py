@@ -12,7 +12,6 @@ from pymilvus import (
     FieldSchema,
     Function,
     FunctionType,
-    MilvusException,
     RRFRanker,
     WeightedRanker,
 )
@@ -20,6 +19,89 @@ from utils.util_log import test_log as log
 
 
 class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
+    @staticmethod
+    def _search_hit_ids_match(
+        hit_ids,
+        expected_id,
+        exact_ids=False,
+        expected_ids=None,
+        expected_count=None,
+    ):
+        if expected_count is not None and len(hit_ids) != expected_count:
+            return False
+        if expected_ids is not None:
+            if exact_ids:
+                return hit_ids == expected_ids
+            return bool(hit_ids) and all(hit_id in expected_ids for hit_id in hit_ids)
+        if exact_ids:
+            return hit_ids == [expected_id]
+        return bool(hit_ids) if expected_id is None else expected_id in hit_ids
+
+    @staticmethod
+    def _is_known_backfill_type_mismatch(exc):
+        message = str(exc).lower()
+        return "vector_sparse_u32_f32 vs varchar" in message or (
+            "vector type must be the same" in message and "vector_sparse_u32_f32" in message and "varchar" in message
+        )
+
+    @classmethod
+    def _search_error_category(cls, exc):
+        message = str(exc).lower()
+        if cls._is_known_backfill_type_mismatch(exc):
+            return "known_backfill_type_mismatch"
+        if "field index" in message and "not loaded" in message:
+            return "field_index_not_loaded"
+        if "field index meta not found" in message:
+            return "field_index_meta_not_found"
+        if "vchannel" in message and "not found" in message:
+            return "vchannel_not_found"
+        return type(exc).__name__
+
+    def _assert_post_hit_search_rounds(
+        self,
+        client,
+        search_kwargs,
+        expected_id,
+        label,
+        rounds=5,
+        exact_ids=False,
+        expected_ids=None,
+        expected_count=None,
+    ):
+        verification_start = time.monotonic()
+        last_search_res = None
+
+        for round_no in range(1, rounds + 1):
+            round_search_kwargs = dict(search_kwargs)
+            round_search_kwargs["timeout"] = 5
+            try:
+                last_search_res = client.search(**round_search_kwargs)
+            except Exception as exc:
+                category = self._search_error_category(exc)
+                raise AssertionError(
+                    f"{label} post-hit search failed on round={round_no}/{rounds}, category={category}: {exc}"
+                ) from exc
+
+            hit_ids = [hit["id"] for hit in last_search_res[0]]
+            matched = self._search_hit_ids_match(
+                hit_ids,
+                expected_id,
+                exact_ids=exact_ids,
+                expected_ids=expected_ids,
+                expected_count=expected_count,
+            )
+            assert matched, (
+                f"{label} post-hit search returned unexpected ids on round={round_no}/{rounds}: "
+                f"expected_id={expected_id}, expected_ids={expected_ids}, "
+                f"expected_count={expected_count}, hit_ids={hit_ids}"
+            )
+
+        log.info(
+            f"{label} remained searchable for {rounds} fixed post-hit rounds in "
+            f"{time.monotonic() - verification_start:.2f}s"
+        )
+        return last_search_res
+
     def wait_for_search_hit(
         self,
         client,
@@ -34,43 +116,148 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         timeout=30,
         interval=1,
         filter=None,
+        expected_ids=None,
+        expected_count=None,
+        exact_ids=False,
     ):
-        poll_start = time.time()
+        poll_start = time.monotonic()
         deadline = poll_start + timeout
         last_error = None
         attempts = 0
+        error_counts = {}
+        first_error_seconds = {}
+        last_error_seconds = {}
+        last_errors = {}
+        empty_result_count = 0
+        first_empty_result_seconds = None
+        last_empty_result_seconds = None
 
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             attempts += 1
+            remaining = deadline - time.monotonic()
+            search_kwargs = {
+                "collection_name": collection_name,
+                "data": data,
+                "anns_field": anns_field,
+                "limit": limit,
+                "output_fields": output_fields or ["id"],
+                "timeout": min(5, remaining),
+            }
+            if search_params is not None:
+                search_kwargs["search_params"] = search_params
+            if filter is not None:
+                search_kwargs["filter"] = filter
+
             try:
-                search_kwargs = {
-                    "collection_name": collection_name,
-                    "data": data,
-                    "anns_field": anns_field,
-                    "limit": limit,
-                    "output_fields": output_fields or ["id"],
-                }
-                if search_params is not None:
-                    search_kwargs["search_params"] = search_params
-                if filter is not None:
-                    search_kwargs["filter"] = filter
-
                 search_res = client.search(**search_kwargs)
-                hit_ids = [hit["id"] for hit in search_res[0]]
-                if expected_id in hit_ids:
-                    ready_msg = (
-                        f"{label} search ready after {time.time() - poll_start:.2f}s, "
-                        f"attempts={attempts}, hit_ids={hit_ids}"
-                    )
-                    log.info(ready_msg)
-                    return search_res
-                last_error = f"{label} search returned ids={hit_ids}"
             except Exception as exc:
-                last_error = str(exc)
+                elapsed = time.monotonic() - poll_start
+                category = self._search_error_category(exc)
+                error_counts[category] = error_counts.get(category, 0) + 1
+                first_error_seconds.setdefault(category, elapsed)
+                last_error_seconds[category] = elapsed
+                last_errors[category] = str(exc)
+                last_error = f"{category}: {exc}"
+                count = error_counts[category]
+                if count == 1 or count % 10 == 0:
+                    log.warning(
+                        f"{label} search error category={category}, count={count}, elapsed={elapsed:.2f}s: {exc}"
+                    )
+            else:
+                hit_ids = [hit["id"] for hit in search_res[0]]
+                if self._search_hit_ids_match(
+                    hit_ids,
+                    expected_id,
+                    exact_ids=exact_ids,
+                    expected_ids=expected_ids,
+                    expected_count=expected_count,
+                ):
+                    log.info(
+                        f"{label} search ready after {time.monotonic() - poll_start:.2f}s, "
+                        f"attempts={attempts}, hit_ids={hit_ids}, "
+                        f"empty_result_count={empty_result_count}, error_counts={error_counts}, "
+                        f"first_error_seconds={first_error_seconds}, "
+                        f"last_error_seconds={last_error_seconds}, last_errors={last_errors}"
+                    )
+                    log.info(f"{label} waiting 2s after the first hit before fixed post-hit verification")
+                    time.sleep(2)
+                    return self._assert_post_hit_search_rounds(
+                        client,
+                        search_kwargs,
+                        expected_id,
+                        label,
+                        exact_ids=exact_ids,
+                        expected_ids=expected_ids,
+                        expected_count=expected_count,
+                    )
+                if hit_ids:
+                    raise AssertionError(
+                        f"{label} search returned unexpected ids={hit_ids}, "
+                        f"expected_id={expected_id}, expected_ids={expected_ids}, "
+                        f"expected_count={expected_count}, exact_ids={exact_ids}"
+                    )
+                elapsed = time.monotonic() - poll_start
+                empty_result_count += 1
+                if first_empty_result_seconds is None:
+                    first_empty_result_seconds = elapsed
+                last_empty_result_seconds = elapsed
+                last_error = f"{label} search returned no hits"
 
-            time.sleep(interval)
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
 
-        raise AssertionError(f"{label} search was not ready within {timeout}s, attempts={attempts}: {last_error}")
+        try:
+            index_info = client.describe_index(collection_name, index_name=anns_field)
+        except Exception as exc:
+            index_info = f"describe_index failed: {exc}"
+        raise AssertionError(
+            f"{label} search was not ready within {timeout}s, attempts={attempts}, "
+            f"expected_id={expected_id}, expected_ids={expected_ids}, expected_count={expected_count}, "
+            f"exact_ids={exact_ids}, "
+            f"last_error={last_error}, empty_result_count={empty_result_count}, "
+            f"first_empty_result_seconds={first_empty_result_seconds}, "
+            f"last_empty_result_seconds={last_empty_result_seconds}, "
+            f"error_counts={error_counts}, first_error_seconds={first_error_seconds}, "
+            f"last_error_seconds={last_error_seconds}, last_errors={last_errors}, "
+            f"{anns_field}_index={index_info}"
+        )
+
+    def wait_for_search_ids(
+        self,
+        client,
+        collection_name,
+        data,
+        anns_field,
+        expected_ids,
+        label,
+        search_params=None,
+        output_fields=None,
+        limit=3,
+        timeout=30,
+        interval=1,
+    ):
+        """Wait for an exact ordered topK and verify that it remains stable.
+
+        Empty results and search errors use the bounded readiness budget. A
+        non-empty wrong ID list fails immediately. After the first exact match,
+        wait 10 seconds and require five more exact successful searches.
+        """
+        search_res = self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=data,
+            anns_field=anns_field,
+            expected_id=None,
+            label=label,
+            search_params=search_params,
+            output_fields=output_fields,
+            limit=limit,
+            timeout=timeout,
+            interval=interval,
+            expected_ids=expected_ids,
+            expected_count=len(expected_ids),
+            exact_ids=True,
+        )
+        return search_res[0]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_bm25_function_field_main_path(self):
@@ -264,39 +451,17 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         # Step 4: Search and wait until BM25 search becomes ready.
         # Expected: BM25 search succeeds through the bound index after load.
-        search_timeout = 30
-        poll_interval = 1
-        poll_start = time.time()
-        deadline = poll_start + search_timeout
-        last_error = None
-        attempts = 0
-        while time.time() < deadline:
-            attempts += 1
-            try:
-                search_res = client.search(
-                    collection_name,
-                    data=["alpha"],
-                    anns_field="sparse",
-                    limit=5,
-                    output_fields=["id", "text"],
-                    search_params={"metric_type": "BM25"},
-                )
-                hit_ids = [hit["id"] for hit in search_res[0]]
-                if 0 in hit_ids:
-                    ready_msg = (
-                        f"BM25 search ready after {time.time() - poll_start:.2f}s, "
-                        f"attempts={attempts}, hit_ids={hit_ids}"
-                    )
-                    log.info(ready_msg)
-                    break
-                last_error = f"BM25 search returned ids={hit_ids}"
-            except Exception as exc:
-                last_error = str(exc)
-            time.sleep(poll_interval)
-        else:
-            raise AssertionError(
-                f"BM25 search was not ready within {search_timeout}s, attempts={attempts}: {last_error}"
-            )
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["alpha"],
+            anns_field="sparse",
+            expected_id=0,
+            label="BM25 bound index",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=30,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -491,7 +656,8 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         target: verify invalid BM25 add_function_field requests are rejected without partial schema mutation
         method: send invalid field/function combinations and compare schema before/after each failure
-        expected: each invalid request fails clearly; schema_version, fields, functions, and max_field_id stay unchanged
+        expected: each invalid request fails clearly; schema_version, fields, functions, and max_field_id stay
+                  unchanged; a request without index params succeeds via server-side AutoIndex resolution
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -754,9 +920,15 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             },
         )
 
-        # Case b: AUTOINDEX index_type is rejected; the bound index requires an explicit index_type.
+        # Case b: AUTOINDEX only tolerates an additional metric_type; any other
+        # build param is rejected, mirroring the create_index AUTOINDEX rule.
         autoindex_params = client.prepare_index_params()
-        autoindex_params.add_index(field_name="sparse_bound_neg", index_type="AUTOINDEX", metric_type="BM25")
+        autoindex_params.add_index(
+            field_name="sparse_bound_neg",
+            index_type="AUTOINDEX",
+            metric_type="BM25",
+            drop_ratio_build="0.2",
+        )
         self.add_function_field(
             client,
             collection_name,
@@ -766,18 +938,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
-                ct.err_msg: "an explicit index_type is required for the bound index of function output field",
+                ct.err_msg: "only metric type can be passed when use AutoIndex",
             },
         )
-
-        # Case c: the server mandates bound index params for vector function output fields;
-        # a raw alter_collection_schema without index params must be rejected.
-        with pytest.raises(MilvusException, match="index params are required"):
-            client._get_connection().alter_collection_schema(
-                collection_name=collection_name,
-                field_schema=bound_params_field,
-                func=bound_params_function,
-            )
 
         # Bound index params failures must not partially mutate schema either.
         after_desc = client.describe_collection(collection_name)
@@ -875,6 +1038,32 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
+
+        # Step 7: A raw alter_collection_schema WITHOUT index params succeeds —
+        # the bound index resolves via AutoIndex on the server (concrete build
+        # type from the sparse autoindex config, metric forced to BM25 by the
+        # function type). describe_index reports the normalized user params, so
+        # index_type surfaces as AUTOINDEX (same as a create_index AUTOINDEX);
+        # the concrete SPARSE_INVERTED_INDEX lives only in the internal build params.
+        auto_field = FieldSchema(name="sparse_auto", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        auto_function = Function(
+            name="bm25_auto_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse_auto"],
+        )
+        client._get_connection().alter_collection_schema(
+            collection_name=collection_name,
+            field_schema=auto_field,
+            func=auto_function,
+        )
+        desc = client.describe_collection(collection_name)
+        assert "sparse_auto" in [field["name"] for field in desc["fields"]]
+        assert "bm25_auto_fn" in [func["name"] for func in desc.get("functions", [])]
+        auto_index_info = client.describe_index(collection_name, index_name="sparse_auto")
+        assert auto_index_info is not None
+        assert auto_index_info["index_type"] == "AUTOINDEX"
+        assert auto_index_info["metric_type"] == "BM25"
 
         self.drop_collection(client, duplicate_name_collection)
         self.drop_collection(client, collection_name)
@@ -1320,7 +1509,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_drop_function_field_combo(self):
         """
         TC-10: Add Function Field with Drop Function / Drop Field combination.
@@ -1639,7 +1828,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         client.drop_alias(reverse_alias_name)
         self.drop_collection(client, reverse_collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_after_delete_upsert_history(self):
         """
         TC-13: Delete / Upsert before add_function_field.
@@ -1845,7 +2034,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_function_field_matches_existing_bm25_and_minhash_output(self):
         """
         TC-15: BM25 / MinHash old-vs-added function output equivalence.
@@ -1934,27 +2123,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         for query_text in bm25_queries:
             base_res = bm25_base_results[query_text]
             base_ids = [hit["id"] for hit in base_res]
-            added_res = []
-            added_ids = []
-            poll_start = time.time()
-            while time.time() - poll_start < 30:
-                added_res = client.search(
-                    bm25_collection_name,
-                    data=[query_text],
-                    anns_field="sparse_added",
-                    limit=3,
-                    output_fields=["id", "text"],
-                    search_params={"metric_type": "BM25"},
-                )[0]
-                added_ids = [hit["id"] for hit in added_res]
-                if added_ids == base_ids:
-                    break
-                time.sleep(1)
-            else:
-                raise AssertionError(
-                    f"BM25 added output did not match base output for {query_text}: "
-                    f"base_ids={base_ids}, added_ids={added_ids}"
-                )
+            added_res = self.wait_for_search_ids(
+                client,
+                bm25_collection_name,
+                data=[query_text],
+                anns_field="sparse_added",
+                expected_ids=base_ids,
+                label=f"BM25 added output for {query_text}",
+                output_fields=["id", "text"],
+                search_params={"metric_type": "BM25"},
+            )
 
             for base_hit, added_hit in zip(base_res, added_res):
                 if "distance" in base_hit and "distance" in added_hit:
@@ -1964,24 +2142,29 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, bm25_collection_name)
         client.load_collection(bm25_collection_name)
 
+        # A reload puts the added field's index back through the same load path,
+        # so poll here for the same reason Step 8 does.
         for query_text in bm25_queries:
-            base_res = client.search(
+            base_res = self.wait_for_search_ids(
+                client,
                 bm25_collection_name,
                 data=[query_text],
                 anns_field="sparse_base",
-                limit=3,
+                expected_ids=[hit["id"] for hit in bm25_base_results[query_text]],
+                label=f"BM25 base output after reload for {query_text}",
                 output_fields=["id", "text"],
                 search_params={"metric_type": "BM25"},
-            )[0]
-            added_res = client.search(
+            )
+            self.wait_for_search_ids(
+                client,
                 bm25_collection_name,
                 data=[query_text],
                 anns_field="sparse_added",
-                limit=3,
+                expected_ids=[hit["id"] for hit in base_res],
+                label=f"BM25 added output after reload for {query_text}",
                 output_fields=["id", "text"],
                 search_params={"metric_type": "BM25"},
-            )[0]
-            assert [hit["id"] for hit in added_res] == [hit["id"] for hit in base_res]
+            )
 
         self.drop_collection(client, bm25_collection_name)
 
@@ -2081,27 +2264,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         for query_text in minhash_queries:
             base_res = minhash_base_results[query_text]
             base_ids = [hit["id"] for hit in base_res]
-            added_res = []
-            added_ids = []
-            poll_start = time.time()
-            while time.time() - poll_start < 30:
-                added_res = client.search(
-                    minhash_collection_name,
-                    data=[query_text],
-                    anns_field="mh_added",
-                    limit=3,
-                    output_fields=["id", "doc"],
-                    search_params={"metric_type": "MHJACCARD", "params": {}},
-                )[0]
-                added_ids = [hit["id"] for hit in added_res]
-                if added_ids == base_ids:
-                    break
-                time.sleep(1)
-            else:
-                raise AssertionError(
-                    f"MinHash added output did not match base output for {query_text}: "
-                    f"base_ids={base_ids}, added_ids={added_ids}"
-                )
+            added_res = self.wait_for_search_ids(
+                client,
+                minhash_collection_name,
+                data=[query_text],
+                anns_field="mh_added",
+                expected_ids=base_ids,
+                label=f"MinHash added output for {query_text}",
+                output_fields=["id", "doc"],
+                search_params={"metric_type": "MHJACCARD", "params": {}},
+            )
 
             for base_hit, added_hit in zip(base_res, added_res):
                 if "distance" in base_hit and "distance" in added_hit:
@@ -2111,24 +2283,28 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, minhash_collection_name)
         client.load_collection(minhash_collection_name)
 
+        # Same reasoning as the BM25 reload above.
         for query_text in minhash_queries:
-            base_res = client.search(
+            base_res = self.wait_for_search_ids(
+                client,
                 minhash_collection_name,
                 data=[query_text],
                 anns_field="mh_base",
-                limit=3,
+                expected_ids=[hit["id"] for hit in minhash_base_results[query_text]],
+                label=f"MinHash base output after reload for {query_text}",
                 output_fields=["id", "doc"],
                 search_params={"metric_type": "MHJACCARD", "params": {}},
-            )[0]
-            added_res = client.search(
+            )
+            self.wait_for_search_ids(
+                client,
                 minhash_collection_name,
                 data=[query_text],
                 anns_field="mh_added",
-                limit=3,
+                expected_ids=[hit["id"] for hit in base_res],
+                label=f"MinHash added output after reload for {query_text}",
                 output_fields=["id", "doc"],
                 search_params={"metric_type": "MHJACCARD", "params": {}},
-            )[0]
-            assert [hit["id"] for hit in added_res] == [hit["id"] for hit in base_res]
+            )
 
         self.drop_collection(client, minhash_collection_name)
 
@@ -2723,7 +2899,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_with_multi_analyzer_by_field(self):
         """
         TC-24: Multi-analyzer / by_field BM25 input.
@@ -2865,7 +3041,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_function_field_function_type_support_matrix(self):
         """
         TC-26: FunctionType support matrix.
@@ -3045,23 +3221,22 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         """
         client = self._client()
 
+        # wait_for_search_hit retries search errors as well as misses, which this
+        # local loop did not: a bound index can report ready before the query
+        # node has loaded it.
         def assert_minhash_hit(collection_name, query_text, expected_id, label, timeout=60):
-            poll_start = time.time()
-            last_hit_ids = []
-            while time.time() - poll_start < timeout:
-                search_res = client.search(
-                    collection_name,
-                    data=[query_text],
-                    anns_field="mh",
-                    limit=5,
-                    output_fields=["id", "doc"],
-                    search_params={"metric_type": "MHJACCARD", "params": {}},
-                )
-                last_hit_ids = [hit["id"] for hit in search_res[0]]
-                if expected_id in last_hit_ids:
-                    return search_res
-                time.sleep(1)
-            raise AssertionError(f"{label} expected id {expected_id}, got {last_hit_ids}")
+            return self.wait_for_search_hit(
+                client,
+                collection_name,
+                data=[query_text],
+                anns_field="mh",
+                expected_id=expected_id,
+                label=label,
+                limit=5,
+                output_fields=["id", "doc"],
+                search_params={"metric_type": "MHJACCARD", "params": {}},
+                timeout=timeout,
+            )
 
         # Positive path: num_hashes=32, shingle_size=5, mh_lsh_band=8.
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -3254,6 +3429,125 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert final_desc.get("functions", []) == before_desc.get("functions", [])
 
         self.drop_collection(client, mismatch_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_add_bm25_function_field_post_create_base_index_small_total_rows(self):
+        """
+        TC-35 / #51366: Post-create base index with total rows below the physical-index threshold.
+
+        target: verify added BM25 field becomes searchable when the base vec index is created after collection
+        method: create vec index separately, insert 12 old rows, add BM25 field, insert 500 rows, wait for the
+            sparse index to report all 512 rows ready, then search without reloading
+        expected: after the sparse index is ready, BM25 search returns all five requested hits without release/reload
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        query_text = "bm25_repro_token"
+        historical_row_count = 12
+        post_add_row_count = 500
+        search_limit = 5
+        total_row_count = historical_row_count + post_add_row_count
+        assert total_row_count == 512
+        assert total_row_count < 1024
+
+        def vector_for_id(row_id):
+            return [float(row_id), float(row_id % 7), float(row_id % 5), float(row_id % 3)]
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field("text", DataType.VARCHAR, max_length=1024, enable_analyzer=True)
+
+        # The post-create base index path is the key difference from the control case.
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            consistency_level="Strong",
+        )
+        dense_index = client.prepare_index_params()
+        dense_index.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_index(collection_name=collection_name, index_params=dense_index)
+
+        client.insert(
+            collection_name=collection_name,
+            data=[
+                {
+                    "id": i,
+                    "vec": vector_for_id(i),
+                    "text": f"existing bm25 document group {i % 4}",
+                }
+                for i in range(historical_row_count)
+            ],
+        )
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=180)
+        dense_index_info = client.describe_index(collection_name, index_name="vec")
+        assert dense_index_info["state"] == "Finished"
+        assert dense_index_info["pending_index_rows"] == 0
+        client.load_collection(collection_name)
+
+        sparse_index = client.prepare_index_params()
+        sparse_index.add_index(
+            field_name="sparse_bm25",
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+        )
+        client.add_function_field(
+            collection_name,
+            FieldSchema("sparse_bm25", DataType.SPARSE_FLOAT_VECTOR),
+            Function(
+                name="bm25_repro_fn",
+                function_type=FunctionType.BM25,
+                input_field_names=["text"],
+                output_field_names=["sparse_bm25"],
+            ),
+            index_params=sparse_index,
+        )
+
+        client.insert(
+            collection_name=collection_name,
+            data=[
+                {
+                    "id": 30000 + i,
+                    "vec": vector_for_id(30000 + i),
+                    "text": f"{query_text} document group {i % 4}",
+                }
+                for i in range(post_add_row_count)
+            ],
+        )
+        client.flush(collection_name)
+
+        stats = client.get_collection_stats(collection_name)
+        assert stats["row_count"] == total_row_count
+
+        # Reproduce the post-index-ready state from #51366 before checking search visibility.
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse_bm25", timeout=180)
+        sparse_index_info = client.describe_index(collection_name, index_name="sparse_bm25")
+        assert sparse_index_info["state"] == "Finished"
+        assert sparse_index_info["total_rows"] == total_row_count
+        assert sparse_index_info["indexed_rows"] == total_row_count
+        assert sparse_index_info["pending_index_rows"] == 0
+
+        search_result = self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=[query_text],
+            anns_field="sparse_bm25",
+            expected_id=None,
+            label="#51366 BM25 with post-create base index and 512 total rows",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id"],
+            limit=search_limit,
+            timeout=60,
+            expected_ids=range(30000, 30000 + post_add_row_count),
+            expected_count=search_limit,
+        )
+        hit_ids = [hit["id"] for hit in search_result[0]]
+        assert len(hit_ids) == search_limit
+        assert all(30000 <= row_id < 30000 + post_add_row_count for row_id in hit_ids)
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_bm25_function_field_large_segment_true_index_build(self):

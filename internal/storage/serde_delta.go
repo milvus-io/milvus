@@ -189,13 +189,12 @@ type simpleArrowRecordReader struct {
 	blobPos int
 	rr      array.RecordReader
 	closer  func()
-
-	r simpleArrowRecord
 }
 
 func (crr *simpleArrowRecordReader) iterateNextBatch() error {
 	if crr.closer != nil {
 		crr.closer()
+		crr.closer = nil
 	}
 
 	crr.blobPos++
@@ -232,35 +231,37 @@ func (crr *simpleArrowRecordReader) Next() (Record, error) {
 			return nil, io.EOF
 		}
 		crr.blobPos = -1
-		crr.r = simpleArrowRecord{
-			field2Col: make(map[FieldID]int),
-		}
 		if err := crr.iterateNextBatch(); err != nil {
 			return nil, err
 		}
 	}
 
-	composeRecord := func() bool {
+	// a fresh wrapper per batch: a Retain()ed record must stay valid across Next()
+	composeRecord := func() (Record, bool) {
 		if ok := crr.rr.Next(); !ok {
-			return false
+			return nil, false
 		}
 		record := crr.rr.Record()
+		field2Col := make(map[FieldID]int, len(record.Schema().Fields()))
 		for i := range record.Schema().Fields() {
-			crr.r.field2Col[FieldID(i)] = i
+			field2Col[FieldID(i)] = i
 		}
-		crr.r.r = record
-		return true
+		return NewSimpleArrowRecord(record, field2Col), true
 	}
 
-	if ok := composeRecord(); !ok {
+	for {
+		if rec, ok := composeRecord(); ok {
+			return rec, nil
+		}
+		// Next()==false means either batch exhaustion or a read error;
+		// pqarrow stores io.EOF in Err() on normal exhaustion
+		if err := crr.rr.Err(); err != nil && err != io.EOF {
+			return nil, merr.WrapErrDataIntegrity(err, "read deltalog record batch")
+		}
 		if err := crr.iterateNextBatch(); err != nil {
 			return nil, err
 		}
-		if ok := composeRecord(); !ok {
-			return nil, io.EOF
-		}
 	}
-	return &crr.r, nil
 }
 
 func (crr *simpleArrowRecordReader) SetNeededFields(_ typeutil.Set[int64]) {
@@ -270,6 +271,7 @@ func (crr *simpleArrowRecordReader) SetNeededFields(_ typeutil.Set[int64]) {
 func (crr *simpleArrowRecordReader) Close() error {
 	if crr.closer != nil {
 		crr.closer()
+		crr.closer = nil
 	}
 	return nil
 }

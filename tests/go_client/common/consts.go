@@ -71,6 +71,7 @@ const (
 	MaxCapacity             = 4096 // max array capacity
 	DefaultPartitionNum     = 16   // default num_partitions
 	MaxTopK                 = 16384
+	MaxFieldNum             = 256
 	MaxVectorFieldNum       = 10
 	MaxShardNum             = 16
 	DefaultBatchSize        = 1000

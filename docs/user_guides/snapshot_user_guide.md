@@ -171,7 +171,9 @@ Parameters:
 - include_collection_info (bool, optional): Whether to include collection schema and index information
 
 Returns:
-- SnapshotInfo: Basic snapshot information
+- SnapshotInfo: Basic snapshot information. For object-storage snapshots,
+  `s3Location` is a credential-free, complete metadata URI suitable for
+  `RestoreExternalSnapshot`.
 - CollectionDescription: Collection schema and properties (if requested)
 - IndexInfo[]: Index information (if requested)
 
@@ -248,16 +250,33 @@ Returns:
 
 ### Export Snapshot
 
-Export a snapshot as a self-contained object-storage bundle. The returned
-`snapshotMetadataURI` points to the exported metadata file and can be used for
-external restore in another cluster that can access the same object storage
-location. The export target may be in another bucket when the object-storage
-provider supports server-side copy and one resolved credential can read the
-source bucket and write the target bucket.
+Export a snapshot as a self-contained object-storage bundle. Export is
+asynchronous: `ExportSnapshot` durably accepts the job and returns a job ID,
+while `GetExportSnapshotState` reports copy progress and the final metadata URI.
+The metadata URI is visible only after the job reaches `Completed`.
+
+The export target may be in another bucket when the object-storage provider
+supports server-side copy and one resolved credential can read the source
+bucket and write the target bucket. Exporting to the source bucket is also
+supported, provided the generated target metadata, segment manifest, and data
+object keys do not overwrite any object used by the source snapshot. Milvus
+rejects such overlap before the first copy.
+
+`targetS3Path` is a destination base root. Each accepted export receives a
+persisted random namespace and writes the bundle under
+`<targetS3Path>/exports/<export-id>`. This prevents different clusters that use
+the same collection and snapshot IDs from overwriting each other's bundles.
+Use the complete `snapshotMetadataURI` returned by a completed job instead of
+constructing the metadata path from `targetS3Path`.
+
+`ExportSnapshot` does not currently support external collections. Their
+StorageV3 manifests may reference lake fragments that are not part of the
+snapshot file set, so Milvus rejects the export before enumerating or copying
+objects instead of publishing an incomplete self-contained bundle.
 
 **Go SDK Example:**
 ```go
-metadataURI, err := client.ExportSnapshot(context.Background(),
+jobID, err := client.ExportSnapshot(context.Background(),
     milvusclient.NewExportSnapshotOption(
         "backup_20240101",
         "my_collection",
@@ -266,7 +285,28 @@ metadataURI, err := client.ExportSnapshot(context.Background(),
 if err != nil {
     log.Fatal(err)
 }
-log.Printf("Exported snapshot metadata: %s", metadataURI)
+
+var metadataURI string
+for {
+    info, err := client.GetExportSnapshotState(context.Background(),
+        milvusclient.NewGetExportSnapshotStateOption(jobID))
+    if err != nil {
+        log.Fatal(err)
+    }
+    switch info.GetState() {
+    case milvuspb.ExportSnapshotState_ExportSnapshotCompleted:
+        metadataURI = info.GetSnapshotMetadataUri()
+        log.Printf("Exported snapshot metadata: %s", metadataURI)
+        break
+    case milvuspb.ExportSnapshotState_ExportSnapshotFailed:
+        log.Fatalf("Export failed: %s", info.GetReason())
+    default:
+        log.Printf("Export progress: %d%%", info.GetProgress())
+        time.Sleep(time.Second)
+        continue
+    }
+    break
+}
 ```
 
 **REST Example:**
@@ -283,17 +323,94 @@ POST /v2/vectordb/jobs/snapshot/export
 }
 ```
 
+The submission response contains `data.jobId`. Poll the job with:
+
+```text
+POST /v2/vectordb/jobs/snapshot/export/describe
+```
+
+```json
+{
+  "jobId": "9001"
+}
+```
+
+The describe response contains `state`, `progress`, `copiedFiles`,
+`totalFiles`, `totalBytes`, `reason`, and `snapshotMetadataURI`. `totalBytes`
+is the total size of the completed bundle objects and is zero until completion.
+The URI is empty for `Pending`, `Executing`, and `Failed` jobs.
+
+Progress is checkpoint based: `0` means queued, `5` means planning completed,
+values from `5` through `95` reflect durably checkpointed object copies, `99`
+means DataCoord has written final segment manifests, verified private staging
+metadata, and durably entered metadata publication. `100` means the final
+metadata object is published and completion is durable. The internal
+publication state is reported through the public API as `Executing`; no
+additional public state is exposed. A restart may replay an uncheckpointed copy
+batch. Once progress reaches `99`, recovery reads only the target staging object
+and never rebuilds the source snapshot or copy plan, so reported progress does
+not move backward.
+
+`dataCoord.snapshot.exportCopyConcurrency` controls the maximum number of
+provider-side object copy requests executed concurrently by each job. The
+default is `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` limits concurrent
+jobs and defaults to `1`. `dataCoord.snapshot.exportJobTimeout` covers queue and
+data-copy execution time and defaults to 12 hours. Once publication progress
+reaches `99`, the original deadline no longer turns the job into `Failed`;
+DataCoord compares `<bundle-root>/_staging/metadata.json` with the final
+metadata object, finishes or replays publication, and then durably records
+completion. If the final write returns an error after actually committing,
+read-back comparison recognizes the matching bytes as success. Source snapshot
+deletion after the source pin expires does not affect a durable `Publishing`
+job. The staging object is removed best-effort after completion.
+Completed and failed jobs remain queryable for
+`dataCoord.snapshot.exportJobRetention`, which defaults to 3 hours. These
+settings are refreshable.
+
+Request validation, source snapshot lookup, pin creation, and job persistence
+can fail synchronously before a job ID is returned. Storage permission errors,
+missing source objects, provider copy failures, plan changes, staging integrity
+errors, and timeout before publication are reported as a `Failed` job. After
+`Publishing` is durable, temporarily unreadable target objects and ambiguous
+final writes remain at progress `99` for reconciliation retry. A missing or
+corrupt staging object, a permanent target-access error, or a final object whose
+bytes differ from staging fails the job.
+DataCoord keeps the source snapshot pinned until the job is terminal or the pin
+expires and recovers accepted jobs after restart. A failed job does not
+automatically delete objects already copied to the target root.
+
+Raw credentials in export `externalSpec` are persisted only while the job is
+active so that DataCoord can recover it after restart. The terminal update
+clears the stored spec. Prefer instance credentials and bucket policy when
+possible.
+
+For remote object storage, the completed job always returns a credential-free,
+complete metadata URI, including when `targetS3Path` was an object key or a
+legacy `s3://` URI. The returned URI can be passed directly to
+`RestoreExternalSnapshot`.
+
+StorageV2 manifest files are copied as ordinary objects; StorageV3 manifest and
+LOB objects are discovered from the packed manifest path.
+
 ### Restore External Snapshot
 
 Restore a snapshot from a metadata URI instead of from the target cluster's
-local snapshot registry. This is intended for cross-cluster restore after a
-snapshot has been exported.
+local snapshot registry. `RestoreExternalSnapshot` supports both snapshot
+layouts:
 
-A self-contained snapshot generated from an existing snapshot and an explicit
-file mapping can be restored with the same external restore API. The metadata
-URI must point to the generated snapshot metadata file, and every file reference
-inside that metadata must be readable from the target cluster object storage
-configuration before the restore job is created.
+- A referenced snapshot created by `CreateSnapshot`. Use the `s3Location`
+  returned by `DescribeSnapshot`. The metadata references the original segment
+  and index files, so the source snapshot and all referenced files must stay
+  readable until restore completes.
+- A self-contained bundle created by `ExportSnapshot`. The bundle contains its
+  own metadata, manifests, and copied data files. It can be moved to another root
+  prefix as long as the internal `snapshots/...` and `files/...` layout stays the
+  same.
+
+For both layouts, the metadata URI must contain
+`snapshots/{collectionID}/metadata/{snapshotID}.json`. Milvus uses that anchor to
+derive the source root; arbitrary metadata locations such as `root/meta.json` are
+not supported.
 
 **Go SDK Example:**
 ```go
@@ -316,18 +433,33 @@ POST /v2/vectordb/jobs/snapshot/restore_external
 ```json
 {
   "targetCollectionName": "restored_collection",
-  "snapshotMetadataURI": "s3://bucket/snapshot-exports/backup_20240101/snapshots/100/metadata/1.json",
+  "snapshotMetadataURI": "https://s3.us-west-2.amazonaws.com/bucket/snapshot-exports/backup_20240101/exports/<export-id>/snapshots/100/metadata/1.json",
   "externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
 }
 ```
 
-`targetS3Path` and `snapshotMetadataURI` can be object keys or `s3://bucket/key`
-URIs. `externalSpec` is optional. When it is empty, Milvus uses the instance
-object-storage credential and relies on bucket policy to authorize the other
-bucket. When it is set, only storage-config-compatible `extfs` fields are
-accepted. Avoid raw access keys in restore `externalSpec` unless operationally
-required, because restore job state must propagate the spec through persistent
-metadata before DataNode can execute the copy.
+`targetS3Path` can be an object key in the instance bucket or a complete
+supported storage URI. `snapshotMetadataURI` must be a complete URI with a
+scheme and host; object keys are rejected before Milvus reads metadata or starts
+restore work. URI query parameters and fragments are rejected, so presigned URLs
+and Azure SAS URLs cannot be used as snapshot credential mechanisms. Complete
+URIs returned by `DescribeSnapshot` and completed export jobs can be used
+directly. Standard cloud endpoints identify their provider and region; custom
+endpoints use the provider from `externalSpec` or the target instance storage
+configuration. `externalSpec` is optional. When it is empty, Milvus uses the
+instance object-storage credential
+and relies on bucket policy to authorize the other bucket. When it is set, only
+storage-config-compatible `extfs` fields are accepted. Supported credential
+modes are `use_iam=true`, raw `access_key_id`/`access_key_value`, or native GCS
+service-account JSON in `credential_json`; these modes are mutually exclusive.
+Avoid raw access keys or `credential_json` in restore `externalSpec` unless
+operationally required, because restore job state must propagate the spec
+through persistent metadata before DataNode can execute the copy.
+
+External restore requires at least one DataNode running Milvus `3.0.1` or
+later. During a rolling upgrade, the restore job remains pending until a
+compatible DataNode is available; unrelated tasks can continue to run on older
+DataNodes.
 
 ### Drop Snapshot
 
@@ -777,6 +909,9 @@ Use consistent and descriptive naming:
 7. **Field/Index ID preservation**:
    - Restore process uses `PreserveFieldId=true` and `PreserveIndexId=true`
    - These flags ensure compatibility between snapshot data files and restored collection
+8. **External collection export**: `ExportSnapshot` rejects external
+   collections because their lake fragments cannot yet be included in a
+   self-contained bundle
 
 ### Planning Considerations
 

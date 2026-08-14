@@ -78,6 +78,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -412,7 +413,7 @@ func (node *QueryNode) Init() error {
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 
-		fileresource.InitManager(node.chunkManager, fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
+		fileresource.InitManager(node.chunkManager, fileresource.GetLocalMode())
 
 		err = initcore.InitQueryNode(node.ctx)
 		if err != nil {
@@ -470,6 +471,31 @@ func (node *QueryNode) Start() error {
 	return nil
 }
 
+// hasOtherActiveQueryNode checks via session whether there is any other
+// non-stopping query node that can accept migrated data.
+func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
+	var sessions map[string]*sessionutil.Session
+	err := retry.Do(node.ctx, func() error {
+		var err error
+		sessions, _, err = node.session.GetSessions(node.ctx, typeutil.QueryNodeRole)
+		return err
+	},
+		retry.AttemptAlways(),
+		retry.Sleep(time.Second),
+		retry.RetryErr(func(error) bool { return true }),
+	)
+	if err != nil {
+		return false, err
+	}
+
+	for _, sess := range sessions {
+		if sess.ServerID != node.GetNodeID() && !sess.Stopping {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
@@ -482,6 +508,9 @@ func (node *QueryNode) Stop() error {
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+			isStandalone := paramtable.GetRole() == typeutil.StandaloneRole
+			standaloneMigrateTimeout := paramtable.Get().QueryNodeCfg.StandaloneMigrateDataTimeout.GetAsDurationByParse()
+			standaloneMigrateDeadline := time.Now().Add(standaloneMigrateTimeout)
 
 		outer:
 			for (node.manager != nil && !node.manager.Segment.Empty()) ||
@@ -500,6 +529,29 @@ func (node *QueryNode) Stop() error {
 				}
 				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
 					break outer
+				}
+
+				// In standalone mode, after the migrate timeout, check if there is any other
+				// active query node (e.g. a new standalone starting up for rolling upgrade).
+				if isStandalone && time.Now().After(standaloneMigrateDeadline) {
+					hasOther, err := node.hasOtherActiveQueryNode()
+					if err != nil {
+						break outer
+					}
+					if !hasOther {
+						mlog.Warn(node.ctx, "standalone migrate data stopped due to no active query node available to accept data",
+							mlog.FieldNodeID(node.GetNodeID()),
+							mlog.Duration("standaloneMigrateTimeout", standaloneMigrateTimeout),
+							mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+								return s.ID()
+							})),
+							mlog.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+								return t.ID()
+							})),
+							mlog.Int("channelNum", channelNum),
+						)
+						break outer
+					}
 				}
 
 				select {

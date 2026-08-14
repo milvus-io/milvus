@@ -51,11 +51,13 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -3547,6 +3549,66 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 		"text index files should not be removed when segment is referenced by snapshot")
 }
 
+func TestGarbageCollector_recycleUnusedAnalyzeFiles_StaleVersions(t *testing.T) {
+	ctx := context.Background()
+
+	meta := &meta{
+		catalog: &datacoord.Catalog{},
+		analyzeMeta: &analyzeMeta{
+			ctx: ctx,
+			tasks: map[int64]*indexpb.AnalyzeTask{
+				401: {
+					TaskID:  401,
+					Version: 2,
+					State:   indexpb.JobState_JobStateFinished,
+				},
+			},
+		},
+	}
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// The non-recursive walk lists the per-task top-level dirs under analyze_stats.
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
+			if strings.Contains(prefix, common.AnalyzeStatsPath) {
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   path.Join(prefix, "401") + "/",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	removedPrefixes := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string) error {
+			removedPrefixes = append(removedPrefixes, prefix)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	gc.recycleUnusedAnalyzeFiles(ctx, nil)
+
+	// Analyze files are written under analyze_stats/{taskID}/{version}/... — for a
+	// finished task at Version=2, exactly the stale versions 0 and 1 under the
+	// task's own prefix must be removed, and version 2 must be kept.
+	root := path.Join(cli.RootPath(), common.AnalyzeStatsPath) + "/"
+	assert.ElementsMatch(t, []string{root + "401/0/", root + "401/1/"}, removedPrefixes)
+}
+
 func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testing.T) {
 	ctx := context.Background()
 
@@ -4514,7 +4576,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 		defer mockSave.UnPatch()
 		mockDropCatalog := mockey.Mock((*datacoord.Catalog).DropSnapshot).Return(nil).Build()
 		defer mockDropCatalog.UnPatch()
-		mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+		mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 		defer mockWriter.UnPatch()
 
 		gc.recycleSnapshots(ctx, nil)

@@ -69,6 +69,14 @@ PhyVectorSearchNode::PhyVectorSearchNode(
     active_count_ = query_context_->get_active_count();
     placeholder_group_ = query_context_->get_placeholder_group();
     search_info_ = query_context_->get_search_info();
+    // Freeze the growing segment's visible-row bound at plan time and carry it
+    // into the search kernels. They must not re-read it from the segment: a
+    // concurrent insert can publish rows between this point and the kernel's
+    // read, and those rows are neither acknowledged nor visible to this query.
+    // Sealed indexes are immutable and keep their empty-bitset fast path.
+    if (segment_->type() == SegmentType::Growing) {
+        search_info_.active_count_ = active_count_;
+    }
 }
 
 void

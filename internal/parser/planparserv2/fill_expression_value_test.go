@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -71,6 +74,15 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
+			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
+			{`A in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
+			{`ArrayField in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -107,9 +119,6 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
 			}},
-			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
-				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
-			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -117,6 +126,160 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
+}
+
+func (s *FillExpressionValueSuite) TestEmptyTermRejectsUnsupportedTargetTypes() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyTemplate := map[string]*schemapb.TemplateValue{
+		"empty": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+	}
+	targetFields := []string{
+		"BinaryVectorField",
+		"FloatVectorField",
+		"Float16VectorField",
+		"BFloat16VectorField",
+		"SparseFloatVectorField",
+		"Int8VectorField",
+		"ArrayOfVectorField",
+		"GeometryField",
+	}
+	rightHandSides := []struct {
+		name   string
+		value  string
+		params map[string]*schemapb.TemplateValue
+	}{
+		{name: "inline", value: "[]"},
+		{name: "template", value: "{empty}", params: emptyTemplate},
+	}
+
+	for _, field := range targetFields {
+		for _, op := range []string{"in", "not in"} {
+			for _, rhs := range rightHandSides {
+				s.Run(field+"/"+op+"/"+rhs.name, func() {
+					expr, err := ParseExpr(schemaH, field+" "+op+" "+rhs.value, rhs.params)
+					s.Require().Error(err)
+					s.Require().Nil(expr)
+					s.Contains(err.Error(), "term expression is not supported")
+				})
+			}
+		}
+	}
+}
+
+func (s *FillExpressionValueSuite) TestEmptyArrayComparisonNormalization() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyArray := generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{})
+
+	testcases := []struct {
+		expr string
+		op   planpb.OpType
+	}{
+		{expr: `ArrayField == {empty}`, op: planpb.OpType_Equal},
+		{expr: `{empty} == ArrayField`, op: planpb.OpType_Equal},
+		{expr: `ArrayField != {empty}`, op: planpb.OpType_NotEqual},
+		{expr: `{empty} != ArrayField`, op: planpb.OpType_NotEqual},
+	}
+	for _, testcase := range testcases {
+		s.Run(testcase.expr, func() {
+			expr, err := ParseExpr(schemaH, testcase.expr, map[string]*schemapb.TemplateValue{
+				"empty": emptyArray,
+			})
+			s.NoError(err)
+			arrayLength := expr.GetBinaryArithOpEvalRangeExpr()
+			s.NotNil(arrayLength)
+			s.Equal(planpb.ArithOpType_ArrayLength, arrayLength.GetArithOp())
+			s.Equal(testcase.op, arrayLength.GetOp())
+			s.Equal(int64(0), arrayLength.GetValue().GetInt64Val())
+		})
+	}
+}
+
+func (s *FillExpressionValueSuite) TestWholeArrayTemplateMembershipNormalization() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyArray := func() *schemapb.TemplateArrayValue {
+		return &schemapb.TemplateArrayValue{}
+	}
+	intArray := func(values ...int64) *schemapb.TemplateArrayValue {
+		return generateTemplateArrayValue(schemapb.DataType_Int64, values)
+	}
+
+	testcases := []struct {
+		name               string
+		arrays             []*schemapb.TemplateArrayValue
+		expectedLengths    int
+		expectedEqualities int
+	}{
+		{
+			name:            "empty arrays",
+			arrays:          []*schemapb.TemplateArrayValue{emptyArray(), emptyArray()},
+			expectedLengths: 2,
+		},
+		{
+			name: "non-empty arrays",
+			arrays: []*schemapb.TemplateArrayValue{
+				intArray(1, 2),
+				intArray(3, 4),
+			},
+			expectedEqualities: 2,
+		},
+		{
+			name: "mixed empty and non-empty arrays",
+			arrays: []*schemapb.TemplateArrayValue{
+				emptyArray(),
+				intArray(1, 2),
+			},
+			expectedLengths:    1,
+			expectedEqualities: 1,
+		},
+	}
+
+	for _, testcase := range testcases {
+		for _, op := range []string{"in", "not in"} {
+			s.Run(testcase.name+"/"+op, func() {
+				expr, err := ParseExpr(schemaH, "ArrayField "+op+" {arrays}", map[string]*schemapb.TemplateValue{
+					"arrays": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_Array, testcase.arrays)),
+				})
+				s.NoError(err)
+				s.NotNil(expr)
+				if op == "not in" {
+					s.NotNil(expr.GetUnaryExpr())
+					s.Equal(planpb.UnaryExpr_Not, expr.GetUnaryExpr().GetOp())
+				}
+
+				var arrayLengths int
+				var arrayEqualities int
+				var walk func(*planpb.Expr)
+				walk = func(current *planpb.Expr) {
+					if current == nil {
+						return
+					}
+					s.Nil(current.GetTermExpr(), "whole ARRAY membership must not remain a TermExpr")
+					if arrayLength := current.GetBinaryArithOpEvalRangeExpr(); arrayLength != nil &&
+						arrayLength.GetArithOp() == planpb.ArithOpType_ArrayLength &&
+						arrayLength.GetOp() == planpb.OpType_Equal &&
+						arrayLength.GetValue().GetInt64Val() == 0 {
+						arrayLengths++
+					}
+					if equality := current.GetUnaryRangeExpr(); equality != nil &&
+						equality.GetOp() == planpb.OpType_Equal &&
+						equality.GetValue().GetArrayVal() != nil {
+						arrayEqualities++
+					}
+					if binary := current.GetBinaryExpr(); binary != nil {
+						walk(binary.GetLeft())
+						walk(binary.GetRight())
+					}
+					if unary := current.GetUnaryExpr(); unary != nil {
+						walk(unary.GetChild())
+					}
+				}
+				walk(expr)
+				s.Equal(testcase.expectedLengths, arrayLengths)
+				s.Equal(testcase.expectedEqualities, arrayEqualities)
+			})
+		}
+	}
 }
 
 func (s *FillExpressionValueSuite) TestUnaryRange() {
@@ -620,6 +783,14 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 				expected: true,
 			},
 			{
+				name: "untyped empty array",
+				expr: `json_contains_all(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+				},
+				expected: true,
+			},
+			{
 				name: "singleton array",
 				expr: `json_contains_all(JSONField, {array})`,
 				values: map[string]*schemapb.TemplateValue{
@@ -816,6 +987,108 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		s.NotNil(bre, "expected BinaryRangeExpr")
 		s.Equal(float64(10.5), bre.GetLowerValue().GetFloatVal())
 		s.Equal(float64(100.5), bre.GetUpperValue().GetFloatVal())
+	})
+
+	s.Run("adjacent mixed bounds above 2^53 should remain valid", func() {
+		expr, err := ParseExpr(schemaH, `{min} <= A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+		s.Require().NoError(err)
+
+		bre := expr.GetBinaryRangeExpr()
+		s.Require().NotNil(bre)
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.Equal(float64(9007199254740992), bre.GetLowerValue().GetFloatVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+		s.Equal(int64(9007199254740993), bre.GetUpperValue().GetInt64Val())
+	})
+
+	s.Run("reverse adjacent mixed bounds above 2^53 should remain valid", func() {
+		expr, err := ParseExpr(schemaH, `{max} > A >= {min}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+		s.Require().NoError(err)
+
+		bre := expr.GetBinaryRangeExpr()
+		s.Require().NotNil(bre)
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+	})
+
+	s.Run("truly reversed mixed bounds should fail", func() {
+		s.assertInvalidExpr(schemaH, `{min} <= A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740994)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+	})
+
+	s.Run("NaN and different dynamic types should fail", func() {
+		bounds := func(min, max *schemapb.TemplateValue) map[string]*schemapb.TemplateValue {
+			return map[string]*schemapb.TemplateValue{"min": min, "max": max}
+		}
+		value := generateTemplateValue
+		mixedBounds := bounds(value(schemapb.DataType_Int64, int64(1)), value(schemapb.DataType_String, "z"))
+		array := func(v int64) *schemapb.TemplateValue {
+			return value(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{v}))
+		}
+		for _, c := range []testcase{
+			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Int64, int64(10)))},
+			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Int64, int64(1)), value(schemapb.DataType_Double, math.NaN()))},
+			{`{min} < A < {max}`, mixedBounds},
+			{`1 < A < {max}`, map[string]*schemapb.TemplateValue{"max": value(schemapb.DataType_String, "z")}},
+			{`{min} < A < "z"`, map[string]*schemapb.TemplateValue{"min": value(schemapb.DataType_Int64, int64(1))}},
+			{`{min} < DoubleField < {max}`, bounds(value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Double, float64(10)))},
+			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Bool, false), value(schemapb.DataType_Bool, true))},
+			{`{min} < A < {max}`, bounds(array(1), array(2))},
+			{`{min} < A < {max} && random_sample(0.1)`, mixedBounds},
+			{`true OR ({min} < A < {max})`, mixedBounds},
+			{`({min} < A < {max}) OR true`, mixedBounds},
+			{`false AND ({min} < A < {max})`, mixedBounds},
+			{`({min} < A < {max}) AND false`, mixedBounds},
+		} {
+			expr, err := ParseExpr(schemaH, c.expr, c.values)
+			s.ErrorIs(err, merr.ErrQueryPlan, c.expr)
+			s.Nil(expr, c.expr)
+		}
+	})
+
+	s.Run("valid template bounds should survive expression wrappers", func() {
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
+		}
+		exprStr := `{min} < A < {max} && random_sample(0.1)`
+		expr, err := ParseExpr(schemaH, exprStr, templateValues)
+		s.Require().NoError(err, exprStr)
+		s.NotNil(expr, exprStr)
+		s.assertNoUnfilledPlaceholder(expr)
+
+		s.assertValidExpr(schemaH, `A > {min} AND A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_String, "z"),
+		})
+	})
+
+	s.Run("template validation preserves constant short circuit when optimization is disabled", func() {
+		old := paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue("false")
+		defer paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue(old)
+
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
+		}
+		for exprStr, want := range map[string]*planpb.Expr{
+			`true OR ({min} < A < {max})`:   alwaysTrueExpr(),
+			`({min} < A < {max}) OR true`:   alwaysTrueExpr(),
+			`false AND ({min} < A < {max})`: alwaysFalseExpr(),
+			`({min} < A < {max}) AND false`: alwaysFalseExpr(),
+		} {
+			expr, err := ParseExpr(schemaH, exprStr, templateValues)
+			s.Require().NoError(err, exprStr)
+			s.Equal(want, expr, exprStr)
+		}
 	})
 }
 

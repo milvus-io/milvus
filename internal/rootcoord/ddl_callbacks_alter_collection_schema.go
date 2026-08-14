@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -193,8 +194,8 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 // apply is a pure idempotent write (a replayed callback rebuilds the identical
 // index), and every input-dependent rejection happens before anything commits.
 func (c *Core) prepareBoundFieldIndex(ctx context.Context, coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) (*indexpb.FieldIndex, error) {
-	indexParamsMap, err := indexparamcheck.PrepareFunctionOutputIndexParams(
-		plan.Function.GetType(), plan.Field.GetName(), plan.IndexExtraParams)
+	indexParamsMap, autoResolved, err := indexparamcheck.PrepareFunctionOutputIndexParams(
+		plan.Function.GetType(), plan.Field, coll.Properties, plan.IndexExtraParams)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +208,21 @@ func (c *Core) prepareBoundFieldIndex(ctx context.Context, coll *model.Collectio
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"invalid index type %s for the bound index of function output field %q",
 			indexType, plan.Field.GetName())
+	}
+	// Merge the YAML build-stage knowhere defaults into the params BEFORE
+	// validation, as create_index does. Without this, an operator-configured
+	// build param (e.g. MINHASH_LSH mh_lsh_band/mh_element_bit_width) reaches the
+	// index build via datacoord's own merge but not the collection metadata that
+	// QueryNode uses for brute-force fallback, so indexed and fallback segments
+	// could evaluate one query with incompatible settings. Merging first also
+	// lets the field validation below reject an invalid/oversized operator
+	// default instead of persisting an index that cannot build. Pre-existing gap
+	// for the explicit bound path too; fixing both here. No-op with the default
+	// (empty) knowhere config.
+	if Params.KnowhereConfig.Enable.GetAsBool() {
+		if indexParamsMap, err = Params.KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap); err != nil {
+			return nil, err
+		}
 	}
 	// Full field-aware validation (params size, dimension fill+match, data-type
 	// compatibility, train params), identical to the create_index path — an index
@@ -255,6 +271,16 @@ func (c *Core) prepareBoundFieldIndex(ctx context.Context, coll *model.Collectio
 	typeParams := lo.Filter(plan.Field.GetTypeParams(), func(kv *commonpb.KeyValuePair, _ int) bool {
 		return kv.GetKey() != common.MmapEnabledKey && kv.GetKey() != common.WarmupKey
 	})
+	// Persist exactly what create_index would persist for the equivalent request,
+	// per deployment mode, so datacoord's checkParams (which compares these pairs)
+	// dedupes a later create_index instead of reporting a distinct-index conflict:
+	// OSS wraps autoindex requests into the canonical AUTOINDEX+metric pair
+	// (wrapUserIndexParams), while the cloud branch (autoIndex.enable=true) keeps
+	// the caller's raw extra params.
+	userIndexParams := plan.IndexExtraParams
+	if autoResolved && !Params.AutoIndexConfig.Enable.GetAsBool() {
+		userIndexParams = indexparamcheck.WrapUserIndexParams(indexParamsMap[common.MetricTypeKey])
+	}
 	index := &model.Index{
 		CollectionID:    coll.CollectionID,
 		FieldID:         plan.Field.GetFieldID(),
@@ -264,7 +290,7 @@ func (c *Core) prepareBoundFieldIndex(ctx context.Context, coll *model.Collectio
 		IndexParams:     indexParams,
 		CreateTime:      createTime,
 		IsAutoIndex:     false,
-		UserIndexParams: plan.IndexExtraParams,
+		UserIndexParams: userIndexParams,
 	}
 	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
 		return nil, err
@@ -287,7 +313,7 @@ func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSc
 			timezone = common.DefaultTimezone
 		}
 		if err := timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
+			return merr.Wrapf(err, "invalid default value of field, name: %s", fieldSchema.Name)
 		}
 	}
 

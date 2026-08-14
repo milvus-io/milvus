@@ -41,11 +41,16 @@ type NamespaceCompactorTestSuite struct {
 func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.schema = &schemapb.CollectionSchema{
+		// NamespaceCompactor is only constructed inside the namespaceEnabled
+		// branch of datanode/services.go, and the merge key below is
+		// [partitionKey, pk] accordingly.
+		EnableNamespace: true,
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:  common.RowIDField,
@@ -64,9 +69,10 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 				IsPrimaryKey: true,
 			},
 			{
-				FieldID:  101,
-				Name:     "namespace",
-				DataType: schemapb.DataType_Int64,
+				FieldID:        101,
+				Name:           "namespace",
+				DataType:       schemapb.DataType_Int64,
+				IsPartitionKey: true,
 			},
 		},
 	}
@@ -75,6 +81,7 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 
 func (s *NamespaceCompactorTestSuite) TearDownSuite() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 	initcore.CleanArrowFileSystem()
 }
 

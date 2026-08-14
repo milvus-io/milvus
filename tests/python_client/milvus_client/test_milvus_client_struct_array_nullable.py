@@ -1096,7 +1096,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             schema=schema,
             index_params=index_params,
             consistency_level="Strong",
-            properties={"collection.autocompaction.enabled": "false"},
         )
 
         def profile(row_id, length, tag_prefix="keep"):
@@ -1249,8 +1248,31 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         baseline = collect_observations()
         assert baseline["match_ids"] == sorted(row_id for row_id, row in source_by_id.items() if row[STRUCT_FIELD])
         assert baseline["contains_ids"] == [4]
-        compact_id, _ = self.compact(client, collection_name)
-        assert compact_id > 0
+        # compact() returns -1 when datacoord finds no candidate segment for the
+        # request. isNormalManualCompactionCandidate requires each segment to be
+        # flushed, sorted, and not already compacting, and both of the remaining
+        # conditions are reached asynchronously:
+        #
+        #   - a freshly flushed segment is unsorted; IsSorted is written by the
+        #     sort compaction datacoord triggers on the datanode
+        #   - once sorted, an automatic mix compaction may claim the segments,
+        #     setting isCompacting until it finishes
+        #
+        # So wait for the segments to be sorted, then ask until the request is
+        # actually accepted. Datacoord only creates index tasks for sorted
+        # segments, so an index with no pending rows means every segment is
+        # sorted; the retry then rides out any automatic compaction holding them.
+        assert self.wait_for_index_ready(client, collection_name, index_name=VECTOR_FIELD, timeout=300), (
+            "vector index still has pending rows; segments are not all sorted yet"
+        )
+        compact_id = -1
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            compact_id, _ = self.compact(client, collection_name)
+            if compact_id > 0:
+                break
+            time.sleep(2)
+        assert compact_id > 0, "no segment was compactable within the timeout"
         assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
         assert collect_observations() == baseline
 
@@ -1284,7 +1306,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 f"array_contains_all({STRUCT_TAG_FIELD}, [])",
                 False,
                 False,
-                marks=pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51416", strict=True),
                 id="contains_all_empty_list",
             ),
         ],

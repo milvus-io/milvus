@@ -95,6 +95,12 @@ func TestIndexInspector_inspect(t *testing.T) {
 		// (reloadFromMeta, the ticker, and the notify channel) may invoke the
 		// mocks immediately, and a call racing with EXPECT registration hits
 		// a no-expectation mock and silently aborts the indexing flow.
+		handler.EXPECT().GetCollection(mock.Anything, int64(2)).Return(&collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "f101"}},
+			},
+		}, nil).Maybe()
 		alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
@@ -123,6 +129,14 @@ func TestIndexInspector_inspect(t *testing.T) {
 }
 
 func TestIndexInspector_ReloadFromMeta(t *testing.T) {
+	pt := paramtable.Get()
+	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
+	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
+	assert.NoError(t, pt.Save(heavyKey, "64"))
+	assert.NoError(t, pt.Save(scalarKey, "16"))
+	defer pt.Reset(heavyKey)
+	defer pt.Reset(scalarKey)
+
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
 	scheduler := task.NewMockGlobalScheduler(t)
@@ -153,6 +167,10 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			ID:           1,
 			CollectionID: 2,
 			State:        commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
+			}},
 		},
 	}
 	meta.segments.SetSegment(seg1.ID, seg1)
@@ -171,11 +189,78 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			FieldID:      100,
 			IndexID:      3,
 			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{{
+				Key: common.IndexTypeKey, Value: "FMINDEX",
+			}},
 		},
 	}
 
-	scheduler.EXPECT().Enqueue(mock.Anything).Return()
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
+		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+	}).Return()
 	inspector.reloadFromMeta()
+}
+
+func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {
+	pt := paramtable.Get()
+	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
+	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
+	assert.NoError(t, pt.Save(heavyKey, "64"))
+	assert.NoError(t, pt.Save(scalarKey, "16"))
+	defer pt.Reset(heavyKey)
+	defer pt.Reset(scalarKey)
+
+	ctx := context.Background()
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storage := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	meta := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 2,
+		PartitionID:  3,
+		State:        commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
+		}},
+	}}
+	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
+		5: {
+			CollectionID: 2,
+			FieldID:      101,
+			IndexID:      5,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{{
+				Key: common.IndexTypeKey, Value: "FMINDEX",
+			}},
+		},
+	}
+
+	inspector := newIndexInspector(ctx, nil, meta, scheduler, alloc, handler, storage, versionManager)
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
+		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+	}).Return()
+
+	assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
 }
 
 func TestIndexInspector_isExternalCollection(t *testing.T) {
@@ -319,6 +404,12 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 		}
 		m.segments.SetSegment(segment.GetID(), segment)
 
+		handler.EXPECT().GetCollection(mock.Anything, int64(2)).Return(&collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"}},
+			},
+		}, nil).Maybe()
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 		scheduler.EXPECT().Enqueue(mock.Anything).Return()
@@ -391,76 +482,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	assert.Equal(t, "DISKANN", segIdx.IndexType)
 }
 
-func TestGetSegmentBinlogFields(t *testing.T) {
-	t.Run("uses ChildFields not FieldID", func(t *testing.T) {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				Binlogs: []*datapb.FieldBinlog{
-					{
-						FieldID:     0, // columnGroupID
-						ChildFields: []int64{100, 101, 102},
-					},
-					{
-						FieldID:     1, // another columnGroupID
-						ChildFields: []int64{200},
-					},
-				},
-			},
-		}
-		fields := getSegmentBinlogFields(segment)
-		assert.Contains(t, fields, int64(100))
-		assert.Contains(t, fields, int64(101))
-		assert.Contains(t, fields, int64(102))
-		assert.Contains(t, fields, int64(200))
-		// columnGroupIDs should NOT be in the result
-		assert.NotContains(t, fields, int64(0))
-		assert.NotContains(t, fields, int64(1))
-	})
-
-	t.Run("legacy FieldID fallback when ChildFields empty", func(t *testing.T) {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				StorageVersion: storage.StorageV1,
-				Binlogs: []*datapb.FieldBinlog{
-					{FieldID: 101},
-					{FieldID: 0, ChildFields: []int64{100, 102}},
-				},
-			},
-		}
-		fields := getSegmentBinlogFields(segment)
-		assert.Contains(t, fields, int64(101))
-		assert.Contains(t, fields, int64(100))
-		assert.Contains(t, fields, int64(102))
-		assert.NotContains(t, fields, int64(0))
-	})
-
-	t.Run("packed storage ignores FieldID fallback when ChildFields empty", func(t *testing.T) {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				StorageVersion: storage.StorageV3,
-				Binlogs: []*datapb.FieldBinlog{
-					{FieldID: 101},
-					{FieldID: 0, ChildFields: []int64{100, 102}},
-				},
-			},
-		}
-		fields := getSegmentBinlogFields(segment)
-		assert.NotContains(t, fields, int64(101))
-		assert.Contains(t, fields, int64(100))
-		assert.Contains(t, fields, int64(102))
-		assert.NotContains(t, fields, int64(0))
-	})
-
-	t.Run("empty binlogs", func(t *testing.T) {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{Binlogs: nil},
-		}
-		fields := getSegmentBinlogFields(segment)
-		assert.Empty(t, fields)
-	})
-}
-
-func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
+func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
@@ -505,19 +527,17 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 	m.collections.Insert(collID, collInfo)
 	handler.EXPECT().GetCollection(mock.Anything, collID).Return(collInfo, nil).Maybe()
 
-	t.Run("create function output index when binlog exists", func(t *testing.T) {
+	t.Run("build function output index when collection has no schema change", func(t *testing.T) {
 		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
 			5: {CollectionID: collID, FieldID: 102, IndexID: 5, IndexName: "bm25_idx"},
 		}
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: collID,
-				State:        commonpb.SegmentState_Flushed,
-				IsSorted:     true,
-				Binlogs: []*datapb.FieldBinlog{
-					{FieldID: 0, ChildFields: []int64{100, 101, 102}},
-				},
+				ID:             1,
+				CollectionID:   collID,
+				State:          commonpb.SegmentState_Flushed,
+				IsSorted:       true,
+				StorageVersion: storage.StorageV3,
 			},
 		}
 		m.segments.SetSegment(segment.GetID(), segment)
@@ -531,41 +551,17 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(5))
 	})
 
-	t.Run("skip function output index when binlog is missing", func(t *testing.T) {
-		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
-			6: {CollectionID: collID, FieldID: 102, IndexID: 6, IndexName: "bm25_idx_missing_binlog"},
-		}
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: collID,
-				State:        commonpb.SegmentState_Flushed,
-				IsSorted:     true,
-				Binlogs: []*datapb.FieldBinlog{
-					{FieldID: 0, ChildFields: []int64{100, 101}},
-				},
-			},
-		}
-		m.segments.SetSegment(segment.GetID(), segment)
-
-		err := inspector.createIndexesForSegment(ctx, segment)
-		assert.NoError(t, err)
-		assert.NotContains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(6))
-	})
-
-	t.Run("create non function output index when binlog is missing", func(t *testing.T) {
+	t.Run("build non function output index", func(t *testing.T) {
 		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
 			7: {CollectionID: collID, FieldID: 103, IndexID: 7, IndexName: "new_vector_idx"},
 		}
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           3,
-				CollectionID: collID,
-				State:        commonpb.SegmentState_Flushed,
-				IsSorted:     true,
-				Binlogs: []*datapb.FieldBinlog{
-					{FieldID: 0, ChildFields: []int64{100, 101}},
-				},
+				ID:             3,
+				CollectionID:   collID,
+				State:          commonpb.SegmentState_Flushed,
+				IsSorted:       true,
+				StorageVersion: storage.StorageV3,
 			},
 		}
 		m.segments.SetSegment(segment.GetID(), segment)
@@ -579,32 +575,31 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(7))
 	})
 
-	t.Run("create ready normal index while skipping missing function output", func(t *testing.T) {
+	// A segment behind the collection schema version defers every index,
+	// including non-function fields.
+	t.Run("skip whole segment when schema behind", func(t *testing.T) {
+		collInfo.Schema.Version = 5
+		defer func() { collInfo.Schema.Version = 0 }()
 		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
 			8: {CollectionID: collID, FieldID: 101, IndexID: 8, IndexName: "text_idx"},
-			9: {CollectionID: collID, FieldID: 102, IndexID: 9, IndexName: "bm25_idx_missing_binlog"},
+			9: {CollectionID: collID, FieldID: 102, IndexID: 9, IndexName: "bm25_idx"},
 		}
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           4,
-				CollectionID: collID,
-				State:        commonpb.SegmentState_Flushed,
-				IsSorted:     true,
-				Binlogs: []*datapb.FieldBinlog{
-					{FieldID: 0, ChildFields: []int64{100, 101}},
-				},
+				ID:             4,
+				CollectionID:   collID,
+				State:          commonpb.SegmentState_Flushed,
+				IsSorted:       true,
+				StorageVersion: storage.StorageV3,
+				SchemaVersion:  3,
 			},
 		}
 		m.segments.SetSegment(segment.GetID(), segment)
 
-		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12348), nil).Once()
-		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
-		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
-
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
 		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segment.GetID())
-		assert.Contains(t, segIndexes, UniqueID(8))
+		assert.NotContains(t, segIndexes, UniqueID(8))
 		assert.NotContains(t, segIndexes, UniqueID(9))
 	})
 
@@ -653,5 +648,91 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
 		assert.NotContains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(11))
+	})
+
+	t.Run("create V3 function output index when segment schema is caught up", func(t *testing.T) {
+		collInfo.Schema.Version = 5
+		defer func() { collInfo.Schema.Version = 0 }()
+		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			12: {CollectionID: collID, FieldID: 102, IndexID: 12, IndexName: "bm25_idx_v3_caughtup"},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             7,
+				CollectionID:   collID,
+				State:          commonpb.SegmentState_Flushed,
+				IsSorted:       true,
+				StorageVersion: storage.StorageV3,
+				SchemaVersion:  5,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101}},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12349), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(12))
+	})
+
+	t.Run("skip V3 function output index when segment schema is behind", func(t *testing.T) {
+		collInfo.Schema.Version = 5
+		defer func() { collInfo.Schema.Version = 0 }()
+		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			13: {CollectionID: collID, FieldID: 102, IndexID: 13, IndexName: "bm25_idx_v3_behind"},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             8,
+				CollectionID:   collID,
+				State:          commonpb.SegmentState_Flushed,
+				IsSorted:       true,
+				StorageVersion: storage.StorageV3,
+				SchemaVersion:  3,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101}},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.NotContains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(13))
+	})
+
+	t.Run("create V3 function output index when segment schema is ahead", func(t *testing.T) {
+		collInfo.Schema.Version = 5
+		defer func() { collInfo.Schema.Version = 0 }()
+		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			14: {CollectionID: collID, FieldID: 102, IndexID: 14, IndexName: "bm25_idx_v3_ahead"},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             9,
+				CollectionID:   collID,
+				State:          commonpb.SegmentState_Flushed,
+				IsSorted:       true,
+				StorageVersion: storage.StorageV3,
+				SchemaVersion:  6,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101}},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12350), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(14))
 	})
 }

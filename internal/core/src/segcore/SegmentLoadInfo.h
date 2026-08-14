@@ -1136,18 +1136,6 @@ class SegmentLoadInfo {
         int64_t segment_id) const;
 
     /**
-    * @brief Check if a field's index has raw data
-    *
-    * Determines whether the index for a given field contains raw data
-    * by querying the IndexFactory with the index parameters.
-    *
-    * @param load_index_info The LoadIndexInfo containing index parameters
-    * @return true if the index has raw data, false otherwise
-    */
-    [[nodiscard]] static bool
-    CheckIndexHasRawData(const LoadIndexInfo& load_index_info);
-
-    /**
      * @brief Convert a TextIndexStats to LoadTextIndexInfo
      *
      * This method converts the protobuf TextIndexStats to the
@@ -1231,24 +1219,32 @@ class SegmentLoadInfo {
                 &index_info, info_.segmentid());
             auto index_type_it =
                 load_index_info.index_params.find(milvus::index::INDEX_TYPE);
-            auto needs_file_context =
+            auto scalar_version_it = load_index_info.index_params.find(
+                milvus::index::SCALAR_INDEX_ENGINE_VERSION);
+            auto scalar_v3 =
                 !IsVectorDataType(load_index_info.field_type) &&
-                index_type_it != load_index_info.index_params.end() &&
-                index_type_it->second == milvus::index::HYBRID_INDEX_TYPE;
+                scalar_version_it != load_index_info.index_params.end() &&
+                std::stoi(scalar_version_it->second) >= 3;
+            auto needs_file_context =
+                scalar_v3 ||
+                (!IsVectorDataType(load_index_info.field_type) &&
+                 index_type_it != load_index_info.index_params.end() &&
+                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
+            auto request =
+                milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                    load_index_info.field_type,
+                    load_index_info.element_type,
+                    load_index_info.index_engine_version,
+                    load_index_info.index_size,
+                    load_index_info.index_params,
+                    load_index_info.enable_mmap,
+                    load_index_info.num_rows,
+                    load_index_info.dim);
             if (!needs_file_context) {
-                load_index_info.load_resource_request =
-                    milvus::index::IndexFactory::GetInstance()
-                        .IndexLoadResource(load_index_info.field_type,
-                                           load_index_info.element_type,
-                                           load_index_info.index_engine_version,
-                                           load_index_info.index_size,
-                                           load_index_info.index_params,
-                                           load_index_info.enable_mmap,
-                                           load_index_info.num_rows,
-                                           load_index_info.dim);
+                load_index_info.load_resource_request = request;
             }
-            // Check if index has raw data before moving
-            if (CheckIndexHasRawData(load_index_info)) {
+            if (milvus::index::IndexFactory::CanUseIndexRawDataForField(
+                    load_index_info.field_type, request.has_raw_data)) {
                 field_index_has_raw_data_.insert(field_id);
             }
             if (load_index_info.field_type == DataType::JSON) {

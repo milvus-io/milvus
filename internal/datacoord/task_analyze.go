@@ -171,16 +171,25 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		if info == nil {
 			log.Warn(context.TODO(), "analyze task is processing, but segment is nil, fail the task",
 				mlog.FieldSegmentID(segID))
-			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
+			if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFailed,
+				fmt.Sprintf("segmentInfo with ID: %d is nil", segID)); err != nil {
+				// State is left untouched, so the scheduler re-enqueues the task and retries.
+				log.Warn(context.TODO(), "failed to persist the failed state of the analyze task", mlog.Err(err))
+			}
 			return
 		}
 		totalSegmentsRows += info.GetNumOfRows()
-		binlogIDs := getBinLogIDs(info, task.FieldID)
-		req.SegmentStats[segID] = &indexpb.SegmentStats{
+		stats := &indexpb.SegmentStats{
 			ID:      segID,
 			NumRows: info.GetNumOfRows(),
-			LogIDs:  binlogIDs,
 		}
+		// StorageV3 segments are read via manifest; V1 via logIDs. Exactly one.
+		if manifest := info.GetManifestPath(); manifest != "" {
+			stats.ManifestPath = manifest
+		} else {
+			stats.LogIDs = getBinLogIDs(info, task.FieldID)
+		}
+		req.SegmentStats[segID] = stats
 	}
 
 	// Extract dim from schema field TypeParams for vector clustering key.
@@ -202,7 +211,10 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 						mlog.Float64("raw data size", totalSegmentsRawDataSize),
 						mlog.Int64("num clusters", numClusters),
 						mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					at.SetState(indexpb.JobState_JobStateFinished, "")
+					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
+						// State is left untouched, so the scheduler re-enqueues the task and retries.
+						log.Warn(context.TODO(), "failed to persist the finished state of the analyze task", mlog.Err(err))
+					}
 					return
 				}
 				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {

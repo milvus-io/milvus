@@ -361,6 +361,13 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
             sync_with_index_.store(true);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing sparse index add error: {}", error.what());
+            // Known design defect: after a raw-data-owning interim index has
+            // synchronized, its source chunks may have been reclaimed and
+            // field_raw_data is no longer a complete recovery source. This
+            // catch is reachable when AddWithDataset fails, but recreating the
+            // index here is not a valid recovery path and must not exist under
+            // single-owner semantics. The failure should instead be propagated
+            // and the segment marked unrecoverable.
             recreate_index(get_data_type(), field_raw_data);
         }
     } else {
@@ -387,6 +394,14 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                 index_->AddWithDataset(dataset, conf);
             } catch (SegcoreError& error) {
                 LOG_ERROR("growing sparse index add error: {}", error.what());
+                // Known design defect: after a raw-data-owning interim index
+                // has synchronized, its source chunks may have been reclaimed
+                // and field_raw_data is no longer a complete recovery source.
+                // This catch is reachable when AddWithDataset fails, but
+                // recreating the index here is not a valid recovery path and
+                // must not exist under single-owner semantics. The failure
+                // should instead be propagated and the segment marked
+                // unrecoverable.
                 recreate_index(get_data_type(), field_raw_data);
             }
         }
@@ -497,6 +512,13 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             sync_with_index_.store(true);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index add error: {}", error.what());
+            // Known design defect: after a raw-data-owning interim index has
+            // synchronized, its source chunks may have been reclaimed and
+            // field_raw_data is no longer a complete recovery source. This
+            // catch is reachable when AddWithDataset fails, but recreating the
+            // index here is not a valid recovery path and must not exist under
+            // single-owner semantics. The failure should instead be propagated
+            // and the segment marked unrecoverable.
             recreate_index(get_data_type(), field_raw_data);
         }
     } else {
@@ -525,6 +547,14 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 index_->AddWithDataset(dataset, conf);
             } catch (SegcoreError& error) {
                 LOG_ERROR("growing index add error: {}", error.what());
+                // Known design defect: after a raw-data-owning interim index
+                // has synchronized, its source chunks may have been reclaimed
+                // and field_raw_data is no longer a complete recovery source.
+                // This catch is reachable when AddWithDataset fails, but
+                // recreating the index here is not a valid recovery path and
+                // must not exist under single-owner semantics. The failure
+                // should instead be propagated and the segment marked
+                // unrecoverable.
                 recreate_index(get_data_type(), field_raw_data);
             }
         }
@@ -655,7 +685,7 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                 stream_data->scalars().has_geometry_data()) {
                 const auto& geometry_array =
                     stream_data->scalars().geometry_data();
-                const auto& valid_data = stream_data->valid_data();
+                const auto& valid_data = GetFieldDataRowValidData(*stream_data);
 
                 // Create accessor for DataArray
                 auto accessor = [&geometry_array, &valid_data](

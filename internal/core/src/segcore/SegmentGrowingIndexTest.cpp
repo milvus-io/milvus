@@ -52,6 +52,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "storage/FileManager.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -369,62 +370,171 @@ TEST_P(GrowingIndexTest, Correctness) {
     }
 }
 
-TEST(GrowingIndex, GrowingSourceFlushDoesNotRetainIndexedVectorChunks) {
-    constexpr int64_t dim = 4;
-    constexpr int64_t row_count = 100;
+class GrowingIndexRawOwnershipTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        schema_ = std::make_shared<Schema>();
+        pk_ = schema_->AddDebugField("pk", DataType::INT64);
+        vec_ = schema_->AddDebugField("embeddings",
+                                      DataType::VECTOR_FLOAT,
+                                      dim,
+                                      knowhere::metric::L2,
+                                      true);
+        schema_->set_primary_field_id(pk_);
 
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    schema->set_primary_field_id(pk);
+        std::map<std::string, std::string> index_params = {
+            {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+            {"metric_type", knowhere::metric::L2},
+            {"nlist", "1"}};
+        std::map<std::string, std::string> type_params = {
+            {"dim", std::to_string(dim)}};
+        FieldIndexMeta field_index_meta(
+            vec_, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_map = {
+            {vec_, field_index_meta}};
+        meta_ =
+            std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
 
-    std::map<std::string, std::string> index_params = {
-        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
-        {"metric_type", knowhere::metric::L2},
-        {"nlist", "1"}};
-    std::map<std::string, std::string> type_params = {
-        {"dim", std::to_string(dim)}};
-    FieldIndexMeta field_index_meta(
-        vec, std::move(index_params), std::move(type_params));
-    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
-    IndexMetaPtr meta =
-        std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
+        InterimIndexConfigForTest interim_config;
+        interim_config.chunk_rows = 16;
+        interim_config.nlist = 1;
+        interim_config.nprobe = 1;
+        interim_config.dense_vector_interim_index_type =
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+        interim_config.sub_dim = dim;
+        interim_config.refine_ratio = 1.0F;
+        interim_config.refine_quant_type = "NONE";
+        interim_config.refine_with_quant_flag = false;
+        ApplyInterimIndexConfigForTest(interim_config, config_);
+        config_.set_storage_v3_enabled(true);
+        config_.set_enable_growing_source_flush(true);
+    }
 
-    auto& config = SegcoreConfig::default_config();
-    ScopedSegcoreConfigRestore config_restore(config);
-    InterimIndexConfigForTest interim_config;
-    interim_config.chunk_rows = 16;
-    interim_config.nlist = 1;
-    interim_config.nprobe = 1;
-    interim_config.dense_vector_interim_index_type =
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
-    interim_config.sub_dim = dim;
-    interim_config.refine_ratio = 1.0F;
-    interim_config.refine_quant_type = "NONE";
-    interim_config.refine_with_quant_flag = false;
-    ApplyInterimIndexConfigForTest(interim_config, config);
-    config.set_storage_v3_enabled(true);
-    config.set_enable_growing_source_flush(true);
-
-    auto insert = [&](SegmentGrowing* segment) {
-        auto dataset = DataGen(schema, row_count);
+    GeneratedData
+    InsertBatch(SegmentGrowing* segment, uint64_t seed) const {
+        auto dataset = DataGen(schema_, row_count, seed);
         auto offset = segment->PreInsert(row_count);
         segment->Insert(offset,
                         row_count,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
                         dataset.raw_);
-    };
+        return dataset;
+    }
 
-    auto segment = CreateGrowingSegment(schema, meta, 1, config);
+    FieldDataPtr
+    CreateNullableFloatFieldData(const DataArray& data) const {
+        std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+        const auto& valid_data = GetFieldDataRowValidData(data);
+        for (int64_t i = 0; i < row_count; ++i) {
+            if (valid_data[i]) {
+                valid_bitmap[i / 8] |= uint8_t{1} << (i % 8);
+            }
+        }
+
+        auto field_data = storage::CreateFieldData(
+            DataType::VECTOR_FLOAT, DataType::NONE, true, dim, row_count);
+        field_data->FillFieldData(data.vectors().float_vector().data().data(),
+                                  valid_bitmap.data(),
+                                  row_count,
+                                  0);
+        return field_data;
+    }
+
+    void
+    AssertNullableFloatDataEqual(const DataArray& actual,
+                                 const DataArray& expected) const {
+        const auto& actual_valid_data = GetFieldDataRowValidData(actual);
+        const auto& expected_valid_data = GetFieldDataRowValidData(expected);
+        ASSERT_EQ(actual_valid_data.size(), expected_valid_data.size());
+        for (int i = 0; i < actual_valid_data.size(); ++i) {
+            EXPECT_EQ(actual_valid_data[i], expected_valid_data[i]);
+        }
+
+        const auto& actual_values = actual.vectors().float_vector().data();
+        const auto& expected_values = expected.vectors().float_vector().data();
+        ASSERT_FALSE(expected_values.empty());
+        ASSERT_EQ(actual_values.size(), expected_values.size());
+        for (int i = 0; i < actual_values.size(); ++i) {
+            EXPECT_FLOAT_EQ(actual_values[i], expected_values[i]);
+        }
+    }
+
+    static constexpr int64_t dim = 4;
+    static constexpr int64_t row_count = 100;
+
+    SegcoreConfig& config_ = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore_{config_};
+    SchemaPtr schema_;
+    FieldId pk_;
+    FieldId vec_;
+    IndexMetaPtr meta_;
+};
+
+TEST_F(GrowingIndexRawOwnershipTest,
+       InsertAfterSynchronizationDoesNotRepopulateRawData) {
+    auto segment = CreateGrowingSegment(schema_, meta_, 1, config_);
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
-    insert(segment.get());
-    EXPECT_EQ(segment_impl->get_insert_record().get_data_base(vec)->num_chunk(),
-              0);
-    EXPECT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec));
+    InsertBatch(segment.get(), 42);
+    auto* raw_vector = segment_impl->get_insert_record().get_data_base(vec_);
+    ASSERT_EQ(raw_vector->num_chunk(), 0);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_));
+    const auto raw_logical_count =
+        raw_vector->get_offset_mapping().GetTotalCount();
+    ASSERT_EQ(raw_logical_count, row_count);
+
+    auto second_batch = InsertBatch(segment.get(), 43);
+
+    EXPECT_EQ(segment->get_row_count(), 2 * row_count);
+    EXPECT_EQ(raw_vector->num_chunk(), 0);
+    EXPECT_EQ(raw_vector->get_offset_mapping().GetTotalCount(),
+              raw_logical_count);
+
+    std::vector<int64_t> offsets(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        offsets[i] = row_count + i;
+    }
+    auto actual =
+        segment_impl->bulk_subscript(nullptr, vec_, offsets.data(), row_count);
+    auto expected = second_batch.get_col(vec_);
+    AssertNullableFloatDataEqual(*actual, *expected);
+}
+
+TEST_F(GrowingIndexRawOwnershipTest,
+       LoadAfterSynchronizationPreservesValidityWithoutRawData) {
+    auto segment = CreateGrowingSegment(schema_, meta_, 1, config_);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    InsertBatch(segment.get(), 42);
+    auto* raw_vector = segment_impl->get_insert_record().get_data_base(vec_);
+    ASSERT_EQ(raw_vector->num_chunk(), 0);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_));
+    const auto raw_logical_count =
+        raw_vector->get_offset_mapping().GetTotalCount();
+    ASSERT_EQ(raw_logical_count, row_count);
+
+    auto second_batch = DataGen(schema_, row_count, 44);
+    auto expected = second_batch.get_col(vec_);
+    auto field_data = CreateNullableFloatFieldData(*expected);
+    auto offset = segment->PreInsert(row_count);
+    segment_impl->load_field_data_common(
+        vec_, offset, {field_data}, pk_, row_count);
+
+    EXPECT_EQ(raw_vector->num_chunk(), 0);
+    EXPECT_EQ(raw_vector->get_offset_mapping().GetTotalCount(),
+              raw_logical_count);
+
+    std::vector<int64_t> offsets(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        offsets[i] = row_count + i;
+    }
+    auto actual =
+        segment_impl->bulk_subscript(nullptr, vec_, offsets.data(), row_count);
+    AssertNullableFloatDataEqual(*actual, *expected);
 }
 
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {

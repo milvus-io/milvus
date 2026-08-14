@@ -25,6 +25,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -321,6 +322,45 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType element_type,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs);
+
+// Streams the field's data out of a storage-v3 manifest batch by batch,
+// invoking `consumer` on the calling thread in batch order. Batch decoding
+// (external-type normalization + FieldData materialization) runs in
+// parallel on the LOW (background) thread pool and overlaps with the next
+// prefetch round. The number of undelivered batches is bounded by a byte
+// budget charged on each batch's *input* arrow bytes, so it caps the decode
+// window only, and only in input terms: normalization can inflate the
+// decoded FieldData beyond its arrow source, and the reader's own prefetch
+// window, arrow's buffers and the consumer's own retention are additional
+// on top. Concurrent builds multiply all of them. Prefer this over
+// GetFieldDatasFromManifest when the caller can process batches
+// incrementally (e.g. spilling to a local file) instead of holding the
+// whole column in memory.
+//
+// `max_inflight_bytes` sizes that window. For a streaming caller it replaces
+// full-column retention, so the default is generous; a caller that retains
+// everything anyway (see kAccumulatingInflightBytes) gains nothing from a
+// large window and should pass a small one, because for it the window is
+// pure additional peak memory on top of the column.
+constexpr int64_t kStreamingInflightBytes = 512LL << 20;
+
+// Window for callers that accumulate the whole column regardless. The decoded
+// batches are retained either way, so the only memory the window adds is the
+// source arrow batches held alive by in-flight decode futures; a few batches
+// are enough to keep fetch and decode overlapped.
+constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
+
+void
+IterateFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const std::function<void(FieldDataPtr)>& consumer,
+    int64_t max_inflight_bytes = kStreamingInflightBytes);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(

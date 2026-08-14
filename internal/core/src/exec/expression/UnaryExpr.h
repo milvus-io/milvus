@@ -499,7 +499,7 @@ struct UnaryElementFuncForArray {
                                        ValueType>;
     void
     operator()(const ArrayView* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t size,
                const ValueType& val,
                int index,
@@ -532,7 +532,7 @@ struct UnaryElementFuncForArray {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -881,7 +881,7 @@ class ShreddingExecutor {
 
     void
     operator()(const GetType* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
@@ -891,7 +891,7 @@ class ShreddingExecutor {
                       "shredding data");
         } else {
             ExecuteOperation(src, size, res);
-            HandleValidData(valid, size, res, valid_res);
+            ApplyValidMask(valid, res, valid_res, size);
         }
     }
 
@@ -899,20 +899,6 @@ class ShreddingExecutor {
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
         BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
-    }
-
-    void
-    HandleValidData(const bool* valid,
-                    size_t size,
-                    TargetBitmapView res,
-                    TargetBitmapView valid_res) {
-        if (valid != nullptr) {
-            for (int i = 0; i < size; ++i) {
-                if (!valid[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
     }
 
     proto::plan::OpType op_type_;
@@ -932,12 +918,12 @@ class ShreddingArrayBsonExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -1008,8 +994,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
              expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
-            auto schema = segment->get_schema();
-            auto field_meta = schema[field_id];
+            auto schema = segment->get_schema_snapshot();
+            auto field_meta = (*schema)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =
@@ -1076,6 +1062,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     GetActiveCount() const {
         return active_count_;
     }
+
+    // The concrete string literal to hand to a scalar index's ShouldUseOp cost
+    // guard, for the anchored pattern ops (PrefixMatch/PostfixMatch/InnerMatch)
+    // whose index cost depends on the literal. Empty for every other op
+    // (including the equality family, which FMINDEX declines outright), so the
+    // guard is judged on the op alone. Lets FMINDEX decline degenerate high-hit
+    // LIKE literals to the raw-data scan on the VARCHAR path.
+    std::string
+    StringLiteralForCostGuard() const;
 
     // Check if ngram index can be used (index exists + literal is valid + no offset input)
     bool
@@ -1171,7 +1166,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};

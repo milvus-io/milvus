@@ -18,14 +18,39 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func getActiveWALName() message.WALName {
+	return streamingutil.MustSelectWALName()
+}
+
+func getMaxSingleRowSize(walName message.WALName) (int, bool) {
+	switch walName {
+	case message.WALNamePulsar:
+		limit := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+		return limit, limit > 0
+	case message.WALNameKafka:
+		limit := Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+		return limit, limit > 0
+	case message.WALNameRocksmq, message.WALNameWoodpecker:
+		// RocksMQ page size and Woodpecker batch size are not hard limits
+		// on an individual WAL entry.
+		return 0, false
+	default:
+		return 0, false
+	}
+}
 
 func genInsertMsgsByPartition(ctx context.Context,
 	segmentID UniqueID,
@@ -34,8 +59,12 @@ func genInsertMsgsByPartition(ctx context.Context,
 	rowOffsets []int,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
+	walName message.WALName,
 ) ([]msgstream.TsMsg, error) {
-	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	// Keep the existing cross-WAL packing threshold separate from the
+	// backend-specific hard limit for a row that cannot be split further.
+	splitThreshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	singleRowLimit, hasSingleRowLimit := getMaxSingleRowSize(walName)
 
 	// create empty insert message
 	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
@@ -77,11 +106,16 @@ func genInsertMsgsByPartition(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
+		if hasSingleRowLimit && curRowMessageSize >= singleRowLimit {
+			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"single row at offset %d is too large to fit in one WAL message: estimated size=%d bytes, limit=%d bytes",
+				offset, curRowMessageSize, singleRowLimit,
+			))
+		}
 
 		// If the insert message size exceeds the threshold, flush the current
-		// message first. A single row can be larger than the threshold, so do
-		// not emit an empty message before adding that row.
-		if msg.NumRows > 0 && requestSize+curRowMessageSize >= threshold {
+		// message first.
+		if msg.NumRows > 0 && requestSize+curRowMessageSize >= splitThreshold {
 			repackedMsgs = append(repackedMsgs, msg)
 			msg = createInsertMsg(segmentID, channelName)
 			requestSize = 0
