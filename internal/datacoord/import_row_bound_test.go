@@ -226,31 +226,67 @@ func withExpansionFactor(t *testing.T, factor string) {
 	t.Cleanup(func() { paramtable.Get().Reset(key) })
 }
 
+// sized builds the input sizeReservations expects: one record per file, carrying
+// the row bound and whether it is exact.
+func sized(rows []int64, exacts []bool) []fileSizing {
+	out := make([]fileSizing, len(rows))
+	for i, r := range rows {
+		out[i] = fileSizing{file: &internalpb.ImportFile{}, rows: r, exact: exacts[i]}
+	}
+	return out
+}
+
+func reservedIDs(sizings []fileSizing) []int64 {
+	out := make([]int64, len(sizings))
+	for i, s := range sizings {
+		out[i] = s.reservedIDs
+	}
+	return out
+}
+
 func Test_sizeReservations(t *testing.T) {
 	t.Run("exact gets the expansion factor, estimate does not", func(t *testing.T) {
 		withExpansionFactor(t, "10")
-		bounds := []int64{100, 100}
-		require.NoError(t, sizeReservations(bounds, []bool{true, false}))
-		assert.Equal(t, []int64{1000, 100}, bounds)
+		sizings := sized([]int64{100, 100}, []bool{true, false})
+		require.NoError(t, sizeReservations(sizings))
+		assert.Equal(t, []int64{1000, 100}, reservedIDs(sizings))
 	})
 
 	t.Run("a zero bound is floored to one id", func(t *testing.T) {
 		withExpansionFactor(t, "10")
 		// An empty range reads as "no range" on the datanode and silently falls back
 		// to the local allocator, which is the divergence this mechanism prevents.
-		bounds := []int64{0, 0}
-		require.NoError(t, sizeReservations(bounds, []bool{true, false}))
-		assert.Equal(t, []int64{1, 1}, bounds)
+		sizings := sized([]int64{0, 0}, []bool{true, false})
+		require.NoError(t, sizeReservations(sizings))
+		assert.Equal(t, []int64{1, 1}, reservedIDs(sizings))
 	})
 
 	t.Run("bounds are never shrunk to fit an allocation ceiling", func(t *testing.T) {
 		withExpansionFactor(t, "1")
 		// Scaling an estimate down would break the upper-bound guarantee that makes
 		// it usable at all; reserveRanges splits the allocation instead.
-		bounds := []int64{3 * math.MaxUint32, math.MaxUint32}
-		require.NoError(t, sizeReservations(bounds, []bool{false, false}))
-		assert.Equal(t, []int64{3 * math.MaxUint32, math.MaxUint32}, bounds)
+		sizings := sized([]int64{3 * math.MaxUint32, math.MaxUint32}, []bool{false, false})
+		require.NoError(t, sizeReservations(sizings))
+		assert.Equal(t, []int64{3 * math.MaxUint32, math.MaxUint32}, reservedIDs(sizings))
 	})
+}
+
+// reserved builds the input reserveRanges expects: one record per file, already
+// carrying its id reservation.
+func reserved(ids ...int64) []fileSizing {
+	out := make([]fileSizing, len(ids))
+	for i, n := range ids {
+		out[i] = fileSizing{file: &internalpb.ImportFile{}, reservedIDs: n}
+	}
+	return out
+}
+
+func sizingFiles(sizings []fileSizing) []*internalpb.ImportFile {
+	out := make([]*internalpb.ImportFile, len(sizings))
+	for i, s := range sizings {
+		out[i] = s.file
+	}
+	return out
 }
 
 func Test_reserveRanges(t *testing.T) {
@@ -287,8 +323,9 @@ func Test_reserveRanges(t *testing.T) {
 
 	t.Run("one batch when the total fits", func(t *testing.T) {
 		var calls []int64
-		files := []*internalpb.ImportFile{{}, {}, {}}
-		require.NoError(t, reserveRanges([]int64{10, 20, 30}, files, newAlloc(&calls, nil), 0))
+		sizings := reserved(10, 20, 30)
+		require.NoError(t, reserveRanges(sizings, newAlloc(&calls, nil), 0))
+		files := sizingFiles(sizings)
 		assert.Equal(t, []int64{60}, calls)
 		assert.Equal(t, []int64{10, 20, 30}, widths(files))
 		assert.Equal(t, files[0].GetPkIdEnd(), files[1].GetPkIdBegin())
@@ -298,9 +335,10 @@ func Test_reserveRanges(t *testing.T) {
 	t.Run("a total above the ceiling is split, and every file keeps its full width", func(t *testing.T) {
 		var calls []int64
 		half := maxIDsPerAllocBatch / 2
-		files := []*internalpb.ImportFile{{}, {}, {}}
+		sizings := reserved(half, half, half)
 		// half+half fills one batch exactly; the third opens a new one.
-		require.NoError(t, reserveRanges([]int64{half, half, half}, files, newAlloc(&calls, nil), 0))
+		require.NoError(t, reserveRanges(sizings, newAlloc(&calls, nil), 0))
+		files := sizingFiles(sizings)
 		assert.Equal(t, []int64{2 * half, half}, calls)
 		assert.Equal(t, []int64{half, half, half}, widths(files),
 			"no reservation is shrunk to fit the ceiling")
@@ -310,8 +348,9 @@ func Test_reserveRanges(t *testing.T) {
 		var calls []int64
 		var blocks []block
 		b := maxIDsPerAllocBatch / 3 * 2
-		files := []*internalpb.ImportFile{{}, {}, {}}
-		require.NoError(t, reserveRanges([]int64{b, b, b}, files, newAlloc(&calls, &blocks), 0))
+		sizings := reserved(b, b, b)
+		require.NoError(t, reserveRanges(sizings, newAlloc(&calls, &blocks), 0))
+		files := sizingFiles(sizings)
 		assert.Equal(t, []int64{b, b, b}, calls, "two of these never fit together")
 		assert.Equal(t, []int64{b, b, b}, widths(files))
 		for i, f := range files {
@@ -321,18 +360,17 @@ func Test_reserveRanges(t *testing.T) {
 
 	t.Run("a single file wider than one batch is a clean error", func(t *testing.T) {
 		var calls []int64
-		files := []*internalpb.ImportFile{{}}
-		err := reserveRanges([]int64{maxIDsPerAllocBatch + 1}, files, newAlloc(&calls, nil), 0)
+		err := reserveRanges(reserved(maxIDsPerAllocBatch+1), newAlloc(&calls, nil), 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "more than one allocation batch holds")
 		assert.Empty(t, calls, "nothing is allocated once the request is rejected")
 	})
 
 	t.Run("all-zero bounds allocate nothing and terminate", func(t *testing.T) {
-		files := []*internalpb.ImportFile{{}, {}}
-		require.NoError(t, reserveRanges([]int64{0, 0}, files,
+		sizings := reserved(0, 0)
+		require.NoError(t, reserveRanges(sizings,
 			func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 0))
-		assert.Equal(t, []int64{0, 0}, widths(files))
+		assert.Equal(t, []int64{0, 0}, widths(sizingFiles(sizings)))
 	})
 }
 
@@ -348,12 +386,11 @@ func Test_computeFileRowUpperBounds_decoderPanicBecomesError(t *testing.T) {
 	defer mk.UnPatch()
 
 	files := []*internalpb.ImportFile{{Paths: []string{"a.npy"}}}
-	bounds, exacts, err := computeFileRowUpperBounds(
+	sizings, err := computeFileRowUpperBounds(
 		context.Background(), mocks.NewChunkManager(t), schemaVec(8, 0), files)
 	require.Error(t, err, "a panicked sizing task must surface as an error, not be swallowed")
 	assert.Contains(t, err.Error(), "decoder blew up")
-	assert.Nil(t, bounds)
-	assert.Nil(t, exacts)
+	assert.Nil(t, sizings)
 }
 
 // A 5 GiB all-VarChar .json is well under maxImportFileSizeInGB (16) and used to be
@@ -389,16 +426,14 @@ func Test_assignPKRangesToFiles_largeVarcharJSONIsAccepted(t *testing.T) {
 // value. numpy.NumRows returns shape[0] unclamped, so the count is reachable.
 func Test_sizeReservations_rejectsExactCountOverOneBatch(t *testing.T) {
 	withExpansionFactor(t, "2")
-	bounds := []int64{maxIDsPerAllocBatch + 1}
-	err := sizeReservations(bounds, []bool{true})
+	err := sizeReservations(sized([]int64{maxIDsPerAllocBatch + 1}, []bool{true}))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "more than one allocation batch can reserve")
 
 	// An estimate is not an exact count and keeps its own path: reserveRanges
 	// still reports it, with the wording that explains the estimate.
-	bounds = []int64{maxIDsPerAllocBatch + 1}
-	assert.NoError(t, sizeReservations(bounds, []bool{false}))
+	assert.NoError(t, sizeReservations(sized([]int64{maxIDsPerAllocBatch + 1}, []bool{false})))
 }
 
 func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing.T) {

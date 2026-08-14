@@ -34,8 +34,22 @@ import (
 // maxIDsPerAllocBatch mirrors the per-call ceiling of rootCoordAllocator.AllocN.
 const maxIDsPerAllocBatch = int64(math.MaxUint32)
 
+// fileSizing carries one import file through the three reservation stages. rows
+// and reservedIDs are deliberately separate fields: a row count is not an id
+// count, and the expansion factor turns one into the other in the middle stage.
+type fileSizing struct {
+	file *internalpb.ImportFile
+	// rows is the upper bound on the file's row count, exact when the format
+	// records it (parquet footer, npy header shape) and a byte-derived
+	// over-estimate otherwise.
+	rows  int64
+	exact bool
+	// reservedIDs is how many ids the file gets, filled by sizeReservations.
+	reservedIDs int64
+}
+
 // assignPKRangesToFiles computes a per-file row upper bound, allocates one
-// contiguous primary-namespace id block sized Σbound via allocN, then writes each
+// contiguous primary-namespace id block sized Σ reservedIDs via allocN, then writes each
 // file its own contiguous [PkIdBegin, PkIdEnd) slice in the given files order.
 // It is called on the PRIMARY at import broadcast for non-backup autoID imports;
 // the ranges then travel on the replicated ImportMsg so both clusters derive
@@ -45,14 +59,14 @@ func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile,
 	allocN func(int64) (int64, int64, error), clusterID uint64,
 ) error {
-	bounds, exacts, err := computeFileRowUpperBounds(ctx, cm, schema, files)
+	sizings, err := computeFileRowUpperBounds(ctx, cm, schema, files)
 	if err != nil {
 		return err
 	}
-	if err := sizeReservations(bounds, exacts); err != nil {
+	if err := sizeReservations(sizings); err != nil {
 		return err
 	}
-	return reserveRanges(bounds, files, allocN, clusterID)
+	return reserveRanges(sizings, allocN, clusterID)
 }
 
 // computeFileRowUpperBounds sizes every file concurrently. Sizing is object-store
@@ -61,9 +75,8 @@ func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
 // serially would turn a millisecond RPC into a minutes-long one.
 func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile,
-) ([]int64, []bool, error) {
-	bounds := make([]int64, len(files))
-	exacts := make([]bool, len(files))
+) ([]fileSizing, error) {
+	sizings := make([]fileSizing, len(files))
 	// Conceal panics so a decoder crash fails this import instead of the process.
 	// conc.Submit's recover already stores the panic in the future before
 	// re-throwing; concealing stops ants from re-panicking on a worker goroutine,
@@ -76,18 +89,18 @@ func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 	for i, f := range files {
 		i, f := i, f
 		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			b, exact, err := importutilv2.RowCountUpperBound(ctx, cm, schema, f)
+			rows, exact, err := importutilv2.RowCountUpperBound(ctx, cm, schema, f)
 			if err != nil {
 				return struct{}{}, err
 			}
-			bounds[i], exacts[i] = b, exact
+			sizings[i] = fileSizing{file: f, rows: rows, exact: exact}
 			return struct{}{}, nil
 		}))
 	}
 	if err := conc.AwaitAll(futures...); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return bounds, exacts, nil
+	return sizings, nil
 }
 
 // sizeReservations turns per-file row counts into per-file id reservations.
@@ -105,13 +118,14 @@ func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 // is only usable because it is guaranteed not to under-count, and scaling it down
 // would break that guarantee and surface as a mid-import failure on the datanode.
 // reserveRanges splits the allocation across batches instead.
-func sizeReservations(bounds []int64, exacts []bool) error {
+func sizeReservations(sizings []fileSizing) error {
 	factor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 	if factor < 1 {
 		factor = 1
 	}
-	for i, b := range bounds {
-		if exacts[i] {
+	for i := range sizings {
+		b := sizings[i].rows
+		if sizings[i].exact {
 			// A file needing more ids than one batch holds can never be reserved
 			// contiguously, and clamping it here would hand back fewer ids than the
 			// file has rows -- a silent under-reservation in a mechanism whose whole
@@ -137,7 +151,7 @@ func sizeReservations(bounds []int64, exacts []bool) error {
 		if b < 1 {
 			b = 1
 		}
-		bounds[i] = b
+		sizings[i].reservedIDs = b
 	}
 	return nil
 }
@@ -148,14 +162,14 @@ func sizeReservations(bounds []int64, exacts []bool) error {
 // two batches, so every range stays contiguous while the import as a whole is not
 // capped at one batch: the reservation total may exceed the ceiling, only a single
 // file may not.
-func reserveRanges(bounds []int64, files []*internalpb.ImportFile,
+func reserveRanges(sizings []fileSizing,
 	allocN func(int64) (int64, int64, error), clusterID uint64,
 ) error {
-	for i := 0; i < len(bounds); {
+	for i := 0; i < len(sizings); {
 		var batch int64
 		j := i
-		for ; j < len(bounds); j++ {
-			if bounds[j] > maxIDsPerAllocBatch {
+		for ; j < len(sizings); j++ {
+			if sizings[j].reservedIDs > maxIDsPerAllocBatch {
 				// For a format that records no row count the number below is an upper
 				// bound derived from the file size, so it can exceed the ceiling on a
 				// file holding far fewer rows. Say so, or the operator reads it as a
@@ -164,12 +178,12 @@ func reserveRanges(bounds []int64, files []*internalpb.ImportFile,
 					"import file %d needs up to %d primary keys, more than one allocation batch holds (max %d); "+
 						"for json/csv this is an upper bound derived from the file size -- split the file, "+
 						"or use parquet/numpy, which record their row count exactly",
-					j, bounds[j], maxIDsPerAllocBatch)
+					j, sizings[j].reservedIDs, maxIDsPerAllocBatch)
 			}
-			if batch+bounds[j] > maxIDsPerAllocBatch {
+			if batch+sizings[j].reservedIDs > maxIDsPerAllocBatch {
 				break
 			}
-			batch += bounds[j]
+			batch += sizings[j].reservedIDs
 		}
 		if batch == 0 {
 			// Only reachable once every remaining bound is zero, which
@@ -182,9 +196,9 @@ func reserveRanges(bounds []int64, files []*internalpb.ImportFile,
 		}
 		cur := begin
 		for k := i; k < j; k++ {
-			files[k].PkIdBegin = cur
-			files[k].PkIdEnd = cur + bounds[k]
-			cur = files[k].PkIdEnd
+			sizings[k].file.PkIdBegin = cur
+			sizings[k].file.PkIdEnd = cur + sizings[k].reservedIDs
+			cur = sizings[k].file.PkIdEnd
 		}
 		i = j
 	}
