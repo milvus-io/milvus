@@ -203,9 +203,11 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	if snap.Frozen {
 		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Float64("reservedCPU", snap.Reserved.CPU),
 			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
 			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
-			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20))
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
+			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	} else {
 		mlog.Info(ctx, "query slots done",
 			mlog.Int64("legacyTotalSlots", legacyTotal),

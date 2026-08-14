@@ -797,9 +797,11 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	if snap.Frozen {
 		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Float64("reservedCPU", snap.Reserved.CPU),
 			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
 			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
-			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20))
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
+			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	} else {
 		mlog.Info(ctx, "query slots done",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
@@ -811,8 +813,24 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	}
 
+	var (
+		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
+		compactionUsed = node.compactionExecutor.Slots()
+		importUsed     = node.importScheduler.Slots()
+	)
+
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(available))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(legacyTotal))
+	// The three gauges below report each executor's own bookkeeping, not the
+	// ledger that now governs admission (that's "available"/"total" above,
+	// folded from resource.GetGuard().Snapshot()). They no longer sum to
+	// "total" the way they used to, and a caller relying on them for
+	// admission math is reading stale semantics -- but existing dashboards
+	// and alerts key on these label names, and nothing here replaces them,
+	// so they are kept rather than dropped out from under those consumers.
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
