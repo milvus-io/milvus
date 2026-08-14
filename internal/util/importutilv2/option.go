@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -48,6 +49,9 @@ const (
 
 // AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
 const AutoCommitKey = "auto_commit"
+
+// WriteMode is the option key selecting import write semantics: append (default), upsert or delete.
+const WriteMode = "write_mode"
 
 // Options for backup-restore mode.
 const (
@@ -211,4 +215,53 @@ func IsAutoCommit(options Options) bool {
 		return true
 	}
 	return false
+}
+
+// GetWriteMode parses the write_mode option. An absent option means Append.
+func GetWriteMode(options Options) (internalpb.ImportWriteMode, error) {
+	value, err := funcutil.GetAttrByKeyFromRepeatedKV(WriteMode, options)
+	if err != nil {
+		return internalpb.ImportWriteMode_Append, nil
+	}
+	switch strings.ToLower(value) {
+	case "", "append":
+		return internalpb.ImportWriteMode_Append, nil
+	case "upsert":
+		return internalpb.ImportWriteMode_Upsert, nil
+	case "delete":
+		return internalpb.ImportWriteMode_Delete, nil
+	default:
+		return internalpb.ImportWriteMode_Append,
+			merr.WrapErrImportFailedMsg("unknown import write_mode %s, expect one of Append/Upsert/Delete", value)
+	}
+}
+
+// writeModeOrAppend returns the parsed mode, falling back to Append when the option is absent or malformed.
+func writeModeOrAppend(options Options) internalpb.ImportWriteMode {
+	mode, err := GetWriteMode(options)
+	if err != nil {
+		return internalpb.ImportWriteMode_Append
+	}
+	return mode
+}
+
+// IsDeleteMode reports whether the job only deletes.
+func IsDeleteMode(options Options) bool {
+	return writeModeOrAppend(options) == internalpb.ImportWriteMode_Delete
+}
+
+// IsUpsertMode reports whether the job writes rows and deletes their primary keys.
+func IsUpsertMode(options Options) bool {
+	return writeModeOrAppend(options) == internalpb.ImportWriteMode_Upsert
+}
+
+// ProducesDeletes reports whether the write mode emits delete records.
+func ProducesDeletes(options Options) bool {
+	mode := writeModeOrAppend(options)
+	return mode == internalpb.ImportWriteMode_Delete || mode == internalpb.ImportWriteMode_Upsert
+}
+
+// ProducesInserts reports whether the write mode writes row data.
+func ProducesInserts(options Options) bool {
+	return writeModeOrAppend(options) != internalpb.ImportWriteMode_Delete
 }
