@@ -36,8 +36,15 @@ const watermarkSampleInterval = 3 * time.Second
 // giving budget back is deliberately slow. A measured signal that could widen
 // the budget would reintroduce "decide from current state", which fails
 // precisely when admitted tasks have not yet reached their peak.
-func (g *guard) startWatermarkLoop(ctx context.Context) {
-	go g.watermarkLoop(ctx, watermarkSampleInterval)
+// done, when non-nil, is closed once the loop has returned, so a caller that
+// cancels ctx can wait for the last sample to finish rather than racing it.
+func (g *guard) startWatermarkLoop(ctx context.Context, done chan struct{}) {
+	go func() {
+		if done != nil {
+			defer close(done)
+		}
+		g.watermarkLoop(ctx, watermarkSampleInterval)
+	}()
 }
 
 // watermarkLoop is the body of the loop, with the period passed in so tests can

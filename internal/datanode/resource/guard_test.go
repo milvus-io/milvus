@@ -945,3 +945,101 @@ func TestGetGuardIsProcessWideSingleton(t *testing.T) {
 	require.NotNil(t, a)
 	assert.Same(t, a, b)
 }
+
+// TestBandTaskIsNotClassifiedOversized pins the property my earlier split of
+// TestNonTaskMemoryShrinksTheBudget claimed to preserve but did not: a task
+// that FITS the node must never be classified oversized, however tight the
+// budget has become.
+//
+// The two obvious ways of asserting it are both blind, because judging
+// oversizedness against the budget produces an identical (false, ExclusiveTaskID
+// == 0) answer via the awaiting-drain branch. What distinguishes the two rules
+// is what the task does to OTHER tasks while it is queued: an oversized waiter
+// holds the line against the whole queue from wherever it sits, and does so
+// regardless of the head-of-line knob. So the knob is turned off -- which
+// removes the ordinary head-of-line rule and leaves the oversized special case
+// as the only thing that could refuse the small task.
+//
+// Mutation-verified: switching isOversizedLocked to budgetLocked() turns this
+// RED. That mutation only reaches here because hasOversizedWaiterLocked now
+// calls isOversizedLocked instead of inlining its own copy of the comparison.
+func TestBandTaskIsNotClassifiedOversized(t *testing.T) {
+	g := newTestGuard(t, 8, 1000)
+	pt := paramtable.Get()
+	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "false")
+	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
+
+	g.mu.Lock()
+	g.nonTask = 400
+	g.mu.Unlock()
+	require.Equal(t, int64(600), g.Snapshot().Total.Memory, "setup: budget is capacity minus nonTask")
+
+	// 700 fits the node (1000) but not the budget (600): the band.
+	band := &waiter{taskID: 1, req: taskresource.Requirement{Memory: 700}, ch: make(chan struct{}, 1)}
+	g.mu.Lock()
+	g.waiters = append(g.waiters, band)
+	g.mu.Unlock()
+
+	ok, _ := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 10})
+	assert.True(t, ok,
+		"a queued task that fits the node must not hold the line against everyone; only a truly oversized one does that")
+
+	// The contrast, on the same guard: a waiter that genuinely exceeds capacity
+	// does stop the small task, knob or no knob.
+	g.Release(2)
+	oversized := &waiter{taskID: 3, req: taskresource.Requirement{Memory: 5000}, ch: make(chan struct{}, 1)}
+	g.mu.Lock()
+	g.waiters = append(g.waiters, oversized)
+	g.mu.Unlock()
+
+	ok, _ = g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{Memory: 10})
+	assert.False(t, ok, "an over-capacity waiter holds the line from anywhere in the queue")
+}
+
+// The same property read off the deferral reason, which names the branch that
+// decided. A band request on a busy node is short of budget (insufficient); if
+// it were classified oversized it would be waiting for the node to drain
+// (awaiting_drain) -- two different operator responses, and indistinguishable
+// from the return value alone.
+func TestBandTaskDefersAsInsufficientNotAwaitingDrain(t *testing.T) {
+	resetResourceMetrics(t)
+	g := newTestGuard(t, 8, 1000)
+
+	g.mu.Lock()
+	g.nonTask = 400
+	g.mu.Unlock()
+
+	mustAcquire(t, g, 9, taskcommon.Compaction, taskresource.Requirement{Memory: 100})
+
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 700})
+	require.False(t, ok, "setup: 700 does not fit the 600 budget")
+
+	assert.Equal(t, float64(1), deferredCount(t, taskcommon.Index, reasonInsufficient))
+	assert.Equal(t, float64(0), deferredCount(t, taskcommon.Index, reasonAwaitingDrain),
+		"a task that fits the node is short of budget, not waiting for a drain")
+}
+
+// A budget floored at zero is not "as much as the node will ever offer": nonTask
+// is a decaying peak-hold, so it resolves. Admitting into it would make the
+// terminal case fire for every request however small, which is the memory check
+// switched off rather than a last resort.
+func TestZeroBudgetDoesNotAdmitEverythingExclusively(t *testing.T) {
+	g := newTestGuard(t, 8, 1000)
+
+	g.mu.Lock()
+	g.nonTask = 5000 // more non-task memory than the node has
+	g.mu.Unlock()
+	require.Equal(t, int64(0), g.Snapshot().Total.Memory, "setup: the budget floors at zero")
+
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 1})
+	assert.False(t, ok, "a node with no budget must admit nothing, not everything")
+	assert.Zero(t, g.Snapshot().ExclusiveTaskID)
+
+	// And it is genuinely "not right now": the same request goes through once
+	// the reservation decays.
+	g.mu.Lock()
+	g.nonTask = 0
+	g.mu.Unlock()
+	ok, _ = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 1})
+	assert.True(t, ok)
+}
