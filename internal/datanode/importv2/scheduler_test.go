@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -725,16 +726,41 @@ func TestImportSchedulerAdmission(t *testing.T) {
 func TestImportTaskResourceRequirements(t *testing.T) {
 	paramtable.Init()
 
+	// The pool width is CPUs x dataNode.import.concurrencyPerCPUCore, so on a
+	// small build agent it would silently bound the file counts below and the
+	// per-file arithmetic would stop being visible in the answer. Pin it.
+	mkCPU := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+	defer mkCPU.UnPatch()
+
+	baseBuffer := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	deleteBuffer := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
+	const floor = int64(64) << 20
+
 	t.Run("preimport charges a base buffer per file in flight", func(t *testing.T) {
+		// Eight files x a 16MiB base buffer is 128MiB, clear of the 64MiB
+		// estimator floor. With the three files this subtest used to carry, the
+		// answer was 48MiB and therefore the floor -- which any implementation
+		// returning a constant would also have produced.
+		files := make([]*datapb.ImportFileStats, 8)
 		task := &PreImportTask{
-			PreImportTask: &datapb.PreImportTask{
-				FileStats: []*datapb.ImportFileStats{{}, {}, {}},
-			},
+			PreImportTask: &datapb.PreImportTask{FileStats: files},
 		}
+
+		got := task.GetResourceRequirement()
 		assert.Equal(t, taskresource.EstimateImport(taskresource.ImportInput{
 			IsPreImport: true,
-			FileNum:     3,
-		}), task.GetResourceRequirement())
+			FileNum:     8,
+		}), got)
+
+		want := baseBuffer * 8
+		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, got.Memory)
+
+		// And it really is per-file: half the files, half the charge.
+		half := &PreImportTask{
+			PreImportTask: &datapb.PreImportTask{FileStats: make([]*datapb.ImportFileStats, 4)},
+		}
+		assert.Equal(t, want/2, half.GetResourceRequirement().Memory)
 	})
 
 	t.Run("import charges the vchannel and partition fan-out", func(t *testing.T) {
@@ -767,36 +793,51 @@ func TestImportTaskResourceRequirements(t *testing.T) {
 	t.Run("l0 preimport charges a delete buffer per file", func(t *testing.T) {
 		task := &L0PreImportTask{
 			PreImportTask: &datapb.PreImportTask{
-				FileStats: []*datapb.ImportFileStats{{}, {}},
+				FileStats: make([]*datapb.ImportFileStats, 8),
 			},
 		}
 		expected := taskresource.EstimateImport(taskresource.ImportInput{
 			IsL0:        true,
 			IsPreImport: true,
-			FileNum:     2,
+			FileNum:     8,
 		})
 		assert.Equal(t, expected, task.GetResourceRequirement())
-		assert.Greater(t, expected.Memory, int64(0))
+
+		want := deleteBuffer * 8
+		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, expected.Memory)
 	})
 
 	t.Run("l0 import charges a delete buffer per file", func(t *testing.T) {
 		task := &L0ImportTask{
 			req: &datapb.ImportRequest{
-				Files: []*internalpb.ImportFile{{}, {}, {}},
+				Files: make([]*internalpb.ImportFile, 8),
 			},
 		}
 		expected := taskresource.EstimateImport(taskresource.ImportInput{
 			IsL0:    true,
-			FileNum: 3,
+			FileNum: 8,
 		})
 		assert.Equal(t, expected, task.GetResourceRequirement())
-		assert.Greater(t, expected.Memory, int64(0))
+
+		want := deleteBuffer * 8
+		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, expected.Memory)
 	})
 
 	t.Run("copy segment charges no segment bytes", func(t *testing.T) {
 		task := &CopySegmentTask{
 			segmentResults: map[int64]*datapb.CopySegmentResult{1: {}, 2: {}},
 		}
-		assert.Equal(t, taskresource.EstimateCopySegment(2), task.GetResourceRequirement())
+		got := task.GetResourceRequirement()
+		assert.Equal(t, taskresource.EstimateCopySegment(2), got)
+
+		// This one is genuinely flat -- the copy is server-side in the object
+		// store and no segment bytes pass through this process -- so its memory
+		// really is the configured constant (which happens to equal the floor).
+		// What must still move is CPU, with how many copies can run at once.
+		assert.Equal(t, paramtable.Get().DataCoordCfg.ResourceCopySegmentMemory.GetAsInt64(), got.Memory)
+		assert.Greater(t, taskresource.EstimateCopySegment(8).CPU, got.CPU,
+			"CPU must scale with concurrency even though memory does not")
 	})
 }

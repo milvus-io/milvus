@@ -66,6 +66,7 @@ type DataNodeServicesSuite struct {
 	storageConfig *indexpb.StorageConfig
 	etcdCli       *clientv3.Client
 	guardMock     *mockey.Mocker
+	guard         *resource.RecordingGuard
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
@@ -159,7 +160,8 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	// and mockey panics on a second patch of a function it already holds, so
 	// the patch is installed once and left in place until teardown.
 	if s.guardMock == nil {
-		s.guardMock = mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
+		s.guard = resource.NewRecordingGuard()
+		s.guardMock = mockey.Mock(resource.GetGuard).Return(s.guard).Build()
 	}
 
 	s.node = NewIDLEDataNodeMock(s.ctx, schemapb.DataType_Int64)
@@ -200,6 +202,7 @@ func (s *DataNodeServicesSuite) TearDownTest() {
 	if s.guardMock != nil {
 		s.guardMock.UnPatch()
 		s.guardMock = nil
+		s.guard = nil
 	}
 }
 
@@ -1975,7 +1978,7 @@ func TestLegacyAvailableSlotsNeverNegative(t *testing.T) {
 
 // TestLegacyAvailableSlotsZeroWhenExclusive guards Resolution 1: an oversized
 // task running alone must read as a full node even though Reserved is tiny
-// relative to Total here -- the utilisation formula alone would report the
+// relative to Total here -- the utilization formula alone would report the
 // node as nearly empty (util=0.1, ~115 slots free). Node capacity is runtime
 // config and can grow after the oversized task is admitted, which can pull
 // its ratio back under 1; ExclusiveTaskID must be checked explicitly so the
@@ -1990,4 +1993,112 @@ func TestLegacyAvailableSlotsZeroWhenExclusive(t *testing.T) {
 	}
 
 	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
+}
+
+// availableSlots is the scalar DataCoord actually reads, and until now nothing
+// exercised it end to end: the RecordingGuard's Snapshot() returned the zero
+// value, so Total.CPU and Total.Memory were both 0, legacyAvailableSlots
+// short-circuited, and the answer was legacyTotal -- exactly what the code this
+// branch replaces produced. The fixture made old and new behavior
+// indistinguishable.
+func (s *DataNodeServicesSuite) TestQuerySlotReportsTheLedgersView() {
+	s.SetupTest()
+
+	legacyTotal := index.CalculateNodeSlots()
+	s.Require().Greater(legacyTotal, int64(10), "setup: the fold below needs room to be visible")
+
+	// 90% of memory committed, 10% of CPU: the worse dimension must win.
+	s.guard.SetSnapshot(resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	})
+
+	resp, err := s.node.QuerySlot(context.Background(), nil)
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+
+	s.Equal(int64(float64(legacyTotal)*0.1), resp.GetAvailableSlots())
+	s.Less(resp.GetAvailableSlots(), legacyTotal,
+		"a loaded ledger must not read as a completely free node")
+}
+
+// The index side reports the same scalar through a different RPC, so it needs
+// the same guard.
+func (s *DataNodeServicesSuite) TestGetJobStatsReportsTheLedgersView() {
+	s.SetupTest()
+
+	legacyTotal := index.CalculateNodeSlots()
+	s.guard.SetSnapshot(resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	})
+
+	resp, err := s.node.GetJobStats(context.Background(), &workerpb.GetJobStatsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+
+	s.Equal(legacyTotal, resp.GetTotalSlots())
+	s.Equal(int64(float64(legacyTotal)*0.1), resp.GetAvailableSlots())
+	s.Less(resp.GetAvailableSlots(), legacyTotal)
+}
+
+// A frozen node must report zero through the RPC, not merely through the
+// helper. This is also the only driver of the frozen mlog.Warn branch, which
+// was undrivable while the double's snapshot was hard-coded to zero.
+func (s *DataNodeServicesSuite) TestQuerySlotReportsZeroWhenFrozen() {
+	s.SetupTest()
+
+	s.guard.SetSnapshot(resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 0, Memory: 0},
+		Frozen:   true,
+		NonTask:  4 << 30,
+	})
+
+	resp, err := s.node.QuerySlot(context.Background(), nil)
+	s.NoError(err)
+	s.EqualValues(0, resp.GetAvailableSlots())
+
+	jobResp, err := s.node.GetJobStats(context.Background(), &workerpb.GetJobStatsRequest{})
+	s.NoError(err)
+	s.EqualValues(0, jobResp.GetAvailableSlots())
+}
+
+// availableSlots takes the smaller of the ledger's view and the executors'.
+// The ledger counts only ADMITTED tasks, so a node holding a large queue of
+// accepted-but-not-yet-started work has an empty ledger and would otherwise
+// advertise itself completely free -- DataCoord's water-filling would keep
+// choosing it until the compaction executor's channel filled and Enqueue
+// blocked inside the gRPC handler.
+func TestAvailableSlotsCountsQueuedWorkToo(t *testing.T) {
+	paramtable.Init()
+
+	const legacyTotal = int64(128)
+	idle := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 0, Memory: 0},
+	}
+
+	// Nothing admitted, nothing queued: the whole node.
+	assert.Equal(t, legacyTotal, availableSlots(idle, legacyTotal, 0, 0, 0))
+
+	// Nothing admitted, but 100 slots' worth queued across the three
+	// executors. The ledger still says "free"; the answer must not.
+	assert.Equal(t, int64(28), availableSlots(idle, legacyTotal, 40, 50, 10))
+
+	// The ledger stays authoritative when it is the more conservative of the
+	// two: 90% committed is 12 slots, well below the 118 the queue allows.
+	loaded := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	}
+	assert.Equal(t, int64(12), availableSlots(loaded, legacyTotal, 10, 0, 0))
+
+	// Over-subscribed queues must clamp at zero rather than go negative.
+	assert.Equal(t, int64(0), availableSlots(idle, legacyTotal, 100, 100, 100))
+
+	// And a frozen node is still zero however empty the queues are.
+	frozen := idle
+	frozen.Frozen = true
+	assert.Equal(t, int64(0), availableSlots(frozen, legacyTotal, 0, 0, 0))
 }
