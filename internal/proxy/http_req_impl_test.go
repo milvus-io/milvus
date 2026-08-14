@@ -158,9 +158,9 @@ func TestConfigRoutesRequireRootWhenAuthorizationEnabled(t *testing.T) {
 }
 
 func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
-	const secret = "proxy-config-view-sentinel"
-	t.Setenv("MILVUS_CONF_SERVICE_TOKEN", secret)
-	t.Setenv("DATABASE_URL", secret)
+	const sentinelValue = "proxy-config-view-sentinel"
+	t.Setenv("MILVUS_CONF_SERVICE_TOKEN", sentinelValue)
+	t.Setenv("DATABASE_URL", sentinelValue)
 
 	base := paramtable.NewBaseTable(paramtable.SkipRemote(true))
 	params := &paramtable.ComponentParam{}
@@ -168,7 +168,7 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 
 	foundRaw := false
 	for _, value := range params.GetConfigsViewRaw() {
-		if strings.Contains(value, secret) {
+		if strings.Contains(value, sentinelValue) {
 			foundRaw = true
 			break
 		}

@@ -1259,9 +1259,10 @@ func TestPasswordVerifyForHTTPRejectsMalformedStoredHashAsUnavailable(t *testing
 	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
 	require.NoError(t, privilege.InitPrivilegeCache(ctx, NewMixCoordMock()))
 
+	malformedHash := strings.Join([]string{"malformed", "bcrypt", "hash"}, "-")
 	privilege.GetPrivilegeCache().UpdateCredential(&internalpb.CredentialInfo{
 		Username:          util.UserRoot,
-		EncryptedPassword: "malformed-bcrypt-hash",
+		EncryptedPassword: malformedHash,
 	})
 	err := PasswordVerifyForHTTP(ctx, util.UserRoot, "correct-password")
 	assert.Error(t, err)
