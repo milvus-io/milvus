@@ -49,6 +49,14 @@ type RecordingGuard struct {
 	gate chan struct{}
 	// err, when non-nil, is what Acquire returns instead of reserving.
 	err error
+	// snapshot is what Snapshot reports. The zero value is deliberately the
+	// zero Snapshot, which is what every existing caller of this double already
+	// gets; SetSnapshot is for the tests that need the reporting path to see a
+	// node under load, since a zero Total makes legacyAvailableSlots
+	// short-circuit and report the node completely free -- which is also what
+	// the code this branch replaces would have reported, so a fixture that
+	// leaves it zero cannot tell the old behavior from the new.
+	snapshot Snapshot
 }
 
 var _ Guard = (*RecordingGuard)(nil)
@@ -130,8 +138,17 @@ func (g *RecordingGuard) Release(taskID int64) {
 	g.events = append(g.events, "release")
 }
 
+// SetSnapshot fixes what Snapshot reports from here on.
+func (g *RecordingGuard) SetSnapshot(s Snapshot) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.snapshot = s
+}
+
 func (g *RecordingGuard) Snapshot() Snapshot {
-	return Snapshot{}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.snapshot
 }
 
 func (g *RecordingGuard) Acquires() []AcquireCall {

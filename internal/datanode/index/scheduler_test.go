@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -520,17 +521,39 @@ func TestTaskResourceRequirements(t *testing.T) {
 	})
 
 	t.Run("stats", func(t *testing.T) {
+		// The request has to carry real binlogs and a schema that selects a
+		// field, or RequirementForStats returns the 64MiB floor and the
+		// assertions below hold for any implementation that returns a
+		// constant. 2GiB of matchable varchar is well clear of it.
+		const fieldBytes = int64(2) << 30
 		req := &workerpb.CreateStatsRequest{
 			ClusterID:  "c",
 			TaskID:     9002,
 			SubJobType: indexpb.StatsSubJob_TextIndexJob,
 			NumRows:    1000,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: 100, DataType: schemapb.DataType_VarChar,
+						TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}},
+					},
+				},
+			},
+			InsertLogs: []*datapb.FieldBinlog{
+				{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: fieldBytes}}},
+			},
 		}
 		task := NewStatsTask(context.Background(), func() {}, req, NewTaskManager(context.Background()), nil, nil)
 
+		got := task.GetResourceRequirement()
 		assert.Equal(t, int64(9002), task.GetTaskID())
 		assert.Equal(t, taskcommon.Stats, task.GetTaskType())
-		assert.Equal(t, taskresource.RequirementForStats(req), task.GetResourceRequirement())
+		assert.Equal(t, taskresource.RequirementForStats(req), got)
+
+		factor := paramtable.Get().DataCoordCfg.ResourceTextIndexFactor.GetAsFloat()
+		want := int64(float64(fieldBytes) * factor)
+		require.Greater(t, want, int64(64)<<20, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, got.Memory)
 	})
 
 	t.Run("analyze", func(t *testing.T) {
@@ -545,9 +568,24 @@ func TestTaskResourceRequirements(t *testing.T) {
 		}
 		task := NewAnalyzeTask(context.Background(), func() {}, req, NewTaskManager(context.Background()), nil)
 
+		got := task.GetResourceRequirement()
 		assert.Equal(t, int64(9003), task.GetTaskID())
 		assert.Equal(t, taskcommon.Analyze, task.GetTaskType())
-		assert.Equal(t, taskresource.RequirementForAnalyze(req), task.GetResourceRequirement())
-		assert.Greater(t, task.GetResourceRequirement().Memory, int64(0))
+		assert.Equal(t, taskresource.RequirementForAnalyze(req), got)
+
+		// 128 dims x 100k rows x 4 bytes is ~48.8MiB of training data, so the
+		// answer is the 64MiB floor and "> 0" would hold for any constant. Pin
+		// the value, and pin a second, much larger request to show the estimate
+		// actually moves with the input.
+		assert.Equal(t, int64(64)<<20, got.Memory, "this input really is floor-bound")
+
+		big := &workerpb.AnalyzeRequest{
+			ClusterID: "c", TaskID: 9004, Dim: 1024,
+			Field:        &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_FloatVector},
+			SegmentStats: map[int64]*indexpb.SegmentStats{1: {NumRows: 2_000_000}},
+		}
+		bigTask := NewAnalyzeTask(context.Background(), func() {}, big, NewTaskManager(context.Background()), nil)
+		assert.Greater(t, bigTask.GetResourceRequirement().Memory, int64(4)<<30,
+			"8GiB of vectors must not be charged the same as 48MiB")
 	})
 }

@@ -51,13 +51,21 @@ func useRecordingGuard(t *testing.T) *resource.RecordingGuard {
 // planWithBinlogs is a compaction plan with enough of a body that its derived
 // requirement is not the estimator's floor, so a test comparing against it
 // cannot be satisfied by any old figure.
+//
+// StorageVersion matters and must be set. Without it RequirementForCompaction
+// takes the v1 branch, which is deliberately input-INDEPENDENT -- a couple of
+// hundred MiB of config constants regardless of the 3GiB and 1M rows below --
+// so the fixture's body would not reach the answer at all, which is the
+// opposite of what this function is for.
 func planWithBinlogs(planID int64) *datapb.CompactionPlan {
 	return &datapb.CompactionPlan{
-		PlanID: planID,
-		Type:   datapb.CompactionType_MixCompaction,
+		PlanID:  planID,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-0",
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 			{
-				SegmentID: 1000,
+				SegmentID:      1000,
+				StorageVersion: 3,
 				FieldBinlogs: []*datapb.FieldBinlog{
 					{Binlogs: []*datapb.Binlog{{MemorySize: 3 << 30, EntriesNum: 1000000}}},
 				},
@@ -708,6 +716,11 @@ func TestExecutorAdmission(t *testing.T) {
 		// about slots. Compared against an independently derived figure so a
 		// requirement that is merely non-zero cannot satisfy this.
 		assert.Equal(t, taskresource.RequirementForCompaction(plan), acquires[0].Req)
+		// ...and the figure itself must come from the fixture's 3GiB of input
+		// rather than from the estimator's floor or from config constants,
+		// which is what a plan with no StorageVersion would have produced.
+		assert.GreaterOrEqual(t, acquires[0].Req.Memory, int64(3)<<30,
+			"the charge must scale with the plan's input, not fall back to a constant")
 		assert.Equal(t, []int64{planID}, g.Releases())
 	})
 
