@@ -1471,6 +1471,7 @@ func logicalGranteeKeyFromEtcdKey(ctx context.Context, granteePrefix string, key
 }
 
 func findOtherGranteeWithIDFromKeys(ctx context.Context, granteePrefix string, granteeKey string, idStr string, keys []string, values []string) (string, error) {
+	var ownerKeys []string
 	for i, key := range keys {
 		if i >= len(values) {
 			mlog.Warn(ctx, "grantee key has no matching id value while checking grantee id sharing",
@@ -1480,6 +1481,13 @@ func findOtherGranteeWithIDFromKeys(ctx context.Context, granteePrefix string, g
 		if values[i] != idStr {
 			continue
 		}
+		ownerKeys = append(ownerKeys, key)
+	}
+	return findOtherGranteeWithIDFromOwnerKeys(ctx, granteePrefix, granteeKey, idStr, ownerKeys)
+}
+
+func findOtherGranteeWithIDFromOwnerKeys(ctx context.Context, granteePrefix string, granteeKey string, idStr string, ownerKeys []string) (string, error) {
+	for _, key := range ownerKeys {
 		logicalKey, ok := logicalGranteeKeyFromEtcdKey(ctx, granteePrefix, key)
 		if !ok {
 			return "", newSharedGranteeIDError(idStr, granteeKey, key)
@@ -2003,6 +2011,31 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		mlog.Error(ctx, "fail to load all grant privilege entities", mlog.String("key", granteeKey), mlog.Err(err))
 		return []*milvuspb.GrantEntity{}, err
 	}
+	granteeOwnerKeys := make(map[string][]string)
+	for i, key := range keys {
+		if i >= len(values) {
+			mlog.Warn(ctx, "grantee key has no matching id value while indexing grantee id owners",
+				mlog.String("key", key), mlog.String("prefix", granteeKey))
+			continue
+		}
+		granteeOwnerKeys[values[i]] = append(granteeOwnerKeys[values[i]], key)
+	}
+
+	granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
+	allIDKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDPrefix)
+	if err != nil {
+		mlog.Error(ctx, "fail to load all grantee ids", mlog.String("key", granteeIDPrefix), mlog.Err(err))
+		return []*milvuspb.GrantEntity{}, err
+	}
+	granteeIDKeys := make(map[string][]string)
+	for _, key := range allIDKeys {
+		granteeIDInfos := typeutil.AfterN(key, granteeIDPrefix, "/")
+		if len(granteeIDInfos) < 2 || funcutil.IsEmptyString(granteeIDInfos[0]) {
+			mlog.Warn(ctx, "invalid grantee id", mlog.String("string", key), mlog.String("sub_string", granteeIDPrefix))
+			continue
+		}
+		granteeIDKeys[granteeIDInfos[0]] = append(granteeIDKeys[granteeIDInfos[0]], key)
+	}
 
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey, "/")
@@ -2014,10 +2047,33 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 			continue
 		}
 		logicalGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
-		idKeys, _, granteeIDKey, err := kc.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, logicalGranteeKey, values[i], keys, values)
-		if err != nil {
-			mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", granteeIDKey), mlog.Err(err))
-			return []*milvuspb.GrantEntity{}, err
+		idStr := values[i]
+		if isLegacyGranteeID(idStr) && idStr != crypto.GranteeID(logicalGranteeKey) {
+			legacyIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, idStr)
+			otherGranteeKey, err := findOtherGranteeWithIDFromOwnerKeys(ctx, granteeKey, logicalGranteeKey, idStr, granteeOwnerKeys[idStr])
+			if err != nil {
+				mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", legacyIDPrefix), mlog.Err(err))
+				return []*milvuspb.GrantEntity{}, err
+			}
+			if otherGranteeKey != "" {
+				err := newSharedGranteeIDError(idStr, logicalGranteeKey, otherGranteeKey)
+				mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", legacyIDPrefix), mlog.Err(err))
+				return []*milvuspb.GrantEntity{}, err
+			}
+		}
+
+		var idKeys []string
+		var granteeIDKey string
+		for _, candidate := range granteeIDCandidates(logicalGranteeKey, idStr) {
+			candidatePrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, candidate)
+			if granteeIDKey == "" {
+				granteeIDKey = candidatePrefix
+			}
+			if candidateKeys := granteeIDKeys[candidate]; len(candidateKeys) > 0 {
+				idKeys = candidateKeys
+				granteeIDKey = candidatePrefix
+				break
+			}
 		}
 		for _, idKey := range idKeys {
 			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey, "/")
