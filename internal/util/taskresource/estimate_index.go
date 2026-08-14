@@ -157,9 +157,12 @@ func EstimateStats(in StatsInput) Requirement {
 // and ran exactly one analyze at a time. Phase 0 reroutes AvailableSlots onto
 // the ledger, so the 65535 no longer serializes anything, and a task charged
 // <= 4GiB while intending to load 0.8 x RAM would leave the node reporting
-// ~94% free. Charging the real allocation normally makes the task oversized,
-// which the guard answers with exclusive execution -- the same one-at-a-time
-// behavior, now expressed through the mechanism that replaced the constant.
+// ~94% free. Charging the real allocation makes the task oversized under
+// defaults -- 0.8 of the node against a 0.75 memoryRatio budget -- which the
+// guard answers with exclusive execution, the same one-at-a-time behavior now
+// expressed through the mechanism that replaced the constant. (Clustering's
+// 0.3 does NOT reach that threshold and is bounded rather than serialized;
+// see estimateClusteringCompaction for why that is the right answer there.)
 //
 // trainSizeRatio is AnalyzeRequest.MaxTrainSizeRatio, the ratio the task will
 // actually apply; a non-positive value (a legacy request that never filled it)

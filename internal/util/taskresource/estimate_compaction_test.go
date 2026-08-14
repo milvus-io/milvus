@@ -19,10 +19,12 @@ package taskresource
 import (
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -257,4 +259,37 @@ func TestEstimateClusteringCompactionRespectsMinMaxAndScales(t *testing.T) {
 	assert.Equal(t, int64(float64(10*gib)*0.3), mid.Memory)
 	assert.Greater(t, mid.Memory, tiny.Memory)
 	assert.Less(t, mid.Memory, huge.Memory)
+}
+
+// The comment on estimateClusteringCompaction makes a claim about defaults --
+// that clustering is bounded by the budget rather than serialized like analyze,
+// and that two run concurrently on the incident node. Prose that specific
+// should be executable, or it rots.
+func TestClusteringIsBoundedByTheBudgetNotSerialized(t *testing.T) {
+	paramtable.Init()
+	mockNodeMemory(t, testNodeMemory)
+	mkCPU := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+	defer mkCPU.UnPatch()
+
+	capacity := NodeCapacity()
+	require.Equal(t, int64(48)*gib, capacity.Memory, "setup: 64GiB x memoryRatio 0.75")
+
+	req := EstimateCompaction(CompactionInput{
+		Type:            datapb.CompactionType_ClusteringCompaction,
+		TotalMemorySize: 100 * mib,
+	})
+
+	// Not oversized: unlike analyze, it fits the node.
+	assert.True(t, req.FitsIn(capacity), "clustering must not be classified oversized under defaults")
+
+	// Two fit, three do not -- so the ledger bounds it at two rather than
+	// serializing it, which is a real capacity gain over the 65535 sentinel.
+	two := req.Add(req)
+	assert.True(t, two.FitsIn(capacity), "two clustering compactions must fit a 64GiB node")
+	assert.False(t, two.Add(req).FitsIn(capacity), "three must not")
+
+	// The contrast that makes the distinction meaningful: analyze IS oversized
+	// on the same node, because 0.8 exceeds the 0.75 memory ratio.
+	analyze := EstimateAnalyze(1000*gib, 0.8)
+	assert.False(t, analyze.FitsIn(capacity), "analyze must still be oversized under defaults")
 }
