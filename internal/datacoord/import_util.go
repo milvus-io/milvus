@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -170,6 +171,25 @@ func importUseLoonFFI(isL0Import bool) bool {
 	return !isL0Import && paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()
 }
 
+// minImportLevelSegmentSize floors the per-level allocation size used by AssignSegments,
+// so a misconfigured paramtable value (e.g. dataNode.segment.deleteBufBytes set to 0) cannot
+// make the allocation loop spin forever.
+const minImportLevelSegmentSize = 1024 * 1024
+
+// estimatedDeleteRecordSize is the assumed on-disk size of one delete record: a primary key
+// plus its timestamp. An int64 key costs 16 bytes; the value leaves room for varchar keys.
+const estimatedDeleteRecordSize = 64
+
+// importSegmentStorageVersion picks the storage version per segment level. Delete records are
+// always written through the storage v2 path, so an L0 segment is recorded as v2 even on a
+// cluster that writes data segments as v3.
+func importSegmentStorageVersion(level datapb.SegmentLevel, isL0Import bool) int64 {
+	if level == datapb.SegmentLevel_L0 {
+		return storage.StorageV2
+	}
+	return importStorageVersion(isL0Import)
+}
+
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64) ([]int64, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
 	if err != nil {
@@ -178,6 +198,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
+	hashedRowCount := make(map[string]map[int64]int64) // vchannel->(partitionID->numRows)
 	for _, fileStats := range task.GetFileStats() {
 		for vchannel, partStats := range fileStats.GetHashedStats() {
 			if hashedDataSize[vchannel] == nil {
@@ -186,31 +207,55 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 			for partitionID, size := range partStats.GetPartitionDataSize() {
 				hashedDataSize[vchannel][partitionID] += size
 			}
+			if hashedRowCount[vchannel] == nil {
+				hashedRowCount[vchannel] = make(map[int64]int64)
+			}
+			for partitionID, rows := range partStats.GetPartitionRows() {
+				hashedRowCount[vchannel][partitionID] += rows
+			}
 		}
 	}
 
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	segmentLevel := datapb.SegmentLevel_L1
-	if isL0Import {
-		segmentLevel = datapb.SegmentLevel_L0
-	}
+	options := job.GetOptions()
+	isL0Import := importutilv2.IsL0Import(options)
 
-	storageVersion := importStorageVersion(isL0Import)
+	levels := make([]datapb.SegmentLevel, 0, 2)
+	if isL0Import || importutilv2.IsDeleteMode(options) {
+		levels = append(levels, datapb.SegmentLevel_L0)
+	} else if importutilv2.IsUpsertMode(options) {
+		levels = append(levels, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0)
+	} else {
+		levels = append(levels, datapb.SegmentLevel_L1)
+	}
 
 	// alloc new segments
 	segments := make([]int64, 0)
-	addSegment := func(vchannel string, partitionID int64, size int64) error {
+	addSegment := func(vchannel string, partitionID int64, size int64, rows int64) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		for size > 0 {
-			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
-				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
-				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
-			if err != nil {
-				return err
+		for _, level := range levels {
+			levelSize := size
+			levelMaxSize := segmentMaxSize
+			if level == datapb.SegmentLevel_L0 {
+				levelSize = rows * estimatedDeleteRecordSize
+				levelMaxSize = int64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt())
+				if levelMaxSize < minImportLevelSegmentSize {
+					mlog.RatedWarn(ctx, rate.Limit(60), "configured flush delete buffer size is below the import L0 segment size floor, clamping",
+						mlog.Int64("configuredSize", levelMaxSize), mlog.Int64("minSize", int64(minImportLevelSegmentSize)))
+					levelMaxSize = minImportLevelSegmentSize
+				}
 			}
-			segments = append(segments, segmentInfo.GetID())
-			size -= segmentMaxSize
+			levelStorageVersion := importSegmentStorageVersion(level, isL0Import)
+			for levelSize > 0 {
+				segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
+					task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
+					partitionID, vchannel, job.GetDataTs(), level, levelStorageVersion)
+				if err != nil {
+					return err
+				}
+				segments = append(segments, segmentInfo.GetID())
+				levelSize -= levelMaxSize
+			}
 		}
 		return nil
 	}
@@ -235,7 +280,8 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 				// allocated for each vchannel when autoID is enabled.
 				size = 1
 			}
-			err := addSegment(vchannel, partitionID, size)
+			rows := hashedRowCount[vchannel][partitionID]
+			err := addSegment(vchannel, partitionID, size, rows)
 			if err != nil {
 				return nil, err
 			}
@@ -329,6 +375,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 			SegmentID:   segment.GetID(),
 			PartitionID: segment.GetPartitionID(),
 			Vchannel:    segment.GetInsertChannel(),
+			Level:       segment.GetLevel(),
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -390,6 +437,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	// storageVersion applies to data segments only; the delete write path picks storage v2 on its own.
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
