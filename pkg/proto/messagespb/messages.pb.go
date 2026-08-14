@@ -7090,8 +7090,7 @@ type RLSPrincipalMetadata struct {
 	unknownFields protoimpl.UnknownFields
 
 	PrincipalName string `protobuf:"bytes,1,opt,name=principal_name,json=principalName,proto3" json:"principal_name,omitempty"`
-	// Complete JSON post-image. Values are string, int64, or double.
-	Tags string `protobuf:"bytes,2,opt,name=tags,proto3" json:"tags,omitempty"`
+	Tags          string `protobuf:"bytes,2,opt,name=tags,proto3" json:"tags,omitempty"`
 }
 
 func (x *RLSPrincipalMetadata) Reset() {

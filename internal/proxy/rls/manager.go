@@ -37,15 +37,11 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type policySnapshot struct {
-	Version     int64
-	RefreshedAt time.Time
-	Policies    []*rlsutil.RowPolicy
-}
-
-type principalTagsSnapshot struct {
-	Version       int64
-	RefreshedAt   time.Time
-	PrincipalTags map[string]map[string]string
+	Version        int64
+	RefreshedAt    time.Time
+	DBName         string
+	CollectionName string
+	Policies       []*rlsutil.RowPolicy
 }
 
 type SnapshotVersionAllocator func(ctx context.Context) (uint64, error)
@@ -53,7 +49,6 @@ type SnapshotVersionAllocator func(ctx context.Context) (uint64, error)
 type Manager interface {
 	Init(ctx context.Context, coord CoordClient, allocVersion SnapshotVersionAllocator) error
 	RefreshPolicySnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error
-	RefreshPrincipalTagsSnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error
 
 	GetRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs) (*planpb.Expr, error)
 	ApplyRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs, plan *planpb.PlanNode) error
@@ -83,30 +78,45 @@ func (entry *compiledCacheEntry) matchesSchemaContext(schemaVersion int32, timez
 }
 
 type collectionState struct {
-	mu                                sync.RWMutex
-	policyVersion                     int64
-	principalTagVersion               int64
-	policyLastSuccessfulRefresh       time.Time
-	principalTagLastSuccessfulRefresh time.Time
-	policies                          map[string]*rlsutil.RowPolicy
-	principalTags                     map[string]map[string]string
-	compiled                          map[compiledKey]*compiledCacheEntry
+	mu                          sync.RWMutex
+	dbName                      string
+	collectionName              string
+	policyVersion               int64
+	policyLastSuccessfulRefresh time.Time
+	policies                    map[string]*rlsutil.RowPolicy
+	compiled                    map[compiledKey]*compiledCacheEntry
+	principalTags               map[string]*principalTagsEntry
 }
 
 type collectionKey struct {
 	collectionID UniqueID
 }
 
-type manager struct {
-	mu                sync.RWMutex
-	collections       map[collectionKey]*collectionState
-	dependencyMu      sync.RWMutex
-	coord             CoordClient
-	allocVersion      SnapshotVersionAllocator
-	validateFreshness bool
-	metadataRefreshes conc.Singleflight[struct{}]
-	refreshLocks      *lock.KeyLock[UniqueID]
+type principalKey struct {
+	collectionID  UniqueID
+	principalName string
 }
+
+type principalTagsEntry struct {
+	refreshedAt time.Time
+	tags        map[string]rlsutil.TagValue
+}
+
+type manager struct {
+	mu                    sync.RWMutex
+	collections           map[collectionKey]*collectionState
+	dependencyMu          sync.RWMutex
+	coord                 CoordClient
+	allocVersion          SnapshotVersionAllocator
+	validateFreshness     bool
+	metadataRefreshes     conc.Singleflight[struct{}]
+	principalRefreshes    conc.Singleflight[map[string]rlsutil.TagValue]
+	refreshLocks          *lock.KeyLock[UniqueID]
+	principalRefreshLocks *lock.KeyLock[principalKey]
+	ttlCancel             context.CancelFunc
+}
+
+const principalCacheScanInterval = 10 * time.Minute
 
 var defaultManager = newManager()
 
@@ -118,19 +128,40 @@ func RemoveCollection(ctx context.Context, collectionID UniqueID) {
 	defaultManager.removeCollection(ctx, collectionID)
 }
 
+func RemovePolicyCollection(ctx context.Context, collectionID UniqueID) {
+	defaultManager.removePolicyCollection(ctx, collectionID)
+}
+
+func RemovePrincipal(ctx context.Context, collectionID UniqueID, principalName string) {
+	defaultManager.removePrincipal(ctx, collectionID, principalName)
+}
+
+func RemoveDatabase(ctx context.Context, dbName string) {
+	defaultManager.removeDatabase(ctx, dbName)
+}
+
 func newManager() *manager {
 	return &manager{
-		collections:  map[collectionKey]*collectionState{},
-		refreshLocks: lock.NewKeyLock[UniqueID](),
+		collections:           map[collectionKey]*collectionState{},
+		refreshLocks:          lock.NewKeyLock[UniqueID](),
+		principalRefreshLocks: lock.NewKeyLock[principalKey](),
 	}
 }
 
-func (m *manager) configure(coord CoordClient, allocVersion SnapshotVersionAllocator) {
+func (m *manager) configure(ctx context.Context, coord CoordClient, allocVersion SnapshotVersionAllocator) {
 	m.dependencyMu.Lock()
-	defer m.dependencyMu.Unlock()
+	if m.ttlCancel != nil {
+		m.ttlCancel()
+	}
+	scanCtx, cancel := context.WithCancel(ctx)
 	m.coord = coord
 	m.allocVersion = allocVersion
 	m.validateFreshness = true
+	m.ttlCancel = cancel
+	m.dependencyMu.Unlock()
+	if ctx.Done() != nil {
+		go m.runPrincipalCacheScanner(scanCtx, principalCacheScanInterval)
+	}
 }
 
 func (m *manager) refreshDependencies() (CoordClient, SnapshotVersionAllocator, bool) {
@@ -156,12 +187,12 @@ func (m *manager) ensureFreshMetadata(ctx context.Context, collectionID UniqueID
 	}
 	m.refreshLocks.RLock(collectionID)
 	defer m.refreshLocks.RUnlock(collectionID)
-	if policyDue, principalTagsDue := m.snapshotRefreshDue(collectionID, refreshTTL, time.Now()); !policyDue && !principalTagsDue {
+	if !m.snapshotRefreshDue(collectionID, refreshTTL, time.Now()) {
 		return nil
 	}
 
 	_, err, _ := m.metadataRefreshes.Do(strconv.FormatInt(collectionID, 10), func() (struct{}, error) {
-		if policyDue, principalTagsDue := m.snapshotRefreshDue(collectionID, refreshTTL, time.Now()); !policyDue && !principalTagsDue {
+		if !m.snapshotRefreshDue(collectionID, refreshTTL, time.Now()) {
 			return struct{}{}, nil
 		}
 		coord, allocVersion, validateFreshness := m.refreshDependencies()
@@ -172,7 +203,7 @@ func (m *manager) ensureFreshMetadata(ctx context.Context, collectionID UniqueID
 		if err != nil {
 			return struct{}{}, merr.Wrap(err, "failed to allocate RLS metadata refresh version")
 		}
-		if err := m.refreshSnapshotsUnlocked(ctx, coord, "", "", collectionID, version, true, true); err != nil {
+		if err := m.refreshPolicySnapshotUnlocked(ctx, coord, "", "", collectionID, version); err != nil {
 			return struct{}{}, merr.Wrap(err, "failed to refresh expired RLS metadata")
 		}
 		return struct{}{}, nil
@@ -180,16 +211,14 @@ func (m *manager) ensureFreshMetadata(ctx context.Context, collectionID UniqueID
 	return err
 }
 
-func (m *manager) snapshotRefreshDue(collectionID UniqueID, refreshTTL time.Duration, now time.Time) (bool, bool) {
+func (m *manager) snapshotRefreshDue(collectionID UniqueID, refreshTTL time.Duration, now time.Time) bool {
 	state := m.getCollectionState(newCollectionKey(collectionID))
 	if state == nil {
-		return true, true
+		return true
 	}
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	policyDue := state.policyLastSuccessfulRefresh.IsZero() || !state.policyLastSuccessfulRefresh.Add(refreshTTL).After(now)
-	principalDue := state.principalTagLastSuccessfulRefresh.IsZero() || !state.principalTagLastSuccessfulRefresh.Add(refreshTTL).After(now)
-	return policyDue, principalDue
+	return state.policyLastSuccessfulRefresh.IsZero() || !state.policyLastSuccessfulRefresh.Add(refreshTTL).After(now)
 }
 
 func (m *manager) setRLSPolicySnapshot(_ string, collectionID UniqueID, snapshot policySnapshot) bool {
@@ -213,6 +242,12 @@ func (state *collectionState) setRLSPolicySnapshot(snapshot policySnapshot) bool
 	}
 	state.policyVersion = snapshot.Version
 	state.policyLastSuccessfulRefresh = snapshot.RefreshedAt
+	if snapshot.DBName != "" {
+		state.dbName = snapshot.DBName
+	}
+	if snapshot.CollectionName != "" {
+		state.collectionName = snapshot.CollectionName
+	}
 	state.policies = map[string]*rlsutil.RowPolicy{}
 	state.compiled = map[compiledKey]*compiledCacheEntry{}
 	for _, policy := range snapshot.Policies {
@@ -224,35 +259,62 @@ func (state *collectionState) setRLSPolicySnapshot(snapshot policySnapshot) bool
 	return true
 }
 
-func (m *manager) setRLSPrincipalTagsSnapshot(_ string, collectionID UniqueID, snapshot principalTagsSnapshot) bool {
-	if m == nil || collectionID == 0 {
-		return false
-	}
-	return m.getOrCreateCollectionState(newCollectionKey(collectionID)).setRLSPrincipalTagsSnapshot(snapshot)
-}
-
-func (state *collectionState) setRLSPrincipalTagsSnapshot(snapshot principalTagsSnapshot) bool {
+func (m *manager) setPrincipalTags(key principalKey, entry *principalTagsEntry) bool {
+	state := m.getCollectionState(newCollectionKey(key.collectionID))
 	if state == nil {
 		return false
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if isStaleSnapshotVersion(snapshot.Version, state.principalTagVersion) {
-		return false
+	if state.principalTags == nil {
+		state.principalTags = make(map[string]*principalTagsEntry)
 	}
-	if snapshot.RefreshedAt.IsZero() {
-		snapshot.RefreshedAt = time.Now()
-	}
-	state.principalTagVersion = snapshot.Version
-	state.principalTagLastSuccessfulRefresh = snapshot.RefreshedAt
-	state.principalTags = map[string]map[string]string{}
-	for principalName, tags := range snapshot.PrincipalTags {
-		if principalName == "" {
-			continue
-		}
-		state.principalTags[principalName] = clonePrincipalTags(tags)
-	}
+	state.principalTags[key.principalName] = entry
 	return true
+}
+
+func (m *manager) getPrincipalTagsEntry(key principalKey) *principalTagsEntry {
+	state := m.getCollectionState(newCollectionKey(key.collectionID))
+	if state == nil {
+		return nil
+	}
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.principalTags[key.principalName]
+}
+
+func (m *manager) removePolicyCollection(_ context.Context, collectionID UniqueID) {
+	if m == nil || collectionID == 0 {
+		return
+	}
+	m.refreshLocks.Lock(collectionID)
+	defer m.refreshLocks.Unlock(collectionID)
+	state := m.getCollectionState(newCollectionKey(collectionID))
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.policyVersion = 0
+	state.policyLastSuccessfulRefresh = time.Time{}
+	state.policies = map[string]*rlsutil.RowPolicy{}
+	state.compiled = map[compiledKey]*compiledCacheEntry{}
+}
+
+func (m *manager) removePrincipal(_ context.Context, collectionID UniqueID, principalName string) {
+	if m == nil || collectionID == 0 || principalName == "" {
+		return
+	}
+	key := principalKey{collectionID: collectionID, principalName: principalName}
+	m.principalRefreshLocks.Lock(key)
+	defer m.principalRefreshLocks.Unlock(key)
+	state := m.getCollectionState(newCollectionKey(collectionID))
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	delete(state.principalTags, principalName)
 }
 
 func (m *manager) removeCollection(ctx context.Context, collectionID UniqueID) {
@@ -262,9 +324,79 @@ func (m *manager) removeCollection(ctx context.Context, collectionID UniqueID) {
 	m.refreshLocks.Lock(collectionID)
 	defer m.refreshLocks.Unlock(collectionID)
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	delete(m.collections, newCollectionKey(collectionID))
+	m.mu.Unlock()
+}
+
+func (m *manager) removeDatabase(ctx context.Context, dbName string) {
+	if m == nil || dbName == "" {
+		return
+	}
+	m.mu.RLock()
+	keys := make([]collectionKey, 0)
+	for key, state := range m.collections {
+		state.mu.RLock()
+		matches := state.dbName == dbName
+		state.mu.RUnlock()
+		if matches {
+			keys = append(keys, key)
+		}
+	}
+	m.mu.RUnlock()
+	for _, key := range keys {
+		m.removeCollection(ctx, key.collectionID)
+	}
+}
+
+func (m *manager) runPrincipalCacheScanner(ctx context.Context, interval time.Duration) {
+	for {
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case now := <-timer.C:
+			m.expirePrincipalTags(now)
+		}
+	}
+}
+
+func (m *manager) expirePrincipalTags(now time.Time) {
+	_, _, validateFreshness := m.refreshDependencies()
+	if !validateFreshness {
+		return
+	}
+	refreshTTL := paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.GetAsDuration(time.Second)
+	if refreshTTL <= 0 {
+		return
+	}
+	m.mu.RLock()
+	states := make(map[collectionKey]*collectionState, len(m.collections))
+	for key, state := range m.collections {
+		states[key] = state
+	}
+	m.mu.RUnlock()
+	for key, state := range states {
+		state.mu.RLock()
+		principals := make([]string, 0, len(state.principalTags))
+		for principalName, entry := range state.principalTags {
+			if entry == nil || !entry.refreshedAt.Add(refreshTTL).After(now) {
+				principals = append(principals, principalName)
+			}
+		}
+		state.mu.RUnlock()
+		for _, principalName := range principals {
+			principalKey := principalKey{collectionID: key.collectionID, principalName: principalName}
+			m.principalRefreshLocks.Lock(principalKey)
+			state.mu.Lock()
+			entry := state.principalTags[principalName]
+			if entry == nil || !entry.refreshedAt.Add(refreshTTL).After(now) {
+				delete(state.principalTags, principalName)
+			}
+			state.mu.Unlock()
+			m.principalRefreshLocks.Unlock(principalKey)
+		}
+	}
 }
 
 func (m *manager) GetRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs) (*planpb.Expr, error) {
@@ -297,12 +429,16 @@ func (m *manager) getRLSPredicate(ctx context.Context, collectionID UniqueID, pr
 	if err := m.ensureFreshMetadata(ctx, collectionID); err != nil {
 		return nil, merr.Wrapf(err, "failed to validate RLS metadata for collection %d", collectionID)
 	}
+	tags, err := m.ensurePrincipalTags(ctx, collectionID, principalName)
+	if err != nil {
+		return nil, err
+	}
 
 	state := m.getCollectionState(newCollectionKey(collectionID))
 	if state == nil {
 		return nil, denyNoApplicableRLSPolicy(action, kind)
 	}
-	compiledExpr, tags, err := state.getCompiledExprAndTags(principalName, action, kind, schemaHelper, visitorArgs, exprSelector)
+	compiledExpr, err := state.getCompiledExpr(action, kind, schemaHelper, visitorArgs, exprSelector)
 	if err != nil || compiledExpr == nil {
 		if err != nil {
 			return nil, err
@@ -373,7 +509,7 @@ func orderedPolicies(policiesByName map[string]*rlsutil.RowPolicy) []*rlsutil.Ro
 	return policies
 }
 
-func (state *collectionState) getCompiledExprAndTags(principalName string, action rlsutil.PolicyAction, kind exprKind, schemaHelper *typeutil.SchemaHelper, _ *planparserv2.ParserVisitorArgs, exprSelector func(*rlsutil.RowPolicy) string) (*compiledExpression, map[string]string, error) {
+func (state *collectionState) getCompiledExpr(action rlsutil.PolicyAction, kind exprKind, schemaHelper *typeutil.SchemaHelper, _ *planparserv2.ParserVisitorArgs, exprSelector func(*rlsutil.RowPolicy) string) (*compiledExpression, error) {
 	key := compiledKey{
 		action: action,
 		kind:   kind,
@@ -388,32 +524,31 @@ func (state *collectionState) getCompiledExprAndTags(principalName string, actio
 	state.mu.RLock()
 	if len(state.policies) == 0 {
 		state.mu.RUnlock()
-		return nil, nil, nil
+		return nil, nil
 	}
 	if entry, ok := state.compiled[key]; ok && entry.matchesSchemaContext(schemaVersion, timezone) {
-		tags := state.principalTags[principalName]
 		state.mu.RUnlock()
-		return entry.expression, tags, nil
+		return entry.expression, nil
 	}
 	state.mu.RUnlock()
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if len(state.policies) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	if state.compiled == nil {
 		state.compiled = map[compiledKey]*compiledCacheEntry{}
 	}
 	if entry, ok := state.compiled[key]; ok && entry.matchesSchemaContext(schemaVersion, timezone) {
-		return entry.expression, state.principalTags[principalName], nil
+		return entry.expression, nil
 	}
 
 	policies := orderedPolicies(state.policies)
 	templates, combinedExpr := preparePolicyExprTemplates(policies, action, exprSelector)
 	if maxExpressionLength := paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt(); len(combinedExpr) > maxExpressionLength {
-		return nil, nil, merr.WrapErrServiceQuotaExceededMsg("RLS combined expression exceeds max length %d", maxExpressionLength)
+		return nil, merr.WrapErrServiceQuotaExceededMsg("RLS combined expression exceeds max length %d", maxExpressionLength)
 	}
 	var policyVisitorArgs *planparserv2.ParserVisitorArgs
 	if schemaHelper != nil {
@@ -421,21 +556,21 @@ func (state *collectionState) getCompiledExprAndTags(principalName string, actio
 	}
 	compiledExpr, err := compileExprTemplates(schemaHelper, templates, policyVisitorArgs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	state.compiled[key] = &compiledCacheEntry{
 		schemaVersion: schemaVersion,
 		timezone:      timezone,
 		expression:    compiledExpr,
 	}
-	return compiledExpr, state.principalTags[principalName], nil
+	return compiledExpr, nil
 }
 
 func newCollectionState() *collectionState {
 	return &collectionState{
 		policies:      map[string]*rlsutil.RowPolicy{},
-		principalTags: map[string]map[string]string{},
 		compiled:      map[compiledKey]*compiledCacheEntry{},
+		principalTags: map[string]*principalTagsEntry{},
 	}
 }
 
@@ -477,15 +612,8 @@ func (m *manager) getOrCreateCollectionState(key collectionKey) *collectionState
 	return state
 }
 
-func clonePrincipalTags(tags map[string]string) map[string]string {
-	if tags == nil {
-		return nil
-	}
-	cloned := make(map[string]string, len(tags))
-	for key, value := range tags {
-		cloned[key] = value
-	}
-	return cloned
+func clonePrincipalTags(tags map[string]rlsutil.TagValue) map[string]rlsutil.TagValue {
+	return rlsutil.CloneTags(tags)
 }
 
 func isStaleSnapshotVersion(incomingVersion int64, currentVersion int64) bool {

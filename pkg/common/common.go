@@ -371,8 +371,9 @@ const (
 	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
 
 	// row level security
-	RLSEnabledKey = "rls.enabled"
-	RLSForceKey   = "rls.force"
+	RLSEnabledKey       = "rls.enabled"
+	RLSForceKey         = "rls.force"
+	RLSPrincipalNameKey = "rls.principal_name"
 
 	// warmup related
 	WarmupKey            = "warmup"

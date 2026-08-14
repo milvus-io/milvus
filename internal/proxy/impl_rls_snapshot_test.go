@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 )
 
@@ -42,7 +43,11 @@ func TestProxyRLSInvalidateRemovesSnapshots(t *testing.T) {
 		commonpb.MsgType_DeleteRLSPrincipalTags,
 	} {
 		status, err := node.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base:           &commonpb.MsgBase{MsgType: msgType, Timestamp: 10},
+			Base: &commonpb.MsgBase{
+				MsgType:    msgType,
+				Timestamp:  10,
+				Properties: map[string]string{common.RLSPrincipalNameKey: "alice"},
+			},
 			DbName:         "db",
 			CollectionName: "coll",
 			CollectionID:   100,
@@ -50,4 +55,15 @@ func TestProxyRLSInvalidateRemovesSnapshots(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 	}
+}
+
+func TestProxyRLSPrincipalInvalidationRequiresPrincipalName(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err := node.InvalidateCollectionMetaCache(context.Background(), &proxypb.InvalidateCollMetaCacheRequest{
+		Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_SetRLSPrincipalTags},
+		CollectionID: 100,
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 }
