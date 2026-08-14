@@ -1578,7 +1578,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *StringFieldData:
 			fieldData = &schemapb.FieldData{

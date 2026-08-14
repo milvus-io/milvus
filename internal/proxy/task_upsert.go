@@ -805,12 +805,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_BytesData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.BytesData.Data = make([][]byte, 0)
 			} else {
 				ret := make([][]byte, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.BytesData.Data[i])
 					}

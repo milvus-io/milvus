@@ -705,8 +705,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 		}
 	case schemapb.DataType_Decimal:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetBytesData().GetData())
 		}
