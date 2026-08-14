@@ -18,14 +18,15 @@ package rootcoord
 
 import (
 	"context"
-	"maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
@@ -131,11 +132,19 @@ func (c *Core) broadcastSetRLSPrincipalTags(ctx context.Context, req *rlsutil.Se
 	if err != nil {
 		return err
 	}
-	return broadcastAlterRLSPrincipal(ctx, broadcaster, principal, newRLSCacheExpirations(
-		req.GetDbName(), req.GetCollectionName(), principal.CollectionID, commonpb.MsgType_SetRLSPrincipalTags))
+	var cacheExpirations *message.CacheExpirations
+	if !principal.IsNew {
+		cacheExpirations = newRLSCacheExpirations(
+			req.GetDbName(), req.GetCollectionName(), principal.CollectionID, commonpb.MsgType_SetRLSPrincipalTags)
+	}
+	return broadcastAlterRLSPrincipal(ctx, broadcaster, principal, cacheExpirations)
 }
 
 func broadcastAlterRLSPrincipal(ctx context.Context, broadcaster broadcaster.BroadcastAPI, principal *model.RLSPrincipal, cacheExpirations *message.CacheExpirations) error {
+	principalMessage, err := marshalRLSPrincipalMessage(principal)
+	if err != nil {
+		return err
+	}
 	msg := message.NewAlterRLSMetadataMessageBuilderV2().
 		WithHeader(&message.AlterRLSMetadataMessageHeader{
 			DbId:             principal.DBID,
@@ -144,12 +153,12 @@ func broadcastAlterRLSPrincipal(ctx context.Context, broadcaster broadcaster.Bro
 		}).
 		WithBody(&message.AlterRLSMetadataMessageBody{
 			Metadata: &messagespb.AlterRLSMetadataMessageBody_Principal{
-				Principal: marshalRLSPrincipalMessage(principal),
+				Principal: principalMessage,
 			},
 		}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
-	_, err := broadcaster.Broadcast(ctx, msg)
+	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
 
@@ -206,11 +215,15 @@ func marshalRLSPolicyMessage(policy *model.RLSPolicy) *messagespb.RLSPolicyMetad
 	}
 }
 
-func marshalRLSPrincipalMessage(principal *model.RLSPrincipal) *messagespb.RLSPrincipalMetadata {
+func marshalRLSPrincipalMessage(principal *model.RLSPrincipal) (*messagespb.RLSPrincipalMetadata, error) {
+	tags, err := rlsutil.TagsToJSON(principal.Tags)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "encode RLS principal metadata")
+	}
 	return &messagespb.RLSPrincipalMetadata{
 		PrincipalName: principal.PrincipalName,
-		Tags:          maps.Clone(principal.Tags),
-	}
+		Tags:          tags,
+	}, nil
 }
 
 func unmarshalRLSPolicyMessage(header *message.AlterRLSMetadataMessageHeader, policy *messagespb.RLSPolicyMetadata) *model.RLSPolicy {
@@ -243,13 +256,17 @@ func policyActionsFromMilvusProto(actions []milvuspb.RowPolicyAction) []rlsutil.
 	return converted
 }
 
-func unmarshalRLSPrincipalMessage(header *message.AlterRLSMetadataMessageHeader, principal *messagespb.RLSPrincipalMetadata) *model.RLSPrincipal {
+func unmarshalRLSPrincipalMessage(header *message.AlterRLSMetadataMessageHeader, principal *messagespb.RLSPrincipalMetadata) (*model.RLSPrincipal, error) {
+	tags, err := rlsutil.TagsFromJSON(principal.GetTags())
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal metadata")
+	}
 	return &model.RLSPrincipal{
 		DBID:          header.GetDbId(),
 		CollectionID:  header.GetCollectionId(),
 		PrincipalName: principal.GetPrincipalName(),
-		Tags:          maps.Clone(principal.GetTags()),
-	}
+		Tags:          tags,
+	}, nil
 }
 
 func (c *DDLCallback) alterRLSMetadataV2AckCallback(ctx context.Context, result message.BroadcastResultAlterRLSMetadataMessageV2) error {
@@ -266,7 +283,18 @@ func (c *DDLCallback) alterRLSMetadataV2AckCallback(ctx context.Context, result 
 		if metadata.Principal == nil {
 			return merr.WrapErrServiceInternalMsg("alter RLS metadata message has nil principal")
 		}
-		err = c.meta.ApplyAlterRLSPrincipal(ctx, unmarshalRLSPrincipalMessage(header, metadata.Principal))
+		principal, decodeErr := unmarshalRLSPrincipalMessage(header, metadata.Principal)
+		if decodeErr != nil {
+			return merr.WrapErrDataIntegrity(decodeErr, "decode RLS principal metadata message")
+		}
+		err = c.meta.ApplyAlterRLSPrincipal(ctx, principal)
+		if err != nil {
+			return err
+		}
+		if len(header.GetCacheExpirations().GetCacheExpirations()) == 0 {
+			return nil
+		}
+		return c.expireCaches(ctx, header, proxyutil.SetMsgProperty(common.RLSPrincipalNameKey, metadata.Principal.GetPrincipalName()))
 	default:
 		return merr.WrapErrServiceInternalMsg("alter RLS metadata message has no metadata")
 	}
@@ -285,6 +313,9 @@ func (c *DDLCallback) dropRLSMetadataV2AckCallback(ctx context.Context, result m
 		err = c.meta.ApplyDropRLSPolicy(ctx, header.GetCollectionId(), metadata.PolicyName)
 	case *messagespb.DropRLSMetadataMessageBody_PrincipalName:
 		err = c.meta.ApplyDropRLSPrincipal(ctx, header.GetCollectionId(), metadata.PrincipalName)
+		if err == nil {
+			return c.expireCaches(ctx, header, proxyutil.SetMsgProperty(common.RLSPrincipalNameKey, metadata.PrincipalName))
+		}
 	default:
 		return merr.WrapErrServiceInternalMsg("drop RLS metadata message has no metadata")
 	}

@@ -3875,7 +3875,7 @@ func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetada
 		}, nil
 	}
 
-	metadata, err := c.meta.GetRLSMetadata(ctx, req.GetCollectionId(), req.GetKind())
+	metadata, err := c.meta.GetRLSMetadata(ctx, req.GetCollectionId(), req.GetKind(), req.GetPrincipalName())
 	if err != nil {
 		mlog.Warn(ctx, "failed to get RLS metadata",
 			mlog.FieldCollectionID(req.GetCollectionId()),
@@ -3889,6 +3889,17 @@ func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetada
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	principals := make([]*rootcoordpb.RLSPrincipalInfo, 0, len(metadata.Principals))
+	for _, principal := range metadata.Principals {
+		info, err := model.MarshalRLSPrincipalModel(principal)
+		if err != nil {
+			return &rootcoordpb.GetRLSMetadataResponse{
+				Status:       merr.Status(err),
+				CollectionId: metadata.CollectionID,
+			}, nil
+		}
+		principals = append(principals, info)
+	}
 	return &rootcoordpb.GetRLSMetadataResponse{
 		Status:         merr.Success(),
 		DbName:         metadata.DBName,
@@ -3897,9 +3908,7 @@ func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetada
 		Policies: lo.Map(metadata.Policies, func(policy *model.RLSPolicy, _ int) *rootcoordpb.RLSPolicyInfo {
 			return model.MarshalRLSPolicyModel(policy)
 		}),
-		Principals: lo.Map(metadata.Principals, func(principal *model.RLSPrincipal, _ int) *rootcoordpb.RLSPrincipalInfo {
-			return model.MarshalRLSPrincipalModel(principal)
-		}),
+		Principals: principals,
 	}, nil
 }
 

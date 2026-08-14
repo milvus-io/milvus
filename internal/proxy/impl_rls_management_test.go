@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -98,7 +99,7 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 	})).Return(merr.Success(), nil).Once()
 	status, err = node.SetRLSPrincipalTags(ctx, &milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",
-		Tags:          map[string]string{"team": "search"},
+		Tags:          `{"team":"search"}`,
 	})
 	require.NoError(t, err)
 	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
@@ -110,7 +111,7 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 		DbName:         "db",
 		CollectionName: "coll",
 		PrincipalName:  "alice",
-		Tags:           map[string]string{"dept": "engineering"},
+		Tags:           `{"dept":"engineering"}`,
 	}, nil).Once()
 	getTagsResp, err := node.GetRLSPrincipalTags(ctx, &milvuspb.GetRLSPrincipalTagsRequest{
 		DbName:         "db",
@@ -121,7 +122,7 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 	require.Equal(t, "db", getTagsResp.GetDbName())
 	require.Equal(t, "coll", getTagsResp.GetCollectionName())
 	require.Equal(t, "alice", getTagsResp.GetPrincipalName())
-	require.Equal(t, "engineering", getTagsResp.GetTags()["dept"])
+	require.JSONEq(t, `{"dept":"engineering"}`, getTagsResp.GetTags())
 	require.Equal(t, commonpb.ErrorCode_Success, getTagsResp.GetStatus().GetErrorCode())
 
 	mixCoord.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
@@ -212,9 +213,11 @@ func TestProxyRLSAPIsRejectInvalidPayloadBeforeForwarding(t *testing.T) {
 	for i := 0; i <= maxTags; i++ {
 		tags[string(rune(i+1))] = "value"
 	}
+	payload, marshalErr := json.Marshal(tags)
+	require.NoError(t, marshalErr)
 	status, err = node.SetRLSPrincipalTags(ctx, &milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",
-		Tags:          tags,
+		Tags:          string(payload),
 	})
 	require.NoError(t, err)
 	assertErrorStatus(t, status, merr.ErrServiceQuotaExceeded)
@@ -268,11 +271,11 @@ func TestProxySetRLSPrincipalTagsDefersCreationLimitToRootCoord(t *testing.T) {
 	})
 
 	mixCoord.EXPECT().SetRLSPrincipalTags(mock.Anything, mock.MatchedBy(func(req *milvuspb.SetRLSPrincipalTagsRequest) bool {
-		return req.GetPrincipalName() == "alice" && req.GetTags()["dept"] == "support"
+		return req.GetPrincipalName() == "alice" && req.GetTags() == `{"dept":"support"}`
 	})).Return(merr.Success(), nil).Once()
 	status, err := node.SetRLSPrincipalTags(ctx, &milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",
-		Tags:          map[string]string{"dept": "support"},
+		Tags:          `{"dept":"support"}`,
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))

@@ -78,6 +78,33 @@ func TestCoreRejectsLegacyRowPolicyRoles(t *testing.T) {
 	require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
 }
 
+func TestRLSPrincipalTagProtoConversion(t *testing.T) {
+	tags, err := rlsutil.TagsFromJSON(`{"tenant":"acme","level":3,"score":0.75}`)
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), tags["tenant"])
+	require.Equal(t, rlsutil.NewInt64TagValue(3), tags["level"])
+	require.Equal(t, rlsutil.NewDoubleTagValue(0.75), tags["score"])
+
+	_, err = rlsutil.TagsFromJSON(`{"nested":{"level":3}}`)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestSetRLSPrincipalTagsRequestFromProto(t *testing.T) {
+	req, err := setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
+		DbName:         "db",
+		CollectionName: "coll",
+		PrincipalName:  "alice",
+		Tags:           `{"tenant":"acme"}`,
+	})
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), req.GetTags()["tenant"])
+
+	_, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
+		Tags: `{"tenant":true}`,
+	})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
 func TestCoreListRowPoliciesProtoConversion(t *testing.T) {
 	ctx := context.Background()
 	meta := mockrootcoord.NewIMetaTable(t)

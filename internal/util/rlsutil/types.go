@@ -16,7 +16,133 @@
 
 package rlsutil
 
-import "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+import (
+	"encoding/json"
+	"io"
+	"strconv"
+	"strings"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+type TagValueKind int32
+
+const (
+	TagValueKindUnknown TagValueKind = iota
+	TagValueKindString
+	TagValueKindInt64
+	TagValueKindDouble
+)
+
+type TagValue struct {
+	Kind        TagValueKind
+	StringValue string
+	Int64Value  int64
+	DoubleValue float64
+}
+
+func NewStringTagValue(value string) TagValue {
+	return TagValue{Kind: TagValueKindString, StringValue: value}
+}
+
+func NewInt64TagValue(value int64) TagValue {
+	return TagValue{Kind: TagValueKindInt64, Int64Value: value}
+}
+
+func NewDoubleTagValue(value float64) TagValue {
+	return TagValue{Kind: TagValueKindDouble, DoubleValue: value}
+}
+
+func TagsFromJSON(payload string) (map[string]TagValue, error) {
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.UseNumber()
+	var raw map[string]any
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+	}
+	if raw == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a JSON object")
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return nil, err
+	}
+	tags := make(map[string]TagValue, len(raw))
+	for key, value := range raw {
+		switch typed := value.(type) {
+		case string:
+			tags[key] = NewStringTagValue(typed)
+		case json.Number:
+			if strings.ContainsAny(typed.String(), ".eE") {
+				value, err := strconv.ParseFloat(typed.String(), 64)
+				if err != nil {
+					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid double value", key)
+				}
+				tags[key] = NewDoubleTagValue(value)
+			} else {
+				value, err := strconv.ParseInt(typed.String(), 10, 64)
+				if err == nil {
+					tags[key] = NewInt64TagValue(value)
+					continue
+				}
+				// encoding/json may serialize a double such as 1e20 without a
+				// decimal point. If it does not fit int64, retain it as a double
+				// so JSON round-tripping does not reject an otherwise valid tag.
+				doubleValue, doubleErr := strconv.ParseFloat(typed.String(), 64)
+				if doubleErr != nil {
+					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid numeric value", key)
+				}
+				tags[key] = NewDoubleTagValue(doubleValue)
+			}
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, or double", key)
+		}
+	}
+	return tags, nil
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tags must contain exactly one JSON object")
+		}
+		return merr.WrapErrParameterInvalidMsg("RLS principal tags contain invalid trailing data: %s", err)
+	}
+	return nil
+}
+
+func TagsToJSON(tags map[string]TagValue) (string, error) {
+	values := make(map[string]any, len(tags))
+	for key, value := range tags {
+		switch value.Kind {
+		case TagValueKindString:
+			values[key] = value.StringValue
+		case TagValueKindInt64:
+			values[key] = value.Int64Value
+		case TagValueKindDouble:
+			values[key] = value.DoubleValue
+		default:
+			return "", merr.WrapErrServiceInternalMsg("RLS principal tag %q has unsupported internal value type", key)
+		}
+	}
+	payload, err := json.Marshal(values)
+	if err != nil {
+		return "", merr.WrapErrDataIntegrity(err, "encode RLS principal tags")
+	}
+	return string(payload), nil
+}
+
+func CloneTags(tags map[string]TagValue) map[string]TagValue {
+	if tags == nil {
+		return nil
+	}
+	cloned := make(map[string]TagValue, len(tags))
+	for key, value := range tags {
+		cloned[key] = value
+	}
+	return cloned
+}
 
 type PolicyType int32
 
@@ -244,7 +370,7 @@ type SetRLSPrincipalTagsRequest struct {
 	DbName         string
 	CollectionName string
 	PrincipalName  string
-	Tags           map[string]string
+	Tags           map[string]TagValue
 }
 
 func (request *SetRLSPrincipalTagsRequest) GetDbName() string {
@@ -268,7 +394,7 @@ func (request *SetRLSPrincipalTagsRequest) GetPrincipalName() string {
 	return request.PrincipalName
 }
 
-func (request *SetRLSPrincipalTagsRequest) GetTags() map[string]string {
+func (request *SetRLSPrincipalTagsRequest) GetTags() map[string]TagValue {
 	if request == nil {
 		return nil
 	}
@@ -304,7 +430,7 @@ func (request *GetRLSPrincipalTagsRequest) GetPrincipalName() string {
 
 type GetRLSPrincipalTagsResponse struct {
 	Status         *commonpb.Status
-	Tags           map[string]string
+	Tags           map[string]TagValue
 	DbName         string
 	CollectionName string
 	PrincipalName  string

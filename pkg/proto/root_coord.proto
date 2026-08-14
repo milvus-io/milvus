@@ -335,7 +335,7 @@ message RLSPrincipalInfo {
   int64 db_id = 1;
   int64 collection_id = 2;
   string principal_name = 3;
-  map<string, string> tags = 4;
+  string tags = 4;
 }
 
 message GetPChannelInfoRequest {
@@ -390,6 +390,9 @@ message GetRLSMetadataRequest {
   common.MsgBase base = 1;
   int64 collection_id = 2;
   RLSMetadataKind kind = 3;
+  // Optional principal filter. It is valid only with PRINCIPALS and allows
+  // Proxy to load one principal by the immutable collection ID.
+  string principal_name = 4;
 }
 
 message GetRLSMetadataResponse {

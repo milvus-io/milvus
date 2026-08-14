@@ -18,6 +18,7 @@ package rls
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc"
@@ -34,56 +35,43 @@ type CoordClient interface {
 	GetRLSMetadata(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)
 }
 
-func (m *manager) Init(_ context.Context, coord CoordClient, allocVersion SnapshotVersionAllocator) error {
+func (m *manager) Init(ctx context.Context, coord CoordClient, allocVersion SnapshotVersionAllocator) error {
 	if m == nil || coord == nil || allocVersion == nil {
 		return merr.WrapErrServiceInternalMsg("failed to initialize RLS metadata manager without required dependencies")
 	}
-	m.configure(coord, allocVersion)
+	m.configure(ctx, coord, allocVersion)
 	return nil
 }
 
 func (m *manager) RefreshPolicySnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error {
-	return m.refreshSnapshots(ctx, coord, dbName, collectionName, collectionID, version, true, false)
+	return m.refreshPolicySnapshot(ctx, coord, dbName, collectionName, collectionID, version)
 }
 
-func (m *manager) RefreshPrincipalTagsSnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error {
-	return m.refreshSnapshots(ctx, coord, dbName, collectionName, collectionID, version, false, true)
-}
-
-func (m *manager) refreshSnapshots(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64, refreshPolicies bool, refreshPrincipalTags bool) error {
+func (m *manager) refreshPolicySnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error {
 	if m == nil || coord == nil {
-		return merr.WrapErrServiceInternalMsg("failed to refresh RLS snapshots without manager or coord client")
+		return merr.WrapErrServiceInternalMsg("failed to refresh RLS policy snapshot without manager or coord client")
 	}
 	if collectionID == 0 {
-		return merr.WrapErrServiceInternalMsg("failed to refresh RLS snapshots with empty collection id")
-	}
-	if !refreshPolicies && !refreshPrincipalTags {
-		return merr.WrapErrServiceInternalMsg("failed to refresh RLS snapshots without a target")
+		return merr.WrapErrServiceInternalMsg("failed to refresh RLS policy snapshot with empty collection id")
 	}
 	m.refreshLocks.RLock(collectionID)
 	defer m.refreshLocks.RUnlock(collectionID)
-	return m.refreshSnapshotsUnlocked(ctx, coord, dbName, collectionName, collectionID, version, refreshPolicies, refreshPrincipalTags)
+	return m.refreshPolicySnapshotUnlocked(ctx, coord, dbName, collectionName, collectionID, version)
 }
 
-func (m *manager) refreshSnapshotsUnlocked(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64, refreshPolicies bool, refreshPrincipalTags bool) error {
+func (m *manager) refreshPolicySnapshotUnlocked(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error {
 	// Capture one collection-state incarnation before the RPC. Cache invalidation
 	// removes this pointer from the manager map. A response that started before
 	// invalidation may still update the detached object, but can never recreate
 	// or overwrite the new incarnation installed by a later request.
 	state := m.getOrCreateCollectionState(newCollectionKey(collectionID))
 
-	kind := rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL
-	if refreshPolicies && !refreshPrincipalTags {
-		kind = rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
-	} else if !refreshPolicies && refreshPrincipalTags {
-		kind = rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS
-	}
 	resp, err := coord.GetRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionId: collectionID,
-		Kind:         kind,
+		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return merr.Wrap(err, "failed to get RLS metadata")
@@ -98,43 +86,95 @@ func (m *manager) refreshSnapshotsUnlocked(ctx context.Context, coord CoordClien
 		collectionName = resp.GetCollectionName()
 	}
 
-	refreshedAt := time.Now()
-	if refreshPolicies {
-		updated := state.setRLSPolicySnapshot(policySnapshot{
-			Version:     int64(version),
-			RefreshedAt: refreshedAt,
-			Policies:    rowPoliciesFromInfo(resp.GetPolicies()),
-		})
-		if !updated {
-			mlog.Debug(ctx, "skip stale RLS policy snapshot",
-				mlog.FieldDbName(dbName),
-				mlog.FieldCollectionName(collectionName),
-				mlog.FieldCollectionID(collectionID),
-				mlog.Uint64("version", version))
-		}
-	}
-	if refreshPrincipalTags {
-		principalTags := make(map[string]map[string]string, len(resp.GetPrincipals()))
-		for _, principal := range resp.GetPrincipals() {
-			if principal == nil || principal.GetPrincipalName() == "" {
-				continue
-			}
-			principalTags[principal.GetPrincipalName()] = principal.GetTags()
-		}
-		updated := state.setRLSPrincipalTagsSnapshot(principalTagsSnapshot{
-			Version:       int64(version),
-			RefreshedAt:   refreshedAt,
-			PrincipalTags: principalTags,
-		})
-		if !updated {
-			mlog.Debug(ctx, "skip stale RLS principal tags snapshot",
-				mlog.FieldDbName(dbName),
-				mlog.FieldCollectionName(collectionName),
-				mlog.FieldCollectionID(collectionID),
-				mlog.Uint64("version", version))
-		}
+	updated := state.setRLSPolicySnapshot(policySnapshot{
+		Version:        int64(version),
+		RefreshedAt:    time.Now(),
+		DBName:         dbName,
+		CollectionName: collectionName,
+		Policies:       rowPoliciesFromInfo(resp.GetPolicies()),
+	})
+	if !updated {
+		mlog.Debug(ctx, "skip stale RLS policy snapshot",
+			mlog.FieldDbName(dbName),
+			mlog.FieldCollectionName(collectionName),
+			mlog.FieldCollectionID(collectionID),
+			mlog.Uint64("version", version))
 	}
 	return nil
+}
+
+func (m *manager) ensurePrincipalTags(ctx context.Context, collectionID UniqueID, principalName string) (map[string]rlsutil.TagValue, error) {
+	if m == nil || collectionID == 0 || principalName == "" {
+		return nil, merr.WrapErrPrivilegeNotPermitted("RLS principal is required")
+	}
+
+	key := principalKey{collectionID: collectionID, principalName: principalName}
+	coord, _, validateFreshness := m.refreshDependencies()
+	if entry := m.getPrincipalTagsEntry(key); entry != nil {
+		return clonePrincipalTags(entry.tags), nil
+	}
+	if !validateFreshness {
+		return nil, merr.WrapErrPrivilegeNotPermitted("RLS principal %q does not exist", principalName)
+	}
+	if coord == nil {
+		return nil, merr.WrapErrServiceInternalMsg("failed to refresh RLS principal tags without coord client")
+	}
+
+	m.refreshLocks.RLock(collectionID)
+	defer m.refreshLocks.RUnlock(collectionID)
+	m.principalRefreshLocks.RLock(key)
+	defer m.principalRefreshLocks.RUnlock(key)
+
+	if entry := m.getPrincipalTagsEntry(key); entry != nil {
+		return clonePrincipalTags(entry.tags), nil
+	}
+
+	cacheKey := fmt.Sprintf("%d/%s", collectionID, principalName)
+	tags, err, _ := m.principalRefreshes.Do(cacheKey, func() (map[string]rlsutil.TagValue, error) {
+		coord, _, _ := m.refreshDependencies()
+		if coord == nil {
+			return nil, merr.WrapErrServiceInternalMsg("failed to refresh RLS principal tags without coord client")
+		}
+		if entry := m.getPrincipalTagsEntry(key); entry != nil {
+			return clonePrincipalTags(entry.tags), nil
+		}
+
+		resp, err := coord.GetRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			CollectionId:  collectionID,
+			Kind:          rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
+			PrincipalName: principalName,
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return nil, merr.Wrapf(err, "failed to get RLS principal %q tags", principalName)
+		}
+		if resp.GetCollectionId() != collectionID {
+			return nil, merr.WrapErrServiceInternalMsg("RLS metadata collection id mismatch: requested %d, received %d", collectionID, resp.GetCollectionId())
+		}
+		var tags map[string]rlsutil.TagValue
+		for _, principal := range resp.GetPrincipals() {
+			if principal.GetPrincipalName() == principalName {
+				tags, err = rlsutil.TagsFromJSON(principal.GetTags())
+				break
+			}
+		}
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to decode RLS principal %q tags", principalName)
+		}
+		if tags == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal [%s] does not exist", principalName)
+		}
+		if !m.setPrincipalTags(key, &principalTagsEntry{
+			refreshedAt: time.Now(),
+			tags:        clonePrincipalTags(tags),
+		}) {
+			return nil, merr.WrapErrServiceInternalMsg("RLS collection %d was removed during principal refresh", collectionID)
+		}
+		return tags, nil
+	})
+	return clonePrincipalTags(tags), err
 }
 
 func rowPoliciesFromInfo(policies []*rootcoordpb.RLSPolicyInfo) []*rlsutil.RowPolicy {

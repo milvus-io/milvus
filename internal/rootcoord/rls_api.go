@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"maps"
 	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -94,12 +93,27 @@ func (c *Core) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrin
 	if req == nil {
 		return c.setRLSPrincipalTags(ctx, nil)
 	}
-	return c.setRLSPrincipalTags(ctx, &rlsutil.SetRLSPrincipalTagsRequest{
+	internalReq, err := setRLSPrincipalTagsRequestFromProto(req)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return c.setRLSPrincipalTags(ctx, internalReq)
+}
+
+func setRLSPrincipalTagsRequestFromProto(req *milvuspb.SetRLSPrincipalTagsRequest) (*rlsutil.SetRLSPrincipalTagsRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	tags, err := rlsutil.TagsFromJSON(req.GetTags())
+	if err != nil {
+		return nil, err
+	}
+	return &rlsutil.SetRLSPrincipalTagsRequest{
 		DbName:         req.GetDbName(),
 		CollectionName: req.GetCollectionName(),
 		PrincipalName:  req.GetPrincipalName(),
-		Tags:           maps.Clone(req.GetTags()),
-	})
+		Tags:           tags,
+	}, nil
 }
 
 func (c *Core) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
@@ -115,9 +129,18 @@ func (c *Core) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrin
 	if resp == nil {
 		return nil, err
 	}
+	tags, encodeErr := rlsutil.TagsToJSON(resp.Tags)
+	if encodeErr != nil {
+		return &milvuspb.GetRLSPrincipalTagsResponse{
+			Status:         merr.Status(encodeErr),
+			DbName:         resp.DbName,
+			CollectionName: resp.CollectionName,
+			PrincipalName:  resp.PrincipalName,
+		}, nil
+	}
 	return &milvuspb.GetRLSPrincipalTagsResponse{
 		Status:         resp.Status,
-		Tags:           maps.Clone(resp.Tags),
+		Tags:           tags,
 		DbName:         resp.DbName,
 		CollectionName: resp.CollectionName,
 		PrincipalName:  resp.PrincipalName,

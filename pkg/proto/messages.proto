@@ -904,7 +904,7 @@ message RLSPolicyMetadata {
 
 message RLSPrincipalMetadata {
     string principal_name = 1;
-    map<string, string> tags = 2;
+    string tags = 2;
 }
 
 // DropRLSMetadataMessageHeader identifies the collection whose RLS metadata

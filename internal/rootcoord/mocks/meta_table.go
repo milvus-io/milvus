@@ -2934,9 +2934,9 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// GetRLSMetadata provides a mock function with given fields: ctx, collectionID, kind
-func (_m *IMetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind) (*model.RLSMetadata, error) {
-	ret := _m.Called(ctx, collectionID, kind)
+// GetRLSMetadata provides a mock function with given fields: ctx, collectionID, kind, principalName
+func (_m *IMetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string) (*model.RLSMetadata, error) {
+	ret := _m.Called(ctx, collectionID, kind, principalName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRLSMetadata")
@@ -2944,19 +2944,19 @@ func (_m *IMetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, ki
 
 	var r0 *model.RLSMetadata
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, rootcoordpb.RLSMetadataKind) (*model.RLSMetadata, error)); ok {
-		return rf(ctx, collectionID, kind)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, rootcoordpb.RLSMetadataKind, string) (*model.RLSMetadata, error)); ok {
+		return rf(ctx, collectionID, kind, principalName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, rootcoordpb.RLSMetadataKind) *model.RLSMetadata); ok {
-		r0 = rf(ctx, collectionID, kind)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, rootcoordpb.RLSMetadataKind, string) *model.RLSMetadata); ok {
+		r0 = rf(ctx, collectionID, kind, principalName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*model.RLSMetadata)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, rootcoordpb.RLSMetadataKind) error); ok {
-		r1 = rf(ctx, collectionID, kind)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, rootcoordpb.RLSMetadataKind, string) error); ok {
+		r1 = rf(ctx, collectionID, kind, principalName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2973,13 +2973,14 @@ type IMetaTable_GetRLSMetadata_Call struct {
 //   - ctx context.Context
 //   - collectionID int64
 //   - kind rootcoordpb.RLSMetadataKind
-func (_e *IMetaTable_Expecter) GetRLSMetadata(ctx interface{}, collectionID interface{}, kind interface{}) *IMetaTable_GetRLSMetadata_Call {
-	return &IMetaTable_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", ctx, collectionID, kind)}
+//   - principalName string
+func (_e *IMetaTable_Expecter) GetRLSMetadata(ctx interface{}, collectionID interface{}, kind interface{}, principalName interface{}) *IMetaTable_GetRLSMetadata_Call {
+	return &IMetaTable_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", ctx, collectionID, kind, principalName)}
 }
 
-func (_c *IMetaTable_GetRLSMetadata_Call) Run(run func(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind)) *IMetaTable_GetRLSMetadata_Call {
+func (_c *IMetaTable_GetRLSMetadata_Call) Run(run func(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string)) *IMetaTable_GetRLSMetadata_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(rootcoordpb.RLSMetadataKind))
+		run(args[0].(context.Context), args[1].(int64), args[2].(rootcoordpb.RLSMetadataKind), args[3].(string))
 	})
 	return _c
 }
@@ -2989,29 +2990,29 @@ func (_c *IMetaTable_GetRLSMetadata_Call) Return(_a0 *model.RLSMetadata, _a1 err
 	return _c
 }
 
-func (_c *IMetaTable_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, int64, rootcoordpb.RLSMetadataKind) (*model.RLSMetadata, error)) *IMetaTable_GetRLSMetadata_Call {
+func (_c *IMetaTable_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, int64, rootcoordpb.RLSMetadataKind, string) (*model.RLSMetadata, error)) *IMetaTable_GetRLSMetadata_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetRLSPrincipalTags provides a mock function with given fields: ctx, req
-func (_m *IMetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error) {
+func (_m *IMetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRLSPrincipalTags")
 	}
 
-	var r0 map[string]string
+	var r0 map[string]rlsutil.TagValue
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)); ok {
 		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) map[string]string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) map[string]rlsutil.TagValue); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]string)
+			r0 = ret.Get(0).(map[string]rlsutil.TagValue)
 		}
 	}
 
@@ -3043,12 +3044,12 @@ func (_c *IMetaTable_GetRLSPrincipalTags_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *IMetaTable_GetRLSPrincipalTags_Call) Return(_a0 map[string]string, _a1 error) *IMetaTable_GetRLSPrincipalTags_Call {
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) Return(_a0 map[string]rlsutil.TagValue, _a1 error) *IMetaTable_GetRLSPrincipalTags_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *IMetaTable_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error)) *IMetaTable_GetRLSPrincipalTags_Call {
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)) *IMetaTable_GetRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
