@@ -787,25 +787,99 @@ func (node *DataNode) queuedSlots() (indexStats, compaction, imports int64) {
 		node.importScheduler.Slots()
 }
 
+// queueUtilization is how full the three executors' own queues say the node is,
+// as a fraction, so it can be compared with the ledger's.
+//
+// A fraction rather than a slot count, because the three counters are NOT all
+// denominated in the same unit and subtracting them from one total is a units
+// error:
+//
+//   - indexStatsUsed and importUsed are on the CalculateNodeSlots scale, the
+//     same scale legacyTotal is on. Their fraction is used/legacyTotal.
+//   - compactionUsed is not. Under this branch DataCoord prices a mix or sort
+//     compaction with memoryToSlots(bytes) = bytes / legacyMemoryPerSlot, so
+//     the counter is denominated in 128MiB units of memory. legacyTotal x
+//     128MiB is 16GiB on the 16c/64GiB node from issue #52180, against a ledger
+//     budget of 48GiB -- so measuring it against legacyTotal saturates at a
+//     third of the node's real capacity, and the node would report itself full
+//     after about three 4.5GiB compactions where the ledger has room for ten.
+//     That is the same throughput collapse dataCoord.resource.
+//     enableCompactionEstimate exists to let an operator escape during a skew
+//     window, except self-inflicted, permanent, and in a fully upgraded
+//     cluster.
+//
+// So the compaction arm is converted back into the currency it came from --
+// slots x legacyMemoryPerSlot recovers the memory memoryToSlots divided -- and
+// measured against the ledger's own budget. memoryToSlots floors, so the
+// reconstruction understates by up to one slot per task; that direction makes
+// this arm slightly less binding, which is the safe way round for a backstop.
+//
+// Two honest imprecisions, neither fixable here. The executors' counters
+// include tasks that are already ADMITTED as well as queued ones, so this arm
+// double-counts whatever the ledger has already charged; it is a backstop
+// against an empty ledger, not an accounting. And with
+// enableCompactionEstimate off, or against a DataCoord too old to send an
+// estimate, the compaction counter carries flat pre-branch constants instead,
+// which reconstruct to far fewer bytes than the tasks really hold -- in that
+// configuration this arm simply stops binding and the ledger governs alone,
+// which is what that switch is asking for anyway.
+func queueUtilization(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) float64 {
+	var util float64
+	if legacyTotal > 0 {
+		util = float64(indexStatsUsed+importUsed) / float64(legacyTotal)
+	}
+	if compactionUsed <= 0 {
+		return util
+	}
+
+	perSlot := paramtable.Get().DataNodeCfg.ResourceLegacyMemoryPerSlot.GetAsInt64()
+	if perSlot <= 0 || snap.Total.Memory <= 0 {
+		// No budget to measure against (an unconfigured exchange rate, or a
+		// guard that has not reported one). Fall back to the legacy scale: it
+		// is the wrong unit, but it is the only one available and it errs
+		// towards reporting the node busier.
+		if legacyTotal > 0 {
+			if u := float64(compactionUsed) / float64(legacyTotal); u > util {
+				util = u
+			}
+		}
+		return util
+	}
+
+	if u := float64(compactionUsed*perSlot) / float64(snap.Total.Memory); u > util {
+		util = u
+	}
+	return util
+}
+
 // availableSlots is the scalar this node reports to DataCoord.
 //
-// It is the smaller of two answers, and needs both. legacyAvailableSlots folds
-// the ledger, which is the memory-aware half and the reason this branch exists
-// -- but the ledger counts only ADMITTED tasks. A node holding five hundred
-// queued compactions that have not been admitted yet has an empty ledger and
-// would advertise itself completely free, so DataCoord's water-filling would
-// keep choosing it and one node would hoard the whole cluster's work. The
-// compaction executor's taskCh is capped (maxTaskQueueNum), and once it fills,
-// Enqueue blocks inside the gRPC handler.
+// It needs two inputs. legacyAvailableSlots folds the ledger, which is the
+// memory-aware half and the reason this branch exists -- but the ledger counts
+// only ADMITTED tasks. A node holding five hundred queued compactions that have
+// not been admitted yet has an empty ledger and would advertise itself
+// completely free, so DataCoord's water-filling would keep choosing it and one
+// node would hoard the whole cluster's work. The compaction executor's taskCh
+// is capped (maxTaskQueueNum), and once it fills, Enqueue blocks inside the
+// gRPC handler.
 //
 // The executors' own counters are the pre-branch answer to that: they are
 // charged at enqueue and released at completion, so they see the queue. They
 // are not memory-aware, which is why they cannot be the only input either.
-// Taking the minimum keeps whichever is currently the more conservative.
+// Whichever of the two currently reports the node busier wins.
 func availableSlots(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) int64 {
 	available := legacyAvailableSlots(snap, legacyTotal)
-	if queued := legacyTotal - indexStatsUsed - compactionUsed - importUsed; queued < available {
-		available = queued
+	if snap.Frozen || snap.ExclusiveTaskID != 0 {
+		// Already zero, and the queue arm must not be able to raise it.
+		return available
+	}
+
+	util := queueUtilization(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
+	if util > 1 {
+		util = 1
+	}
+	if fromQueue := int64(float64(legacyTotal) * (1 - util)); fromQueue < available {
+		available = fromQueue
 	}
 	if available < 0 {
 		available = 0
