@@ -29,15 +29,15 @@ import (
 //
 //	├── pchannel-1
 //	│   ├── checkpoint
-//	│   ├── vchannels
+//	│   ├── vchannel
 //	│   │   ├── vchannel-1
 //	│   │   │   ├── schema/version-1
 //	│   │   │   └── schema/version-2
 //	│   │   ├── vchannel-2
 //	│   │   │   └── schema/version-1
 //	│   ├── summary-store
-//	│   │   ├── pchannel-meta
-//	│   │   └── vchannels
+//	│   │   ├── pchannel-summary-meta
+//	│   │   └── vchannel-summary-meta
 //	│   │       └── idempotency
 //	│   │           ├── vchannel-1
 //	│   │           └── vchannel-2
@@ -47,12 +47,12 @@ import (
 //	│       └── 456398247939
 //	└── pchannel-2
 //	    ├── checkpoint
-//	    ├── vchannels
+//	    ├── vchannel
 //	    │   ├── vchannel-1
 //	    │   └── vchannel-2
 //	    ├── summary-store
-//	    │   ├── pchannel-meta
-//	    │   └── vchannels
+//	    │   ├── pchannel-summary-meta
+//	    │   └── vchannel-summary-meta
 //	    │       └── idempotency
 //	    │           ├── vchannel-1
 //	    │           └── vchannel-2
@@ -461,7 +461,7 @@ func buildSummaryStorePrefix(pchannelName string) string {
 
 // buildVChannelSummaryMetaPrefix returns the prefix for all vchannel summary metadata of a view type under a pchannel.
 func buildVChannelSummaryMetaPrefix(pchannelName string, viewType string) string {
-	return buildSummaryStorePrefix(pchannelName) + DirectorySummaryVChannel + "/" + viewType + "/"
+	return buildSummaryStorePrefix(pchannelName) + DirectoryVChannelSummaryMeta + "/" + viewType + "/"
 }
 
 // Key functions: return exact keys for individual records.

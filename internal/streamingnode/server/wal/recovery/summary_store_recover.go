@@ -194,7 +194,7 @@ func (m *summaryManager) bootstrapPChannelSummaryStore(ctx context.Context, pcha
 	// Do not remove chunks here based only on the earlier no-meta read: another
 	// owner may have bootstrapped and published a meta after that read. A stale
 	// opener can safely write an orphan term-suffixed generation-0 chunk and then
-	// lose the pchannel-meta CAS, but a prefix delete would remove the new
+	// lose the pchannel summary meta CAS, but a prefix delete would remove the new
 	// owner's referenced chunk before the stale owner is fenced.
 	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
 		return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, footer, m.term)

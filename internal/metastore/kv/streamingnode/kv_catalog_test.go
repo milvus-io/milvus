@@ -666,13 +666,13 @@ func TestBuildPrefixAndKey(t *testing.T) {
 	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/", buildSummaryStorePrefix("p1"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/", buildSummaryStorePrefix("p2"))
 
-	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/pchannel-meta", buildPChannelSummaryMetaKey("p1"))
-	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/pchannel-meta", buildPChannelSummaryMetaKey("p2"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/pchannel-summary-meta", buildPChannelSummaryMetaKey("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/pchannel-summary-meta", buildPChannelSummaryMetaKey("p2"))
 
-	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/idempotency/", buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency))
-	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/pkindex/", buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypePrimaryKeyIndex))
-	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/idempotency/v1", buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1"))
-	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/pkindex/v1", buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypePrimaryKeyIndex, "v1"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannel-summary-meta/idempotency/", buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannel-summary-meta/pkindex/", buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypePrimaryKeyIndex))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannel-summary-meta/idempotency/v1", buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannel-summary-meta/pkindex/v1", buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypePrimaryKeyIndex, "v1"))
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))
