@@ -521,6 +521,18 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 	return stats.GetInsertBinlogSize() + stats.GetStatsBinlogSize() + stats.GetDeltaBinlogSize()
 }
 
+// getDeltaLogSize returns the uncompressed size of this segment's deltalogs
+// alone, unlike getSegmentSize which also folds in insert and stats logs.
+func (s *SegmentInfo) getDeltaLogSize() int64 {
+	var size int64
+	for _, deltaLogs := range s.GetDeltalogs() {
+		for _, l := range deltaLogs.GetBinlogs() {
+			size += l.GetMemorySize()
+		}
+	}
+	return size
+}
+
 func (s *SegmentInfo) getFieldBinlogSize(fieldID int64) int64 {
 	var size int64
 	for _, binlogs := range s.GetBinlogs() {

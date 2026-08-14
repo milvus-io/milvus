@@ -588,6 +588,23 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 	return max(defaultSlots/8, 1)
 }
 
+// memoryToSlots converts a byte estimate into the scalar slot the wire
+// protocol still carries in phase 0. It folds bytes to slots using the same
+// bytes-per-slot constant the DataNode uses when it has to go the other way
+// (taskresource.LegacySlotToRequirement), so the two sides agree on the
+// exchange rate between a slot and a byte budget.
+func memoryToSlots(memory int64) int64 {
+	perSlot := paramtable.Get().DataNodeCfg.ResourceLegacyMemoryPerSlot.GetAsInt64()
+	if perSlot <= 0 {
+		perSlot = 128 * 1024 * 1024
+	}
+	slots := memory / perSlot
+	if slots < 1 {
+		slots = 1
+	}
+	return slots
+}
+
 func enableSortCompaction() bool {
 	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
 }
