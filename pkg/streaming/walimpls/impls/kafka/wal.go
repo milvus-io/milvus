@@ -13,11 +13,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
 
-const kafkaTopicMetadataTimeout = time.Second
+type kafkaMetadataGetter interface {
+	GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error)
+}
 
 type walImpl struct {
 	*helper.WALHelper
@@ -114,17 +117,20 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	}
 
 	if err := c.Assign([]kafka.TopicPartition{seekPosition}); err != nil {
-		return nil, errors.Wrap(convertKafkaReadError(err, topic), "failed to assign kafka consumer")
+		return nil, errors.Wrap(err, "failed to assign kafka consumer")
 	}
 	consumerOwnedByScanner = true
 	return newScanner(opt.Name, topic, exclude, c), nil
 }
 
-func validateKafkaTopicExists(ctx context.Context, consumer *kafka.Consumer, topic string) error {
+func validateKafkaTopicExists(ctx context.Context, consumer kafkaMetadataGetter, topic string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	timeout := kafkaTopicMetadataTimeout
+	timeout := paramtable.Get().KafkaCfg.ReadTimeout.GetAsDuration(time.Second)
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -135,10 +141,10 @@ func validateKafkaTopicExists(ctx context.Context, consumer *kafka.Consumer, top
 		}
 	}
 	timeoutMillis := max(int(timeout.Milliseconds()), 1)
-	// Request a complete metadata snapshot without naming the missing topic.
-	// This avoids triggering topic creation and keeps transient runtime
-	// UNKNOWN_TOPIC_OR_PARTITION errors separate from an absent topic.
-	metadata, err := consumer.GetMetadata(nil, true, timeoutMillis)
+	// Query only the target topic. RO consumers disable automatic topic
+	// creation, so this does not recreate a missing historical topic and avoids
+	// fetching metadata for every topic in the cluster.
+	metadata, err := consumer.GetMetadata(&topic, false, timeoutMillis)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -157,7 +163,12 @@ func validateKafkaTopicMetadata(metadata *kafka.Metadata, topic string) error {
 		return merr.WrapErrMqTopicNotFound(topic)
 	}
 	if topicMetadata.Error.Code() != kafka.ErrNoError {
-		return convertKafkaReadError(topicMetadata.Error, topic)
+		switch topicMetadata.Error.Code() {
+		case kafka.ErrUnknownTopic, kafka.ErrUnknownTopicOrPart:
+			return merr.WrapErrMqTopicNotFound(topic, topicMetadata.Error.Error())
+		default:
+			return topicMetadata.Error
+		}
 	}
 	return nil
 }
@@ -170,17 +181,6 @@ func (w *walImpl) consumerConfigForRead() kafka.ConfigMap {
 		consumerConfig.SetKey("allow.auto.create.topics", false)
 	}
 	return consumerConfig
-}
-
-func convertKafkaReadError(err error, topic string) error {
-	var kafkaErr kafka.Error
-	if errors.As(err, &kafkaErr) && kafkaErr.IsFatal() {
-		switch kafkaErr.Code() {
-		case kafka.ErrUnknownTopic, kafka.ErrUnknownTopicOrPart:
-			return merr.WrapErrMqTopicNotFound(topic, kafkaErr.Error())
-		}
-	}
-	return err
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {

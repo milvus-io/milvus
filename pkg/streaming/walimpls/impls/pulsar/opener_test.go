@@ -108,7 +108,7 @@ func TestOpenReadOnlyWALRejectsInconclusiveTopicCheck(t *testing.T) {
 			require.ErrorIs(t, err, merr.ErrMqInternal)
 			require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
 			require.True(t, topicAdmin.hasDeadline)
-			require.WithinDuration(t, time.Now().Add(pulsarTopicCheckTimeout), topicAdmin.deadline, time.Second)
+			require.WithinDuration(t, time.Now().Add(getPulsarTopicCheckTimeout()), topicAdmin.deadline, time.Second)
 		})
 	}
 }

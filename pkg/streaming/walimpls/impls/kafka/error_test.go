@@ -3,8 +3,8 @@ package kafka
 import (
 	"context"
 	"testing"
+	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/require"
 
@@ -12,32 +12,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func TestConvertKafkaReadError(t *testing.T) {
-	t.Run("non-fatal topic error remains recoverable", func(t *testing.T) {
-		expected := kafka.NewError(kafka.ErrUnknownTopicOrPart, "unknown topic", false)
-		err := convertKafkaReadError(
-			expected,
-			"missing-topic",
-		)
-		require.Equal(t, expected, err)
-		require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
-	})
-
-	t.Run("fatal topic error is unavailable", func(t *testing.T) {
-		err := convertKafkaReadError(
-			kafka.NewError(kafka.ErrUnknownTopicOrPart, "unknown topic", true),
-			"missing-topic",
-		)
-		require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
-	})
-
-	t.Run("unrelated error", func(t *testing.T) {
-		expected := errors.New("unrelated error")
-		require.Same(t, expected, convertKafkaReadError(expected, "topic"))
-	})
-}
 
 func TestValidateKafkaTopicMetadata(t *testing.T) {
 	t.Run("topic exists", func(t *testing.T) {
@@ -56,8 +32,8 @@ func TestValidateKafkaTopicMetadata(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
 	})
 
-	t.Run("transient topic metadata error remains recoverable", func(t *testing.T) {
-		expected := kafka.NewError(kafka.ErrUnknownTopicOrPart, "metadata is propagating", false)
+	t.Run("target topic missing error is unavailable", func(t *testing.T) {
+		expected := kafka.NewError(kafka.ErrUnknownTopicOrPart, "unknown topic", false)
 		err := validateKafkaTopicMetadata(&kafka.Metadata{
 			Topics: map[string]kafka.TopicMetadata{
 				"existing-topic": {
@@ -66,8 +42,7 @@ func TestValidateKafkaTopicMetadata(t *testing.T) {
 				},
 			},
 		}, "existing-topic")
-		require.Equal(t, expected, err)
-		require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
+		require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
 	})
 
 	t.Run("nil metadata is an internal error", func(t *testing.T) {
@@ -80,6 +55,33 @@ func TestValidateKafkaTopicExistsPreservesCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.ErrorIs(t, validateKafkaTopicExists(ctx, nil, "topic"), context.Canceled)
+}
+
+type testKafkaMetadataGetter struct {
+	testingT *testing.T
+	metadata *kafka.Metadata
+	err      error
+}
+
+func (g *testKafkaMetadataGetter) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
+	require.NotNil(g.testingT, topic)
+	require.Equal(g.testingT, "topic", *topic)
+	require.False(g.testingT, allTopics)
+	require.Equal(g.testingT, int((3 * time.Second).Milliseconds()), timeoutMs)
+	return g.metadata, g.err
+}
+
+func TestValidateKafkaTopicExistsQueriesOnlyTargetTopic(t *testing.T) {
+	oldValue := paramtable.Get().KafkaCfg.ReadTimeout.SwapTempValue("3")
+	defer paramtable.Get().KafkaCfg.ReadTimeout.SwapTempValue(oldValue)
+
+	getter := &testKafkaMetadataGetter{
+		testingT: t,
+		metadata: &kafka.Metadata{Topics: map[string]kafka.TopicMetadata{
+			"topic": {Topic: "topic"},
+		}},
+	}
+	require.NoError(t, validateKafkaTopicExists(context.Background(), getter, "topic"))
 }
 
 func TestConsumerConfigForRead(t *testing.T) {

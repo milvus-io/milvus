@@ -24,7 +24,6 @@ import (
 const (
 	truncateCursorSubscriptionName = "truncate-cursor"
 	defaultBacklogSize             = 100 * 1024 * 1024 // default 100MB
-	pulsarTopicCheckTimeout        = time.Second
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
@@ -111,7 +110,7 @@ func (o *openerImpl) checkTopicExists(ctx context.Context, topic string) error {
 		return merr.Wrap(err, "get pulsar topic admin")
 	}
 
-	checkCtx, cancel := context.WithTimeout(ctx, pulsarTopicCheckTimeout)
+	checkCtx, cancel := context.WithTimeout(ctx, getPulsarTopicCheckTimeout())
 	defer cancel()
 	if _, err := topicAdmin.GetStatsWithContext(checkCtx, *topicName); err != nil {
 		if ctx.Err() != nil {
@@ -123,6 +122,14 @@ func (o *openerImpl) checkTopicExists(ctx context.Context, topic string) error {
 		return merr.WrapErrMqInternal(err, "check pulsar topic existence")
 	}
 	return nil
+}
+
+func getPulsarTopicCheckTimeout() time.Duration {
+	timeout := paramtable.Get().PulsarCfg.RequestTimeout.GetAsDuration(time.Second)
+	if timeout <= 0 {
+		return 60 * time.Second
+	}
+	return timeout
 }
 
 func (o *openerImpl) getTopicAdmin() (pulsarTopicAdmin, error) {
