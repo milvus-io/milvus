@@ -84,7 +84,12 @@ type restoreWALAccesserTarget struct {
 // fixtures want; leaving the checkpoint unset would instead park them in the
 // completeness gate.
 func emptySnapshotTestMeta() *meta {
-	m := &meta{ctx: context.Background(), segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	m := &meta{
+		ctx:         context.Background(),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 	m.channelCPs.checkpoints[testCreateSnapshotChannel] = &msgpb.MsgPosition{
 		ChannelName: testCreateSnapshotChannel,
 		Timestamp:   testCreateSnapshotBoundaryTs + 1,
