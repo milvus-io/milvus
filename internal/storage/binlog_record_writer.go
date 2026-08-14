@@ -697,7 +697,7 @@ func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
+		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, pw.storagePluginContext, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed text writer")
 		}
@@ -777,6 +777,7 @@ func NewPackedTextManifestRecordWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
 	pkStatsConfigs ...PkStatsConfig,
 ) (*PackedTextManifestRecordWriter, error) {
@@ -787,23 +788,24 @@ func NewPackedTextManifestRecordWriter(
 
 	writer := &PackedTextManifestRecordWriter{
 		packedBinlogRecordWriterBase: packedBinlogRecordWriterBase{
-			collectionID:        collectionID,
-			partitionID:         partitionID,
-			segmentID:           segmentID,
-			schema:              schema,
-			arrowSchema:         arrowSchema,
-			BlobsWriter:         blobsWriter,
-			allocator:           allocator,
-			maxRowNum:           maxRowNum,
-			bufferSize:          bufferSize,
-			multiPartUploadSize: multiPartUploadSize,
-			columnGroups:        columnGroups,
-			storageConfig:       storageConfig,
-			writerFormat:        writerFormat,
-			tsFrom:              typeutil.MaxTimestamp,
-			tsTo:                0,
-			ttlFieldID:          getTTLFieldID(schema),
-			ttlFieldValues:      make([]int64, 0),
+			collectionID:         collectionID,
+			partitionID:          partitionID,
+			segmentID:            segmentID,
+			schema:               schema,
+			arrowSchema:          arrowSchema,
+			BlobsWriter:          blobsWriter,
+			allocator:            allocator,
+			maxRowNum:            maxRowNum,
+			bufferSize:           bufferSize,
+			multiPartUploadSize:  multiPartUploadSize,
+			columnGroups:         columnGroups,
+			storageConfig:        storageConfig,
+			storagePluginContext: storagePluginContext,
+			writerFormat:         writerFormat,
+			tsFrom:               typeutil.MaxTimestamp,
+			tsTo:                 0,
+			ttlFieldID:           getTTLFieldID(schema),
+			ttlFieldValues:       make([]int64, 0),
 		},
 		textColumnConfigs: textColumnConfigs,
 	}

@@ -309,7 +309,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 
 	binlogReaderOpts := []BinlogReaderOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
+	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
 		// Reader pluginContext from import tasks
 		if rwOptions.pluginContext != nil {
@@ -438,7 +438,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
 
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
+			if pluginContext == nil && len(unsafe) > 0 {
 				pluginContext = &indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
@@ -474,6 +474,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
+				pluginContext,
 				rwOptions.writerFormat,
 				pkStatsConfigs...,
 			)

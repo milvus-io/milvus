@@ -716,12 +716,6 @@ func buildImportV3WriterOptions(storageConfig *indexpb.StorageConfig, collection
 		if spec.GetTargetStorageVersion() != storage.StorageV3 {
 			return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 TEXT columns require StorageV3")
 		}
-		// The existing text writer still drops StoragePluginContext before the
-		// FFISegmentWriter boundary. Refuse encrypted TEXT until that narrow
-		// storage chain accepts the same context as the normal V3 writer.
-		if pluginContext != nil {
-			return nil, merr.WrapErrImportSysFailedMsg("ImportTaskV3 encrypted TEXT writer is not supported")
-		}
 		partitionBase := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, strconv.FormatInt(collectionID, 10), strconv.FormatInt(segment.GetPartitionId(), 10))
 		textConfigs := make([]packed.TextColumnConfig, 0, len(spec.GetTextColumns()))
 		for _, text := range spec.GetTextColumns() {

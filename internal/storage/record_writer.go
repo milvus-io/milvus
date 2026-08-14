@@ -515,6 +515,7 @@ func NewPackedTextBatchWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedTextBatchWriter, error) {
@@ -562,7 +563,7 @@ func NewPackedTextBatchWriter(
 		SchemaBasedFormats: schemaBasedFormats,
 	}
 
-	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
+	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}
