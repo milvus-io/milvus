@@ -508,6 +508,10 @@ func executeImportPlan(ctx context.Context, cm storage.ChunkManager, req *datapb
 	if err != nil {
 		return nil, err
 	}
+	isSorted, isNamespaceSorted, err := importv3.ResultSortFlags(snapshot.GetSortSpec(), targetSchema)
+	if err != nil {
+		return nil, err
+	}
 	if len(plan.GetSegmentPlans()) == 0 {
 		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 plan has no segment plans")
 	}
@@ -589,8 +593,7 @@ func executeImportPlan(ctx context.Context, cm storage.ChunkManager, req *datapb
 		if err != nil {
 			return nil, err
 		}
-		isNamespaceSorted := targetSchema.GetEnableNamespace()
-		segmentResult := &datapb.SegmentResult{LogicalSegmentOrdinal: ordinal, PhysicalSegmentId: physicalSegmentID, VchannelOrdinal: segment.GetVchannelOrdinal(), Vchannel: segment.GetVchannel(), PartitionOrdinal: segment.GetPartitionOrdinal(), PartitionId: segment.GetPartitionId(), Rows: rows, Materialized: rows > 0, IsSorted: !isNamespaceSorted, IsSortedByNamespace: isNamespaceSorted, StorageVersion: writerSpec.GetTargetStorageVersion(), SchemaVersion: int32(writerSpec.GetTargetSchemaVersion())}
+		segmentResult := &datapb.SegmentResult{LogicalSegmentOrdinal: ordinal, PhysicalSegmentId: physicalSegmentID, VchannelOrdinal: segment.GetVchannelOrdinal(), Vchannel: segment.GetVchannel(), PartitionOrdinal: segment.GetPartitionOrdinal(), PartitionId: segment.GetPartitionId(), Rows: rows, Materialized: rows > 0, IsSorted: isSorted, IsSortedByNamespace: isNamespaceSorted, StorageVersion: writerSpec.GetTargetStorageVersion(), SchemaVersion: int32(writerSpec.GetTargetSchemaVersion())}
 		if writer != nil {
 			fieldBinlogs, statsLog, bm25Logs, manifestPath, expiration := writer.GetLogs()
 			segmentResult.InsertLogs = storage.SortFieldBinlogs(fieldBinlogs)

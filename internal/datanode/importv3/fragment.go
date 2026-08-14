@@ -110,6 +110,41 @@ func SortFields(spec *datapb.SortSpec, schema *schemapb.CollectionSchema) ([]int
 	return result, nil
 }
 
+// ResultSortFlags derives segment metadata only from the frozen SortSpec. A
+// namespace-enabled collection is considered namespace-sorted only when the
+// persisted order is exactly partition-key then primary-key; ordinary import
+// is sorted only when the order is exactly primary-key.
+func ResultSortFlags(spec *datapb.SortSpec, schema *schemapb.CollectionSchema) (bool, bool, error) {
+	fields, err := SortFields(spec, schema)
+	if err != nil {
+		return false, false, err
+	}
+	pk, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return false, false, merr.WrapErrDataIntegrityMsg("ImportTaskV3 target schema has no primary key")
+	}
+	expected := []int64{pk.GetFieldID()}
+	if schema.GetEnableNamespace() {
+		partitionKey, err := typeutil.GetPartitionKeyFieldSchema(schema)
+		if err != nil {
+			return false, false, merr.WrapErrDataIntegrityMsg("ImportTaskV3 namespace schema has no partition key")
+		}
+		expected = []int64{partitionKey.GetFieldID(), pk.GetFieldID()}
+	}
+	if len(fields) != len(expected) {
+		return false, false, merr.WrapErrDataIntegrityMsg("ImportTaskV3 SortSpec does not match target sort contract")
+	}
+	for index := range expected {
+		if fields[index] != expected[index] {
+			return false, false, merr.WrapErrDataIntegrityMsg("ImportTaskV3 SortSpec does not match target sort contract")
+		}
+	}
+	if schema.GetEnableNamespace() {
+		return false, true, nil
+	}
+	return true, false, nil
+}
+
 // NewTTLOnlyPredicate creates the ordinary-import final predicate.  It never
 // reads collection deltalogs and always gives EntityFilter an empty delete
 // map.  A fresh time.Now value is captured once per input Record batch, not

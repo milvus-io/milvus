@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -38,6 +39,40 @@ func TestSortFieldsValidatesPersistedTypes(t *testing.T) {
 		FieldId: 101, KeyType: datapb.SortKeyType_SORT_KEY_TYPE_INT64,
 	}}}, schema)
 	require.Error(t, err)
+}
+
+func TestResultSortFlagsRequireFrozenContract(t *testing.T) {
+	ordinary := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+	}}}
+	pkSpec := &datapb.SortSpec{FormatVersion: 1, Fields: []*datapb.SortFieldSpec{{
+		FieldId: 100, KeyType: datapb.SortKeyType_SORT_KEY_TYPE_INT64,
+	}}}
+	isSorted, namespaceSorted, err := ResultSortFlags(pkSpec, ordinary)
+	require.NoError(t, err)
+	require.True(t, isSorted)
+	require.False(t, namespaceSorted)
+
+	namespace := &schemapb.CollectionSchema{EnableNamespace: true, Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+	}}
+	namespaceSpec := &datapb.SortSpec{FormatVersion: 1, Fields: []*datapb.SortFieldSpec{
+		{FieldId: 101, KeyType: datapb.SortKeyType_SORT_KEY_TYPE_STRING},
+		{FieldId: 100, KeyType: datapb.SortKeyType_SORT_KEY_TYPE_INT64},
+	}}
+	isSorted, namespaceSorted, err = ResultSortFlags(namespaceSpec, namespace)
+	require.NoError(t, err)
+	require.False(t, isSorted)
+	require.True(t, namespaceSorted)
+
+	_, _, err = ResultSortFlags(pkSpec, namespace)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	_, _, err = ResultSortFlags(&datapb.SortSpec{FormatVersion: 1, Fields: []*datapb.SortFieldSpec{
+		{FieldId: 100, KeyType: datapb.SortKeyType_SORT_KEY_TYPE_INT64},
+		{FieldId: 101, KeyType: datapb.SortKeyType_SORT_KEY_TYPE_STRING},
+	}}, namespace)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 func ttlRecord(expirationMicros ...int64) storage.Record {
