@@ -705,18 +705,22 @@ enum VChannelSchemaState {
 // vchannel. Physical summary entries are stored in the pchannel-level
 // PChannelSummary chunks. This meta only records the view checkpoint hint and
 // the oldest physical generation still required to recover the retained view.
+//
+// Nothing at vchannel level records a physical WAL position. A vchannel filters
+// by timetick, and where recovery starts reading is decided by
+// min_required_generation, which names the pchannel chunk generation to open;
+// the physical position then comes from that chunk's pchannel checkpoint.
 message VChannelSummaryMeta {
     string pchannel = 1;
     string vchannel = 2;
     uint64 evicted_watermark_timetick = 3;
     uint64 snapshot_checkpoint_timetick = 4;
-    common.MessageID snapshot_checkpoint_message_id = 5;
-    uint64 latest_applied_generation = 6;
-    uint64 min_required_generation = 7;
+    uint64 latest_applied_generation = 5;
+    uint64 min_required_generation = 6;
     // Summary view type, e.g. idempotency or meta-only index.
-    string view_type = 8;
+    string view_type = 7;
     // Metrics only.
-    uint64 entry_count = 9;
+    uint64 entry_count = 8;
 }
 
 // PChannelSummaryChunkTermRange records which WAL assignment term owns a
@@ -789,8 +793,7 @@ message SummarySnapshot {
     string vchannel = 2;
     uint64 evicted_watermark_timetick = 3;
     uint64 snapshot_checkpoint_timetick = 4;
-    common.MessageID snapshot_checkpoint_message_id = 5;
-    repeated SummaryEntry entries = 6;
+    repeated SummaryEntry entries = 5;
 }
 
 ///
@@ -803,25 +806,23 @@ message SummarySnapshot {
 // verify one vchannel's records without decoding the whole object, so it stays
 // hand-rolled binary; the messages below are only the payloads inside it.
 
-// SummaryChunkSourceRange is the source WAL span covered by a chunk or by one
-// vchannel inside it, kept for operational inspection and replay bounds.
-message SummaryChunkSourceRange {
-    common.MessageID start_message_id = 1;
-    common.MessageID end_message_id   = 2;
-    uint64 start_timetick             = 3;
-    uint64 end_timetick               = 4;
-}
+// The source span of a chunk, and of each vchannel inside it, is recorded as a
+// timetick range only. A physical WAL position belongs to the pchannel level
+// (source_checkpoint_message_id below): a vchannel is filtered by timetick, and
+// recovery already knows which chunk generation to open before it reads any of
+// this.
 
 // VChannelSummaryChunkIndex locates one vchannel's payload inside the chunk
 // object. The checksum covers exactly the stored payload bytes and is always
 // present; it is verified before that payload is decoded.
 message VChannelSummaryChunkIndex {
-    string vchannel                       = 1;
-    uint64 offset                         = 2;
-    uint64 length                         = 3;
-    bytes checksum                        = 4;
-    uint64 record_count                   = 5;
-    SummaryChunkSourceRange source_range  = 6;
+    string vchannel            = 1;
+    uint64 offset              = 2;
+    uint64 length              = 3;
+    bytes checksum             = 4;
+    uint64 record_count        = 5;
+    uint64 source_start_timetick = 6;
+    uint64 source_end_timetick   = 7;
 }
 
 // PChannelSummaryChunkFooter is the chunk object's index. Recovery reads it
@@ -834,10 +835,13 @@ message PChannelSummaryChunkFooter {
     // write conflict between two owners (split-brain): the newer term wins, the
     // older term is fenced.
     int64 term                                      = 4;
+    // The pchannel WAL position this chunk covers. This is the one physical
+    // position the summary store records, and recovery resumes consuming from it.
     common.MessageID source_checkpoint_message_id   = 5;
     uint64 source_checkpoint_timetick               = 6;
-    SummaryChunkSourceRange source_range            = 7;
-    repeated VChannelSummaryChunkIndex chunks       = 8;
+    uint64 source_start_timetick                    = 7;
+    uint64 source_end_timetick                      = 8;
+    repeated VChannelSummaryChunkIndex chunks       = 9;
 }
 
 // CommittedWriteRow is one row of a committed write: where it sat in the
@@ -869,8 +873,9 @@ message VChannelSummaryChunk {
     string pchannel                          = 2;
     string vchannel                          = 3;
     uint64 generation                        = 4;
-    SummaryChunkSourceRange source_range     = 5;
-    repeated CommittedWriteRecord records    = 6;
+    uint64 source_start_timetick             = 5;
+    uint64 source_end_timetick               = 6;
+    repeated CommittedWriteRecord records    = 7;
 }
 
 ///

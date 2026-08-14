@@ -285,13 +285,6 @@ func (record *committedWriteRecord) SummaryEntry() *streamingpb.SummaryEntry {
 	return entry
 }
 
-func committedWriteRecordCheckpointMessageID(record committedWriteRecord) *commonpb.MessageID {
-	if record.LastConfirmedMessageID != nil {
-		return cloneMessageIDProto(record.LastConfirmedMessageID)
-	}
-	return cloneMessageIDProto(record.SourceMessageID)
-}
-
 func cloneCommittedWriteRecord(record committedWriteRecord) committedWriteRecord {
 	record.SourceMessageID = cloneMessageIDProto(record.SourceMessageID)
 	record.LastConfirmedMessageID = cloneMessageIDProto(record.LastConfirmedMessageID)

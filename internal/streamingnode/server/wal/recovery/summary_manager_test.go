@@ -310,38 +310,6 @@ func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
 	require.Len(t, state.entries, 3)
 }
 
-func TestGetSummarySnapshotCheckpointSkipsNilCheckpoint(t *testing.T) {
-	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
-
-	summaryWithCP := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
-		MessageID: rmq.NewRmqID(50),
-		TimeTick:  50,
-	})
-	summaryWithoutCP := newEmptyVChannelSummary("p1", "v2", nil)
-	manager.setSummaries(map[string]*vchannelSummary{
-		"v1": summaryWithCP,
-		"v2": summaryWithoutCP,
-	})
-
-	cp := manager.getSummarySnapshotCheckpointUnsafe()
-	require.NotNil(t, cp)
-	require.Equal(t, uint64(50), cp.TimeTick)
-}
-
-func TestGetSummarySnapshotCheckpointAllNilReturnsNil(t *testing.T) {
-	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
-
-	summary1 := newEmptyVChannelSummary("p1", "v1", nil)
-	summary2 := newEmptyVChannelSummary("p1", "v2", nil)
-	manager.setSummaries(map[string]*vchannelSummary{
-		"v1": summary1,
-		"v2": summary2,
-	})
-
-	cp := manager.getSummarySnapshotCheckpointUnsafe()
-	require.Nil(t, cp)
-}
-
 // --- helpers ---
 
 func populateSummaryEntries(state *vchannelSummary, timeticks []uint64) {

@@ -50,35 +50,29 @@ type pchannelSummaryChunkFooter struct {
 	Term                      int64
 	SourceCheckpointMessageID *commonpb.MessageID
 	SourceCheckpointTimetick  uint64
-	SourceStartMessageID      *commonpb.MessageID
-	SourceEndMessageID        *commonpb.MessageID
 	SourceStartTimetick       uint64
 	SourceEndTimetick         uint64
 	Chunks                    []vchannelSummaryChunkIndex
 }
 
 type vchannelSummaryChunkIndex struct {
-	VChannel             string
-	Offset               uint64
-	Length               uint64
-	Checksum             []byte
-	RecordCount          uint64
-	SourceStartMessageID *commonpb.MessageID
-	SourceEndMessageID   *commonpb.MessageID
-	SourceStartTimetick  uint64
-	SourceEndTimetick    uint64
+	VChannel            string
+	Offset              uint64
+	Length              uint64
+	Checksum            []byte
+	RecordCount         uint64
+	SourceStartTimetick uint64
+	SourceEndTimetick   uint64
 }
 
 type vchannelSummaryChunk struct {
-	CodecVersion         int
-	PChannel             string
-	VChannel             string
-	Generation           uint64
-	SourceStartMessageID *commonpb.MessageID
-	SourceEndMessageID   *commonpb.MessageID
-	SourceStartTimetick  uint64
-	SourceEndTimetick    uint64
-	Records              []committedWriteRecord
+	CodecVersion        int
+	PChannel            string
+	VChannel            string
+	Generation          uint64
+	SourceStartTimetick uint64
+	SourceEndTimetick   uint64
+	Records             []committedWriteRecord
 }
 
 func newPChannelSummarySourceCheckpoint(checkpoint *WALCheckpoint) *pchannelSummarySourceCheckpoint {
@@ -142,15 +136,13 @@ func marshalPChannelSummaryChunk(
 		buf.Write(payload)
 		extendPChannelSummaryChunkFooterSourceRange(footer, chunk)
 		footer.Chunks = append(footer.Chunks, vchannelSummaryChunkIndex{
-			VChannel:             vchannel,
-			Offset:               offset,
-			Length:               uint64(len(payload)),
-			Checksum:             chunkChecksum(payload),
-			RecordCount:          uint64(len(records)),
-			SourceStartMessageID: cloneMessageIDProto(chunk.SourceStartMessageID),
-			SourceEndMessageID:   cloneMessageIDProto(chunk.SourceEndMessageID),
-			SourceStartTimetick:  chunk.SourceStartTimetick,
-			SourceEndTimetick:    chunk.SourceEndTimetick,
+			VChannel:            vchannel,
+			Offset:              offset,
+			Length:              uint64(len(payload)),
+			Checksum:            chunkChecksum(payload),
+			RecordCount:         uint64(len(records)),
+			SourceStartTimetick: chunk.SourceStartTimetick,
+			SourceEndTimetick:   chunk.SourceEndTimetick,
 		})
 	}
 
@@ -247,7 +239,7 @@ func marshalVChannelSummaryChunk(chunk *vchannelSummaryChunk) ([]byte, error) {
 	}
 	chunk.CodecVersion = pchannelSummaryCodecVersion
 	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
-	chunk.SourceStartMessageID, chunk.SourceEndMessageID, chunk.SourceStartTimetick, chunk.SourceEndTimetick = committedWriteRecordSourceRange(chunk.Records)
+	chunk.SourceStartTimetick, chunk.SourceEndTimetick = committedWriteRecordSourceRange(chunk.Records)
 	// No self-checksum: the chunk's bytes are protected by the footer's per-chunk
 	// index checksum (vchannelSummaryChunkIndex.Checksum), computed over these exact
 	// bytes and verified before this chunk is ever decoded.
@@ -300,20 +292,6 @@ func unmarshalPChannelSummaryChunkFooter(payload []byte) (*pchannelSummaryChunkF
 	return newPChannelSummaryChunkFooterFromProto(pb), nil
 }
 
-// newSummaryChunkSourceRange builds the wire source range, returning nil when
-// the range carries nothing so an absent range stays absent on the wire.
-func newSummaryChunkSourceRange(startID, endID *commonpb.MessageID, startTT, endTT uint64) *streamingpb.SummaryChunkSourceRange {
-	if startID == nil && endID == nil && startTT == 0 && endTT == 0 {
-		return nil
-	}
-	return &streamingpb.SummaryChunkSourceRange{
-		StartMessageId: cloneMessageIDProto(startID),
-		EndMessageId:   cloneMessageIDProto(endID),
-		StartTimetick:  startTT,
-		EndTimetick:    endTT,
-	}
-}
-
 func (footer *pchannelSummaryChunkFooter) intoProto() *streamingpb.PChannelSummaryChunkFooter {
 	pb := &streamingpb.PChannelSummaryChunkFooter{
 		CodecVersion:              uint32(footer.CodecVersion),
@@ -322,23 +300,19 @@ func (footer *pchannelSummaryChunkFooter) intoProto() *streamingpb.PChannelSumma
 		Term:                      footer.Term,
 		SourceCheckpointMessageId: cloneMessageIDProto(footer.SourceCheckpointMessageID),
 		SourceCheckpointTimetick:  footer.SourceCheckpointTimetick,
-		SourceRange: newSummaryChunkSourceRange(
-			footer.SourceStartMessageID, footer.SourceEndMessageID,
-			footer.SourceStartTimetick, footer.SourceEndTimetick,
-		),
-		Chunks: make([]*streamingpb.VChannelSummaryChunkIndex, 0, len(footer.Chunks)),
+		SourceStartTimetick:       footer.SourceStartTimetick,
+		SourceEndTimetick:         footer.SourceEndTimetick,
+		Chunks:                    make([]*streamingpb.VChannelSummaryChunkIndex, 0, len(footer.Chunks)),
 	}
 	for _, index := range footer.Chunks {
 		pb.Chunks = append(pb.Chunks, &streamingpb.VChannelSummaryChunkIndex{
-			Vchannel:    index.VChannel,
-			Offset:      index.Offset,
-			Length:      index.Length,
-			Checksum:    index.Checksum,
-			RecordCount: index.RecordCount,
-			SourceRange: newSummaryChunkSourceRange(
-				index.SourceStartMessageID, index.SourceEndMessageID,
-				index.SourceStartTimetick, index.SourceEndTimetick,
-			),
+			Vchannel:            index.VChannel,
+			Offset:              index.Offset,
+			Length:              index.Length,
+			Checksum:            index.Checksum,
+			RecordCount:         index.RecordCount,
+			SourceStartTimetick: index.SourceStartTimetick,
+			SourceEndTimetick:   index.SourceEndTimetick,
 		})
 	}
 	return pb
@@ -352,23 +326,19 @@ func newPChannelSummaryChunkFooterFromProto(pb *streamingpb.PChannelSummaryChunk
 		Term:                      pb.GetTerm(),
 		SourceCheckpointMessageID: cloneMessageIDProto(pb.GetSourceCheckpointMessageId()),
 		SourceCheckpointTimetick:  pb.GetSourceCheckpointTimetick(),
-		SourceStartMessageID:      cloneMessageIDProto(pb.GetSourceRange().GetStartMessageId()),
-		SourceEndMessageID:        cloneMessageIDProto(pb.GetSourceRange().GetEndMessageId()),
-		SourceStartTimetick:       pb.GetSourceRange().GetStartTimetick(),
-		SourceEndTimetick:         pb.GetSourceRange().GetEndTimetick(),
+		SourceStartTimetick:       pb.GetSourceStartTimetick(),
+		SourceEndTimetick:         pb.GetSourceEndTimetick(),
 		Chunks:                    make([]vchannelSummaryChunkIndex, 0, len(pb.GetChunks())),
 	}
 	for _, index := range pb.GetChunks() {
 		footer.Chunks = append(footer.Chunks, vchannelSummaryChunkIndex{
-			VChannel:             index.GetVchannel(),
-			Offset:               index.GetOffset(),
-			Length:               index.GetLength(),
-			Checksum:             index.GetChecksum(),
-			RecordCount:          index.GetRecordCount(),
-			SourceStartMessageID: cloneMessageIDProto(index.GetSourceRange().GetStartMessageId()),
-			SourceEndMessageID:   cloneMessageIDProto(index.GetSourceRange().GetEndMessageId()),
-			SourceStartTimetick:  index.GetSourceRange().GetStartTimetick(),
-			SourceEndTimetick:    index.GetSourceRange().GetEndTimetick(),
+			VChannel:            index.GetVchannel(),
+			Offset:              index.GetOffset(),
+			Length:              index.GetLength(),
+			Checksum:            index.GetChecksum(),
+			RecordCount:         index.GetRecordCount(),
+			SourceStartTimetick: index.GetSourceStartTimetick(),
+			SourceEndTimetick:   index.GetSourceEndTimetick(),
 		})
 	}
 	return footer
@@ -376,15 +346,13 @@ func newPChannelSummaryChunkFooterFromProto(pb *streamingpb.PChannelSummaryChunk
 
 func (chunk *vchannelSummaryChunk) intoProto() *streamingpb.VChannelSummaryChunk {
 	pb := &streamingpb.VChannelSummaryChunk{
-		CodecVersion: uint32(chunk.CodecVersion),
-		Pchannel:     chunk.PChannel,
-		Vchannel:     chunk.VChannel,
-		Generation:   chunk.Generation,
-		SourceRange: newSummaryChunkSourceRange(
-			chunk.SourceStartMessageID, chunk.SourceEndMessageID,
-			chunk.SourceStartTimetick, chunk.SourceEndTimetick,
-		),
-		Records: make([]*streamingpb.CommittedWriteRecord, 0, len(chunk.Records)),
+		CodecVersion:        uint32(chunk.CodecVersion),
+		Pchannel:            chunk.PChannel,
+		Vchannel:            chunk.VChannel,
+		Generation:          chunk.Generation,
+		SourceStartTimetick: chunk.SourceStartTimetick,
+		SourceEndTimetick:   chunk.SourceEndTimetick,
+		Records:             make([]*streamingpb.CommittedWriteRecord, 0, len(chunk.Records)),
 	}
 	for _, record := range chunk.Records {
 		pb.Records = append(pb.Records, record.intoProto())
@@ -394,15 +362,13 @@ func (chunk *vchannelSummaryChunk) intoProto() *streamingpb.VChannelSummaryChunk
 
 func newVChannelSummaryChunkFromProto(pb *streamingpb.VChannelSummaryChunk) *vchannelSummaryChunk {
 	chunk := &vchannelSummaryChunk{
-		CodecVersion:         int(pb.GetCodecVersion()),
-		PChannel:             pb.GetPchannel(),
-		VChannel:             pb.GetVchannel(),
-		Generation:           pb.GetGeneration(),
-		SourceStartMessageID: cloneMessageIDProto(pb.GetSourceRange().GetStartMessageId()),
-		SourceEndMessageID:   cloneMessageIDProto(pb.GetSourceRange().GetEndMessageId()),
-		SourceStartTimetick:  pb.GetSourceRange().GetStartTimetick(),
-		SourceEndTimetick:    pb.GetSourceRange().GetEndTimetick(),
-		Records:              make([]committedWriteRecord, 0, len(pb.GetRecords())),
+		CodecVersion:        int(pb.GetCodecVersion()),
+		PChannel:            pb.GetPchannel(),
+		VChannel:            pb.GetVchannel(),
+		Generation:          pb.GetGeneration(),
+		SourceStartTimetick: pb.GetSourceStartTimetick(),
+		SourceEndTimetick:   pb.GetSourceEndTimetick(),
+		Records:             make([]committedWriteRecord, 0, len(pb.GetRecords())),
 	}
 	for _, record := range pb.GetRecords() {
 		chunk.Records = append(chunk.Records, newCommittedWriteRecordFromProto(record))
@@ -444,13 +410,14 @@ func cloneAndSortCommittedWriteRecords(pchannel, vchannel string, records []comm
 	return cloned
 }
 
-func committedWriteRecordSourceRange(records []committedWriteRecord) (*commonpb.MessageID, *commonpb.MessageID, uint64, uint64) {
+// committedWriteRecordSourceRange returns the timetick span of an already sorted
+// record slice. The span is a timetick range only: a vchannel never records a
+// physical WAL position.
+func committedWriteRecordSourceRange(records []committedWriteRecord) (uint64, uint64) {
 	if len(records) == 0 {
-		return nil, nil, 0, 0
+		return 0, 0
 	}
-	start := records[0]
-	end := records[len(records)-1]
-	return cloneMessageIDProto(start.SourceMessageID), cloneMessageIDProto(end.SourceMessageID), start.SourceTimeTick, end.SourceTimeTick
+	return records[0].SourceTimeTick, records[len(records)-1].SourceTimeTick
 }
 
 func extendPChannelSummaryChunkFooterSourceRange(footer *pchannelSummaryChunkFooter, chunk *vchannelSummaryChunk) {
@@ -459,11 +426,9 @@ func extendPChannelSummaryChunkFooterSourceRange(footer *pchannelSummaryChunkFoo
 	}
 	if footer.SourceStartTimetick == 0 || chunk.SourceStartTimetick < footer.SourceStartTimetick {
 		footer.SourceStartTimetick = chunk.SourceStartTimetick
-		footer.SourceStartMessageID = cloneMessageIDProto(chunk.SourceStartMessageID)
 	}
 	if chunk.SourceEndTimetick > footer.SourceEndTimetick {
 		footer.SourceEndTimetick = chunk.SourceEndTimetick
-		footer.SourceEndMessageID = cloneMessageIDProto(chunk.SourceEndMessageID)
 	}
 }
 

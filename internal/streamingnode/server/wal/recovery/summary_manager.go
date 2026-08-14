@@ -206,18 +206,6 @@ func (m *summaryManager) hasDirtySummaryUnsafe() bool {
 	return false
 }
 
-func (m *summaryManager) getSummarySnapshotCheckpointUnsafe() *WALCheckpoint {
-	var minimum *WALCheckpoint
-	for _, summary := range m.summaries() {
-		cp := summary.checkpoint()
-		if cp == nil {
-			continue
-		}
-		minimum = minCheckpointByTimeTick(minimum, cp)
-	}
-	return minimum
-}
-
 func (m *summaryManager) consumePendingCommittedWriteRecords() (map[string][]committedWriteRecord, map[string]*summaryMetaUpdate, *WALCheckpoint) {
 	if len(m.summaries()) == 0 || !m.hasDirtySummaryUnsafe() {
 		return nil, nil, nil

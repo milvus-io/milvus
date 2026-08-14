@@ -390,10 +390,6 @@ func TestSummarySnapshotSerdeRoundTrip(t *testing.T) {
 		Vchannel:                   "v1",
 		SnapshotCheckpointTimetick: 100,
 		EvictedWatermarkTimetick:   90,
-		SnapshotCheckpointMessageId: &commonpb.MessageID{
-			WALName: commonpb.WALName_Test,
-			Id:      "100",
-		},
 		Entries: []*streamingpb.SummaryEntry{
 			{
 				Key:            "key-2",
@@ -830,7 +826,6 @@ func TestSummaryMaterializerApplyCommittedWriteRecords(t *testing.T) {
 	require.Equal(t, "key-1", snapshot.GetEntries()[0].GetKey())
 	require.Equal(t, []int64{10}, snapshot.GetEntries()[0].GetIdempotentResult().GetIds().GetIntId().GetData())
 	require.Equal(t, uint64(112), snapshot.GetSnapshotCheckpointTimetick())
-	require.True(t, message.MustUnmarshalMessageID(snapshot.GetSnapshotCheckpointMessageId()).EQ(rmq.NewRmqID(111)))
 }
 
 func TestSummaryConsumesPendingCommittedWriteRecords(t *testing.T) {
@@ -970,11 +965,14 @@ func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 	require.Len(t, footer.Chunks, 2)
 	require.Equal(t, "v1", footer.Chunks[0].VChannel)
 	require.Equal(t, uint64(2), footer.Chunks[0].RecordCount)
-	require.True(t, message.MustUnmarshalMessageID(footer.Chunks[0].SourceStartMessageID).EQ(rmq.NewRmqID(105)))
+	// The source span is a timetick range: nothing below the pchannel level
+	// records a physical WAL position.
+	require.Equal(t, uint64(105), footer.Chunks[0].SourceStartTimetick)
+	require.Equal(t, uint64(110), footer.Chunks[0].SourceEndTimetick)
 	require.Equal(t, "v2", footer.Chunks[1].VChannel)
 	require.Equal(t, uint64(1), footer.Chunks[1].RecordCount)
-	require.True(t, message.MustUnmarshalMessageID(footer.SourceStartMessageID).EQ(rmq.NewRmqID(105)))
-	require.True(t, message.MustUnmarshalMessageID(footer.SourceEndMessageID).EQ(rmq.NewRmqID(119)))
+	require.Equal(t, uint64(105), footer.SourceStartTimetick)
+	require.Equal(t, uint64(119), footer.SourceEndTimetick)
 
 	decoded, _, decodedChecksum, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
@@ -1292,13 +1290,12 @@ func TestPChannelSummaryRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 	}, records1)
 	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 	catalogState.summaryMetas["v1"] = &streamingpb.VChannelSummaryMeta{
-		Pchannel:                    "p1",
-		Vchannel:                    "v1",
-		ViewType:                    common.VChannelSummaryViewTypeIdempotency,
-		SnapshotCheckpointMessageId: rmq.NewRmqID(20).IntoProto(),
-		SnapshotCheckpointTimetick:  20,
-		LatestAppliedGeneration:     1,
-		MinRequiredGeneration:       1,
+		Pchannel:                   "p1",
+		Vchannel:                   "v1",
+		ViewType:                   common.VChannelSummaryViewTypeIdempotency,
+		SnapshotCheckpointTimetick: 20,
+		LatestAppliedGeneration:    1,
+		MinRequiredGeneration:      1,
 	}
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -1403,13 +1400,12 @@ func TestPChannelSummaryRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 		TimeTick:  120,
 	}, records)
 	catalogState.summaryMetas["v1"] = &streamingpb.VChannelSummaryMeta{
-		Pchannel:                    "p1",
-		Vchannel:                    "v1",
-		ViewType:                    common.VChannelSummaryViewTypeIdempotency,
-		SnapshotCheckpointMessageId: rmq.NewRmqID(20).IntoProto(),
-		SnapshotCheckpointTimetick:  20,
-		LatestAppliedGeneration:     1,
-		MinRequiredGeneration:       1,
+		Pchannel:                   "p1",
+		Vchannel:                   "v1",
+		ViewType:                   common.VChannelSummaryViewTypeIdempotency,
+		SnapshotCheckpointTimetick: 20,
+		LatestAppliedGeneration:    1,
+		MinRequiredGeneration:      1,
 	}
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, initialCheckpoint)
@@ -2102,11 +2098,10 @@ func TestPChannelSummaryRejectsVChannelOnlyMeta(t *testing.T) {
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, "p1", common.VChannelSummaryViewTypeIdempotency).Return([]*streamingpb.VChannelSummaryMeta{
 		{
-			Pchannel:                    "p1",
-			Vchannel:                    "v1",
-			ViewType:                    "idempotency",
-			SnapshotCheckpointTimetick:  100,
-			SnapshotCheckpointMessageId: rmq.NewRmqID(100).IntoProto(),
+			Pchannel:                   "p1",
+			Vchannel:                   "v1",
+			ViewType:                   "idempotency",
+			SnapshotCheckpointTimetick: 100,
 		},
 	}, nil)
 	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, "p1").Return(nil, nil)

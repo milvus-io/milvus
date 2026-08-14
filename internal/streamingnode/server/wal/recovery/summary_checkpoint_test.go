@@ -42,11 +42,10 @@ func TestEffectivePersistCheckpointUsesPChannelSummaryAndFlushOnly(t *testing.T)
 		vchannelSummaryMetaUpdates: map[string]*summaryMetaUpdate{
 			"v1": {
 				meta: &streamingpb.VChannelSummaryMeta{
-					Pchannel:                    "p1",
-					Vchannel:                    "v1",
-					ViewType:                    common.VChannelSummaryViewTypeIdempotency,
-					SnapshotCheckpointMessageId: rmq.NewRmqID(10).IntoProto(),
-					SnapshotCheckpointTimetick:  10,
+					Pchannel:                   "p1",
+					Vchannel:                   "v1",
+					ViewType:                   common.VChannelSummaryViewTypeIdempotency,
+					SnapshotCheckpointTimetick: 10,
 				},
 			},
 		},

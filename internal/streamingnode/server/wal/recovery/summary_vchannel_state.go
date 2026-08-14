@@ -6,7 +6,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -15,18 +14,17 @@ import (
 )
 
 type vchannelSummary struct {
-	pchannel                    string
-	vchannel                    string
-	snapshotCheckpointTimetick  uint64
-	snapshotCheckpointMessageID *commonpb.MessageID
-	evictedWatermarkTimetick    uint64
-	entries                     map[string]*summaryEntry
-	commitOrder                 []string
-	pendingEntries              map[string]*streamingpb.SummaryEntry
-	pendingRecords              []committedWriteRecord
-	latestAppliedGeneration     uint64
-	minRequiredGeneration       uint64
-	dirty                       bool
+	pchannel                   string
+	vchannel                   string
+	snapshotCheckpointTimetick uint64
+	evictedWatermarkTimetick   uint64
+	entries                    map[string]*summaryEntry
+	commitOrder                []string
+	pendingEntries             map[string]*streamingpb.SummaryEntry
+	pendingRecords             []committedWriteRecord
+	latestAppliedGeneration    uint64
+	minRequiredGeneration      uint64
+	dirty                      bool
 	// entryBytes tracks the total serialized size of materialized entries for the
 	// byte-cap eviction.
 	entryBytes int
@@ -89,9 +87,6 @@ func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoin
 	}
 	if checkpoint != nil {
 		state.snapshotCheckpointTimetick = checkpoint.TimeTick
-		if checkpoint.MessageID != nil {
-			state.snapshotCheckpointMessageID = checkpoint.MessageID.IntoProto()
-		}
 	}
 	state.refreshEvictedWatermark()
 	state.refreshMinRequiredGeneration()
@@ -103,16 +98,15 @@ func newVChannelSummaryFromSnapshot(snapshot *streamingpb.SummarySnapshot) (*vch
 		return nil, merr.WrapErrServiceInternalMsg("nil idempotency summary snapshot")
 	}
 	state := &vchannelSummary{
-		pchannel:                    snapshot.GetPchannel(),
-		vchannel:                    snapshot.GetVchannel(),
-		snapshotCheckpointTimetick:  snapshot.GetSnapshotCheckpointTimetick(),
-		snapshotCheckpointMessageID: cloneMessageIDProto(snapshot.GetSnapshotCheckpointMessageId()),
-		evictedWatermarkTimetick:    snapshot.GetEvictedWatermarkTimetick(),
-		entries:                     make(map[string]*summaryEntry, len(snapshot.GetEntries())),
-		pendingEntries:              make(map[string]*streamingpb.SummaryEntry),
-		pendingRecords:              make([]committedWriteRecord, 0),
-		commitOrder:                 make([]string, 0, len(snapshot.GetEntries())),
-		generationStats:             make(map[uint64]*summaryGenerationStat),
+		pchannel:                   snapshot.GetPchannel(),
+		vchannel:                   snapshot.GetVchannel(),
+		snapshotCheckpointTimetick: snapshot.GetSnapshotCheckpointTimetick(),
+		evictedWatermarkTimetick:   snapshot.GetEvictedWatermarkTimetick(),
+		entries:                    make(map[string]*summaryEntry, len(snapshot.GetEntries())),
+		pendingEntries:             make(map[string]*streamingpb.SummaryEntry),
+		pendingRecords:             make([]committedWriteRecord, 0),
+		commitOrder:                make([]string, 0, len(snapshot.GetEntries())),
+		generationStats:            make(map[uint64]*summaryGenerationStat),
 	}
 	sortedEntries := append([]*streamingpb.SummaryEntry(nil), snapshot.GetEntries()...)
 	sortSummaryEntries(sortedEntries)
@@ -149,10 +143,6 @@ func (s *vchannelSummary) advanceCheckpoint(msg message.ImmutableMessage) {
 		return
 	}
 	s.snapshotCheckpointTimetick = msg.TimeTick()
-	s.snapshotCheckpointMessageID = safeMessageIDProto(msg.LastConfirmedMessageID())
-	if s.snapshotCheckpointMessageID == nil && msg.MessageID() != nil {
-		s.snapshotCheckpointMessageID = msg.MessageID().IntoProto()
-	}
 	s.refreshEvictedWatermark()
 }
 
@@ -161,9 +151,6 @@ func (s *vchannelSummary) advanceCheckpointTo(checkpoint *WALCheckpoint) {
 		return
 	}
 	s.snapshotCheckpointTimetick = checkpoint.TimeTick
-	if checkpoint.MessageID != nil {
-		s.snapshotCheckpointMessageID = checkpoint.MessageID.IntoProto()
-	}
 	s.refreshEvictedWatermark()
 }
 
@@ -199,12 +186,11 @@ func (s *vchannelSummary) snapshot() *streamingpb.SummarySnapshot {
 
 func (s *vchannelSummary) snapshotWithEntries(entries []*streamingpb.SummaryEntry) *streamingpb.SummarySnapshot {
 	snapshot := &streamingpb.SummarySnapshot{
-		Pchannel:                    s.pchannel,
-		Vchannel:                    s.vchannel,
-		EvictedWatermarkTimetick:    s.evictedWatermarkTimetick,
-		SnapshotCheckpointTimetick:  s.snapshotCheckpointTimetick,
-		SnapshotCheckpointMessageId: cloneMessageIDProto(s.snapshotCheckpointMessageID),
-		Entries:                     entries,
+		Pchannel:                   s.pchannel,
+		Vchannel:                   s.vchannel,
+		EvictedWatermarkTimetick:   s.evictedWatermarkTimetick,
+		SnapshotCheckpointTimetick: s.snapshotCheckpointTimetick,
+		Entries:                    entries,
 	}
 	return snapshot
 }
@@ -323,20 +309,9 @@ func (s *vchannelSummary) advanceCheckpointToCommittedWriteRecord(record committ
 		return
 	}
 	s.snapshotCheckpointTimetick = record.SourceTimeTick
-	s.snapshotCheckpointMessageID = committedWriteRecordCheckpointMessageID(record)
 	s.refreshEvictedWatermark()
 	if markDirty {
 		s.dirty = true
-	}
-}
-
-func (s *vchannelSummary) checkpoint() *WALCheckpoint {
-	if s.snapshotCheckpointMessageID == nil {
-		return nil
-	}
-	return &WALCheckpoint{
-		MessageID: message.MustUnmarshalMessageID(s.snapshotCheckpointMessageID),
-		TimeTick:  s.snapshotCheckpointTimetick,
 	}
 }
 
@@ -407,15 +382,14 @@ func (s *vchannelSummary) registerGenerationEntry(generation uint64, entry *stre
 func (s *vchannelSummary) summaryMeta() *streamingpb.VChannelSummaryMeta {
 	s.refreshMinRequiredGeneration()
 	return &streamingpb.VChannelSummaryMeta{
-		Pchannel:                    s.pchannel,
-		Vchannel:                    s.vchannel,
-		EvictedWatermarkTimetick:    s.evictedWatermarkTimetick,
-		SnapshotCheckpointTimetick:  s.snapshotCheckpointTimetick,
-		SnapshotCheckpointMessageId: cloneMessageIDProto(s.snapshotCheckpointMessageID),
-		LatestAppliedGeneration:     s.latestAppliedGeneration,
-		MinRequiredGeneration:       s.minRequiredGeneration,
-		ViewType:                    common.VChannelSummaryViewTypeIdempotency,
-		EntryCount:                  uint64(len(s.entries)),
+		Pchannel:                   s.pchannel,
+		Vchannel:                   s.vchannel,
+		EvictedWatermarkTimetick:   s.evictedWatermarkTimetick,
+		SnapshotCheckpointTimetick: s.snapshotCheckpointTimetick,
+		LatestAppliedGeneration:    s.latestAppliedGeneration,
+		MinRequiredGeneration:      s.minRequiredGeneration,
+		ViewType:                   common.VChannelSummaryViewTypeIdempotency,
+		EntryCount:                 uint64(len(s.entries)),
 	}
 }
 
