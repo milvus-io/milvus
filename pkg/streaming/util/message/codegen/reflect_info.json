@@ -528,6 +528,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.RecoveryBarrierMessageHeader",
+                "BodyType": "messagespb.RecoveryBarrierMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRecoveryBarrier",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.BatchUpdateManifestMessageHeader",
                 "BodyType": "messagespb.BatchUpdateManifestMessageBody"
             },
@@ -545,6 +555,6 @@
                 "MessageType": "MessageTypeRefreshExternalCollection",
                 "Version": 2
             }
-        }
-    ]
+		}
+	]
 }

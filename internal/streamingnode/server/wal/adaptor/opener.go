@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -209,7 +207,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	if err != nil {
 		return nil, errors.Wrap(err, "when recovering recovery storage")
 	}
-	resources.recoveryStorage = rs
+	param.RecoveryStorage = rs
 
 	// Handle alter WAL if found in snapshot
 	// This flushes all remaining data and triggers WAL switch to the target implementation
@@ -247,19 +245,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, err
 	}
 
-	// start the flusher to flush and generate recovery info.
-	var flusher *flusherimpl.WALFlusherImpl
-	if !opt.DisableFlusher {
-		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:                param.WAL,
-			RecoveryStorage:    rs,
-			ChannelInfo:        l.Channel(),
-			RecoverySnapshot:   snapshot,
-			RateLimitComponent: roWAL.WALRateLimitComponent,
-		})
-		resources.flusher = flusher
-	}
-	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)
+	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param)
 	o.walInstances.Insert(id, wal)
 	resources.Release()
 	return wal, nil
@@ -317,22 +303,6 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	rs recovery.RecoveryStorage,
 	resources *walOpenResources, snapshot *recovery.RecoverySnapshot,
 ) error {
-	// Start flusher to flush all growing segments
-	var flusher *flusherimpl.WALFlusherImpl
-	if !opt.DisableFlusher {
-		f := syncutil.NewFuture[wal.WAL]()
-		f.Set(roWAL)
-		roWAL.ForceRecovery(true)
-		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:                f,
-			RecoveryStorage:    rs,
-			ChannelInfo:        roWAL.Channel(),
-			RecoverySnapshot:   snapshot,
-			RateLimitComponent: roWAL.WALRateLimitComponent,
-		})
-		resources.flusher = flusher
-	}
-
 	// Wait for all data up to target time tick to be flushed
 	targetTimeTick := snapshot.AlterWALInfo.AlterWALTs
 	targetWALName := snapshot.AlterWALInfo.TargetWALName
@@ -346,27 +316,27 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	const defaultWALSwitchFlushTimeout = 1 * time.Minute
 
 	// Periodically check flush progress until target time tick is reached
-	var flusherCP *utility.WALCheckpoint
-	for flusherCP == nil || flusherCP.TimeTick < targetTimeTick {
+	var dataCP *utility.WALCheckpoint
+	for dataCP == nil || dataCP.TimeTick < targetTimeTick {
 		select {
 		case <-ticker.C:
-			flusherCP = rs.GetFlusherCheckpointByTimeTick(ctx)
-			if flusherCP == nil {
-				mlog.Info(ctx, "waiting for flusher checkpoint initialization")
+			dataCP = rs.GetDataCheckpoint(ctx)
+			if dataCP == nil {
+				mlog.Info(ctx, "waiting for recovery data checkpoint initialization")
 				continue
 			}
-			if flusherCP.TimeTick >= targetTimeTick {
+			if dataCP.TimeTick >= targetTimeTick {
 				mlog.Info(ctx, "flush completed, ready for WAL switch",
 					mlog.String("channel", opt.Channel.Name),
-					mlog.Uint64("flusherCheckpointTS", flusherCP.TimeTick),
+					mlog.Uint64("dataCheckpointTS", dataCP.TimeTick),
 					mlog.Uint64("targetTimeTick", targetTimeTick),
 					mlog.Stringer("targetWAL", targetWALName))
 				break
 			}
-			remaining := targetTimeTick - flusherCP.TimeTick
+			remaining := targetTimeTick - dataCP.TimeTick
 			mlog.Info(ctx, "flush in progress",
 				mlog.String("channel", opt.Channel.Name),
-				mlog.Uint64("currentTS", flusherCP.TimeTick),
+				mlog.Uint64("currentTS", dataCP.TimeTick),
 				mlog.Uint64("targetTS", targetTimeTick),
 				mlog.Uint64("remainingTS", remaining))
 		case <-time.After(defaultWALSwitchFlushTimeout):
@@ -385,6 +355,10 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	resources.Close()
 
 	// Update checkpoint stage to ADVANCE_CHECKPOINT and persist to catalog
+	snapshot.Checkpoint.DataCheckpoint = &utility.WALConsumeCheckpoint{
+		MessageID: dataCP.MessageID,
+		TimeTick:  dataCP.TimeTick,
+	}
 	snapshot.Checkpoint.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
 
 	catalog := resource.Resource().StreamingNodeCatalog()
@@ -474,6 +448,10 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	finalCheckpoint := snapshot.Checkpoint.Clone()
 	finalCheckpoint.AlterWalState = nil
 	finalCheckpoint.MessageID = msgadaptor.MustGetMessageIDFromMQWrapperID(newWALInitialMsgID)
+	finalCheckpoint.DataCheckpoint = &utility.WALConsumeCheckpoint{
+		MessageID: finalCheckpoint.MessageID,
+		TimeTick:  finalCheckpoint.TimeTick,
+	}
 	if finalCheckpoint.ReplicateCheckpoint != nil {
 		finalCheckpoint.ReplicateCheckpoint.MessageID = finalCheckpoint.MessageID
 	}

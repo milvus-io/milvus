@@ -353,6 +353,7 @@ type commonConfig struct {
 	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+	NodeSchedulerMaxConcurrencyRatio  ParamItem `refreshable:"true"`
 
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnableDriverPrefetch              ParamItem `refreshable:"true"`
@@ -1460,6 +1461,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.NodeSchedulerMaxConcurrencyRatio = ParamItem{
+		Key:          "common.nodeScheduler.maxConcurrencyRatio",
+		Version:      "3.0",
+		DefaultValue: "2",
+		Doc:          "Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.",
+		Export:       true,
+	}
+	p.NodeSchedulerMaxConcurrencyRatio.Init(base.mgr)
 
 	p.EnabledOptimizeExpr = ParamItem{
 		Key:          "common.enabledOptimizeExpr",
@@ -8166,6 +8176,7 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+	WALRecoveryTaskConcurrency           ParamItem `refreshable:"true"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -8589,6 +8600,15 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALRecoveryTaskConcurrency = ParamItem{
+		Key:          "streaming.walRecovery.taskConcurrency",
+		Version:      "2.6.10",
+		Doc:          `The max number of recovery storage async tasks running concurrently per pchannel, 16 by default. Non-positive value means unlimited.`,
+		DefaultValue: "16",
+		Export:       true,
+	}
+	p.WALRecoveryTaskConcurrency.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",

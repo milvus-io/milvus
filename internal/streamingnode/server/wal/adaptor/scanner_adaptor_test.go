@@ -14,16 +14,19 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -61,7 +64,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 			MessageFilter: nil,
 		},
 		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		func() {}, false)
+		func() {})
 	// wait for timetick inspector first round
 	<-sig1.CloseCh()
 	// wait for scanner backoff 2 rounds
@@ -70,6 +73,47 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	<-s.Chan()
 	<-s.Done()
 	assert.NoError(t, s.Error())
+}
+
+func TestScannerAdaptorWaitsForTimeTickOperator(t *testing.T) {
+	resource.InitForTest(t)
+
+	pchannel := types.PChannelInfo{Name: "test-pchannel", AccessMode: types.AccessModeRW}
+	l := mock_walimpls.NewMockWALImpls(t)
+	l.EXPECT().Channel().Return(pchannel)
+	scanner := &scannerAdaptorImpl{
+		logger:        mlog.With(),
+		innerWAL:      l,
+		ScannerHelper: helper.NewScannerHelper("test"),
+	}
+
+	done := make(chan wab.ROWriteAheadBuffer, 1)
+	go func() {
+		wb, err := scanner.waitWriteAheadBuffer()
+		assert.NoError(t, err)
+		done <- wb
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("write ahead buffer should wait until timetick operator is registered")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	wb := mock_wab.NewMockROWriteAheadBuffer(t)
+	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
+	operator.EXPECT().Channel().Return(pchannel)
+	operator.EXPECT().WriteAheadBuffer().Return(wb)
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Maybe()
+	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
+	defer resource.Resource().TimeTickInspector().UnregisterSyncOperator(operator)
+
+	select {
+	case got := <-done:
+		assert.Equal(t, wb, got)
+	case <-time.After(time.Second):
+		t.Fatal("wait write ahead buffer timeout")
+	}
 }
 
 func TestPauseConsumption(t *testing.T) {
@@ -114,4 +158,82 @@ func TestPauseConsumption(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("wait until start consumption timeout")
 	}
+}
+
+func TestRecoveryBarrierConfirmsBufferedMessages(t *testing.T) {
+	scanner := &scannerAdaptorImpl{
+		logger: mlog.With(),
+		readOption: wal.ReadOption{
+			IgnorePauseConsumption: true,
+		},
+		filterFunc:      func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:         func() {},
+		ScannerHelper:   helper.NewScannerHelper("test"),
+		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
+		readRateCounter: utility.NewAverageRateCounter(time.Second),
+	}
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, false)
+	barrier := newScannerTestMessage(t, 20, "", message.MessageTypeRecoveryBarrier, true)
+
+	scanner.handleUpstream(msg)
+	assert.Equal(t, 1, scanner.reorderBuffer.Len())
+	assert.Equal(t, 0, scanner.pendingQueue.Len())
+
+	scanner.handleUpstream(barrier)
+
+	assert.Equal(t, 0, scanner.reorderBuffer.Len())
+	assert.Equal(t, 2, scanner.pendingQueue.Len())
+	assert.Equal(t, msg, scanner.pendingQueue.Next())
+	scanner.pendingQueue.UnsafeAdvance()
+	assert.Equal(t, barrier, scanner.pendingQueue.Next())
+}
+
+func TestTimeTickConfirmsBufferedMessagesWithoutEnteringPendingQueue(t *testing.T) {
+	scanner := &scannerAdaptorImpl{
+		logger: mlog.With(),
+		readOption: wal.ReadOption{
+			IgnorePauseConsumption: true,
+		},
+		filterFunc:      func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:         func() {},
+		ScannerHelper:   helper.NewScannerHelper("test"),
+		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
+		readRateCounter: utility.NewAverageRateCounter(time.Second),
+	}
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, false)
+	timeTick := newScannerTestMessage(t, 20, "", message.MessageTypeTimeTick, true)
+
+	scanner.handleUpstream(msg)
+	scanner.handleUpstream(timeTick)
+
+	assert.Equal(t, 0, scanner.reorderBuffer.Len())
+	assert.Equal(t, 1, scanner.pendingQueue.Len())
+	assert.Equal(t, msg, scanner.pendingQueue.Next())
+	scanner.pendingQueue.UnsafeAdvance()
+	assert.Equal(t, 0, scanner.pendingQueue.Len())
+}
+
+func newScannerTestMessage(
+	t *testing.T,
+	timetick uint64,
+	vchannel string,
+	msgType message.MessageType,
+	persisted bool,
+) *mock_message.MockImmutableMessage {
+	msg := mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().MessageType().Return(msgType).Maybe()
+	msg.EXPECT().TimeTick().Return(timetick).Maybe()
+	msg.EXPECT().VChannel().Return(vchannel).Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	msg.EXPECT().IsPersisted().Return(persisted).Maybe()
+	msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(int64(timetick))).Maybe()
+	msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
+	return msg
 }

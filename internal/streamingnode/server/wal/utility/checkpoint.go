@@ -1,6 +1,8 @@
 package utility
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -23,9 +25,9 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		ReplicateConfig:     cp.ReplicateConfig,
 		ReplicateCheckpoint: NewReplicateCheckpointFromProto(cp.ReplicateCheckpoint),
 		AlterWalState:       cp.AlterWalState,
+		DataCheckpoint:      NewWALConsumeCheckpointFromProto(cp.DataCheckpoint),
 	}
 }
-
 // WALCheckpoint represents a consume checkpoint in the Write-Ahead Log (WAL).
 type WALCheckpoint struct {
 	MessageID           message.MessageID // should always be not nil.
@@ -34,6 +36,7 @@ type WALCheckpoint struct {
 	ReplicateCheckpoint *ReplicateCheckpoint
 	ReplicateConfig     *commonpb.ReplicateConfiguration
 	AlterWalState       *streamingpb.AlterWALState
+	DataCheckpoint      *WALConsumeCheckpoint
 }
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
@@ -48,18 +51,67 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
 		AlterWalState:       c.AlterWalState,
+		DataCheckpoint:      c.DataCheckpoint.IntoProto(),
 	}
 }
 
 // Clone creates a new WALCheckpoint with the same values as the original.
 func (c *WALCheckpoint) Clone() *WALCheckpoint {
+	var replicateConfig *commonpb.ReplicateConfiguration
+	if c.ReplicateConfig != nil {
+		replicateConfig = proto.Clone(c.ReplicateConfig).(*commonpb.ReplicateConfiguration)
+	}
+	var alterWalState *streamingpb.AlterWALState
+	if c.AlterWalState != nil {
+		alterWalState = proto.Clone(c.AlterWalState).(*streamingpb.AlterWALState)
+	}
 	return &WALCheckpoint{
 		MessageID:           c.MessageID,
 		TimeTick:            c.TimeTick,
 		Magic:               c.Magic,
-		ReplicateConfig:     c.ReplicateConfig,
+		ReplicateConfig:     replicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
-		AlterWalState:       c.AlterWalState,
+		AlterWalState:       alterWalState,
+		DataCheckpoint:      c.DataCheckpoint.Clone(),
+	}
+}
+
+// NewWALConsumeCheckpointFromProto creates a new WALConsumeCheckpoint from a protobuf message.
+func NewWALConsumeCheckpointFromProto(cp *streamingpb.WALConsumeCheckpoint) *WALConsumeCheckpoint {
+	if cp == nil {
+		return nil
+	}
+	return &WALConsumeCheckpoint{
+		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
+		TimeTick:  cp.TimeTick,
+	}
+}
+
+// WALConsumeCheckpoint represents a physical consume point in the WAL.
+type WALConsumeCheckpoint struct {
+	MessageID message.MessageID
+	TimeTick  uint64
+}
+
+// IntoProto converts the WALConsumeCheckpoint to a protobuf message.
+func (c *WALConsumeCheckpoint) IntoProto() *streamingpb.WALConsumeCheckpoint {
+	if c == nil {
+		return nil
+	}
+	return &streamingpb.WALConsumeCheckpoint{
+		MessageId: message.MustMarshalMessageID(c.MessageID),
+		TimeTick:  c.TimeTick,
+	}
+}
+
+// Clone creates a new WALConsumeCheckpoint with the same values as the original.
+func (c *WALConsumeCheckpoint) Clone() *WALConsumeCheckpoint {
+	if c == nil {
+		return nil
+	}
+	return &WALConsumeCheckpoint{
+		MessageID: c.MessageID,
+		TimeTick:  c.TimeTick,
 	}
 }
 
