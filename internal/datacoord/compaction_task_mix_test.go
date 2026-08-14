@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -45,7 +47,10 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 			State:         commonpb.SegmentState_Flushed,
 			Binlogs:       binLogs,
 		}}
-	}).Times(2)
+		// Called once per input segment by GetTaskSlot (to size the
+		// requirement estimate) and once more per input segment when
+		// BuildCompactionRequest assembles the plan's segment binlogs.
+	}).Times(4)
 	task := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:         1,
 		TriggerID:      19530,
@@ -102,7 +107,9 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 					State:         commonpb.SegmentState_Flushed,
 					Binlogs:       binLogs,
 				}}
-			}).Once()
+				// Once from GetTaskSlot's own segment scan, once more when
+				// BuildCompactionRequest assembles the plan's segment binlogs.
+			}).Times(2)
 			if testCase.expectResourceGet {
 				mockMeta.EXPECT().GetFileResources(mock.Anything, mock.Anything).Return(expectedResources, nil).Once()
 			}
@@ -140,7 +147,8 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 	s.Run("segment_not_found", func() {
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 			return nil
-		}).Once()
+		}).Times(3) // GetTaskSlot scans both nil segments (skipping each), then
+		// BuildCompactionRequest's own loop hits segment 200 again and fails fast.
 		task := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:         1,
 			TriggerID:      19530,
@@ -179,7 +187,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
 			SchemaVersion: 3,
-		}}).Once()
+		}}).Times(2) // once from GetTaskSlot, once from the segment binlog loop
 		task := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
@@ -245,13 +253,21 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 		},
 	} {
 		s.Run(test.name, func() {
+			// A pre-stored slotUsage (sort cases below) short-circuits
+			// GetTaskSlot's own segment scan, so only the segment binlog
+			// loop in BuildCompactionRequest calls GetHealthySegment; a
+			// mix task with no stored slotUsage pays for both.
+			wantCalls := 2
+			if test.storeSlotUsage {
+				wantCalls = 1
+			}
 			meta := NewMockCompactionMeta(s.T())
 			meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: test.inputSchema,
 				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
-			}}).Once()
+			}}).Times(wantCalls)
 			task := newMixCompactionTask(&datapb.CompactionTask{
 				PlanID:        1,
 				Type:          test.compactionType,
@@ -316,4 +332,101 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	t1.QueryTaskOnWorker(cluster)
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
+}
+
+// newMixCompactionTaskForTest builds a *mixCompactionTask with a single input
+// segment (ID 200) carrying the given storage version and uncompressed
+// binlog size, wired to a mock CompactionMeta so GetTaskSlot's
+// taskresource.EstimateCompaction path can run end to end.
+func newMixCompactionTaskForTest(t *testing.T, storageVersion int64, memorySize int64) *mixCompactionTask {
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:             200,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storageVersion,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: memorySize}}},
+		},
+	}}).Once()
+
+	return newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		InputSegments: []int64{200},
+	}, nil, meta, newMockVersionManager())
+}
+
+// issue #52180 incident 1: eight mix compactions totalling 36GiB of input
+// were each charged the flat mixCompactionUsage of 4.
+func TestMixCompactionSlotScalesWithInput(t *testing.T) {
+	paramtable.Init()
+
+	small := newMixCompactionTaskForTest(t, 3 /* storageVersion */, 100*1024*1024)
+	large := newMixCompactionTaskForTest(t, 3 /* storageVersion */, 8*1024*1024*1024)
+
+	assert.Greater(t, large.GetTaskSlot(), small.GetTaskSlot(),
+		"a 8GiB compaction must not cost the same as a 100MiB one")
+}
+
+func TestMixCompactionSlotIsPositive(t *testing.T) {
+	paramtable.Init()
+
+	task := newMixCompactionTaskForTest(t, 2, 0)
+	assert.Greater(t, task.GetTaskSlot(), int64(0))
+}
+
+// GetTaskSlot must aggregate across every input segment, not just the first
+// or last one it happens to see: storage version and delete payload take the
+// max (a single v3/heavy-delete segment dominates the memory profile per the
+// design doc), while memory size sums (the reader holds all of it). Segment
+// order is varied to catch an implementation that silently reads only the
+// first segment in the slice, which "max across inputs" logic can easily
+// regress to.
+func TestMixCompactionSlotAggregatesAcrossSegments(t *testing.T) {
+	paramtable.Init()
+
+	newSeg := func(id, storageVersion, memorySize, deltaSize int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             id,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storageVersion,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: memorySize}}},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{MemorySize: deltaSize}}},
+			},
+		}}
+	}
+
+	const (
+		mem1   = 50 * 1024 * 1024
+		mem2   = 30 * 1024 * 1024
+		delta1 = 1 * 1024 * 1024
+		delta2 = 3 * 1024 * 1024
+	)
+	// want is computed from the real estimator with the aggregated inputs a
+	// correct implementation must derive (max storage version 3, summed
+	// memory, max delete payload) -- an independent check that does not just
+	// re-run GetTaskSlot's own arithmetic.
+	want := memoryToSlots(taskresource.EstimateCompaction(taskresource.CompactionInput{
+		Type:                  datapb.CompactionType_MixCompaction,
+		StorageVersion:        3,
+		TotalMemorySize:       mem1 + mem2,
+		MaxSegmentDeleteBytes: delta2,
+	}).Memory)
+
+	for _, order := range [][]int64{{200, 201}, {201, 200}} {
+		meta := NewMockCompactionMeta(t)
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(newSeg(200, 1, mem1, delta1)).Once()
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(201)).Return(newSeg(201, 3, mem2, delta2)).Once()
+
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			Type:          datapb.CompactionType_MixCompaction,
+			InputSegments: order,
+		}, nil, meta, newMockVersionManager())
+
+		assert.Equal(t, want, task.GetTaskSlot(), "input order %v must not change the aggregated result", order)
+	}
 }

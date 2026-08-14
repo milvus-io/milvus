@@ -144,6 +144,29 @@ func TestGetSegmentSize(t *testing.T) {
 	assert.Equal(t, int64(3), segment.getFieldBinlogSize(2))
 }
 
+func TestGetDeltaLogSize(t *testing.T) {
+	// Unlike getSegmentSize, getDeltaLogSize must ignore insert and stats
+	// logs entirely: it feeds MaxSegmentDeleteBytes in the compaction
+	// estimator, which needs the delete payload in isolation.
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1, MemorySize: 100}}},
+			},
+			Statslogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{LogID: 1, MemorySize: 100}}},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{LogID: 1, MemorySize: 5}, {LogID: 2, MemorySize: 7}}},
+			},
+		},
+	}
+	assert.Equal(t, int64(12), segment.getDeltaLogSize())
+
+	empty := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{}}
+	assert.Equal(t, int64(0), empty.getDeltaLogSize())
+}
+
 func TestIsDeltaLogExists(t *testing.T) {
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{

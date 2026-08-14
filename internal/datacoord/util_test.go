@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -123,6 +124,33 @@ func (suite *UtilSuite) TestVerifyResponse() {
 
 func TestUtil(t *testing.T) {
 	suite.Run(t, new(UtilSuite))
+}
+
+func TestMemoryToSlots(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	t.Run("divides by the configured bytes-per-slot", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "1048576") // 1MiB
+		defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
+
+		assert.EqualValues(t, 10, memoryToSlots(10*1024*1024))
+	})
+
+	t.Run("floors at 1 slot instead of 0", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "1048576") // 1MiB
+		defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
+
+		assert.EqualValues(t, 1, memoryToSlots(0))
+		assert.EqualValues(t, 1, memoryToSlots(1024))
+	})
+
+	t.Run("falls back to the 128MiB default when the config is non-positive", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "0")
+		defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
+
+		assert.EqualValues(t, 2, memoryToSlots(256*1024*1024))
+	})
 }
 
 type fixedTSOAllocator struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -52,19 +53,50 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 
 func (t *mixCompactionTask) GetTaskSlot() int64 {
 	slotUsage := t.slotUsage.Load()
-	if slotUsage == 0 {
-		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
-			segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
-			if segment != nil {
-				segSize := segment.getSegmentSize()
-				slotUsage = calculateStatsTaskSlot(segSize)
-				mlog.Info(context.TODO(), "mixCompactionTask get task slot",
-					mlog.Int64("segment size", segSize), mlog.Int64("task slot", slotUsage))
-			}
-		}
-		t.slotUsage.Store(slotUsage)
+	if slotUsage != 0 {
+		return slotUsage
 	}
+
+	var totalMemory, totalRows, maxDelete, storageVersion int64
+	for _, segID := range t.GetTaskProto().GetInputSegments() {
+		segment := t.meta.GetHealthySegment(context.Background(), segID)
+		if segment == nil {
+			continue
+		}
+		totalMemory += segment.getSegmentSize()
+		totalRows += segment.GetNumOfRows()
+		if d := segment.getDeltaLogSize(); d > maxDelete {
+			maxDelete = d
+		}
+		// Storage version is per segment, not per task: neither CompactionTask
+		// nor CompactionPlan carries one (only SegmentInfo field 21 and
+		// CompactionSegmentBinlogs field 10 do). Take the max, matching what
+		// RequirementForCompaction does on the DataNode side — a v3 segment in
+		// a mixed plan dominates the memory profile, so the max is the
+		// conservative direction.
+		if v := segment.GetStorageVersion(); v > storageVersion {
+			storageVersion = v
+		}
+	}
+
+	req := taskresource.EstimateCompaction(taskresource.CompactionInput{
+		Type:                  t.GetTaskProto().GetType(),
+		StorageVersion:        storageVersion,
+		TotalMemorySize:       totalMemory,
+		TotalRows:             totalRows,
+		MaxSegmentDeleteBytes: maxDelete,
+	})
+
+	// Phase 0 still speaks the scalar protocol on the wire, so the byte-level
+	// estimate is folded back into slots here. Phase 1 sends the requirement
+	// itself and this fold disappears.
+	slotUsage = memoryToSlots(req.Memory)
+	t.slotUsage.Store(slotUsage)
+	mlog.Info(context.TODO(), "mixCompactionTask get task slot",
+		mlog.Int64("totalMemorySize", totalMemory),
+		mlog.Int64("storageVersion", storageVersion),
+		mlog.String("requirement", req.String()),
+		mlog.Int64("taskSlot", slotUsage))
 	return slotUsage
 }
 
