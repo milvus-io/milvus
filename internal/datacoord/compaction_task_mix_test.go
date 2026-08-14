@@ -512,13 +512,16 @@ func TestMixCompactionSlotCachesOnceAllSegmentsResolve(t *testing.T) {
 	assert.Equal(t, full, again)
 }
 
-// dataCoord.resource.enable is the branch's rollback story, and the only one it
-// has. The estimate is folded back onto the same scalar slot field the wire has
-// always carried, but with a different scale: a 4.5GiB storage-v3 compaction
-// moves from a flat 4 slots to about 36. Against a DataNode that has not
-// restarted yet -- an ordinary partial rollout, or a rollback -- a new
+// dataCoord.resource.enableCompactionEstimate is the coordinator side's
+// rollback path. The estimate is folded back onto the same scalar slot field
+// the wire has always carried, but with a different scale: a 4.5GiB storage-v3
+// compaction moves from a flat 4 slots to about 36. Against a DataNode that has
+// not restarted yet -- an ordinary partial rollout, or a rollback -- a new
 // DataCoord therefore reads that node as full roughly nine times too early, on
 // every task rather than on rare ones.
+//
+// It is deliberately NOT a switch for the whole feature: the DataNode ledger
+// stays on. Hence the name.
 func TestMixCompactionSlotHonoursTheResourceKillSwitch(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
@@ -531,8 +534,8 @@ func TestMixCompactionSlotHonoursTheResourceKillSwitch(t *testing.T) {
 	require.Greater(t, estimated, flat,
 		"setup: the estimate must differ from the constant, or this switch changes nothing")
 
-	pt.Save(pt.DataCoordCfg.ResourceEnable.Key, "false")
-	defer pt.Reset(pt.DataCoordCfg.ResourceEnable.Key)
+	pt.Save(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key)
 
 	off := newMixCompactionTaskForTest(t, 3, inputBytes).GetTaskSlot()
 	assert.Equal(t, flat, off, "with the switch off, mix compaction reports the pre-branch constant")
@@ -543,8 +546,8 @@ func TestMixCompactionSlotHonoursTheResourceKillSwitch(t *testing.T) {
 func TestSortCompactionSlotKillSwitchRestoresTheStepFunction(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
-	pt.Save(pt.DataCoordCfg.ResourceEnable.Key, "false")
-	defer pt.Reset(pt.DataCoordCfg.ResourceEnable.Key)
+	pt.Save(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key)
 
 	const segSize = int64(2) * 1024 * 1024 * 1024
 	meta := NewMockCompactionMeta(t)
