@@ -229,9 +229,14 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 }
 
 func TestBroadcastWithoutKeyIsUnaffected(t *testing.T) {
-	// A broadcast carrying no idempotency key must not consult the index at all
-	// and must follow the original path, which consumes the guards by handing
-	// them to the newly created task.
+	// A broadcast carrying no idempotency key follows the original path unchanged:
+	// it creates a task and consumes the guards by handing them to it.
+	//
+	// This does NOT prove the `key != ""` guard in Broadcast is present — an empty
+	// key is a structural miss in the index (Get("") always returns false), so the
+	// observable outcome is identical with or without the guard. The guard exists
+	// to skip a pointless lookup, not for correctness, and is deliberately left
+	// unasserted rather than pinned by a test that cannot fail.
 	bm := newBroadcastTaskManagerForTest(t)
 
 	guards := bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey())
