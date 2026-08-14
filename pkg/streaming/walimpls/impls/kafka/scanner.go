@@ -61,7 +61,7 @@ func (s *scannerImpl) executeConsume() {
 			if c, ok := err.(kafka.Error); ok && c.Code() == kafka.ErrTimedOut {
 				continue
 			}
-			s.Finish(convertKafkaReadError(err, s.topic))
+			s.Finish(err)
 			return
 		}
 		messageID := kafkaID(msg.TopicPartition.Offset)

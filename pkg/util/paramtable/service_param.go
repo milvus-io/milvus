@@ -1214,14 +1214,23 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
-		Formatter: func(add string) string {
+		Formatter: func(address string) string {
+			if address != "" {
+				return address
+			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
 				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
 				return ""
 			}
-			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+			webScheme := "http"
+			if pulsarURL.Scheme == "pulsar+ssl" {
+				webScheme = "https"
+			}
+			return webScheme + "://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
 		},
+		Doc:    "HTTP(S) address of the Pulsar admin service. If empty, it is derived from pulsar.address and pulsar.webport.",
+		Export: true,
 	}
 	p.WebAddress.Init(base.mgr)
 

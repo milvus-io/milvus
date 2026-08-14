@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -21,9 +23,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func TestCatchupScannerUsesUnderlyingAdaptorForWALSpecificPosition(t *testing.T) {
+func TestCatchupScannerUsesCurrentWALForCurrentWALPosition(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
+	messageCh := make(chan message.ImmutableMessage)
+	innerScanner := mock_walimpls.NewMockScannerImpls(t)
+	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
+	innerScanner.EXPECT().Close().Return(nil).Once()
+	currentWAL.(*mock_walimpls.MockWALImpls).EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
+	openerCalled := false
 	scanner := newSwitchableScanner(
 		"current-reader",
 		mlog.With(),
@@ -32,8 +40,7 @@ func TestCatchupScannerUsesUnderlyingAdaptorForWALSpecificPosition(t *testing.T)
 		options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(1)),
 		make(chan message.ImmutableMessage),
 		func(_ context.Context, walName message.WALName, gotChannel types.PChannelInfo) (walimpls.ROWALImpls, error) {
-			require.Equal(t, message.WALNameTest, walName)
-			require.Equal(t, channel, gotChannel)
+			openerCalled = true
 			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
 		},
 		nil,
@@ -41,14 +48,11 @@ func TestCatchupScannerUsesUnderlyingAdaptorForWALSpecificPosition(t *testing.T)
 
 	catchup, ok := scanner.(*catchupScanner)
 	require.True(t, ok)
-	underlyingScanner, err := catchup.openCatchupScannerImpls(context.Background())
+	openedScanner, err := catchup.openCatchupScannerImpls(context.Background())
 	require.NoError(t, err)
-	_, ok = underlyingScanner.(*underlyingWALScannerAdaptor)
-	require.True(t, ok)
-	_, ok = <-underlyingScanner.Chan()
-	require.False(t, ok)
-	require.Error(t, underlyingScanner.Error())
-	require.Error(t, underlyingScanner.Close())
+	require.Same(t, innerScanner, openedScanner)
+	require.False(t, openerCalled)
+	require.NoError(t, openedScanner.Close())
 }
 
 func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {

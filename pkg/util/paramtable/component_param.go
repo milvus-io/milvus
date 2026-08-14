@@ -8230,8 +8230,9 @@ type streamingConfig struct {
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 
-	// read ahead buffer size
-	WALReadAheadBufferLength ParamItem `refreshable:"true"`
+	// scanner
+	WALReadAheadBufferLength   ParamItem `refreshable:"true"`
+	WALSwitchTargetOpenTimeout ParamItem `refreshable:"true"`
 
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
@@ -8562,6 +8563,14 @@ Use the underlying wal default value if 0 is given.`,
 		Export:       true,
 	}
 	p.WALReadAheadBufferLength.Init(base.mgr)
+	p.WALSwitchTargetOpenTimeout = ParamItem{
+		Key:          "streaming.walSwitch.targetOpenTimeout",
+		Version:      "2.6.11",
+		Doc:          "Maximum time a historical reader waits for the target WAL to become available after an AlterWAL boundary.",
+		DefaultValue: "10m",
+		Export:       true,
+	}
+	p.WALSwitchTargetOpenTimeout.Init(base.mgr)
 
 	p.LoggingAppendSlowThreshold = ParamItem{
 		Key:     "streaming.logging.appendSlowThreshold",

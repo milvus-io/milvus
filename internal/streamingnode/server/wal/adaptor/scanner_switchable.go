@@ -165,8 +165,14 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 }
 
 func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.ScannerImpls, error) {
-	_, hasWALSpecificPosition := getDeliverPolicyWALName(s.deliverPolicy)
-	if !hasWALSpecificPosition || s.underlyingROWALImplsOpener == nil {
+	positionWALName, hasWALSpecificPosition := getDeliverPolicyWALName(s.deliverPolicy)
+	// A WAL-specific position is also used for ordinary reconnects and WAB
+	// eviction recovery. Only a position from a different backend needs the
+	// cross-WAL adaptor; positions for the active backend should keep using the
+	// already-open current WAL and must not depend on RO topic validation.
+	if !hasWALSpecificPosition ||
+		s.underlyingROWALImplsOpener == nil ||
+		positionWALName == s.innerWAL.WALName() {
 		scanner, err := s.createInnerWALScannerWithBackoff(ctx, s.deliverPolicy)
 		if err == nil && s.onReaderChanged != nil {
 			s.onReaderChanged(s.innerWAL.WALName())
