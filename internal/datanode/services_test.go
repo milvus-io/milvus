@@ -2064,7 +2064,22 @@ func (s *DataNodeServicesSuite) TestQuerySlotReportsZeroWhenFrozen() {
 	s.EqualValues(0, jobResp.GetAvailableSlots())
 }
 
-// availableSlots takes the smaller of the ledger's view and the executors'.
+// The incident node from issue #52180: 16 cores, 64GiB, so
+// CalculateNodeSlots reports 128 and the ledger budget is 64GiB x 0.75.
+const (
+	incidentLegacyTotal = int64(128)
+	incidentBudget      = int64(48) << 30
+)
+
+func incidentSnapshot(reservedMemory int64, reservedCPU float64) resource.Snapshot {
+	return resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 16, Memory: incidentBudget},
+		Reserved: taskresource.Capacity{CPU: reservedCPU, Memory: reservedMemory},
+	}
+}
+
+// availableSlots takes whichever of the ledger and the executors' queues
+// reports the node busier.
 // The ledger counts only ADMITTED tasks, so a node holding a large queue of
 // accepted-but-not-yet-started work has an empty ledger and would otherwise
 // advertise itself completely free -- DataCoord's water-filling would keep
@@ -2073,32 +2088,67 @@ func (s *DataNodeServicesSuite) TestQuerySlotReportsZeroWhenFrozen() {
 func TestAvailableSlotsCountsQueuedWorkToo(t *testing.T) {
 	paramtable.Init()
 
-	const legacyTotal = int64(128)
-	idle := resource.Snapshot{
-		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
-		Reserved: taskresource.Capacity{CPU: 0, Memory: 0},
-	}
+	perSlot := paramtable.Get().DataNodeCfg.ResourceLegacyMemoryPerSlot.GetAsInt64()
+	idle := incidentSnapshot(0, 0)
 
 	// Nothing admitted, nothing queued: the whole node.
-	assert.Equal(t, legacyTotal, availableSlots(idle, legacyTotal, 0, 0, 0))
+	assert.Equal(t, incidentLegacyTotal, availableSlots(idle, incidentLegacyTotal, 0, 0, 0))
 
-	// Nothing admitted, but 100 slots' worth queued across the three
-	// executors. The ledger still says "free"; the answer must not.
-	assert.Equal(t, int64(28), availableSlots(idle, legacyTotal, 40, 50, 10))
+	// Nothing admitted, but index and import have accepted 50 of the node's
+	// 128 slots. The ledger still says "free"; the answer must not.
+	assert.Equal(t, int64(78), availableSlots(idle, incidentLegacyTotal, 40, 0, 10))
+
+	// Same for a compaction backlog. These counters are in 128MiB units of
+	// memory, so 300 of them is 37.5GiB of the 48GiB budget: ~78% full.
+	queuedBytes := 300 * perSlot
+	require.Equal(t, int64(37)<<30+int64(512)<<20, queuedBytes, "setup: 37.5GiB queued")
+	assert.Equal(t, int64(28), availableSlots(idle, incidentLegacyTotal, 0, 300, 0))
 
 	// The ledger stays authoritative when it is the more conservative of the
-	// two: 90% committed is 12 slots, well below the 118 the queue allows.
-	loaded := resource.Snapshot{
-		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
-		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
-	}
-	assert.Equal(t, int64(12), availableSlots(loaded, legacyTotal, 10, 0, 0))
+	// two: 90% of the budget committed is 12 slots, well below what a small
+	// queue would allow.
+	loaded := incidentSnapshot(incidentBudget/10*9, 1)
+	assert.Equal(t, int64(12), availableSlots(loaded, incidentLegacyTotal, 10, 0, 0))
 
-	// Over-subscribed queues must clamp at zero rather than go negative.
-	assert.Equal(t, int64(0), availableSlots(idle, legacyTotal, 100, 100, 100))
+	// Over-subscribed queues clamp at zero rather than going negative.
+	assert.Equal(t, int64(0), availableSlots(idle, incidentLegacyTotal, 100, 0, 100))
 
 	// And a frozen node is still zero however empty the queues are.
 	frozen := idle
 	frozen.Frozen = true
-	assert.Equal(t, int64(0), availableSlots(frozen, legacyTotal, 0, 0, 0))
+	assert.Equal(t, int64(0), availableSlots(frozen, incidentLegacyTotal, 0, 0, 0))
+}
+
+// The queue arm must not be denominated in legacyTotal, because the compaction
+// counter is not on that scale. Under this branch DataCoord prices a mix
+// compaction as memoryToSlots(bytes) = bytes / 128MiB, so 128 of those slots is
+// 16GiB -- a third of this node's 48GiB budget. Subtracting them from
+// legacyTotal caps compaction at about three concurrent 4.5GiB tasks where the
+// ledger has room for ten: a permanent 3x throughput cut on a fully upgraded
+// cluster, which is the very failure enableCompactionEstimate exists to let an
+// operator escape during a skew window.
+func TestAvailableSlotsDoesNotCapCompactionOnTheLegacySlotScale(t *testing.T) {
+	paramtable.Init()
+
+	perSlot := paramtable.Get().DataNodeCfg.ResourceLegacyMemoryPerSlot.GetAsInt64()
+	const perTask = int64(4608) << 20 // 4.5GiB
+	taskSlots := perTask / perSlot
+	require.Equal(t, int64(36), taskSlots, "setup: memoryToSlots prices this task at 36 slots")
+
+	// Three of them accepted and admitted: 13.5GiB of a 48GiB budget.
+	snap := incidentSnapshot(3*perTask, 3)
+	got := availableSlots(snap, incidentLegacyTotal, 0, 3*taskSlots, 0)
+
+	// The ledger is the honest constraint here (28% committed), so the queue
+	// arm must not bind at all.
+	ledgerOnly := legacyAvailableSlots(snap, incidentLegacyTotal)
+	require.Equal(t, int64(92), ledgerOnly, "setup: 13.5GiB of 48GiB leaves ~72%")
+	assert.Equal(t, ledgerOnly, got,
+		"the queue arm must not report a node busier than its own ledger does")
+
+	// Stated the way DataCoord reads it: it divides the reported availability
+	// by this task's own slot count to decide how many more will fit. The
+	// ledger has room for seven more; the answer must not be zero.
+	assert.GreaterOrEqual(t, got/taskSlots, int64(2),
+		"the node must still claim room for more of the same task")
 }
