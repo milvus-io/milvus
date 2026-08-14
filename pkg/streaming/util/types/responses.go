@@ -30,6 +30,12 @@ type BroadcastAppendResult struct {
 }
 
 // GetAppendResult returns the append result of the given channel.
+//
+// Returns nil for every channel when the broadcast was deduplicated, because a
+// deduplicated broadcast appended nothing. A caller that broadcasts with an
+// idempotency key must therefore check Duplicated BEFORE dereferencing anything
+// this returns, or it will nil-panic on the duplicate path only — a branch that
+// success-path testing never reaches.
 func (r *BroadcastAppendResult) GetAppendResult(channelName string) *AppendResult {
 	return r.AppendResults[channelName]
 }
