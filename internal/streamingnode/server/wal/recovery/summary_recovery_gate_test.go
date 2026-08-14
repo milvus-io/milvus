@@ -231,7 +231,7 @@ func TestRecoverSummariesFailsOnReferencedChunkCorruption(t *testing.T) {
 
 	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 99,
 				MessageId:      rmq.NewRmqID(99).IntoProto(),
@@ -278,7 +278,7 @@ func TestRecoverSummariesSelfHealsCorruptOrphanChunk(t *testing.T) {
 
 	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 99,
 				MessageId:      rmq.NewRmqID(99).IntoProto(),

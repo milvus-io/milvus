@@ -158,7 +158,7 @@ func (s *vchannelSummary) consumePendingCommittedWriteRecords() ([]*streamingpb.
 	if !s.dirty {
 		return nil, nil
 	}
-	records := cloneAndSortCommittedWriteRecords(s.pchannel, s.vchannel, s.pendingRecords)
+	records := sortCommittedWriteRecords(s.pendingRecords)
 	pendingEntryKeys := make([]string, 0, len(s.pendingEntries))
 	for key := range s.pendingEntries {
 		pendingEntryKeys = append(pendingEntryKeys, key)
@@ -196,7 +196,7 @@ func (s *vchannelSummary) snapshotWithEntries(entries []*streamingpb.SummaryEntr
 }
 
 func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []*streamingpb.CommittedWriteRecord, generation uint64) error {
-	records = cloneAndSortCommittedWriteRecords(s.pchannel, s.vchannel, records)
+	records = sortCommittedWriteRecords(records)
 	for _, record := range records {
 		if err := s.applyCommittedWriteRecord(record, false); err != nil {
 			return err
@@ -212,12 +212,6 @@ func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []*stre
 }
 
 func (s *vchannelSummary) applyCommittedWriteRecord(record *streamingpb.CommittedWriteRecord, markDirty bool) error {
-	if record.SourcePchannel != "" && s.pchannel != "" && record.SourcePchannel != s.pchannel {
-		return merr.WrapErrServiceInternalMsg("committed write record pchannel mismatch, state %s, record %s", s.pchannel, record.SourcePchannel)
-	}
-	if record.Vchannel != "" && s.vchannel != "" && record.Vchannel != s.vchannel {
-		return merr.WrapErrServiceInternalMsg("committed write record vchannel mismatch, state %s, record %s", s.vchannel, record.Vchannel)
-	}
 	key := record.GetIdempotencyKey()
 	if key == "" {
 		// A keyless write is checkpoint bookkeeping only: it advances the summary

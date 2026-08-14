@@ -82,11 +82,14 @@ func marshalPChannelSummaryChunk(
 	}
 
 	for _, vchannel := range vchannels {
-		records := cloneAndSortCommittedWriteRecords(pchannel, vchannel, recordsByVChannel[vchannel])
+		records := sortCommittedWriteRecords(recordsByVChannel[vchannel])
 		if len(records) == 0 {
 			continue
 		}
-		payload, err := marshalVChannelSummaryChunk(&streamingpb.VChannelSummaryChunk{Records: records})
+		payload, err := marshalVChannelSummaryChunk(&streamingpb.VChannelSummaryChunk{
+			Vchannel: vchannel,
+			Records:  records,
+		})
 		if err != nil {
 			return nil, nil, "", err
 		}
@@ -171,7 +174,7 @@ func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]*streamingpb.Co
 		if !bytes.Equal(chunkIndex.Checksum, chunkChecksum(chunkPayload)) {
 			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk checksum mismatch for vchannel %s", chunkIndex.Vchannel)
 		}
-		chunk, err := unmarshalVChannelSummaryChunk(chunkPayload, footer.Pchannel, chunkIndex.Vchannel)
+		chunk, err := unmarshalVChannelSummaryChunk(chunkPayload)
 		if err != nil {
 			return nil, nil, "", markPChannelSummaryStoreCorrupted(err)
 		}
@@ -203,15 +206,15 @@ func marshalVChannelSummaryChunk(chunk *streamingpb.VChannelSummaryChunk) ([]byt
 	return summaryChunkMarshalOptions.Marshal(chunk)
 }
 
-// unmarshalVChannelSummaryChunk decodes a chunk payload. The pchannel and
-// vchannel come from the footer that located this payload rather than from the
-// payload itself; they backfill records that carry no destination of their own.
-func unmarshalVChannelSummaryChunk(payload []byte, pchannel, vchannel string) (*streamingpb.VChannelSummaryChunk, error) {
+// unmarshalVChannelSummaryChunk decodes a chunk payload. Where the records
+// belong is the chunk's own vchannel and the footer's pchannel; a record carries
+// no destination of its own.
+func unmarshalVChannelSummaryChunk(payload []byte) (*streamingpb.VChannelSummaryChunk, error) {
 	pb := &streamingpb.VChannelSummaryChunk{}
 	if err := proto.Unmarshal(payload, pb); err != nil {
 		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	pb.Records = cloneAndSortCommittedWriteRecords(pchannel, vchannel, pb.GetRecords())
+	pb.Records = sortCommittedWriteRecords(pb.GetRecords())
 	return pb, nil
 }
 
@@ -248,27 +251,23 @@ func unmarshalPChannelSummaryChunkFooter(payload []byte) (*streamingpb.PChannelS
 	return pb, nil
 }
 
-func cloneAndSortCommittedWriteRecords(pchannel, vchannel string, records []*streamingpb.CommittedWriteRecord) []*streamingpb.CommittedWriteRecord {
+// sortCommittedWriteRecords returns the records in chunk order: by source
+// timetick, then source message id, then idempotency key. It copies the slice
+// but never the records — they are shared by pointer and nothing here mutates
+// them.
+func sortCommittedWriteRecords(records []*streamingpb.CommittedWriteRecord) []*streamingpb.CommittedWriteRecord {
 	if len(records) == 0 {
 		return nil
 	}
-	cloned := make([]*streamingpb.CommittedWriteRecord, 0, len(records))
+	sorted := make([]*streamingpb.CommittedWriteRecord, 0, len(records))
 	for _, record := range records {
 		if record == nil {
 			continue
 		}
-		// Records are constructed with their destination already set. One that
-		// somehow lacks it is completed on a copy, so the caller's record — which
-		// this slice shares by pointer — is never mutated behind its back.
-		if record.GetSourcePchannel() == "" || record.GetVchannel() == "" {
-			record = proto.Clone(record).(*streamingpb.CommittedWriteRecord)
-			record.SourcePchannel = firstNonEmpty(record.GetSourcePchannel(), pchannel)
-			record.Vchannel = firstNonEmpty(record.GetVchannel(), vchannel)
-		}
-		cloned = append(cloned, record)
+		sorted = append(sorted, record)
 	}
-	sort.Slice(cloned, func(i, j int) bool {
-		left, right := cloned[i], cloned[j]
+	sort.Slice(sorted, func(i, j int) bool {
+		left, right := sorted[i], sorted[j]
 		if left.GetSourceTimetick() != right.GetSourceTimetick() {
 			return left.GetSourceTimetick() < right.GetSourceTimetick()
 		}
@@ -281,7 +280,7 @@ func cloneAndSortCommittedWriteRecords(pchannel, vchannel string, records []*str
 		}
 		return false
 	})
-	return cloned
+	return sorted
 }
 
 // committedWriteRecordSourceRange returns the timetick span of an already sorted
@@ -304,13 +303,6 @@ func extendPChannelSummaryChunkFooterSourceRange(footer *streamingpb.PChannelSum
 	if endTimetick > footer.SourceEndTimetick {
 		footer.SourceEndTimetick = endTimetick
 	}
-}
-
-func firstNonEmpty(value string, fallback string) string {
-	if value != "" {
-		return value
-	}
-	return fallback
 }
 
 func chunkChecksum(payload []byte) []byte {

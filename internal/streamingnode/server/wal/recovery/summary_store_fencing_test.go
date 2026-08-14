@@ -71,8 +71,6 @@ func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t
 	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
 	records := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {{
-			SourcePchannel:  "p1",
-			Vchannel:        "v1",
 			SourceMessageId: rmq.NewRmqID(101).IntoProto(),
 			SourceTimetick:  101,
 			IdempotencyKey:  "key-1",
@@ -156,7 +154,7 @@ func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 
 	summary := newEmptyVChannelSummary("p1", "v1", nil)
-	record := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	record := committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 		Key:            "stale-key",
 		CommitTimetick: 210,
 		MessageId:      rmq.NewRmqID(210).IntoProto(),
@@ -192,7 +190,7 @@ func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 
 	staleRecords := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 				Key:            "stale-key",
 				CommitTimetick: 210,
 				MessageId:      rmq.NewRmqID(210).IntoProto(),
@@ -201,7 +199,7 @@ func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 	}
 	currentRecords := map[string][]*streamingpb.CommittedWriteRecord{
 		"v1": {
-			committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+			committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 				Key:            "current-key",
 				CommitTimetick: 220,
 				MessageId:      rmq.NewRmqID(220).IntoProto(),

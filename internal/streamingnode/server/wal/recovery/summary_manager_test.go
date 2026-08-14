@@ -315,7 +315,7 @@ func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
 func populateSummaryEntries(state *vchannelSummary, timeticks []uint64) {
 	for i, tt := range timeticks {
 		key := fmt.Sprintf("key-%d", i)
-		record := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+		record := committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tt,
 			MessageId:      rmq.NewRmqID(int64(tt)).IntoProto(),
@@ -328,7 +328,7 @@ func populateSummaryEntriesWithBaseTT(state *vchannelSummary, baseTT uint64, cou
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("key-%d", i)
 		tt := baseTT + uint64(i)
-		record := committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+		record := committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tt,
 			MessageId:      rmq.NewRmqID(int64(tt)).IntoProto(),
@@ -339,8 +339,6 @@ func populateSummaryEntriesWithBaseTT(state *vchannelSummary, baseTT uint64, cou
 
 func makeRecord(key string, timetick uint64) *streamingpb.CommittedWriteRecord {
 	return &streamingpb.CommittedWriteRecord{
-		SourcePchannel: "p1",
-		Vchannel:       "v1",
 		SourceTimetick: timetick,
 		IdempotencyKey: key,
 	}

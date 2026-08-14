@@ -846,37 +846,40 @@ message PChannelSummaryChunkFooter {
 
 // CommittedWriteRecord is one committed write fact derived from an already
 // landed WAL message.
+//
+// It records no destination. Every record in a chunk shares one, so the vchannel
+// is stored once on the chunk and the pchannel once on the footer; repeating
+// them per record would cost two strings per row-batch to say what the container
+// already says.
 message CommittedWriteRecord {
-    string source_pchannel                        = 1;
-    common.MessageID source_message_id            = 2;
-    uint64 source_timetick                        = 3;
-    string vchannel                               = 4;
+    common.MessageID source_message_id            = 1;
+    uint64 source_timetick                        = 2;
     // The rows the write produced, in the shape they are handed back in: the
     // same IdempotentInsertResult a duplicate append returns. Storing the result
     // itself rather than a per-row projection keeps one representation of the
     // rows end to end, and its columnar packed encoding is more compact than a
     // sub-message per row.
-    messages.IdempotentInsertResult idempotent_result = 5;
+    messages.IdempotentInsertResult idempotent_result = 3;
     // Empty when the write carried no idempotency key.
-    string idempotency_key                        = 6;
-    common.MessageID last_confirmed_message_id    = 7;
+    string idempotency_key                        = 4;
+    common.MessageID last_confirmed_message_id    = 5;
 }
 
 // VChannelSummaryChunk is one vchannel's whole chunk inside the object.
 //
-// It carries records and nothing else today. It is kept as its own message
-// because block-level information — a key range, a filter, whatever lets a
-// reader skip the entire block without decoding it — belongs here when it
-// arrives.
+// It is the block its records belong to, so it names the vchannel once here
+// rather than on every record. Block-level information — a key range, a filter,
+// whatever lets a reader skip the entire block without decoding it — belongs
+// here too when it arrives.
 //
-// What it must not grow is a self-describing header. The footer index above
-// already names the vchannel and records this payload's offset, length,
-// checksum, record count and timetick range, and the payload is never decoded
-// without that index in hand and its checksum verified, so a pchannel,
-// vchannel, generation or codec version here could only repeat what the reader
-// already holds and has already proven.
+// What it must not grow is a copy of what locates it. The footer index above
+// records this payload's offset, length, checksum, record count and timetick
+// range, and the payload is never decoded without that index in hand and its
+// checksum verified, so a generation or codec version here could only repeat
+// what the reader already holds and has already proven.
 message VChannelSummaryChunk {
-    repeated CommittedWriteRecord records = 1;
+    string vchannel                       = 1;
+    repeated CommittedWriteRecord records = 2;
 }
 
 ///

@@ -162,7 +162,7 @@ func TestRecoveryCheckpointBecomesDirtyAfterSummarySnapshotPersisted(t *testing.
 	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, summary.applyCommittedWriteRecord(committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
+	require.NoError(t, summary.applyCommittedWriteRecord(committedWriteRecordFromSummaryEntry(&streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 120,
 		MessageId:      rmq.NewRmqID(120).IntoProto(),

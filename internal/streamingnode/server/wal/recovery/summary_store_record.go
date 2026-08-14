@@ -26,14 +26,9 @@ func newCommittedWriteRecordFromMessage(pchannel string, msg message.ImmutableMe
 		return nil, false
 	}
 	record := &streamingpb.CommittedWriteRecord{
-		SourcePchannel:         pchannel,
 		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
-		Vchannel:               msg.VChannel(),
 		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
-	}
-	if record.GetSourcePchannel() == "" {
-		record.SourcePchannel = msg.PChannel()
 	}
 
 	var decodedResult *messagespb.IdempotentInsertResult
@@ -55,14 +50,9 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 		return nil, false
 	}
 	record := &streamingpb.CommittedWriteRecord{
-		SourcePchannel:         pchannel,
 		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
-		Vchannel:               msg.VChannel(),
 		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
-	}
-	if record.GetSourcePchannel() == "" {
-		record.SourcePchannel = msg.PChannel()
 	}
 
 	insertResults := make([]*messagespb.IdempotentInsertResult, 0, msg.Size())
@@ -87,8 +77,8 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 		// instead of silently degrading to "no idempotent payload", then keep the
 		// record without a duplicate response.
 		mlog.Warn(context.TODO(), "failed to merge idempotent insert results for committed write record",
-			mlog.String("pchannel", record.GetSourcePchannel()),
-			mlog.String("vchannel", record.GetVchannel()),
+			mlog.String("pchannel", pchannel),
+			mlog.String("vchannel", msg.VChannel()),
 			mlog.Err(err))
 	} else if hadAny {
 		record.IdempotentResult = mergedResult
@@ -142,15 +132,16 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 	return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
 }
 
-func committedWriteRecordFromSummaryEntry(pchannel, vchannel string, entry *streamingpb.SummaryEntry) *streamingpb.CommittedWriteRecord {
+// committedWriteRecordFromSummaryEntry rebuilds the record a summary entry came
+// from. The destination is not part of it: the entry already lives under its
+// vchannel's summary.
+func committedWriteRecordFromSummaryEntry(entry *streamingpb.SummaryEntry) *streamingpb.CommittedWriteRecord {
 	if entry == nil {
 		return nil
 	}
 	return &streamingpb.CommittedWriteRecord{
-		SourcePchannel:         pchannel,
 		SourceMessageId:        cloneMessageIDProto(entry.GetMessageId()),
 		SourceTimetick:         entry.GetCommitTimetick(),
-		Vchannel:               vchannel,
 		LastConfirmedMessageId: cloneMessageIDProto(entry.GetLastConfirmedMessageId()),
 		IdempotentResult:       entry.GetIdempotentResult(),
 		IdempotencyKey:         entry.GetKey(),
