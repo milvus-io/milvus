@@ -23,7 +23,7 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// tasks. The guards are deliberately NOT consumed on a hit, so the caller's
 	// deferred Close() releases the locks.
 	if key := message.IdempotencyKeyOf(msg); key != "" {
-		if dup, ok := b.broadcaster.getDuplicatedBroadcastMessage(key); ok {
+		if dup, ok := b.broadcaster.getOriginalBroadcastMessage(key); ok {
 			return &types.BroadcastAppendResult{
 				BroadcastID: dup.BroadcastHeader().BroadcastID,
 				Duplicated:  dup,
