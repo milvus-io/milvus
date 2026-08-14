@@ -6477,14 +6477,22 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	mlog.Info(ctx, rpcReceived(method))
 	nodeID := paramtable.GetStringNodeID()
 
+	idempotencyKey := GetIdempotencyKeyFromContext(ctx)
+	if err := validateIdempotencyKeyLength(idempotencyKey); err != nil {
+		mlog.Warn(ctx, "reject import with oversized idempotency key", mlog.Err(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
 	it := &importTask{
-		baseTask:  baseTask{metaCache: node.getMetaCache()},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       req,
-		node:      node,
-		mixCoord:  node.mixCoord,
-		resp:      resp,
+		baseTask:       baseTask{metaCache: node.getMetaCache()},
+		ctx:            ctx,
+		Condition:      NewTaskCondition(ctx),
+		req:            req,
+		node:           node,
+		mixCoord:       node.mixCoord,
+		resp:           resp,
+		idempotencyKey: idempotencyKey,
 	}
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {

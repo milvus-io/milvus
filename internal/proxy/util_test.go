@@ -7398,3 +7398,26 @@ func TestResolveTimezone(t *testing.T) {
 		assert.Equal(t, common.DefaultTimezone, tz)
 	})
 }
+
+func TestGetIdempotencyKeyFromContext(t *testing.T) {
+	assert.Equal(t, "", GetIdempotencyKeyFromContext(context.Background()))
+
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs(util.HeaderIdempotencyKey, "run-1-batch-1"))
+	assert.Equal(t, "run-1-batch-1", GetIdempotencyKeyFromContext(ctx))
+
+	// gRPC normalizes metadata keys to lowercase, so a canonically-cased header
+	// from an HTTP client must resolve identically.
+	ctx = metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs("Idempotency-Key", "run-1-batch-2"))
+	assert.Equal(t, "run-1-batch-2", GetIdempotencyKeyFromContext(ctx))
+}
+
+func TestValidateIdempotencyKeyLength(t *testing.T) {
+	paramtable.Init()
+	assert.NoError(t, validateIdempotencyKeyLength(""))
+	assert.NoError(t, validateIdempotencyKeyLength(strings.Repeat("a", 256)))
+	err := validateIdempotencyKeyLength(strings.Repeat("a", 257))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
