@@ -157,6 +157,14 @@ func GetSegmentMaxSize(job ImportJob, meta *meta) int {
 	return int(getExpectedSegmentSize(meta, job.GetCollectionID(), job.GetSchema()))
 }
 
+// jobSkipsDataStages reports whether a job produces no data segments at all, so the stats and
+// index-building stages can be skipped for the whole job. An upsert job produces data segments
+// and filters per segment instead.
+func jobSkipsDataStages(job ImportJob) bool {
+	options := job.GetOptions()
+	return importutilv2.IsL0Import(options) || importutilv2.IsDeleteMode(options)
+}
+
 func importStorageVersion(isL0Import bool) int64 {
 	if isL0Import {
 		return storage.StorageV2
