@@ -1933,6 +1933,23 @@ func TestLegacyAvailableSlotsFoldsWorstDimension(t *testing.T) {
 	assert.Equal(t, int64(12), legacyAvailableSlots(snap, 128))
 }
 
+// TestLegacyAvailableSlotsFoldsCPUDominant is the mirror of
+// TestLegacyAvailableSlotsFoldsWorstDimension: CPU is 90% consumed while
+// memory is only 1% consumed, so the CPU ratio alone must win the max. The
+// two tests together pin both directions of the fold; without this one, a
+// max-tracker that only ever looked at the memory ratio (or compared them in
+// the wrong order) could still pass every existing test.
+func TestLegacyAvailableSlotsFoldsCPUDominant(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 9, Memory: 10},
+	}
+
+	assert.Equal(t, int64(12), legacyAvailableSlots(snap, 128))
+}
+
 func TestLegacyAvailableSlotsZeroWhenFrozen(t *testing.T) {
 	paramtable.Init()
 
