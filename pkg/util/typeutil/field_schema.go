@@ -3,6 +3,7 @@ package typeutil
 import (
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -90,12 +91,53 @@ func CreateFieldSchemaHelper(schema *schemapb.FieldSchema) *FieldSchemaHelper {
 	}
 }
 
+// CheckDupKvPairs rejects duplicate keys in a key-value pair list.
+func CheckDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
+	seen := make(map[string]struct{}, len(params))
+	for _, param := range params {
+		key := param.GetKey()
+		if _, ok := seen[key]; ok {
+			return merr.WrapErrParameterInvalidMsg(
+				"duplicated %s param key %q", paramType, key)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+// ValidateArrayElementType validates a scalar type supported by ARRAY fields.
+func ValidateArrayElementType(dataType schemapb.DataType) error {
+	switch dataType {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_VarChar:
+		return nil
+	case schemapb.DataType_String:
+		return merr.WrapErrParameterInvalidMsg(
+			"string data type not supported yet, please use VarChar type instead")
+	case schemapb.DataType_None:
+		return merr.WrapErrParameterInvalidMsg(
+			"element data type None is not valid")
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"element type %s is not supported", dataType.String())
+	}
+}
+
 // validateTypeSchemaNode validates the recursive encoding of a TypeSchema
-// node. Parameter validation is handled by callers' Array schema validators.
+// node, including the parameter key set owned by this node.
 func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) error {
 	if typeSchema == nil {
 		return merr.WrapErrParameterInvalidMsg(
 			"type_schema kind should be specified for field %s", fieldName)
+	}
+	if err := CheckDupKvPairs(typeSchema.GetTypeParams(), "type_schema"); err != nil {
+		return err
 	}
 
 	switch kind := typeSchema.GetKind().(type) {
@@ -115,7 +157,7 @@ func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) e
 			return merr.WrapErrParameterInvalidMsg(
 				"type_schema leaf_type Array must use array_element for field %s", fieldName)
 		}
-		return nil
+		return ValidateArrayElementType(kind.LeafType)
 	default:
 		return merr.WrapErrParameterInvalidMsg(
 			"type_schema kind should be specified for field %s", fieldName)

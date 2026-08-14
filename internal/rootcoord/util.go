@@ -485,13 +485,13 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				panic("default value unsupport data type")
 			}
 		}
-		if err := checkDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
+		if err := typeutil.CheckDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
 			return err
 		}
 		if err := validateLocalFormat(fieldSchema); err != nil {
 			return err
 		}
-		if err := checkDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
+		if err := typeutil.CheckDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
 			return err
 		}
 	}
@@ -536,13 +536,13 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 					field.DataType.String(), field.ElementType.String(), field.Name)
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
-			if err := checkDupKvPairs(field.GetTypeParams(), "type"); err != nil {
+			if err := typeutil.CheckDupKvPairs(field.GetTypeParams(), "type"); err != nil {
 				return err
 			}
 			if err := validateLocalFormat(field); err != nil {
 				return err
 			}
-			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
+			if err := typeutil.CheckDupKvPairs(field.GetIndexParams(), "index"); err != nil {
 				return err
 			}
 
@@ -601,17 +601,6 @@ func checkStructArrayFieldMaxCapacity(schema *schemapb.StructArrayFieldSchema) e
 			return merr.WrapErrParameterInvalidMsg("all sub-fields in struct array field must have the same max_capacity: structName=%s, subFieldName=%s, max_capacity=%d, expected=%d",
 				schema.GetName(), field.GetName(), maxCapacity, expectedMaxCapacity)
 		}
-	}
-	return nil
-}
-
-func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
-	set := typeutil.NewSet[string]()
-	for _, kv := range params {
-		if set.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicated %s param key \"%s\"", paramType, kv.GetKey())
-		}
-		set.Insert(kv.GetKey())
 	}
 	return nil
 }

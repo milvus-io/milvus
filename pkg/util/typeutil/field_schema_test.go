@@ -21,8 +21,34 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
+
+func TestValidateArrayElementType(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_VarChar,
+	} {
+		require.NoError(t, ValidateArrayElementType(dataType))
+	}
+
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_String,
+		schemapb.DataType_Text,
+		schemapb.DataType_Timestamptz,
+		schemapb.DataType_JSON,
+		schemapb.DataType_FloatVector,
+	} {
+		require.Error(t, ValidateArrayElementType(dataType))
+	}
+}
 
 func TestValidateFieldTypeSchema(t *testing.T) {
 	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
@@ -141,6 +167,43 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 			TypeSchema: array(array(leaf(schemapb.DataType(999)))),
 		})
 		require.ErrorContains(t, err, "leaf_type 999 is not valid")
+	})
+
+	t.Run("unsupported array leaf type", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+			Name:        "field",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema:  array(array(leaf(schemapb.DataType_FloatVector))),
+		})
+		require.ErrorContains(t, err, "element type FloatVector is not supported")
+	})
+
+	t.Run("duplicate type schema params are rejected at every level", func(t *testing.T) {
+		for _, duplicateAt := range []func(*schemapb.TypeSchema){
+			func(typeSchema *schemapb.TypeSchema) {
+				typeSchema.TypeParams = []*commonpb.KeyValuePair{
+					{Key: "max_capacity", Value: "10"},
+					{Key: "max_capacity", Value: "20"},
+				}
+			},
+			func(typeSchema *schemapb.TypeSchema) {
+				typeSchema.GetArrayElement().TypeParams = []*commonpb.KeyValuePair{
+					{Key: "max_capacity", Value: "10"},
+					{Key: "max_capacity", Value: "20"},
+				}
+			},
+		} {
+			root := array(array(leaf(schemapb.DataType_Int32)))
+			duplicateAt(root)
+			err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+				Name:        "field",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  root,
+			})
+			require.ErrorContains(t, err, "duplicated type_schema param key")
+		}
 	})
 }
 

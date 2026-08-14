@@ -128,6 +128,20 @@ TEST(FieldMetaTest, NestedArrayRoundTrip) {
     EXPECT_EQ(serialized.SerializeAsString(), proto.SerializeAsString());
 }
 
+TEST(FieldMetaTest, RejectUnsupportedNestedArrayLeafType) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("nested_vector_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    proto.mutable_type_schema()
+        ->mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(milvus::proto::schema::DataType::FloatVector);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
 TEST(FieldMetaTest, NestedArrayRootNullableIsNormalizedIntoTypeSchema) {
     milvus::proto::schema::FieldSchema proto;
     proto.set_fieldid(204);

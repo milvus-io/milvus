@@ -60,6 +60,23 @@ ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
                "type_schema leaf_type ARRAY must use array_element for field "
                "{}",
                field_name);
+    switch (leaf_type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+        case DataType::VARCHAR:
+            break;
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "type_schema leaf_type {} is not supported for ARRAY "
+                      "field {}",
+                      leaf_type,
+                      field_name);
+    }
     return {leaf_type, DataType::NONE};
 }
 

@@ -558,20 +558,7 @@ func validateDuplicatedFieldName(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func validateElementType(dataType schemapb.DataType) error {
-	switch dataType {
-	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
-		schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_VarChar:
-		return nil
-	case schemapb.DataType_String:
-		return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
-	case schemapb.DataType_None:
-		return merr.WrapErrParameterInvalidMsg("element data type None is not valid")
-	}
-	return merr.WrapErrParameterInvalidMsg("element type %s is not supported", dataType.String())
-}
-
-func validateNestedArrayTypeSchema(collectionName string, fieldName string, typeSchema *schemapb.TypeSchema) (int64, error) {
+func validateNestedArrayTypeParams(collectionName string, fieldName string, typeSchema *schemapb.TypeSchema) (int64, error) {
 	if typeSchema == nil {
 		return 0, merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", fieldName)
 	}
@@ -588,14 +575,11 @@ func validateNestedArrayTypeSchema(collectionName string, fieldName string, type
 		if err != nil {
 			return 0, err
 		}
-		if _, err := validateNestedArrayTypeSchema(collectionName, fieldName, kind.ArrayElement); err != nil {
+		if _, err := validateNestedArrayTypeParams(collectionName, fieldName, kind.ArrayElement); err != nil {
 			return 0, err
 		}
 		return maxCapacity, nil
 	case *schemapb.TypeSchema_LeafType:
-		if err := validateElementType(kind.LeafType); err != nil {
-			return 0, err
-		}
 		if kind.LeafType == schemapb.DataType_VarChar {
 			if err := validateMaxLengthPerRow(collectionName, fieldName, kind.LeafType, typeSchema.GetTypeParams()); err != nil {
 				return 0, err
@@ -626,7 +610,7 @@ func validateArrayOfVectorFieldSchema(collectionName string, field *schemapb.Fie
 
 func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema) error {
 	if field.GetTypeSchema() != nil {
-		rootCapacity, err := validateNestedArrayTypeSchema(
+		rootCapacity, err := validateNestedArrayTypeParams(
 			collectionName, field.GetName(), field.GetTypeSchema())
 		if err != nil {
 			return err
@@ -654,7 +638,7 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 	if field.GetElementType() == schemapb.DataType_Array {
 		return merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", field.GetName())
 	}
-	if err := validateElementType(field.GetElementType()); err != nil {
+	if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
 		return err
 	}
 	if field.GetElementType() == schemapb.DataType_VarChar {
@@ -680,7 +664,7 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 			return merr.WrapErrParameterInvalidMsg("data type None is not valid")
 		case schemapb.DataType_Array:
 			if field.GetTypeSchema() == nil {
-				if err := validateElementType(field.GetElementType()); err != nil {
+				if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
 					return err
 				}
 			}
