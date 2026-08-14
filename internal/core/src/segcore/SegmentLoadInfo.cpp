@@ -128,21 +128,6 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     return load_index_info;
 }
 
-bool
-SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
-    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        load_index_info.field_type,
-        load_index_info.element_type,
-        load_index_info.index_engine_version,
-        load_index_info.index_size,
-        load_index_info.index_params,
-        load_index_info.enable_mmap,
-        load_index_info.num_rows,
-        load_index_info.dim);
-
-    return request.has_raw_data;
-}
-
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Get current index IDs from converted cache
