@@ -138,6 +138,13 @@ func TestCoverage_InsertRequest(t *testing.T) {
 	})
 }
 
+func TestCoverage_UpsertRequest(t *testing.T) {
+	assertFieldCoverage(t, &milvuspb.UpsertRequest{}, func(b []byte) (proto.Message, error) {
+		m := &milvuspb.UpsertRequest{}
+		return m, UnmarshalUpsertRequest(b, m)
+	})
+}
+
 // TestStructArrays_RoundTrips documents the previously-dropped field explicitly.
 func TestStructArrays_RoundTrips(t *testing.T) {
 	roundTripFieldData(t, &schemapb.FieldData{

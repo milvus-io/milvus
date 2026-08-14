@@ -426,7 +426,7 @@ TEST(ArrayInvertedIndexRegression,
         ASSERT_NE(array_field, nullptr);
         auto* array_data = array_field->mutable_scalars()->mutable_array_data();
         ASSERT_EQ(array_data->data_size(), row_count);
-        auto* valid_data = array_field->mutable_valid_data();
+        auto* valid_data = array_field->mutable_scalars()->mutable_valid_data();
         ASSERT_EQ(valid_data->size(), row_count);
 
         std::vector<boost::container::vector<int64_t>> index_arrays;

@@ -112,9 +112,6 @@ The internal message proto adds attempt-scoped commit-admission proof:
 message PartialUpdateCAS {
     uint64 read_ts = 1;
     int64 observed_pchannel_term = 2;
-
-    reserved 3, 4;
-    reserved "primary_key_field_id", "collection_id";
 }
 ```
 
@@ -137,22 +134,20 @@ with an empty value as a control marker. The outer marker contains no PK,
 
 ### Configuration and metrics
 
-No public configuration is added. The following internal constants are
-introduced by the feature implementation proposed here; they are not existing
-Milvus configuration parameters. They have no corresponding `paramtable` key
-or `milvus.yaml` setting and cannot be changed at runtime:
+The proposal adds one internal, non-refreshable StreamingNode configuration
+parameter. The remaining values are internal constants:
 
-| Proposed internal constant | Proposal default | Purpose |
+| Parameter or constant | Default | Purpose |
 |---|---|---|
 | `defaultVersionIndexTTL` | 30 seconds | Limits how long each vchannel retains recent PK-write versions and also bounds the valid window from `readTS` to `commitTS` for one partial-update attempt. When the window is exceeded, StreamingNode returns a retryable CAS rejection; Proxy automatically retries only replacement updates that can be rebuilt safely. |
-| `defaultVersionIndexBudgetBytes` | 640,000,000 bytes, approximately 610 MiB | Caps the estimated memory used by the PK-version index shared by all vchannels in one PChannel WAL term. When the budget is unavailable, ordinary writes continue, but CAS on the affected vchannel fails closed until the omitted write leaves the valid read window. |
+| `streaming.partialUpdate.versionIndexMaxBytes` | 640,000,000 bytes, approximately 610 MiB | Caps the estimated memory used by all PK-version indexes on one StreamingNode. When the shared budget is unavailable, ordinary writes continue, but CAS on the affected vchannel fails closed until the omitted write leaves the valid read window. |
 | `partialUpdateCASMaxRetryAttempts` | 5 attempts, including the first attempt | Limits the total number of Proxy attempts used to rebuild a complete replacement update after a deterministic CAS conflict. Requests containing relative field operations do not use this automatic retry. |
 | `partialUpdateCASRetryBackoff` | Starts at 10 ms with exponential backoff; each sleep is capped at 40 ms | Controls the delay between Proxy CAS attempts and reduces sustained contention caused by immediately retrying concurrent conflicts. The 40 ms cap is calculated as `4 * partialUpdateCASRetryBackoff`. |
 
 The PK-index budget is an estimate, not a hard process-RSS limit. Each Int64 PK
 entry is charged 128 bytes; each VarChar PK entry is charged
-`128 + PK byte length`. Changing these proposal defaults requires a code
-change, rebuild, and redeployment.
+`128 + PK byte length`. StreamingNode exports node-level used-byte,
+configured-limit, and missed-write metrics for this shared budget.
 
 ### Durable format
 
@@ -197,7 +192,7 @@ flowchart LR
     TimeTick --> Shard[shard interceptor]
     Shard --> CAS[partial-update interceptor]
     CAS --> WAL[WAL backend]
-    CAS --- Index[per-term PK / collection / vchannel fences]
+    CAS --- Index[per-WAL PK state / node-wide byte budget]
 ```
 
 | State | Owner | Lifetime | Persistence |
@@ -206,13 +201,14 @@ flowchart LR
 | Local transaction packaging and empty `_puc` commit marker | Producer | One vchannel message group | Standard WAL properties |
 | PChannel global lock and keyed vchannel RW locks | Lock interceptor | One WAL instance | None |
 | `pendingTxn`, PK versions, collection fences, and incomplete-txn fences | Partial-update interceptor | One PChannel WAL term | None |
+| PK-version byte budget and aggregate used/limit/missed-write metrics | Partial-update interceptor builder | One StreamingNode process | None |
 | Live and recovered transaction sessions | TxnManager | Transaction and WAL recovery lifecycle | Existing TxnBuffer recovery |
 | Collection schema and immutable PK descriptor | ShardManager | Collection lifecycle in one WAL | Existing recovery snapshot |
 
-Each WAL open creates an independent partial-update state. The interceptor does
-not use a process-wide registry and does not reconstruct row-level proof from
-TxnBuffer. Closing the WAL releases the term's maps, heaps, and pending
-transaction state.
+Each WAL open creates independent PK, fence, and transaction state, while all
+WALs built by the StreamingNode share one byte budget. The interceptor does not
+reconstruct row-level proof from TxnBuffer. Closing a WAL releases its maps and
+heaps and returns their estimated bytes to the node-wide budget.
 
 ### End-to-end flow
 
@@ -313,7 +309,8 @@ For every CAS Insert, StreamingNode:
 1. reads `collection_id` and `schema_version` from the Insert header;
 2. requires `schema_version` to be explicitly present;
 3. resolves the immutable PK descriptor through ShardManager;
-4. extracts the descriptor's PK field from the complete Insert chunk; and
+4. decodes the complete Insert body with the generated protobuf codec and
+   extracts the descriptor's PK field and CAS metadata;
 5. verifies that all CAS chunks in the transaction use the same proof,
    collection, and schema version.
 
@@ -323,6 +320,13 @@ omit `schema_version`. Only CAS Insert requires an explicit version.
 The message builder writes metadata into the Insert body before encryption and
 before `BuildMutable()`. When cluster encryption is enabled, the proof is
 inside the same encrypted boundary as the DML payload.
+
+Insert and Delete tracking decode complete DML bodies and keep extracted PKs in
+typed Int64/VarChar slices. This intentionally accepts the CPU, allocation, GC,
+and append-latency cost of decoding unrelated fields, including vectors, to
+keep protobuf wire compatibility owned by generated code instead of a custom
+parser. If an encrypted payload cannot be decrypted, the current append returns
+an error; the StreamingNode process does not panic.
 
 The empty outer `_puc` marker only selects the transaction and lock paths.
 After packing, Proxy verifies that:
@@ -499,9 +503,10 @@ term.
 
 ### Retention and memory bound
 
-The PK index has a fixed 30-second TTL and one estimated-byte budget shared by
-all vchannels in a PChannel term. Each vchannel owns an independent map,
-expiration heap, retention watermark, and incomplete-history marker.
+The PK index has a fixed 30-second TTL. All WAL terms on one StreamingNode
+share the configured estimated-byte budget, while each WAL keeps independent
+vchannel maps, expiration heaps, retention watermarks, and incomplete-history
+markers.
 
 An entry is charged conservatively:
 
@@ -509,8 +514,8 @@ An entry is charged conservatively:
 estimated bytes = 128 + VarChar PK bytes
 ```
 
-The proposal's 640,000,000-byte budget is approximately five million Int64
-entries.
+The default 640,000,000-byte node budget is approximately five million Int64
+entries across all WALs hosted by the StreamingNode.
 
 `Update`, `Verify`, and TimeTick advancement incrementally evict expired
 entries. Validation fails closed when:
@@ -611,7 +616,8 @@ receive an error after one or more vchannel transactions have committed.
 The design adds the following costs:
 
 - one query per partial-update attempt;
-- PK extraction and recent-version publication for ordinary Insert/Delete;
+- complete protobuf decoding, PK extraction, and recent-version publication
+  for ordinary Insert/Delete;
 - an expiration-heap update for tracked PKs;
 - serialization of CAS commits on the same vchannel;
 - a vchannel write lock held through CommitTxn WAL append;

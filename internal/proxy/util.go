@@ -1252,7 +1252,7 @@ func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *
 			for i := range validData {
 				validData[i] = true
 			}
-			fd.ValidData = validData
+			typeutil.SetFieldDataValidData(fd, validData)
 			break
 		}
 	}
@@ -1286,12 +1286,27 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 
 	// Validate field existence using schemaHelper
 	for _, fieldData := range columns {
-		_, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		_, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
 	}
 
+	return nil
+}
+
+// validateAndNormalizeFieldDataValidData validates compatibility fields once
+// when a user payload enters the proxy, then keeps only the current
+// field-specific representation for internal processing.
+func validateAndNormalizeFieldDataValidData(fields []*schemapb.FieldData) error {
+	for _, field := range fields {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
+			return merr.WrapErrParameterInvalidMsg(
+				"field %s has different legacy and field-specific valid_data",
+				field.GetFieldName(),
+			)
+		}
+	}
 	return nil
 }
 
@@ -1301,7 +1316,7 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	for _, fieldData := range columns {
 		// Use schemaHelper to get field schema, automatically handles dynamic fields
-		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		fieldSchema, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
@@ -1806,10 +1821,10 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			} else {
 				if schema.EnableDynamicField {
 					dynamicNestedPath := outputFieldName
-					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+					err := planparserv2.ParseIdentifier(schema.SchemaHelper, outputFieldName, func(expr *planpb.Expr) error {
 						columnInfo := expr.GetColumnExpr().GetInfo()
 						// there must be no error here
-						dynamicField, _ := schema.schemaHelper.GetDynamicField()
+						dynamicField, _ := schema.SchemaHelper.GetDynamicField()
 						// only $meta["xxx"] is allowed for now
 						if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
 							return merr.WrapErrParameterInvalidMsg("not support getting subkeys of json field yet")
@@ -1960,7 +1975,7 @@ func checkFieldsDataBySchema(ctx context.Context, allFields []*schemapb.FieldSch
 			if err != nil {
 				return err
 			}
-			dataToAppend.ValidData = make([]bool, insertMsg.GetNumRows())
+			typeutil.SetFieldDataValidData(dataToAppend, make([]bool, insertMsg.GetNumRows()))
 			insertMsg.FieldsData = append(insertMsg.FieldsData, dataToAppend)
 		}
 	}
@@ -2040,6 +2055,10 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		// either have data or all be empty. Partial presence is invalid.
 		hasDataCount := 0
 		for _, subField := range structArrays.StructArrays.Fields {
+			if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
+				return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
+					subField.GetFieldName(), structName)
+			}
 			if subFieldHasData(subField) {
 				hasDataCount++
 			}
@@ -2050,7 +2069,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			// omitted entirely. Reject illegal ValidData first: when no payload is
 			// provided, any ValidData[i]==true contradicts itself.
 			for _, subField := range structArrays.StructArrays.Fields {
-				for j, v := range subField.ValidData {
+				for j, v := range typeutil.GetFieldDataValidData(subField) {
 					if v {
 						return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' claims row %d is valid but no payload is provided",
 							subField.FieldName, structName, j)
@@ -2074,20 +2093,21 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			var refFieldName string
 			refInitialized := false
 			for _, subField := range structArrays.StructArrays.Fields {
+				validData := typeutil.GetFieldDataValidData(subField)
 				if !refInitialized {
-					refValidData = subField.ValidData
+					refValidData = validData
 					refFieldName = subField.FieldName
 					refInitialized = true
 					continue
 				}
-				if len(subField.ValidData) != len(refValidData) {
+				if len(validData) != len(refValidData) {
 					return merr.WrapErrParameterInvalidMsg("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
-						structName, refFieldName, len(refValidData), subField.FieldName, len(subField.ValidData))
+						structName, refFieldName, len(refValidData), subField.FieldName, len(validData))
 				}
 				for j := range refValidData {
-					if subField.ValidData[j] != refValidData[j] {
+					if validData[j] != refValidData[j] {
 						return merr.WrapErrParameterInvalidMsg("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
-							structName, j, refFieldName, refValidData[j], subField.FieldName, subField.ValidData[j])
+							structName, j, refFieldName, refValidData[j], subField.FieldName, validData[j])
 					}
 				}
 			}
@@ -2233,7 +2253,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 
 			if expectedArrayLen == -1 {
 				expectedArrayLen = currentArrayLen
-				firstValidData = subField.GetValidData()
+				firstValidData = typeutil.GetFieldDataValidData(subField)
 			} else if currentArrayLen != expectedArrayLen {
 				return merr.WrapErrParameterInvalidMsg("inconsistent array length in struct field '%s': expected %d, got %d for sub-field '%s'",
 					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
@@ -2288,13 +2308,16 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 
 		for _, subField := range structArrays.StructArrays.Fields {
 			transformedFieldName := storedStructSubFieldName(structName, subField.FieldName)
+			validData := typeutil.GetFieldDataValidData(subField)
+			// Field is shared by the flattened copy. Normalize validity before
+			// sharing it so the source and flattened field cannot conflict.
+			typeutil.SetFieldDataValidData(subField, validData)
 			subFieldCopy := &schemapb.FieldData{
 				FieldName: transformedFieldName,
 				FieldId:   subField.FieldId,
 				Type:      subField.Type,
 				Field:     subField.Field,
 				IsDynamic: subField.IsDynamic,
-				ValidData: subField.ValidData,
 			}
 
 			flattenedFields = append(flattenedFields, subFieldCopy)
@@ -2464,7 +2487,13 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
-func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
+func checkUpsertPrimaryFieldData(
+	ctx context.Context,
+	allFields []*schemapb.FieldSchema,
+	schema *schemapb.CollectionSchema,
+	insertMsg *msgstream.InsertMsg,
+	preserveAutoIDPrimaryKey bool,
+) (*schemapb.IDs, *schemapb.IDs, error) {
 	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -2493,9 +2522,8 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 	for i, field := range insertMsg.GetFieldsData() {
 		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
 			primaryFieldData = field
-			if primaryFieldSchema.AutoID {
-				// use the passed pk as new pk when autoID == false
-				// automatic generate pk as new pk wehen autoID == true
+			if primaryFieldSchema.AutoID && !preserveAutoIDPrimaryKey {
+				// Normal AutoID upsert deletes the supplied PK and inserts a new PK.
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
 					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
@@ -2518,7 +2546,7 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	if !primaryFieldSchema.GetAutoID() {
+	if !primaryFieldSchema.GetAutoID() || preserveAutoIDPrimaryKey {
 		return ids, ids, nil
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
@@ -3197,7 +3225,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 			}
 			collToPartIDs[collectionID] = []int64{}
 		}
-		return db.dbID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
+		return db.DBID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
 		// Use the db the request actually targets (normalized by
 		// DatabaseInterceptor), consistent with the sibling cases, so quota is
@@ -3206,7 +3234,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
-		return dbInfo.dbID, map[int64][]int64{
+		return dbInfo.DBID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
 	case *milvuspb.ListFileResourcesRequest:
@@ -3422,7 +3450,7 @@ func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema
 }
 
 func getColTimezone(colInfo *collectionInfo) string {
-	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.properties)
+	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.Properties)
 	if timezone == "" {
 		timezone = common.DefaultTimezone
 	}

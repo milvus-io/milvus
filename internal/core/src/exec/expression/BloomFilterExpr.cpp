@@ -222,7 +222,7 @@ PhyBloomFilterExpr::ExecVisitorImpl(EvalCtx& context) {
         [&processed_cursor, &bitmap_input, &
          filter ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -239,7 +239,7 @@ PhyBloomFilterExpr::ExecVisitorImpl(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 // NULL never matches, under either bloom_match or
                 // not bloom_match — same three-valued behavior as TermExpr.
                 res[i] = valid_res[i] = false;
@@ -293,7 +293,7 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
     auto execute_sub_batch =
         [&filter]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -309,7 +309,7 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -383,7 +383,7 @@ PhyBloomFilterExpr::ExecVisitorImplJson(EvalCtx& context) {
         [&processed_cursor, &bitmap_input, &
          filter ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -401,7 +401,7 @@ PhyBloomFilterExpr::ExecVisitorImplJson(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 // Whole-row NULL never matches, under either polarity.
                 res[i] = valid_res[i] = false;
                 continue;

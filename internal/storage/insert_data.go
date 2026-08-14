@@ -193,6 +193,7 @@ type FieldData interface {
 	AppendValidDataRows(rows interface{}) error
 	GetDataType() schemapb.DataType
 	GetNullable() bool
+	GetValidData() []bool
 }
 
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {

@@ -162,7 +162,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
         [&bitmap_input, &
          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -180,7 +180,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = false;
                 continue;
             }

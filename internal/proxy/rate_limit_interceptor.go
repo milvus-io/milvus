@@ -132,7 +132,7 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 			if err != nil {
 				return 0, nil, err
 			}
-			return db.dbID, map[int64][]int64{collectionID: {part.partitionID}}, nil
+			return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
 		}
 	}
 
@@ -144,14 +144,14 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 			}
 		}
 		if collectionSchema.IsPartitionKeyCollection() {
-			return db.dbID, map[int64][]int64{collectionID: {}}, nil
+			return db.DBID, map[int64][]int64{collectionID: {}}, nil
 		}
 	}
 	part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
 	if err != nil {
 		return 0, nil, err
 	}
-	return db.dbID, map[int64][]int64{collectionID: {part.partitionID}}, nil
+	return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
 }
 
 func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, map[int64][]int64, error) {
@@ -181,10 +181,10 @@ func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, m
 		if err != nil {
 			return 0, nil, err
 		}
-		parts[i] = part.partitionID
+		parts[i] = part.PartitionID
 	}
 
-	return db.dbID, map[int64][]int64{collectionID: parts}, nil
+	return db.DBID, map[int64][]int64{collectionID: parts}, nil
 }
 
 func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
@@ -193,7 +193,7 @@ func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
 		return util.InvalidDBID, map[int64][]int64{}
 	}
 	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-	return db.dbID, map[int64][]int64{collectionID: {}}
+	return db.DBID, map[int64][]int64{collectionID: {}}
 }
 
 func getDatabaseID(dbName string) int64 {
@@ -201,7 +201,7 @@ func getDatabaseID(dbName string) int64 {
 	if db == nil {
 		return util.InvalidDBID
 	}
-	return db.dbID
+	return db.DBID
 }
 
 // failedMutationResult returns failed mutation result.

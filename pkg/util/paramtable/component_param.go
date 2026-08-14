@@ -5541,6 +5541,11 @@ type dataCoordConfig struct {
 	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
+	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
+	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
+	SnapshotExportJobTimeout               ParamItem `refreshable:"true"`
+	SnapshotExportJobRetention             ParamItem `refreshable:"true"`
+	SnapshotExportMaxConcurrentJobs        ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	// LOB Garbage Collection
@@ -6542,6 +6547,83 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 	}
 	p.SnapshotRestorePinTTLSeconds.Init(base.mgr)
 
+	p.SnapshotCrossBucketEndpointAllowlist = ParamItem{
+		Key:          "dataCoord.snapshot.crossBucketEndpointAllowlist",
+		Version:      "2.6.15",
+		DefaultValue: "",
+		Doc: "Comma/space separated endpoint host[:port] allowlist for snapshot " +
+			"server-side cross-bucket copy with custom object storage endpoints. " +
+			"Canonical cloud endpoints derived from cloud_provider and region are " +
+			"allowed without this list.",
+		Export: true,
+	}
+	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
+
+	p.SnapshotExportCopyConcurrency = ParamItem{
+		Key:          "dataCoord.snapshot.exportCopyConcurrency",
+		Version:      "2.6.15",
+		DefaultValue: "16",
+		Doc: "Maximum concurrent provider-side object copy requests for ExportSnapshot. " +
+			"Invalid or non-positive values are coerced to the default value 16.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed <= 0 {
+				return "16"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportCopyConcurrency.Init(base.mgr)
+
+	p.SnapshotExportJobTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.exportJobTimeout",
+		Version:      "2.6.15",
+		DefaultValue: "43200",
+		Doc:          "Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time. Default 12 hours.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				return "43200"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportJobTimeout.Init(base.mgr)
+
+	p.SnapshotExportJobRetention = ParamItem{
+		Key:          "dataCoord.snapshot.exportJobRetention",
+		Version:      "2.6.15",
+		DefaultValue: "10800",
+		Doc:          "Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				return "10800"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportJobRetention.Init(base.mgr)
+
+	p.SnapshotExportMaxConcurrentJobs = ParamItem{
+		Key:          "dataCoord.snapshot.exportMaxConcurrentJobs",
+		Version:      "2.6.15",
+		DefaultValue: "1",
+		Doc:          "Maximum number of snapshot export jobs executed concurrently by DataCoord.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed <= 0 {
+				return "1"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportMaxConcurrentJobs.Init(base.mgr)
+
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
 		Version:      "2.0.0",
@@ -7262,6 +7344,7 @@ type dataNodeConfig struct {
 	ImportMaxWriteRetryAttempts     ParamItem `refreshable:"true"`
 	ImportWriteRetryInitialInterval ParamItem `refreshable:"true"`
 	ImportWriteRetryMaxInterval     ParamItem `refreshable:"true"`
+	ImportCopyObjectTimeout         ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -7672,6 +7755,22 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	}
 	p.ImportWriteRetryMaxInterval.Init(base.mgr)
 
+	p.ImportCopyObjectTimeout = ParamItem{
+		Key:          "dataNode.import.copyObjectTimeout",
+		Version:      "2.7.0",
+		Doc:          "Timeout in seconds for copying one object during snapshot restore, including retries.",
+		DefaultValue: "3600",
+		PanicIfEmpty: false,
+		Export:       true,
+		Formatter: func(value string) string {
+			if getAsInt(value) <= 0 {
+				return "3600"
+			}
+			return value
+		},
+	}
+	p.ImportCopyObjectTimeout.Init(base.mgr)
+
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
@@ -7909,6 +8008,9 @@ type streamingConfig struct {
 
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
+
+	// partial update
+	PartialUpdateVersionIndexMaxBytes ParamItem `refreshable:"false"`
 
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
@@ -8243,6 +8345,15 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Export:       true,
 	}
 	p.LoggingAppendSlowThreshold.Init(base.mgr)
+
+	p.PartialUpdateVersionIndexMaxBytes = ParamItem{
+		Key:          "streaming.partialUpdate.versionIndexMaxBytes",
+		Version:      "3.0.0",
+		Doc:          "The node-wide memory budget for the partial update primary-key version index, 640000000 bytes by default",
+		DefaultValue: "640000000",
+		Export:       false,
+	}
+	p.PartialUpdateVersionIndexMaxBytes.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",

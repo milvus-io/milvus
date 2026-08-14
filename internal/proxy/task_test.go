@@ -6816,7 +6816,7 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify schema contains StructArrayFields
-		assert.NotNil(t, task.schema)
+		assert.NotNil(t, task.Schema)
 		assert.Len(t, task.schema.StructArrayFields, 1)
 
 		structArrayField := task.schema.StructArrayFields[0]

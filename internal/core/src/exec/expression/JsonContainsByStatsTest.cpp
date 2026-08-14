@@ -389,7 +389,7 @@ ReadJsonStatsInt64Equal(JsonKeyStats& stats,
     TargetBitmapView valid_res_view(valid_res);
 
     auto func = [expected](const int64_t* data,
-                           const bool* valid_data,
+                           ValidityView valid_data,
                            const int chunk_size,
                            TargetBitmapView res,
                            TargetBitmapView valid_res) {

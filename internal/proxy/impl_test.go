@@ -65,6 +65,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
+	validData := []bool{true, false}
+	newField := func(name string) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: name,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: validData},
+			},
+		}
+	}
+	outputField := newField("output")
+	legacyGroupBy := newField("legacy_group_by")
+	groupBy := newField("group_by")
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{outputField},
+			GroupByFieldValue:  legacyGroupBy,
+			GroupByFieldValues: []*schemapb.FieldData{groupBy},
+		},
+	}
+
+	projectSearchResultValidDataForLegacy(result)
+
+	for _, field := range []*schemapb.FieldData{outputField, legacyGroupBy, groupBy} {
+		assert.Equal(t, validData, field.GetValidData())
+		assert.Equal(t, validData, field.GetScalars().GetValidData())
+	}
+}
+
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	paramtable.Init()
 	cache := globalMetaCache
@@ -1568,7 +1597,7 @@ func TestProxy_Delete(t *testing.T) {
 	}
 	schema := mustNewSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
-		collID: collectionID,
+		CollID: collectionID,
 	}
 	paramtable.Init()
 
@@ -1585,7 +1614,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
-		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -1770,7 +1799,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
 		globalMetaCache = mc
 
@@ -1995,7 +2024,7 @@ func TestRunAnalyzer(t *testing.T) {
 					Name:    "test_text",
 				}},
 			},
-			fieldMap: fieldMap,
+			FieldMap: fieldMap,
 		}, nil)
 
 		lb := shardclient.NewMockLBPolicy(t)
@@ -2386,7 +2415,7 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(&collectionInfo{schema: mustNewSchemaInfo(schema)}, nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
 		globalMetaCache = cache
 
 		var capturedNamespace *string
@@ -2461,7 +2490,7 @@ func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 
 	m1 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
 	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		schema: mustNewSchemaInfo(externalSchema),
+		Schema: mustNewSchemaInfo(externalSchema),
 	}, nil).Build()
 	defer m1.UnPatch()
 	defer m2.UnPatch()
@@ -3406,8 +3435,8 @@ func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t 
 			},
 		}
 		return &collectionInfo{
-			collID: 1,
-			schema: &schemaInfo{CollectionSchema: schema},
+			CollID: 1,
+			Schema: &schemaInfo{CollectionSchema: schema},
 		}
 	}
 
@@ -3517,8 +3546,8 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 		},
 	}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		collID: 101,
-		schema: &schemaInfo{
+		CollID: 101,
+		Schema: &schemaInfo{
 			CollectionSchema: schema,
 		},
 	}, nil).Build()

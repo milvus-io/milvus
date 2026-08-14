@@ -48,6 +48,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
@@ -1005,51 +1006,42 @@ TEST(Sealed, LoadFieldData) {
     auto valid7 = dataset.get_col_valid(int64_nullable_id);
     auto valid8 = dataset.get_col_valid(double_nullable_id);
     auto valid9 = dataset.get_col_valid(str_nullable_id);
-    ASSERT_EQ(chunk_span1.get().valid_data(), nullptr);
-    ASSERT_EQ(chunk_span2.get().valid_data(), nullptr);
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_FALSE(chunk_span1.get().validity());
+    ASSERT_FALSE(chunk_span2.get().validity());
+    ASSERT_FALSE(chunk_span3.get().second);
     for (int i = 0; i < N; ++i) {
-        if (chunk_span1.get().valid_data() == nullptr ||
-            chunk_span1.get().valid_data()[i]) {
+        if (chunk_span1.get().is_valid(i)) {
             ASSERT_EQ(chunk_span1.get().data()[i], ref1[i]);
         }
-        if (chunk_span2.get().valid_data() == nullptr ||
-            chunk_span2.get().valid_data()[i]) {
+        if (chunk_span2.get().is_valid(i)) {
             ASSERT_EQ(chunk_span2.get().data()[i], ref2[i]);
         }
-        if (chunk_span3.get().second.size() == 0 ||
-            chunk_span3.get().second[i]) {
+        if (!chunk_span3.get().second || chunk_span3.get().second[i]) {
             ASSERT_EQ(chunk_span3.get().first[i], ref3[i]);
         }
-        if (chunk_span4.get().valid_data() == nullptr ||
-            chunk_span4.get().valid_data()[i]) {
+        if (chunk_span4.get().is_valid(i)) {
             ASSERT_EQ(chunk_span4.get().data()[i], ref4[i]);
         }
-        if (chunk_span5.get().valid_data() == nullptr ||
-            chunk_span5.get().valid_data()[i]) {
+        if (chunk_span5.get().is_valid(i)) {
             ASSERT_EQ(chunk_span5.get().data()[i], ref5[i]);
         }
-        if (chunk_span6.get().valid_data() == nullptr ||
-            chunk_span6.get().valid_data()[i]) {
+        if (chunk_span6.get().is_valid(i)) {
             ASSERT_EQ(chunk_span6.get().data()[i], ref6[i]);
         }
-        if (chunk_span7.get().valid_data() == nullptr ||
-            chunk_span7.get().valid_data()[i]) {
+        if (chunk_span7.get().is_valid(i)) {
             ASSERT_EQ(chunk_span7.get().data()[i], ref7[i]);
         }
-        if (chunk_span8.get().valid_data() == nullptr ||
-            chunk_span8.get().valid_data()[i]) {
+        if (chunk_span8.get().is_valid(i)) {
             ASSERT_EQ(chunk_span8.get().data()[i], ref8[i]);
         }
-        if (chunk_span9.get().second.size() == 0 ||
-            chunk_span9.get().second[i]) {
+        if (!chunk_span9.get().second || chunk_span9.get().second[i]) {
             ASSERT_EQ(chunk_span9.get().first[i], ref9[i]);
         }
-        ASSERT_EQ(chunk_span4.get().valid_data()[i], valid4[i]);
-        ASSERT_EQ(chunk_span5.get().valid_data()[i], valid5[i]);
-        ASSERT_EQ(chunk_span6.get().valid_data()[i], valid6[i]);
-        ASSERT_EQ(chunk_span7.get().valid_data()[i], valid7[i]);
-        ASSERT_EQ(chunk_span8.get().valid_data()[i], valid8[i]);
+        ASSERT_EQ(chunk_span4.get().is_valid(i), valid4[i]);
+        ASSERT_EQ(chunk_span5.get().is_valid(i), valid5[i]);
+        ASSERT_EQ(chunk_span6.get().is_valid(i), valid6[i]);
+        ASSERT_EQ(chunk_span7.get().is_valid(i), valid7[i]);
+        ASSERT_EQ(chunk_span8.get().is_valid(i), valid8[i]);
         ASSERT_EQ(chunk_span9.get().second[i], valid9[i]);
     }
 
@@ -1129,7 +1121,7 @@ TEST(Sealed, ClearData) {
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_FALSE(chunk_span3.get().second);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1.get()[i], ref1[i]);
         ASSERT_EQ(chunk_span2.get()[i], ref2[i]);
@@ -1215,7 +1207,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_FALSE(chunk_span3.get().second);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1.get()[i], ref1[i]);
         ASSERT_EQ(chunk_span2.get()[i], ref2[i]);
@@ -2514,21 +2506,21 @@ TEST(Sealed, QueryAllFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
-    EXPECT_EQ(bool_result->valid_data_size(), 0);
-    EXPECT_EQ(int8_result->valid_data_size(), 0);
-    EXPECT_EQ(int16_result->valid_data_size(), 0);
-    EXPECT_EQ(int32_result->valid_data_size(), 0);
-    EXPECT_EQ(int64_result->valid_data_size(), 0);
-    EXPECT_EQ(float_result->valid_data_size(), 0);
-    EXPECT_EQ(double_result->valid_data_size(), 0);
-    EXPECT_EQ(varchar_result->valid_data_size(), 0);
-    EXPECT_EQ(json_result->valid_data_size(), 0);
-    EXPECT_EQ(int_array_result->valid_data_size(), 0);
-    EXPECT_EQ(long_array_result->valid_data_size(), 0);
-    EXPECT_EQ(bool_array_result->valid_data_size(), 0);
-    EXPECT_EQ(string_array_result->valid_data_size(), 0);
-    EXPECT_EQ(double_array_result->valid_data_size(), 0);
-    EXPECT_EQ(float_array_result->valid_data_size(), 0);
+    EXPECT_TRUE(GetFieldDataRowValidData(*bool_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int8_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int16_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int32_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int64_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*float_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*double_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*varchar_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*json_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*long_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*bool_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*string_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*double_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*float_array_result).empty());
 }
 
 TEST(Sealed, QueryAllNullableFields) {
@@ -2685,21 +2677,26 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
-    EXPECT_EQ(bool_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int8_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int16_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int32_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(float_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(double_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(varchar_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(json_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(geometry_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(long_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(bool_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(string_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(double_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(float_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int32_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*float_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*double_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*varchar_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*json_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*geometry_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int_array_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*long_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*bool_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*string_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*double_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*float_array_result).size(),
+              dataset_size);
 }
 
 using VectorArrayTestParam =
@@ -2808,8 +2805,8 @@ TEST_P(SealedVectorArrayTest, QueryVectorArrayAllFields) {
         VerifyVectorResults(result_vec, expected_vec, element_type);
     }
 
-    EXPECT_EQ(int64_result->valid_data_size(), 0);
-    EXPECT_EQ(array_vector_result->valid_data_size(), 0);
+    EXPECT_TRUE(GetFieldDataRowValidData(*int64_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*array_vector_result).empty());
 }
 
 TEST_P(SealedVectorArrayTest, SearchVectorArray) {
@@ -3274,9 +3271,10 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
     auto result = sealed->bulk_subscript(
         nullptr, array_vec, offsets.data(), offsets.size());
     ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->valid_data_size(), row_count);
-    EXPECT_TRUE(result->valid_data(0));
-    EXPECT_TRUE(result->valid_data(1));
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), row_count);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
 
     const auto& rows = result->vectors().vector_array().data();
     ASSERT_EQ(rows.size(), row_count);
@@ -3409,13 +3407,14 @@ TEST(SealedVectorArrayNullable,
         nullptr, array_vec, offsets.data(), offsets.size());
 
     ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), offsets.size());
     ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
 
     for (size_t i = 0; i < offsets.size(); ++i) {
         auto logical_offset = offsets[i];
         auto expected_valid = logical_offset % 3 != 0;
-        EXPECT_EQ(result->valid_data(i), expected_valid);
+        EXPECT_EQ(valid_data[i], expected_valid);
         const auto& result_vec = result->vectors().vector_array().data(i);
         if (!expected_valid) {
             EXPECT_TRUE(result_vec.has_float_vector());
@@ -3540,10 +3539,11 @@ TEST(SealedVectorArrayNullable,
         nullptr, array_vec, offsets.data(), offsets.size());
 
     ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), offsets.size());
     ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
-    for (int i = 0; i < result->valid_data_size(); ++i) {
-        EXPECT_FALSE(result->valid_data(i));
+    for (int i = 0; i < valid_data.size(); ++i) {
+        EXPECT_FALSE(valid_data[i]);
         EXPECT_EQ(
             result->vectors().vector_array().data(i).float_vector().data_size(),
             0);

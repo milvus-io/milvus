@@ -57,6 +57,24 @@ func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T)
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
 }
 
+func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
+	Init()
+	params := Get()
+	key := params.DataCoordCfg.SnapshotExportCopyConcurrency.Key
+	params.Reset(key)
+	t.Cleanup(func() { params.Reset(key) })
+
+	assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+
+	params.Save(key, "3")
+	assert.Equal(t, 3, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+
+	for _, invalid := range []string{"0", "-1", "invalid"} {
+		params.Save(key, invalid)
+		assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+	}
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -807,6 +825,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 120, Params.ImportWriteRetryMaxInterval.GetAsInt())
 		params.Reset(Params.ImportWriteRetryInitialInterval.Key)
 		params.Reset(Params.ImportWriteRetryMaxInterval.Key)
+		assert.Equal(t, time.Hour, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
+		params.Save(Params.ImportCopyObjectTimeout.Key, "120")
+		assert.Equal(t, 2*time.Minute, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
+		params.Save(Params.ImportCopyObjectTimeout.Key, "0")
+		assert.Equal(t, time.Hour, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
+		params.Reset(Params.ImportCopyObjectTimeout.Key)
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
@@ -857,6 +881,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 		assert.Equal(t, 128, params.StreamingCfg.WALReadAheadBufferLength.GetAsInt())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
+		assert.Equal(t, int64(640000000), params.StreamingCfg.PartialUpdateVersionIndexMaxBytes.GetAsSize())
 		assert.Equal(t, 3*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
