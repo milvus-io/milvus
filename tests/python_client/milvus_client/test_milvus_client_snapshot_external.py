@@ -658,6 +658,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         rows = [_core_row(row_id) for row_id in range(SMALL_ROWS)]
         self._create_core_source(client, source, rows)
         self._flush_rate_limited(client, source)
+        self.load_collection(client, source)
 
         self.delete(client, source, ids=[0])
         self.upsert(client, source, [_core_row(1, marker=9), _core_row(SMALL_ROWS, marker=9)])
