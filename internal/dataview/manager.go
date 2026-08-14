@@ -227,11 +227,11 @@ func (m *dataViewManager) OnFlush(ctx context.Context, event FlushDataViewEvent)
 }
 
 func (m *dataViewManager) OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error) {
-	return m.commit(ctx, event.CollectionID, dataViewAdvanceStreaming, membershipMutation{add: event.Segments})
+	return m.commit(ctx, event.CollectionID, dataViewAdvanceCompact, membershipMutation{add: event.Segments})
 }
 
 func (m *dataViewManager) OnCopySegmentComplete(ctx context.Context, event CopySegmentCompleteDataViewEvent) (*viewpb.DataVersion, error) {
-	return m.commit(ctx, event.CollectionID, dataViewAdvanceStreaming, membershipMutation{add: event.Segments})
+	return m.commit(ctx, event.CollectionID, dataViewAdvanceCompact, membershipMutation{add: event.Segments})
 }
 
 func (m *dataViewManager) OnCompact(ctx context.Context, event CompactDataViewEvent) (*viewpb.DataVersion, error) {
@@ -242,15 +242,10 @@ func (m *dataViewManager) OnCompact(ctx context.Context, event CompactDataViewEv
 }
 
 func (m *dataViewManager) OnExternalRefresh(ctx context.Context, event ExternalRefreshDataViewEvent) (*viewpb.DataVersion, error) {
-	state := m.getOrCreateState(event.CollectionID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	return m.commitLocked(ctx, state, func(removed, added bool) dataViewAdvance {
-		if removed {
-			return dataViewAdvanceCompact
-		}
-		return dataViewAdvanceStreaming
-	}, membershipMutation{add: event.AddSegments, remove: event.DropSegments})
+	return m.commit(ctx, event.CollectionID, dataViewAdvanceCompact, membershipMutation{
+		add:    event.AddSegments,
+		remove: event.DropSegments,
+	})
 }
 
 func (m *dataViewManager) OnDropPartition(ctx context.Context, event DropPartitionDataViewEvent) (*viewpb.DataVersion, error) {
@@ -343,13 +338,13 @@ func (m *dataViewManager) commit(ctx context.Context, collectionID int64, advanc
 	state := m.getOrCreateState(collectionID)
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	return m.commitLocked(ctx, state, func(bool, bool) dataViewAdvance { return advance }, mutation)
+	return m.commitLocked(ctx, state, advance, mutation)
 }
 
 func (m *dataViewManager) commitLocked(
 	ctx context.Context,
 	state *collectionState,
-	classify func(removed, added bool) dataViewAdvance,
+	advance dataViewAdvance,
 	mutation membershipMutation,
 ) (*viewpb.DataVersion, error) {
 	if state.terminal {
@@ -361,9 +356,8 @@ func (m *dataViewManager) commitLocked(
 		next = &viewpb.DataViewOfCollection{CollectionId: state.id}
 	}
 
-	removed := removeSegments(next, mutation.remove, mutation.removePartitions)
-	added, err := addSegments(next, mutation.add)
-	if err != nil {
+	removeSegments(next, mutation.remove, mutation.removePartitions)
+	if err := addSegments(next, mutation.add); err != nil {
 		return nil, err
 	}
 	canonicalizeDataView(next)
@@ -371,7 +365,7 @@ func (m *dataViewManager) commitLocked(
 		return dataVersionFromView(base), nil
 	}
 
-	next.DataVersion = nextDataVersion(base, classify(removed, added))
+	next.DataVersion = nextDataVersion(base, advance)
 	if err := m.persistLocked(ctx, state, next); err != nil {
 		return nil, err
 	}
@@ -473,17 +467,16 @@ func nextDataVersion(base *viewpb.DataViewOfCollection, advance dataViewAdvance)
 	}
 }
 
-func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) (bool, error) {
+func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
 	locations := dataViewSegmentLocations(view)
-	changed := false
 	for _, segment := range segments {
 		if segment.SegmentID == 0 || segment.VChannel == "" {
-			return false, merr.WrapErrServiceInternalMsg("invalid loadable Segment descriptor: segment=%d vchannel=%q", segment.SegmentID, segment.VChannel)
+			return merr.WrapErrServiceInternalMsg("invalid loadable Segment descriptor: segment=%d vchannel=%q", segment.SegmentID, segment.VChannel)
 		}
 		location := segmentLocation{vchannel: segment.VChannel, partitionID: segment.PartitionID}
 		if known, ok := locations[segment.SegmentID]; ok {
 			if known != location {
-				return false, merr.WrapErrDataIntegrityMsg("Segment %d has conflicting DataView locations", segment.SegmentID)
+				return merr.WrapErrDataIntegrityMsg("Segment %d has conflicting DataView locations", segment.SegmentID)
 			}
 			continue
 		}
@@ -491,28 +484,24 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 		partition := findOrCreatePartition(shard, segment.PartitionID)
 		partition.SegmentIds = append(partition.SegmentIds, segment.SegmentID)
 		locations[segment.SegmentID] = location
-		changed = true
 	}
-	return changed, nil
+	return nil
 }
 
-func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64, partitions map[int64]struct{}) bool {
+func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64, partitions map[int64]struct{}) {
 	removeIDs := make(map[int64]struct{}, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		removeIDs[segmentID] = struct{}{}
 	}
-	changed := false
 	for _, shard := range view.GetShards() {
 		keptPartitions := shard.Partitions[:0]
 		for _, partition := range shard.GetPartitions() {
 			if _, ok := partitions[partition.GetPartitionId()]; ok {
-				changed = changed || len(partition.GetSegmentIds()) > 0
 				continue
 			}
 			keptSegments := partition.SegmentIds[:0]
 			for _, segmentID := range partition.GetSegmentIds() {
 				if _, ok := removeIDs[segmentID]; ok {
-					changed = true
 					continue
 				}
 				keptSegments = append(keptSegments, segmentID)
@@ -524,7 +513,6 @@ func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64, parti
 		}
 		shard.Partitions = keptPartitions
 	}
-	return changed
 }
 
 type segmentLocation struct {

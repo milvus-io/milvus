@@ -81,10 +81,11 @@ recovery, reference protection, and GC behavior are documented in
 The storage view contains all complete, non-duplicate loadable Sealed Segment
 data ([B1] and [A1]). A version number DataVersion is introduced:
 
-- **streaming_version**: Incremented when new loadable data joins the view from
-  the write/import/copy-segment-complete side.
-- **compact_version**: Incremented when existing loadable membership is
-  replaced, removed, or trimmed.
+- **streaming_version**: Incremented only when StreamingNode Flush publishes a
+  Segment for the growing-to-sealed query handoff.
+- **compact_version**: Incremented for every other loadable-membership change,
+  including import, copy completion, compaction, external refresh, partition
+  drop, and truncate.
 
 Version numbers are ordered lexicographically by `(streaming_version, compact_version)`.
 
@@ -103,17 +104,20 @@ The following timeline shows the version evolution process of the storage view (
 | 2 | Flush Segment 3 | `2,0` | `Segment 1 @1,0`, `Segment 2 @1,0`, `Segment 3 @2,0` |
 | 3 | Compact Segment 1 and 2 into Segment 4 and 5 | `2,1` | `Segment 4 @2,1`, `Segment 5 @2,1`, `Segment 3 @2,0` |
 | 4 | Cluster compaction or reshard | `2,2` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2` |
-| 5 | Import Segment 5 | `3,0` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2`, `Segment 10 @3,0` |
+| 5 | Import Segment 10 | `2,3` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2`, `Segment 10 @2,3` |
 
 1. **Version 1,0**: Initial state, containing Segment 1 @1,0 and Segment 2 @1,0.
 2. **Version 2,0** (Flush Segment 3): Segment 3 @2,0 is added, streaming_version is incremented. Segments 1 and 2 retain their original version number @1,0.
 3. **Version 2,1** (Compact Segments 1 and 2 into Segments 4 and 5): Segments 1 and 2 are removed from the view, Segments 4 @2,1 and 5 @2,1 are added. compact_version is incremented. Segment 3 @2,0 remains unchanged.
 4. **Version 2,2** (Cluster Compaction or Reshard): All old Segments are replaced by Segments 6–9 @2,2.
-5. **Version 3,0** (Import Segment 5): Segment 10 @3,0 is added, streaming_version is incremented. Segments 6–9 retain @2,2.
+5. **Version 2,3** (Import Segment 10): Segment 10 @2,3 is added,
+   compact_version is incremented. Segments 6–9 retain @2,2.
 
 Key observations:
-- Flush operations cause streaming_version to increment (e.g., 1,0 → 2,0 and 2,2 → 3,0).
-- Compact operations cause compact_version to increment (e.g., 2,0 → 2,1 → 2,2).
+- Only Flush operations cause streaming_version to increment (for example,
+  1,0 → 2,0).
+- All other membership changes cause compact_version to increment (for
+  example, 2,0 → 2,1 → 2,2 → 2,3).
 - In this example, `SegmentID @DataVersion` labels the DataVersion when the
   segment joined the view. DataView itself stores loadable membership and the
   collection-level DataVersion, not a per-segment view-version field.
