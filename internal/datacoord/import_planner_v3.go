@@ -226,6 +226,9 @@ type v3PlanningFragment struct {
 }
 
 func (c *importChecker) planV3Job(job ImportJob) error {
+	if _, err := validateImportV3Schema(c.meta, job.GetCollectionID(), job.GetSchema()); err != nil {
+		return err
+	}
 	if job.GetPlanningSnapshotRef() != "" || job.GetImportPlanIndexRef() != "" {
 		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
 	}

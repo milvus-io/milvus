@@ -344,6 +344,14 @@ func (t *importTaskV3) acceptResult(ref string, digest []byte) error {
 		return merr.WrapErrImportSysFailedMsg("import v3 result storage is unavailable")
 	}
 	p := t.task.Load()
+	job := t.importMeta.GetJob(context.TODO(), p.GetJobId())
+	if job == nil {
+		return merr.WrapErrImportSysFailedMsg("import v3 job is unavailable during result acceptance")
+	}
+	schemaVersion, err := validateImportV3Schema(t.meta, p.GetCollectionId(), job.GetSchema())
+	if err != nil {
+		return err
+	}
 	manifest, err := loadImportResultManifestV3(context.TODO(), t.meta.chunkManager, ref, p.GetOutputPrefix(), digest)
 	if err != nil {
 		return err
@@ -351,7 +359,7 @@ func (t *importTaskV3) acceptResult(ref string, digest []byte) error {
 	if err := validateImportResultManifest(manifest, p.GetJobId(), p.GetTaskId(), p.GetRunId(), p.GetPlanningGeneration(), p.GetTaskPlanDigest(), p.GetOutputSegmentIds()); err != nil {
 		return err
 	}
-	return applyImportResultManifest(context.TODO(), t.meta, p.GetCollectionId(), manifest)
+	return applyImportResultManifest(context.TODO(), t.meta, p.GetCollectionId(), schemaVersion, manifest)
 }
 
 func (t *importTaskV3) DropTaskOnWorker(cluster session.Cluster) {

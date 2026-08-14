@@ -375,6 +375,12 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 func (c *importChecker) checkImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		currentSchemaVersion, err := validateImportV3Schema(c.meta, job.GetCollectionID(), job.GetSchema())
+		if err != nil {
+			log.Warn(c.ctx, "import v3 schema changed incompatibly before index build", mlog.Err(err))
+			_ = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()), UpdateJobFailureCode(merr.Code(err)))
+			return
+		}
 		tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
 		if len(tasks) == 0 {
 			return
@@ -393,6 +399,17 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		// IndexBuilding will retry this idempotently if the process stops here.
 		if err := publishImportV3Segments(c.ctx, c.meta, tasks); err != nil {
 			log.Warn(c.ctx, "publish import v3 segments failed", mlog.Err(err))
+		}
+		for _, task := range tasks {
+			for _, segmentID := range task.(*importTaskV3).task.Load().GetOutputSegmentIds() {
+				segment := c.meta.GetSegment(c.ctx, segmentID)
+				if segment != nil && segment.GetNumOfRows() > 0 && segment.GetSchemaVersion() != currentSchemaVersion {
+					if err := c.meta.UpdateSegmentsInfo(c.ctx, updateImportV3SchemaVersion(segmentID, currentSchemaVersion)); err != nil {
+						log.Warn(c.ctx, "update import v3 segment schema version failed", mlog.Err(err))
+						return
+					}
+				}
+			}
 		}
 		return
 	}

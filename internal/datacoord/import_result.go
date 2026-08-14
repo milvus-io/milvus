@@ -184,7 +184,7 @@ func validateImportResultManifest(manifest *datapb.ImportResultManifest, jobID, 
 // persists the task Completed marker only after this function succeeds, which
 // keeps the existing V2 marker-last recovery shape: a crash between segment
 // batches and the task marker simply replays the same immutable manifest.
-func applyImportResultManifest(ctx context.Context, meta *meta, collectionID int64, manifest *datapb.ImportResultManifest) error {
+func applyImportResultManifest(ctx context.Context, meta *meta, collectionID int64, schemaVersion int32, manifest *datapb.ImportResultManifest) error {
 	operators := make([]UpdateOperator, 0, len(manifest.GetSegments())*9)
 	for _, result := range manifest.GetSegments() {
 		segmentID := result.GetPhysicalSegmentId()
@@ -207,9 +207,21 @@ func applyImportResultManifest(ctx context.Context, meta *meta, collectionID int
 			UpdateImportSegmentPosition(segmentID, result.GetMinTimestamp(), result.GetMaxTimestamp()),
 			updateImportResultProjectionOperator(result),
 			UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed),
+			updateImportV3SchemaVersion(segmentID, schemaVersion),
 		)
 	}
 	return meta.UpdateSegmentsInfo(ctx, operators...)
+}
+
+func updateImportV3SchemaVersion(segmentID int64, schemaVersion int32) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrDataIntegrityMsg("import v3 segment %d is missing", segmentID))
+		}
+		segment.SchemaVersion = schemaVersion
+		return true
+	}
 }
 
 func validateImportResultSegmentOperator(collectionID int64, result *datapb.SegmentResult) UpdateOperator {
