@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -105,6 +106,42 @@ func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix s
 		sort.Strings(v)
 	}
 	return insertLogs, nil
+}
+
+// ExpandObjects resolves the legacy backup prefixes once during planning. The
+// returned paths are sorted and can be persisted in an Import V3 plan; workers
+// must consume that immutable list through NewExplicitReader.
+func ExpandObjects(ctx context.Context, cm storage.ChunkManager, paths []string) (map[int64][]string, []string, error) {
+	return expandObjects(ctx, cm, paths, paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint())
+}
+
+func expandObjects(ctx context.Context, cm storage.ChunkManager, paths []string, retryAttempts uint) (map[int64][]string, []string, error) {
+	if len(paths) == 0 {
+		return nil, nil, merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(paths) > 2 {
+		return nil, nil, merr.WrapErrImportFailedMsg("too many input paths for binlog import. Valid paths length should be one or two, but got paths:%s", paths)
+	}
+	insertLogs, err := listInsertLogs(ctx, cm, paths[0], retryAttempts)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(paths) == 1 {
+		return insertLogs, nil, nil
+	}
+
+	var deltaLogs []string
+	err = importcommon.WalkWithPrefixRetry(ctx, cm, paths[1], true, retryAttempts,
+		func() { deltaLogs = nil },
+		func(chunkInfo *storage.ChunkObjectInfo) bool {
+			deltaLogs = append(deltaLogs, chunkInfo.FilePath)
+			return true
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Strings(deltaLogs)
+	return insertLogs, deltaLogs, nil
 }
 
 func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog {

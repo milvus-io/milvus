@@ -150,3 +150,26 @@ func TestCreateFieldBinlogListIsSorted(t *testing.T) {
 	binlogs := createFieldBinlogList(map[int64][]string{101: {"101"}, 0: {"0"}, 100: {"100"}})
 	assert.Equal(t, []int64{0, 100, 101}, []int64{binlogs[0].GetFieldID(), binlogs[1].GetFieldID(), binlogs[2].GetFieldID()})
 }
+
+func TestExpandObjectsSortsDeltaPaths(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().WalkWithPrefix(mock.Anything, "insert/", true, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ bool, walk storage.ChunkObjectWalkFunc) error {
+			walk(&storage.ChunkObjectInfo{FilePath: "insert/0/2"})
+			walk(&storage.ChunkObjectInfo{FilePath: "insert/0/1"})
+			return nil
+		}).Once()
+	cm.EXPECT().WalkWithPrefix(mock.Anything, "delta/", true, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ bool, walk storage.ChunkObjectWalkFunc) error {
+			walk(&storage.ChunkObjectInfo{FilePath: "delta/2"})
+			walk(&storage.ChunkObjectInfo{FilePath: "delta/1"})
+			return nil
+		}).Once()
+
+	insert, delta, err := ExpandObjects(ctx, cm, []string{"insert/", "delta/"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"insert/0/1", "insert/0/2"}, insert[0])
+	assert.Equal(t, []string{"delta/1", "delta/2"}, delta)
+}
