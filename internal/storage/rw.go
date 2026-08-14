@@ -77,6 +77,7 @@ type rwOptions struct {
 	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
 	externalReader      packed.ExternalReaderContext
 	writerFormat        string
+	pkStatsConfig       *PkStatsConfig
 }
 
 func (o *rwOptions) validate() error {
@@ -218,6 +219,12 @@ func WithTextRefsAsBinary() RwOption {
 func WithWriterFormat(format string) RwOption {
 	return func(options *rwOptions) {
 		options.writerFormat = format
+	}
+}
+
+func WithPkStatsConfig(config PkStatsConfig) RwOption {
+	return func(options *rwOptions) {
+		options.pkStatsConfig = &config
 	}
 }
 
@@ -440,6 +447,10 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			}
 		}
 	}
+	pkStatsConfigs := make([]PkStatsConfig, 0, 1)
+	if rwOptions.pkStatsConfig != nil {
+		pkStatsConfigs = append(pkStatsConfigs, *rwOptions.pkStatsConfig)
+	}
 
 	switch rwOptions.version {
 	case StorageV1:
@@ -453,6 +464,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.storageConfig,
 			pluginContext,
 			rwOptions.writerFormat,
+			pkStatsConfigs...,
 		)
 	case StorageV3:
 		// if TEXT column configs are provided, use the text writer with TEXT column support
@@ -463,6 +475,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
 				rwOptions.writerFormat,
+				pkStatsConfigs...,
 			)
 		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -472,6 +485,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 			rwOptions.textRefsAsBinary,
 			rwOptions.writerFormat,
+			pkStatsConfigs...,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

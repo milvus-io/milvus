@@ -364,6 +364,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
+	pkStatsConfigs ...PkStatsConfig,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -398,6 +399,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		collectionID,
 		schema,
 		maxRowNum,
+		pkStatsConfigs...,
 	)
 	if err != nil {
 		return nil, err
@@ -591,6 +593,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	textRefsAsBinary bool,
 	writerFormat string,
+	pkStatsConfigs ...PkStatsConfig,
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -626,6 +629,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 		collectionID,
 		schema,
 		maxRowNum,
+		pkStatsConfigs...,
 	)
 	if err != nil {
 		return nil, err
@@ -774,6 +778,7 @@ func NewPackedTextManifestRecordWriter(
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
 	writerFormat string,
+	pkStatsConfigs ...PkStatsConfig,
 ) (*PackedTextManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -808,6 +813,7 @@ func NewPackedTextManifestRecordWriter(
 		collectionID,
 		schema,
 		maxRowNum,
+		pkStatsConfigs...,
 	)
 	if err != nil {
 		return nil, err

@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
@@ -119,6 +120,21 @@ func TestPkStatsCollector(t *testing.T) {
 		err = collector.Collect(record)
 		assert.NoError(t, err)
 	})
+}
+
+func TestPkStatsCollectorUsesExplicitBloomConfig(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+	}}}
+	collector, err := NewPkStatsCollector(1, schema, 1, PkStatsConfig{
+		Capacity: 1024, BloomFilterType: bloomfilter.BasicBFName, MaxBloomFalsePositive: 0.25,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, collector.pkstats)
+	assert.Equal(t, bloomfilter.BasicBF, collector.pkstats.BFType)
+	expected := bloomfilter.NewBloomFilterWithType(1024, 0.25, bloomfilter.BasicBFName)
+	assert.Equal(t, expected.Cap(), collector.pkstats.BF.Cap())
+	assert.Equal(t, expected.K(), collector.pkstats.BF.K())
 }
 
 func TestBm25StatsCollector(t *testing.T) {

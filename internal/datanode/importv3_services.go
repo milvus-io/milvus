@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -667,6 +668,13 @@ func buildImportV3WriterOptions(storageConfig *indexpb.StorageConfig, collection
 	if segment.GetPlannedRows() <= 0 {
 		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 planned rows must be positive")
 	}
+	if spec.GetPkStatsCapacity() < segment.GetPlannedRows() {
+		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 WriterSpec PK stats capacity is smaller than planned rows: capacity=%d rows=%d", spec.GetPkStatsCapacity(), segment.GetPlannedRows())
+	}
+	bfType := bloomfilter.BFTypeFromString(spec.GetBloomFilterType())
+	if (bfType != bloomfilter.BasicBF && bfType != bloomfilter.BlockedBF) || spec.GetMaxBloomFalsePositive() <= 0 || spec.GetMaxBloomFalsePositive() >= 1 {
+		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 WriterSpec Bloom filter config is invalid")
+	}
 	if spec.GetWriterFormat() == "" {
 		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 WriterSpec writer format is empty")
 	}
@@ -700,6 +708,9 @@ func buildImportV3WriterOptions(storageConfig *indexpb.StorageConfig, collection
 		storage.WithStorageConfig(storageConfig),
 		storage.WithPluginContext(pluginContext),
 		storage.WithWriterFormat(spec.GetWriterFormat()),
+		storage.WithPkStatsConfig(storage.PkStatsConfig{
+			Capacity: spec.GetPkStatsCapacity(), BloomFilterType: spec.GetBloomFilterType(), MaxBloomFalsePositive: spec.GetMaxBloomFalsePositive(),
+		}),
 	}
 	if len(spec.GetTextColumns()) > 0 {
 		if spec.GetTargetStorageVersion() != storage.StorageV3 {

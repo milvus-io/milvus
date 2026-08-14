@@ -47,6 +47,15 @@ type PrimaryKeyStats struct {
 	MinPk   PrimaryKey                       `json:"minPk"`
 }
 
+// PkStatsConfig freezes the capacity and Bloom filter settings used to build
+// primary-key statistics. Callers that omit it keep the legacy paramtable
+// behavior.
+type PkStatsConfig struct {
+	Capacity              int64
+	BloomFilterType       string
+	MaxBloomFalsePositive float64
+}
+
 // UnmarshalJSON unmarshal bytes to PrimaryKeyStats
 func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	var messageMap map[string]*json.RawMessage
@@ -203,19 +212,32 @@ func (stats *PrimaryKeyStats) UpdateMinMax(pk PrimaryKey) {
 }
 
 func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error) {
-	if rowNum <= 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num %d", rowNum)
-	}
+	return NewPrimaryKeyStatsWithConfig(fieldID, pkType, PkStatsConfig{
+		Capacity:              rowNum,
+		BloomFilterType:       paramtable.Get().CommonCfg.BloomFilterType.GetValue(),
+		MaxBloomFalsePositive: paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+	})
+}
 
-	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
+func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (*PrimaryKeyStats, error) {
+	if config.Capacity <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num %d", config.Capacity)
+	}
+	bfType := bloomfilter.BFTypeFromString(config.BloomFilterType)
+	if bfType != bloomfilter.BasicBF && bfType != bloomfilter.BlockedBF {
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported bloom filter type %q", config.BloomFilterType)
+	}
+	if config.MaxBloomFalsePositive <= 0 || config.MaxBloomFalsePositive >= 1 {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid bloom false positive rate %v", config.MaxBloomFalsePositive)
+	}
 	return &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  pkType,
-		BFType:  bloomfilter.BFTypeFromString(bfType),
+		BFType:  bfType,
 		BF: bloomfilter.NewBloomFilterWithType(
-			uint(rowNum),
-			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
-			bfType),
+			uint(config.Capacity),
+			config.MaxBloomFalsePositive,
+			config.BloomFilterType),
 	}, nil
 }
 
