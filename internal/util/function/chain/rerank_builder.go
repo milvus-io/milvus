@@ -282,16 +282,20 @@ func buildRerankChainInternal(
 		SetName("rerank_chain")
 
 	sortDescending := true // default: larger score = better match
+	mergeKeyField := ""
+	if searchParams.HasGrouping() && searchParams.GroupSize == 1 {
+		mergeKeyField = searchParams.GroupByField
+	}
 
 	switch rerankerName {
 	case RRFRerankerName:
-		if err := buildRRFChain(fc, funcSchema, searchMetrics); err != nil {
+		if err := buildRRFChain(fc, funcSchema, searchMetrics, mergeKeyField); err != nil {
 			return nil, err
 		}
 
 	case WeightedRerankerName:
 		var err error
-		sortDescending, err = buildWeightedChain(fc, funcSchema, searchMetrics)
+		sortDescending, err = buildWeightedChain(fc, funcSchema, searchMetrics, mergeKeyField)
 		if err != nil {
 			return nil, err
 		}
@@ -364,7 +368,7 @@ func buildRerankChainInternal(
 // RRF Builder
 // =============================================================================
 
-func buildRRFChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMetrics []string) error {
+func buildRRFChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMetrics []string, mergeKeyField string) error {
 	rrfK, err := parseRRFK(funcSchema)
 	if err != nil {
 		return err
@@ -373,7 +377,8 @@ func buildRRFChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMet
 	// RRF scores are computed purely from rank position, not from original scores,
 	// so metricTypes and normalize are not needed.
 	fc.Merge(MergeStrategyRRF,
-		WithRRFK(rrfK))
+		WithRRFK(rrfK),
+		WithMergeKeyField(mergeKeyField))
 
 	return nil
 }
@@ -398,7 +403,7 @@ func parseRRFK(funcSchema *schemapb.FunctionSchema) (float64, error) {
 // Weighted Builder
 // =============================================================================
 
-func buildWeightedChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMetrics []string) (sortDescending bool, err error) {
+func buildWeightedChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMetrics []string, mergeKeyField string) (sortDescending bool, err error) {
 	weights, normalize, err := parseWeightedParams(funcSchema)
 	if err != nil {
 		return true, err
@@ -415,7 +420,8 @@ func buildWeightedChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, sear
 	mergeOp := NewMergeOp(MergeStrategyWeighted,
 		WithWeights(weights),
 		WithMetricTypes(searchMetrics),
-		WithNormalize(normalize))
+		WithNormalize(normalize),
+		WithMergeKeyField(mergeKeyField))
 
 	fc.Add(mergeOp)
 

@@ -74,6 +74,7 @@ type MergeOp struct {
 	strategy       MergeStrategy
 	weights        []float64       // for weighted strategy
 	rrfK           float64         // for rrf strategy, default 60
+	mergeKeyField  string          // optional field used as the cross-input fusion identity
 	sortDescending bool            // pre-computed: true means larger score = better match
 	scoreNormFuncs []normalizeFunc // pre-computed per-input normalization; nil entry = no-op
 }
@@ -87,6 +88,7 @@ type mergeConfig struct {
 	metricTypes     []string
 	normalize       bool
 	forceDescending bool
+	mergeKeyField   string
 }
 
 // MergeOption is a functional option for MergeOp.
@@ -136,6 +138,14 @@ func WithForceDescending(force bool) MergeOption {
 	}
 }
 
+// WithMergeKeyField uses a scalar field instead of the primary key to match
+// rows across inputs. The output still carries a representative primary key.
+func WithMergeKeyField(field string) MergeOption {
+	return func(cfg *mergeConfig) {
+		cfg.mergeKeyField = field
+	}
+}
+
 // NewMergeOp creates a new MergeOp with the given strategy and options.
 // Behavioral fields (sortDescending, scoreNormFuncs) are resolved eagerly
 // so that the execution path is free of metric-type branching.
@@ -160,6 +170,7 @@ func NewMergeOp(strategy MergeStrategy, opts ...MergeOption) *MergeOp {
 		strategy:       strategy,
 		weights:        cfg.weights,
 		rrfK:           cfg.rrfK,
+		mergeKeyField:  cfg.mergeKeyField,
 		sortDescending: sortDesc,
 		scoreNormFuncs: normFuncs,
 	}
@@ -266,6 +277,12 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 		}
 
 		ids, scores, locs := sortAndExtractResults(idScores, idLocs, op.SortDescending())
+		if op.mergeKeyField != "" {
+			ids, err = outputIDsFromLocations(inputs, chunkIdx, locs)
+			if err != nil {
+				return nil, err
+			}
+		}
 		newChunkSizes[chunkIdx] = int64(len(ids))
 
 		idArr, scoreArr, err := op.buildResultArrays(ctx, ids, scores, idType)
@@ -337,15 +354,19 @@ func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int) (map[any]
 			if id == nil {
 				continue
 			}
+			key, err := op.mergeKey(df, chunkIdx, rowIdx, id)
+			if err != nil {
+				return nil, nil, err
+			}
 
 			// RRF score: 1 / (k + rank), rank is 1-based
 			rrfScore := float32(1.0 / (op.rrfK + float64(rowIdx+1)))
 
-			if existingScore, exists := idScores[id]; exists {
-				idScores[id] = existingScore + rrfScore
+			if existingScore, exists := idScores[key]; exists {
+				idScores[key] = existingScore + rrfScore
 			} else {
-				idScores[id] = rrfScore
-				idLocs[id] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
+				idScores[key] = rrfScore
+				idLocs[key] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
 			}
 		}
 	}
@@ -384,6 +405,10 @@ func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int) (map
 			if id == nil {
 				continue
 			}
+			key, err := op.mergeKey(df, chunkIdx, rowIdx, id)
+			if err != nil {
+				return nil, nil, err
+			}
 
 			score := scoreChunk.Value(rowIdx)
 			if normFunc != nil {
@@ -391,11 +416,11 @@ func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int) (map
 			}
 			weightedScore := weight * score
 
-			if existingScore, exists := idScores[id]; exists {
-				idScores[id] = existingScore + weightedScore
+			if existingScore, exists := idScores[key]; exists {
+				idScores[key] = existingScore + weightedScore
 			} else {
-				idScores[id] = weightedScore
-				idLocs[id] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
+				idScores[key] = weightedScore
+				idLocs[key] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
 			}
 		}
 	}
@@ -469,20 +494,24 @@ func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, merg
 			if id == nil {
 				continue
 			}
+			key, err := op.mergeKey(df, chunkIdx, rowIdx, id)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 
 			score := scoreChunk.Value(rowIdx)
 			if normFunc != nil {
 				score = normFunc(score)
 			}
 
-			if existingScore, exists := idScores[id]; exists {
-				newScore, newCount := mergeFunc(existingScore, score, idCounts[id])
-				idScores[id] = newScore
-				idCounts[id] = newCount
+			if existingScore, exists := idScores[key]; exists {
+				newScore, newCount := mergeFunc(existingScore, score, idCounts[key])
+				idScores[key] = newScore
+				idCounts[key] = newCount
 			} else {
-				idScores[id] = score
-				idCounts[id] = 1
-				idLocs[id] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
+				idScores[key] = score
+				idCounts[key] = 1
+				idLocs[key] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
 			}
 		}
 	}
@@ -626,6 +655,29 @@ func getIDValue(arr arrow.Array, idx int) any {
 	default:
 		return nil
 	}
+}
+
+func (op *MergeOp) mergeKey(df *DataFrame, chunkIdx, rowIdx int, id any) (any, error) {
+	if op.mergeKeyField == "" {
+		return id, nil
+	}
+	col := df.Column(op.mergeKeyField)
+	if col == nil {
+		return nil, merr.WrapErrFunctionFailedMsg("merge_op: input missing merge key column %q", op.mergeKeyField)
+	}
+	return getArrayValue(col.Chunk(chunkIdx), rowIdx), nil
+}
+
+func outputIDsFromLocations(inputs []*DataFrame, chunkIdx int, locs []idLocation) ([]any, error) {
+	ids := make([]any, len(locs))
+	for i, loc := range locs {
+		idCol := inputs[loc.inputIdx].Column(types.IDFieldName)
+		if idCol == nil {
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", loc.inputIdx, types.IDFieldName)
+		}
+		ids[i] = getIDValue(idCol.Chunk(chunkIdx), loc.rowIdx)
+	}
+	return ids, nil
 }
 
 // collectOrderedFieldNames returns field names (excluding $id and $score)
