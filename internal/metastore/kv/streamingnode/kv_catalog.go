@@ -84,7 +84,7 @@ func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []s
 				return nil, errors.Wrapf(err, "unmarshal vchannel meta %s failed", key)
 			}
 			if vchannel.GetVchannel() != ks[0] {
-				return nil, errors.Errorf("mismatched vchannel recovery meta, key %s, meta %s", ks[0], vchannel.GetVchannel())
+				return nil, merr.WrapErrDataIntegrityMsg("mismatched vchannel recovery meta, key %s, meta %s", ks[0], vchannel.GetVchannel())
 			}
 			vchannels[ks[0]] = vchannel
 		case 3: // {{vchannel}}/schema/{{version}}
@@ -107,7 +107,7 @@ func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []s
 	for vchannelName, vchannel := range vchannels {
 		schemas, ok := schemas[vchannelName]
 		if !ok {
-			return nil, errors.Errorf("vchannel %s missing schemas in recovery info", vchannelName)
+			return nil, merr.WrapErrDataIntegrityMsg("vchannel %s missing schemas in recovery info", vchannelName)
 		}
 		sort.Slice(schemas, func(i, j int) bool {
 			// order by checkpoint time tick.
@@ -266,7 +266,7 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 			}
 			kvs[buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick())] = string(data)
 		default:
-			return nil, nil, errors.Errorf("unknown vchannel schema state in recovery meta: vchannel %s schema %d", info.GetVchannel(), schema.GetCheckpointTimeTick())
+			return nil, nil, merr.WrapErrDataIntegrityMsg("unknown vchannel schema state in recovery meta: vchannel %s schema %d", info.GetVchannel(), schema.GetCheckpointTimeTick())
 		}
 	}
 	data, err := marshalVChannelBaseMeta(pchannelName, info)
@@ -306,7 +306,7 @@ func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string
 		}
 		segmentID, err := strconv.ParseInt(typeutil.After(keys[k], prefix), 10, 64)
 		if err != nil || segmentID != info.GetSegmentId() {
-			return nil, errors.Errorf("mismatched segment assignment recovery meta, key %s, meta %d", keys[k], info.GetSegmentId())
+			return nil, merr.WrapErrDataIntegrityMsg("mismatched segment assignment recovery meta, key %s, meta %d", keys[k], info.GetSegmentId())
 		}
 		infos = append(infos, info)
 	}

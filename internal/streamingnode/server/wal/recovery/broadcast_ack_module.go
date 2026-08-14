@@ -30,7 +30,7 @@ type broadcastAckModule struct {
 }
 
 func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- Close invokes the retained cancel function.
 	m := &broadcastAckModule{
 		runtime:    runtime,
 		ctx:        ctx,

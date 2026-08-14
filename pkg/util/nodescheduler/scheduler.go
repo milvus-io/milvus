@@ -164,7 +164,7 @@ func (s *nodeScheduler) resize(concurrency int) {
 }
 
 func (s *nodeScheduler) Submit(task Task) TaskHandle {
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- task completion invokes the retained cancel function.
 	entry := &taskEntry{
 		task:   task,
 		ctx:    ctx,

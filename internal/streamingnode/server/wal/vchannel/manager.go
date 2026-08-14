@@ -311,8 +311,6 @@ func (m *PChannelRecoveryManager) moduleForMessage(msg message.ImmutableMessage)
 	if !loaded && !switched && m.metaAndData.Load() {
 		module.SwitchIntoMetaAndData()
 	}
-	if !loaded {
-	}
 	return module
 }
 

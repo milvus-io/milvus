@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Config struct {
@@ -255,7 +256,7 @@ func (t *TransformLog) flush(ctx context.Context, opt flushOption) (flushResult,
 
 	if work.Chunk != nil {
 		if t.store == nil {
-			return flushResult{}, errors.New("transform log store is nil")
+			return flushResult{}, merr.WrapErrServiceInternalMsg("transform log store is nil")
 		}
 		if err := t.store.WriteTransformLogChunk(ctx, t.vchannel, work.Chunk); err != nil {
 			return flushResult{}, err
@@ -298,7 +299,7 @@ func (t *TransformLog) materialize(ctx context.Context, opt materializeOption) (
 
 	if len(work.Entries) > 0 {
 		if t.materializer == nil {
-			return materializeResult{}, errors.New("transform log materializer is nil")
+			return materializeResult{}, merr.WrapErrServiceInternalMsg("transform log materializer is nil")
 		}
 		if err := t.materializer.Materialize(ctx, MaterializeRequest{
 			VChannel:       t.vchannel,
@@ -699,7 +700,7 @@ func (t *TransformLog) loadChunk(ctx context.Context, chunk *chunkDescriptor) er
 		case chunkStateCold:
 			if t.store == nil {
 				t.mu.Unlock()
-				return errors.New("transform log store is nil")
+				return merr.WrapErrServiceInternalMsg("transform log store is nil")
 			}
 			done := make(chan struct{})
 			chunk.state = chunkStateLoading
@@ -743,13 +744,13 @@ func (t *TransformLog) validateLoadedChunkOrderLocked(chunk *chunkDescriptor) er
 		if idx > 0 {
 			previous := t.chunks[idx-1]
 			if previous.toTimeTick > 0 && chunk.fromTimeTick <= previous.toTimeTick {
-				return errors.Errorf("transform log chunk %d entries are not ordered", chunk.id)
+				return merr.WrapErrDataIntegrityMsg("transform log chunk %d entries are not ordered", chunk.id)
 			}
 		}
 		if idx+1 < len(t.chunks) {
 			next := t.chunks[idx+1]
 			if next.fromTimeTick > 0 && chunk.toTimeTick >= next.fromTimeTick {
-				return errors.Errorf("transform log chunk %d entries are not ordered", chunk.id)
+				return merr.WrapErrDataIntegrityMsg("transform log chunk %d entries are not ordered", chunk.id)
 			}
 		}
 		return nil
@@ -775,17 +776,17 @@ func (t *TransformLog) latestTimeTickLocked() uint64 {
 
 func validateChunk(chunk *streamingpb.TransformLogChunk, expectedChunkID uint64, previousTimeTick uint64) error {
 	if chunk == nil {
-		return errors.Errorf("transform log chunk %d is nil", expectedChunkID)
+		return merr.WrapErrDataIntegrityMsg("transform log chunk %d is nil", expectedChunkID)
 	}
 	if chunk.GetChunkId() != expectedChunkID {
-		return errors.Errorf("transform log chunk id mismatch, expected %d, got %d", expectedChunkID, chunk.GetChunkId())
+		return merr.WrapErrDataIntegrityMsg("transform log chunk id mismatch, expected %d, got %d", expectedChunkID, chunk.GetChunkId())
 	}
 	if len(chunk.GetEntries()) == 0 {
-		return errors.Errorf("transform log chunk %d is empty", expectedChunkID)
+		return merr.WrapErrDataIntegrityMsg("transform log chunk %d is empty", expectedChunkID)
 	}
 	for _, entry := range chunk.GetEntries() {
 		if entry.GetTimeTick() <= previousTimeTick {
-			return errors.Errorf("transform log chunk %d entries are not ordered", expectedChunkID)
+			return merr.WrapErrDataIntegrityMsg("transform log chunk %d entries are not ordered", expectedChunkID)
 		}
 		previousTimeTick = entry.GetTimeTick()
 	}

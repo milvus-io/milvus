@@ -19,7 +19,6 @@ package transformlog
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -78,17 +78,17 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 		return nil
 	}
 	if m.chunkManager == nil {
-		return errors.New("chunk manager is nil")
+		return merr.WrapErrServiceInternalMsg("chunk manager is nil")
 	}
 	if m.allocator == nil {
-		return errors.New("id allocator is nil")
+		return merr.WrapErrServiceInternalMsg("id allocator is nil")
 	}
 	if m.metaWriter == nil {
-		return errors.New("meta writer is nil")
+		return merr.WrapErrServiceInternalMsg("meta writer is nil")
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.VChannel)
 	if collectionID <= 0 {
-		return errors.Errorf("invalid vchannel %q for transform log materialization", req.VChannel)
+		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for transform log materialization", req.VChannel)
 	}
 	for _, group := range splitMaterializeGroups(req) {
 		if err := m.materializeGroup(ctx, req.VChannel, collectionID, req.TargetTimeTick, group); err != nil {

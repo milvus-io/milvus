@@ -5,7 +5,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -14,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -344,7 +344,7 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		return err
 	}
 	if result == nil || result.PersistedStorage == nil {
-		return errors.New("growing segment pack writer returned empty persisted storage")
+		return merr.WrapErrServiceInternalMsg("growing segment pack writer returned empty persisted storage")
 	}
 
 	s.mu.Lock()

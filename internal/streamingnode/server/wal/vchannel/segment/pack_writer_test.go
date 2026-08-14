@@ -188,7 +188,7 @@ func TestFlushInsertBufferBuildsStorageV2ColumnGroups(t *testing.T) {
 
 	writer := &growingBulkPackWriter{
 		writeFn: func(_ context.Context, req *growingBulkWriteRequest) (*growingBulkWriteResult, error) {
-			require.Equal(t, int64(storage.StorageV2), req.storageVersion)
+			require.Equal(t, storage.StorageV2, req.storageVersion)
 			require.NotEmpty(t, req.currentSplit)
 			for _, columnGroup := range req.currentSplit {
 				require.NotEmpty(t, columnGroup.Fields)

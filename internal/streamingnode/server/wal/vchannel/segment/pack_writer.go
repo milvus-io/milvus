@@ -4,7 +4,6 @@ import (
 	"context"
 	"path"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -84,7 +84,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 
 	schema := pack.Schema
 	if schema == nil {
-		return nil, errors.New("growing flush pack schema is nil")
+		return nil, merr.WrapErrServiceInternalMsg("growing flush pack schema is nil")
 	}
 	insertData, err := buildGrowingInsertData(schema, pack)
 	if err != nil {
@@ -145,7 +145,7 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 		if err := forEachSegmentInsertMessage(raw, pack.SegmentID, func(insert segmentInsertMessage) error {
 			request := insert.Message.MustBody()
 			if request == nil {
-				return errors.New("growing insert message has nil request")
+				return merr.WrapErrServiceInternalMsg("growing insert message has nil request")
 			}
 			request.ShardName = pack.VChannel
 			request.CollectionID = pack.CollectionID
@@ -164,7 +164,7 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 		}
 	}
 	if len(insertMessages) == 0 {
-		return nil, errors.Newf("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID)
+		return nil, merr.WrapErrServiceInternalMsg("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID)
 	}
 	prepared, err := writebuffer.PrepareInsert(schema, pkField, insertMessages)
 	if err != nil {

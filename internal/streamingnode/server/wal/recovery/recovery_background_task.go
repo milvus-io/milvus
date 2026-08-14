@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -174,7 +172,7 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, s
 			case moduleapi.SnapshotOpUpsert:
 				meta, ok := snapshot.Payload().(*streamingpb.VChannelMeta)
 				if !ok || meta == nil {
-					return errors.New("vchannel dirty snapshot payload is not VChannelMeta")
+					return merr.WrapErrServiceInternalMsg("vchannel dirty snapshot payload is not VChannelMeta")
 				}
 				return catalog.SaveVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
 			case moduleapi.SnapshotOpUpsertBase:
@@ -190,7 +188,7 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, s
 				}
 				return catalog.DropVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
 			default:
-				return errors.Errorf("unknown vchannel snapshot op: %d", snapshot.Op())
+				return merr.WrapErrServiceInternalMsg("unknown vchannel snapshot op: %d", snapshot.Op())
 			}
 		case moduleapi.ModuleNameSegment:
 			switch snapshot.Op() {
@@ -203,23 +201,23 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, s
 			case moduleapi.SnapshotOpDelete:
 				return catalog.DropSegmentAssignments(ctx, key.PChannel, []int64{key.SegmentID})
 			default:
-				return errors.Errorf("unknown segment snapshot op: %d", snapshot.Op())
+				return merr.WrapErrServiceInternalMsg("unknown segment snapshot op: %d", snapshot.Op())
 			}
 		case moduleapi.ModuleNameTransformLog:
 			switch snapshot.Op() {
 			case moduleapi.SnapshotOpUpsert:
 				meta, ok := snapshot.Payload().(*streamingpb.VChannelTransformLogMeta)
 				if !ok || meta == nil {
-					return errors.New("transformlog dirty snapshot payload is not VChannelTransformLogMeta")
+					return merr.WrapErrServiceInternalMsg("transformlog dirty snapshot payload is not VChannelTransformLogMeta")
 				}
 				return catalog.SaveTransformLogMeta(ctx, key.PChannel, map[string]*streamingpb.VChannelTransformLogMeta{key.VChannel: meta})
 			case moduleapi.SnapshotOpDelete:
 				return catalog.DropTransformLogMeta(ctx, key.PChannel, []string{key.VChannel})
 			default:
-				return errors.Errorf("unknown transformlog snapshot op: %d", snapshot.Op())
+				return merr.WrapErrServiceInternalMsg("unknown transformlog snapshot op: %d", snapshot.Op())
 			}
 		default:
-			return errors.Errorf("unknown module dirty snapshot: %s", snapshot.ModuleName())
+			return merr.WrapErrServiceInternalMsg("unknown module dirty snapshot: %s", snapshot.ModuleName())
 		}
 	})
 }

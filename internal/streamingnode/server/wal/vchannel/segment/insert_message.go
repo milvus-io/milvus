@@ -1,10 +1,9 @@
 package segment
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // segmentInsertMessage is an Insert or Txn(Insert) entry selected for one
@@ -22,7 +21,7 @@ func forEachSegmentInsertMessage(
 	visit func(segmentInsertMessage) error,
 ) error {
 	if raw == nil {
-		return errors.New("nil insert WAL message")
+		return merr.WrapErrServiceInternalMsg("nil insert WAL message")
 	}
 	switch raw.MessageType() {
 	case message.MessageTypeInsert:
@@ -35,7 +34,7 @@ func forEachSegmentInsertMessage(
 	case message.MessageTypeTxn:
 		txn := message.AsImmutableTxnMessage(raw)
 		if txn == nil {
-			return errors.New("invalid txn WAL message")
+			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
 		}
 		return txn.RangeOver(func(inner message.ImmutableMessage) error {
 			if inner.MessageType() != message.MessageTypeInsert {
