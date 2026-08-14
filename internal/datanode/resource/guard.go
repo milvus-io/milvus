@@ -111,6 +111,8 @@ var (
 	globalGuard       Guard
 	globalGuardOnce   sync.Once
 	globalGuardCancel context.CancelFunc
+	// globalGuardDone closes once the singleton's sampling loop has returned.
+	globalGuardDone chan struct{}
 )
 
 // GetGuard returns the process-wide guard shared by the compaction, index and
@@ -124,8 +126,9 @@ func GetGuard() Guard {
 		// (e.g. distributed/cdc/service.go).
 		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec
 		globalGuardCancel = cancel
+		globalGuardDone = make(chan struct{})
 		g := NewGuard()
-		g.startWatermarkLoop(ctx)
+		g.startWatermarkLoop(ctx, globalGuardDone)
 		globalGuard = g
 	})
 	return globalGuard
@@ -141,10 +144,19 @@ func GetGuard() Guard {
 // patch -- then fails or not depending on which test ran first. Declaration
 // order happens to save it today; -shuffle, a -run filter or a file rename does
 // not.
+// Canceling is not enough on its own: a sample already inside sampleOnce keeps
+// running after the cancel returns, and would call the patched
+// hardware.GetUsedMemoryCount after the caller's cleanup had torn the patch
+// down. Waiting for the loop to actually return closes that window -- the same
+// class of hazard as the leaked goroutine itself, just narrower.
 func stopGlobalGuardForTest() {
 	if globalGuardCancel != nil {
 		globalGuardCancel()
 		globalGuardCancel = nil
+	}
+	if globalGuardDone != nil {
+		<-globalGuardDone
+		globalGuardDone = nil
 	}
 	globalGuard = nil
 	globalGuardOnce = sync.Once{}
@@ -184,6 +196,12 @@ func (g *guard) budgetLocked() taskresource.Capacity {
 }
 
 // isOversizedLocked reports whether req can never run alongside anything else.
+// It is the single definition of oversizedness; everything that needs to ask
+// the question goes through here, including hasOversizedWaiterLocked, which
+// used to inline the same comparison. Two copies of one rule is the defect
+// class this whole effort keeps finding, and it also made the rule untestable:
+// a mutation of this function did not reach the queue, so nothing could tell
+// the two definitions apart.
 func (g *guard) isOversizedLocked(req taskresource.Requirement) bool {
 	return !req.FitsIn(g.nodeCapacityLocked())
 }
@@ -291,7 +309,18 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		// request that cannot be met on an empty node is run the same way an
 		// oversized one is, alone. That is strictly safer than running it
 		// concurrently, which is what the node did before this branch.
-		if len(g.ledger) == 0 {
+		//
+		// budget.Memory > 0 is the one case where the premise above is false.
+		// Once nonTask reaches capacity the budget floors at zero, so EVERY
+		// request fails the fit check and the terminal case would admit every
+		// one of them -- the memory check switched off entirely, which is the
+		// opposite of what it is for. And "as much budget as the node will ever
+		// offer" is untrue there: nonTask is a decaying peak-hold, so a zero
+		// budget is a transient state that genuinely does resolve. The 0.85
+		// freeze bounds how long, but standalone can sit in the 0.75-0.85 band
+		// indefinitely with another role's memory counted as non-task, so this
+		// is reachable rather than theoretical.
+		if len(g.ledger) == 0 && budget.Memory > 0 {
 			// Same queue rule as the oversized path above, for the same reason:
 			// taking the whole node must not be a way past tasks already
 			// waiting. Acquire is FIFO, so waiting carries this task to the
@@ -363,12 +392,10 @@ func (g *guard) blockedByHeadOfLineLocked(taskID int64, budget taskresource.Capa
 }
 
 // hasOversizedWaiterLocked reports whether anyone other than exceptTaskID is
-// queued for the whole node. Capacity is read once rather than per waiter: the
-// production path recomputes it from paramtable and hardware on every call.
+// queued for the whole node.
 func (g *guard) hasOversizedWaiterLocked(exceptTaskID int64) bool {
-	capacity := g.nodeCapacityLocked()
 	for _, w := range g.waiters {
-		if w.taskID != exceptTaskID && !w.req.FitsIn(capacity) {
+		if w.taskID != exceptTaskID && g.isOversizedLocked(w.req) {
 			return true
 		}
 	}

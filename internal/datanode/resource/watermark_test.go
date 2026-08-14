@@ -506,15 +506,25 @@ func TestStartWatermarkLoopReturnsImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := make(chan struct{})
+	returned := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
-		defer close(done)
-		g.startWatermarkLoop(ctx)
+		defer close(returned)
+		g.startWatermarkLoop(ctx, stopped)
 	}()
 
 	select {
-	case <-done:
+	case <-returned:
 	case <-time.After(time.Second):
 		t.Fatal("startWatermarkLoop must not block the caller")
+	}
+
+	// And the loop it started signals when it has actually finished, so a
+	// caller that cancels can wait for the last sample instead of racing it.
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("the loop must close its done channel once ctx ends")
 	}
 }
