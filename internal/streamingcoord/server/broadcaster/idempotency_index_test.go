@@ -180,7 +180,11 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 		createImportBroadcastTaskProto(100, "import/1/k",
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{0x01}))
 
-	guards := bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey())
+	// Hold an EXCLUSIVE key, mirroring what import actually holds in production
+	// (SharedDBName + ExclusiveCollectionName). A shared key would not conflict
+	// with itself, which would make the release check below vacuous.
+	collectionKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
+	guards := bm.resourceKeyLocker.Lock(collectionKey)
 	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: guards}
 
 	msg := message.NewImportMessageBuilderV1().
@@ -200,14 +204,23 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 	require.Equal(t, "import/1/k", message.IdempotencyKeyOf(result.Duplicated))
 
 	// On a hit the guards were never consumed, so Close() must actually release
-	// the lock — otherwise the next broadcast on the same collection blocks forever.
+	// them — a leaked guard would block every later import on that collection
+	// forever. Contend on the SAME exclusive key to prove both halves: still held
+	// before Close, actually released after.
 	require.NotNil(t, api.guards)
-	api.Close()
+
 	released := make(chan struct{})
 	go func() {
-		bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey()).Unlock()
+		bm.resourceKeyLocker.Lock(collectionKey).Unlock()
 		close(released)
 	}()
+	select {
+	case <-released:
+		t.Fatal("exclusive resource key was acquirable while the broadcast still held it")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	api.Close()
 	select {
 	case <-released:
 	case <-time.After(3 * time.Second):
