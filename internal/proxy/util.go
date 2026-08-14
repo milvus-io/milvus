@@ -1497,6 +1497,18 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
+	if v := apiKeyVerifier(); v != nil {
+		user, err := v.Verify(rawToken)
+		if err != nil {
+			mlog.Warn(context.TODO(), "fail to verify apikey", mlog.Err(err))
+			return "", merr.WrapErrParameterInvalidMsg("invalid apikey")
+		}
+		if user == "" {
+			mlog.Warn(context.TODO(), "installed verifier returned no username for apikey")
+			return "", merr.WrapErrParameterInvalidMsg("invalid apikey")
+		}
+		return user, nil
+	}
 	hoo := hookutil.GetHook()
 	user, err := hoo.VerifyAPIKey(rawToken)
 	if err != nil {

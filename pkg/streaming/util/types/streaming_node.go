@@ -86,6 +86,15 @@ func (n StreamingNodeInfo) String() string {
 type StreamingNodeInfoWithResourceGroup struct {
 	StreamingNodeInfo
 	ResourceGroup string // Resource group label from session's ServerLabels, if empty, it means the streaming node doesn't have a resource group.
+
+	// NoQueryService reports that the query node embedded in this streaming
+	// node does not serve shard queries, so no replica may place a shard
+	// delegator on it. The node still owns its write ahead logs and advances
+	// their checkpoints.
+	//
+	// It is stated negatively so that the zero value is the answer milvus gave
+	// before the field existed: a node nobody labelled serves queries.
+	NoQueryService bool
 }
 
 // StreamingNodeStatus is the information of a streaming node.

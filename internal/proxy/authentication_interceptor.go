@@ -92,6 +92,10 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			md[util.HeaderToken] = []string{rawToken}
 			ctx = metadata.NewIncomingContext(ctx, md)
 		} else {
+			if ExternalListenerRequiresAPIKey() {
+				mlog.Warn(ctx, "rejecting username and password authentication because the installed verifier requires api keys")
+				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
+			}
 			// username+password authentication
 			username, password := parseMD(rawToken)
 			if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {

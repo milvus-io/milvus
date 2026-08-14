@@ -623,6 +623,12 @@ func (c *Core) initRbac(initCtx context.Context) error {
 		}
 	}
 
+	if mt, ok := c.meta.(*MetaTable); ok {
+		if err := bootstrapExtensionRBAC(initCtx, mt.catalog); err != nil {
+			return errors.Wrap(err, "failed to bootstrap extension rbac")
+		}
+	}
+
 	if Params.RoleCfg.Enabled.GetAsBool() {
 		return c.initBuiltinRoles(initCtx)
 	}

@@ -50,6 +50,26 @@ const (
 	LabelStreamingNodeEmbeddedQueryNode       = "STREAMING-EMBEDDED"
 	LegacyLabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_" + LabelStreamingNodeEmbeddedQueryNode
 
+	// StreamingNode
+	//
+	// LabelStreamingNodeNoQueryService marks a streaming node whose embedded
+	// query node does not serve shard queries. The node still owns its write
+	// ahead logs and advances their checkpoints; it is only excluded from the
+	// streaming query nodes a replica may place a shard delegator on.
+	//
+	// It is set the way every server label is set, from the environment:
+	//   MILVUS_SERVER_LABEL_STREAMINGNODE_STREAMING_NOQUERY=1
+	//
+	// The name is underscored rather than hyphenated, unlike the label above
+	// it, because this one is meant to be set by whoever deploys milvus: a
+	// hyphen makes the environment variable name illegal to export from a
+	// shell. The label above is only ever set by milvus's own process, from
+	// Go, where the name is never parsed as an identifier.
+	//
+	// Its absence is the answer milvus gave before the label existed, so a
+	// deployment that does not set it behaves exactly as it does today.
+	LabelStreamingNodeNoQueryService = "STREAMING_NOQUERY"
+
 	// All Roles
 	LabelStandalone    = "STANDALONE"
 	LabelResourceGroup = "RESOURCE_GROUP"

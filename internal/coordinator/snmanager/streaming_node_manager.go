@@ -146,6 +146,12 @@ func (s *StreamingNodeManager) GetWALLocated(vChannel string) int64 {
 }
 
 // GetStreamingQueryNodeIDs returns the server ids of the streaming query nodes.
+//
+// Every streaming node is returned, including one that declared it does not
+// serve shard queries: this answers "which nodes own a write ahead log", which
+// is what the callers that count streaming nodes or dispatch a request to one
+// are asking. Placing a shard delegator is a different question, and
+// GetStreamingQueryNodeIDsByResourceGroup is what answers it.
 func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
 	streamingNodes := s.fetchStreamingNodes()
 	streamingNodeIDs := typeutil.NewUniqueSet()
@@ -156,10 +162,22 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
 }
 
 // GetStreamingQueryNodeIDsByResourceGroup returns the server ids of the streaming query nodes grouped by resource group.
+//
+// A streaming node that declared it does not serve shard queries is left out.
+// This is the only thing that feeds a replica's streaming query nodes, and a
+// replica's streaming query nodes are the only nodes a shard delegator is ever
+// placed on, so leaving it out here is what keeps a delegator off it - rather
+// than each placement site having to remember to exclude it.
+//
+// No streaming node declares this unless a deployment labels it, so a stock
+// binary groups exactly the nodes it always did.
 func (s *StreamingNodeManager) GetStreamingQueryNodeIDsByResourceGroup() map[string]typeutil.UniqueSet {
 	streamingNodes := s.fetchStreamingNodes()
 	nodesByRG := make(map[string]typeutil.UniqueSet)
 	for _, node := range streamingNodes {
+		if node.NoQueryService {
+			continue
+		}
 		if _, ok := nodesByRG[node.ResourceGroup]; !ok {
 			nodesByRG[node.ResourceGroup] = typeutil.NewUniqueSet()
 		}

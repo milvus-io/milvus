@@ -275,7 +275,12 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		var rwNodes []int64
 		if streamingutil.IsStreamingServiceEnabled() {
 			rwNodes = replica.GetRWSQNodes()
-		} else {
+		}
+		// Falling back covers the replica whose streaming nodes serve no
+		// queries, where the delegator belongs on a regular query node. With
+		// the streaming service off, or on with a streaming node that does
+		// serve queries, this is the path it always took.
+		if len(rwNodes) == 0 {
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
 				rwNodes = replica.GetRWNodes()
 			}

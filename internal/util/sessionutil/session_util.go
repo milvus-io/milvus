@@ -159,6 +159,18 @@ func (s *SessionRaw) GetResourceGroupName() string {
 	return s.ServerLabels[LabelResourceGroup]
 }
 
+// HasNoQueryService reports whether this streaming node declared that its
+// embedded query node does not serve shard queries.
+//
+// The absence of the label is the answer milvus gave before it existed, so an
+// unlabelled session reads as query serving.
+func (s *SessionRaw) HasNoQueryService() bool {
+	if s.ServerLabels == nil {
+		return false
+	}
+	return s.ServerLabels[LabelStreamingNodeNoQueryService] == "1"
+}
+
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // Exclusive indicates that this server can only start one.

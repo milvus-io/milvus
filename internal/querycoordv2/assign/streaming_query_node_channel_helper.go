@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func assignChannelToWALLocatedFirstForNodeInfo(
@@ -57,10 +58,36 @@ func assignChannelToWALLocatedFirstForNodeInfo(
 	return notFoundChannels, plans, scoreDelta
 }
 
+// QueryServingStreamingNodes returns the streaming query nodes a shard
+// delegator may be placed on.
+//
+// It is the flattened form of the per-resource-group grouping, which is what
+// feeds a replica's streaming query nodes, so it excludes any streaming node
+// that declared it does not serve shard queries.
+//
+// An empty result means no streaming node anywhere can carry a delegator. That
+// is not a stock configuration - a streaming node embeds a query node - but it
+// is the shape of a deployment that runs the streaming node only to own its
+// write ahead logs. Channel assignment then falls back to regular read-write
+// query nodes, which is what it does with the streaming service off.
+func QueryServingStreamingNodes() typeutil.UniqueSet {
+	serving := typeutil.NewUniqueSet()
+	for _, nodes := range snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup() {
+		serving.Insert(nodes.Collect()...)
+	}
+	return serving
+}
+
 // filterSQNIfStreamingServiceEnabled filter out the non-sqn querynode.
 func filterSQNIfStreamingServiceEnabled(nodes []int64) []int64 {
 	if streamingutil.IsStreamingServiceEnabled() {
-		sqns := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+		sqns := QueryServingStreamingNodes()
+		if sqns.Len() == 0 {
+			// No streaming node serves queries, so the candidates are regular
+			// query nodes and every one of them is expected. Filtering here
+			// would leave the channel with nowhere to go.
+			return nodes
+		}
 		expectedSQNs := make([]int64, 0, len(nodes))
 		unexpectedNodes := make([]int64, 0)
 		for _, node := range nodes {

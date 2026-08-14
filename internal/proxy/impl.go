@@ -770,6 +770,10 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		return merr.Status(err), nil
 	}
 
+	if status := interceptLoadCollection(ctx, request); status != nil {
+		return status, nil
+	}
+
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-LoadCollection")
 	defer sp.End()
 	method := "LoadCollection"
@@ -821,6 +825,10 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+
+	if status := interceptReleaseCollection(ctx, request); status != nil {
+		return status, nil
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ReleaseCollection")
@@ -1653,6 +1661,10 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		return merr.Status(err), nil
 	}
 
+	if status := interceptLoadPartitions(ctx, request); status != nil {
+		return status, nil
+	}
+
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-LoadPartitions")
 	defer sp.End()
 	method := "LoadPartitions"
@@ -1702,6 +1714,10 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+
+	if status := interceptReleasePartitions(ctx, request); status != nil {
+		return status, nil
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ReleasePartitions")
@@ -1885,6 +1901,11 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetLoadingProgressResponse{Status: merr.Status(err)}, nil
 	}
+
+	if resp := interceptGetLoadingProgress(ctx, request); resp != nil {
+		return resp, nil
+	}
+
 	method := "GetLoadingProgress"
 	tr := timerecord.NewTimeRecorder(method)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetLoadingProgress")
@@ -1959,6 +1980,11 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetLoadStateResponse{Status: merr.Status(err)}, nil
 	}
+
+	if resp := interceptGetLoadState(ctx, request); resp != nil {
+		return resp, nil
+	}
+
 	method := "GetLoadState"
 	tr := timerecord.NewTimeRecorder(method)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetLoadState")
@@ -2455,6 +2481,12 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}, nil
 	}
 
+	if st := interceptDML(ctx, "Insert", request); st != nil {
+		return &milvuspb.MutationResult{
+			Status: st,
+		}, nil
+	}
+
 	// Check for external collection - insert is not supported
 	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
 		return &milvuspb.MutationResult{
@@ -2592,6 +2624,12 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
+	if st := interceptDML(ctx, "Delete", request); st != nil {
+		return &milvuspb.MutationResult{
+			Status: st,
+		}, nil
+	}
+
 	// Check for external collection - delete is not supported
 	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
 		return &milvuspb.MutationResult{
@@ -2685,6 +2723,12 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
+		}, nil
+	}
+
+	if st := interceptDML(ctx, "Upsert", request); st != nil {
+		return &milvuspb.MutationResult{
+			Status: st,
 		}, nil
 	}
 
@@ -2834,6 +2878,21 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	// The cleaned parameters replace the request's own, here at the entry, so
+	// that every attempt the retry below makes sends the same stripped request.
+	ctx, request.SearchParams = rewriteRequestParams(ctx, request.GetSearchParams())
+
+	// Ahead of the retry loop, so one readiness answer covers every attempt
+	// node.search makes, and so the resource group it named is on the context
+	// every attempt runs under.
+	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())
+	defer placement.Release()
+	if readyErr != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(readyErr),
+		}, nil
+	}
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -3061,6 +3120,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
+
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
@@ -3104,6 +3165,18 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+	// A hybrid search carries the reserved parameter on its rank params; see
+	// the note in Search on why this runs outside the retry.
+	ctx, request.RankParams = rewriteRequestParams(ctx, request.GetRankParams())
+
+	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())
+	defer placement.Release()
+	if readyErr != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(readyErr),
+		}, nil
+	}
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -3291,6 +3364,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		dbName,
 		collectionName,
 	).Observe(float64(searchDur))
+
+	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3592,6 +3667,14 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		return resp, nil
 	}
 
+	// Flush is a write-path operation even though it moves no rows: it seals
+	// segments and forces them out, which only means something on an instance
+	// that accepted the writes behind them.
+	if st := interceptDML(ctx, "Flush", request); st != nil {
+		resp.Status = st
+		return resp, nil
+	}
+
 	// Check for external collection - flush is not supported
 	for _, collName := range request.GetCollectionNames() {
 		if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), collName, "flush"); err != nil {
@@ -3748,6 +3831,9 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
+			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true
@@ -3756,6 +3842,25 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	// Ahead of the task, which captures ctx: the task and everything it starts
+	// must run under the context the rewrite returned.
+	ctx, request.QueryParams = rewriteRequestParams(ctx, request.GetQueryParams())
+
+	// The gate sits on the RPC entry rather than on node.query, which the
+	// search pipeline's requery operator re-enters with the ids a search has
+	// already returned. That sub-query runs inside a request which has already
+	// passed the gate and is still holding its placement, so gating it again
+	// would ask a second time for readiness the caller already holds - and on a
+	// form where readiness takes a lock or a pin, the outer request is exactly
+	// what the inner one would be waiting on.
+	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())
+	defer placement.Release()
+	if readyErr != nil {
+		return &milvuspb.QueryResults{
+			Status: merr.Status(readyErr),
+		}, nil
+	}
+
 	qt := &queryTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -4129,6 +4234,11 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	if st := interceptDML(ctx, "FlushAll", request); st != nil {
+		resp.Status = st
 		return resp, nil
 	}
 
@@ -6286,6 +6396,16 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 		GoVersion:  os.Getenv(metricsinfo.MilvusUsedGoVersion),
 		DeployMode: os.Getenv(metricsinfo.DeployModeEnvKey),
 		Reserved:   make(map[string]string),
+	}
+
+	// Bind the connection before it is registered: an extension that refuses
+	// the client's declaration must not leave a registered connection behind
+	// that nothing will ever bind or collect.
+	if err := onConnect(int64(ts), request.GetClientInfo()); err != nil {
+		logger.Info(ctx, "connect failed, extension refused the connection", mlog.Err(err))
+		return &milvuspb.ConnectResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	connection.GetManager().Register(ctx, int64(ts), request.GetClientInfo())

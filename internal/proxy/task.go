@@ -482,6 +482,17 @@ func (t *createCollectionTask) validateTTL() error {
 	return nil
 }
 
+// collectionAlreadyExists reports whether the collection is already
+// resolvable in the metadata cache. Guards globalMetaCache being nil, which
+// is not always initialised in tests.
+func collectionAlreadyExists(ctx context.Context, database, collectionName string) bool {
+	if globalMetaCache == nil {
+		return false
+	}
+	_, err := globalMetaCache.GetCollectionID(ctx, database, collectionName)
+	return err == nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -681,6 +692,30 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Ask admission before checking existence, not after. A create-collection
+	// request almost always names a collection that does not exist yet -- that
+	// is the point of the request -- so an existence-first check pays for a
+	// coordinator round trip (collectionAlreadyExists falls through to a
+	// DescribeCollection RPC on a cache miss) on essentially every real
+	// create, purely to guard against the rare idempotent retry. Asking
+	// admission first is free when it admits: that is both the common case
+	// under capacity and the only case when no provider is installed at all,
+	// so PreExecute returns without ever touching the cache or the
+	// coordinator. Only when admission would reject -- rare, and a request
+	// that was already headed for failure -- do we pay for the existence
+	// lookup, and only then to distinguish a genuine retry (the collection is
+	// already counted, so admission necessarily rejects it) from a genuine
+	// over-cap create, so the retry still gets rootcoord's own "already
+	// exists" or schema-mismatch answer instead of ResourceExhausted. Do not
+	// flip this back to existence-first: it reads simpler, but it relocates a
+	// coordinator round trip from the rare rejected case onto every create.
+	if err := checkCreateCollectionAdmission(ctx, t.mixCoord); err != nil {
+		if !collectionAlreadyExists(ctx, t.GetDbName(), t.GetCollectionName()) {
+			return err
+		}
+	}
+
 	return nil
 }
 

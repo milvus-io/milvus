@@ -1,0 +1,134 @@
+// Package extension is milvus's deployment-form extension framework.
+//
+// A distribution links its own implementation of the capability interfaces and
+// installs one Provider at boot. A stock milvus binary installs none, so every
+// capability is nil and each seam falls through to the native path unchanged.
+package extension
+
+import (
+	"errors"
+	"fmt"
+	"sync/atomic"
+)
+
+// CapabilityID names one entry of the capability table.
+type CapabilityID string
+
+const (
+	// CapProxyExtension is the proxy-side behaviour takeover.
+	CapProxyExtension CapabilityID = "proxy_extension"
+
+	// CapAPIKey is API key verification.
+	CapAPIKey CapabilityID = "api_key"
+
+	// CapRBACBootstrap is account and role seeding at rootcoord startup.
+	CapRBACBootstrap CapabilityID = "rbac_bootstrap"
+
+	// CapAdmission is per-instance admission checking on DDL such as
+	// collection and database creation.
+	CapAdmission CapabilityID = "admission"
+
+	// CapCoordinatorEngine is control-plane machinery hosted in the
+	// coordinator process, with its own gRPC services on the coordinator's
+	// server.
+	CapCoordinatorEngine CapabilityID = "coordinator_engine"
+
+	// CapResourceGroupInterceptor is interception of the resource-group
+	// requests the coordinator receives.
+	CapResourceGroupInterceptor CapabilityID = "resource_group_interceptor"
+
+	// CapIndexDrain is the graceful drop of a vector index on a loaded
+	// collection.
+	CapIndexDrain CapabilityID = "index_drain"
+
+	// CapLoadPlacementScope is whether a load request states the
+	// collection's whole desired placement or only the placement of the
+	// resource groups it names.
+	CapLoadPlacementScope CapabilityID = "load_placement_scope"
+)
+
+// Capabilities is the table a Provider fills in. A nil field means the
+// capability is not taken over and the native path applies.
+//
+// Fields are only ever added, never removed or renamed: adding a field is
+// additive and keeps existing implementations compiling, whereas adding a
+// method to an interface would break every one of them.
+type Capabilities struct {
+	ProxyExt          ProxyExtension
+	APIKey            APIKeyVerifier
+	RBACBootstrap     RBACBootstrapper
+	Admission         AdmissionChecker
+	CoordinatorEngine CoordinatorEngine
+	ResourceGroups    ResourceGroupInterceptor
+	IndexDrain        IndexDrainer
+	LoadPlacement     LoadPlacementScope
+}
+
+func (c Capabilities) has(id CapabilityID) bool {
+	switch id {
+	case CapProxyExtension:
+		return c.ProxyExt != nil
+	case CapAPIKey:
+		return c.APIKey != nil
+	case CapRBACBootstrap:
+		return c.RBACBootstrap != nil
+	case CapAdmission:
+		return c.Admission != nil
+	case CapCoordinatorEngine:
+		return c.CoordinatorEngine != nil
+	case CapResourceGroupInterceptor:
+		return c.ResourceGroups != nil
+	case CapIndexDrain:
+		return c.IndexDrain != nil
+	case CapLoadPlacementScope:
+		return c.LoadPlacement != nil
+	default:
+		return false
+	}
+}
+
+// Provider is one deployment form's extension implementation.
+type Provider interface {
+	// Name identifies the provider in logs and errors.
+	Name() string
+	// Requires lists the capabilities this form cannot run without. SetProvider
+	// fails when any of them is absent from the table, so a wiring mistake stops
+	// the process instead of silently degrading to the native path.
+	Requires() []CapabilityID
+	// Capabilities returns the table.
+	Capabilities() Capabilities
+}
+
+type box struct {
+	provider Provider
+	caps     Capabilities
+}
+
+var installed atomic.Pointer[box]
+
+// SetProvider installs the provider and verifies its declared requirements.
+// It may be called at most once, before any component starts.
+func SetProvider(p Provider) error {
+	if p == nil {
+		return errors.New("extension: nil provider")
+	}
+	c := p.Capabilities()
+	for _, id := range p.Requires() {
+		if !c.has(id) {
+			return fmt.Errorf("extension: provider %q requires capability %q but did not supply it", p.Name(), id)
+		}
+	}
+	if !installed.CompareAndSwap(nil, &box{provider: p, caps: c}) {
+		return fmt.Errorf("extension: provider %q already installed", installed.Load().provider.Name())
+	}
+	return nil
+}
+
+// Caps returns the installed capability table, or the zero table when no
+// provider was installed.
+func Caps() Capabilities {
+	if b := installed.Load(); b != nil {
+		return b.caps
+	}
+	return Capabilities{}
+}

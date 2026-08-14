@@ -93,7 +93,9 @@ func TestDropDatabaseTask(t *testing.T) {
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 	).Maybe()
+	oldCache := globalMetaCache
 	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
 
 	t.Run("ok", func(t *testing.T) {
 		err := task.PreExecute(ctx)

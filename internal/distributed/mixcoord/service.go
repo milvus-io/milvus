@@ -237,6 +237,10 @@ func (s *Server) startGrpcLoop() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+	// The extension seam sits here, and only here, because gRPC forbids
+	// registering a service once Serve has begun: this is the last point at
+	// which an installed engine can add services of its own.
+	registerCoordinatorEngineGRPC(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err
@@ -252,6 +256,13 @@ func (s *Server) start() error {
 
 	if err := s.mixCoord.Start(); err != nil {
 		mlog.Error(s.ctx, "MixCoord start service failed", mlog.Err(err))
+		return err
+	}
+
+	// The extension seam sits after the coordinator is running, because an
+	// engine's first act is usually to read coordinator state.
+	if err := startCoordinatorEngine(s.ctx, s.mixCoord); err != nil {
+		mlog.Error(s.ctx, "coordinator engine start failed", mlog.Err(err))
 		return err
 	}
 
@@ -274,6 +285,10 @@ func (s *Server) Stop() (err error) {
 	if s.tikvCli != nil {
 		defer s.tikvCli.Close()
 	}
+
+	// The extension seam sits before the coordinator is torn down, so an
+	// engine still sees a working coordinator while it stops.
+	stopCoordinatorEngine(s.ctx)
 
 	if s.mixCoord != nil {
 		mlog.Info(s.ctx, "graceful stop rootCoord")

@@ -190,6 +190,51 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 	return err
 }
 
+// CheckNodesSynced reports whether the given query nodes hold the current
+// analyzer file resources.
+//
+// This is the query-side counterpart of CheckAllQnReady. A DDL only needs
+// whatever process validates analyzer parameters to hold the files; a node
+// that actually runs an analyzer over data - BM25, raw text match - needs them
+// on its own disk. Callers pass the nodes they are about to put data on, so a
+// lagging node they are not using cannot block them.
+//
+// A node with no record has confirmed nothing and must not be read as ready: a
+// node registers its session, which is what puts it in a resource group and in
+// the task executor, before its first sync has been asked for. The comparison
+// is against the version rather than mere presence for the same reason - a node
+// that acknowledged one sync keeps its record, so presence alone would pass a
+// node still downloading the version registered after it.
+func (m *FileResourceObserver) CheckNodesSynced(nodeIDs []int64) error {
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	if m.meta == nil {
+		return merr.WrapErrServiceUnavailable("rootcoord meta is not ready")
+	}
+
+	resources, version := m.meta.ListFileResource(m.ctx)
+	if version == 0 || len(resources) == 0 {
+		return nil
+	}
+	if m.qnMode != fileresource.SyncMode {
+		return nil
+	}
+
+	for _, nodeID := range nodeIDs {
+		info, ok := m.distribution.Get(nodeID)
+		if !ok {
+			return merr.WrapErrServiceUnavailableMsg(
+				"node %d has not synced any analyzer file resource yet", nodeID)
+		}
+		if info.Version < version {
+			return merr.WrapErrServiceUnavailableMsg(
+				"node %d analyzer file resource version %d is behind %d", nodeID, info.Version, version)
+		}
+	}
+	return nil
+}
+
 func (m *FileResourceObserver) Sync() error {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()

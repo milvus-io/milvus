@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -977,14 +978,34 @@ func (s *mixCoordImpl) GetShardLeaders(ctx context.Context, req *querypb.GetShar
 }
 
 func (s *mixCoordImpl) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	return s.queryCoordServer.CreateResourceGroup(ctx, req)
+	// Extension seam, see extension_seam.go: with none installed this returns req.
+	return s.queryCoordServer.CreateResourceGroup(ctx, beforeCreateResourceGroup(ctx, req))
 }
 
 func (s *mixCoordImpl) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
-	return s.queryCoordServer.UpdateResourceGroups(ctx, req)
+	// Extension seam, see extension_seam.go. This is the one resource-group
+	// request whose control flow an interceptor can change, so the native path
+	// is spelled out first: with none installed the update is forwarded
+	// exactly as it arrived and nothing below runs.
+	interceptor := resourceGroupInterceptor()
+	if interceptor == nil {
+		return s.queryCoordServer.UpdateResourceGroups(ctx, req)
+	}
+	update, err := interceptor.BeforeUpdateResourceGroups(ctx, req)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	if update.Applied {
+		return merr.Success(), nil
+	}
+	status, err := s.queryCoordServer.UpdateResourceGroups(ctx, update.RequestToApply(req))
+	afterUpdateResourceGroups(ctx, update, status, err)
+	return status, err
 }
 
 func (s *mixCoordImpl) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	// Extension seam, see extension_seam.go: with none installed this does nothing.
+	beforeDropResourceGroup(ctx, req)
 	return s.queryCoordServer.DropResourceGroup(ctx, req)
 }
 
@@ -1002,6 +1023,42 @@ func (s *mixCoordImpl) ListResourceGroups(ctx context.Context, req *milvuspb.Lis
 
 func (s *mixCoordImpl) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
 	return s.queryCoordServer.DescribeResourceGroup(ctx, req)
+}
+
+// GetLoadPercentageByResourceGroup exposes querycoord's per-resource-group
+// load progress to in-process callers. It is not part of any coordinator
+// service interface: no proto RPC carries it, and adding it to types.MixCoord
+// would force every generated mock of that interface to change. Callers reach
+// it by type-asserting the concrete coordinator; see
+// internal/distributed/mixcoord/extension_seam.go.
+func (s *mixCoordImpl) GetLoadPercentageByResourceGroup(ctx context.Context, collectionID int64, rgName string) (int32, error) {
+	return s.queryCoordServer.GetLoadPercentageByResourceGroup(ctx, collectionID, rgName)
+}
+
+// GetShardLeaderReadinessByResourceGroup exposes querycoord's
+// per-resource-group shard-leader readiness to in-process callers, on the same
+// terms as GetLoadPercentageByResourceGroup above: no proto RPC carries it, so
+// callers type-assert the concrete coordinator rather than growing
+// types.MixCoord and every generated mock of it.
+func (s *mixCoordImpl) GetShardLeaderReadinessByResourceGroup(ctx context.Context, collectionID int64, rgName string) (extension.ShardLeaderReadiness, error) {
+	return s.queryCoordServer.GetShardLeaderReadinessByResourceGroup(ctx, collectionID, rgName)
+}
+
+// InvalidateShardLeaderCache drops one collection's cached shard leaders on
+// every proxy the coordinator knows. It is exposed to in-process callers on
+// the same terms as the two methods above: no proto RPC carries it, so callers
+// type-assert the concrete coordinator rather than growing types.MixCoord and
+// every generated mock of it.
+//
+// The coordinator holds the only proxy client manager in the process, which is
+// why the fan-out has to live here rather than in the caller.
+func (s *mixCoordImpl) InvalidateShardLeaderCache(ctx context.Context, collectionID int64) error {
+	if s.proxyClientManager == nil {
+		return nil
+	}
+	return s.proxyClientManager.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+		CollectionIDs: []int64{collectionID},
+	})
 }
 
 func (s *mixCoordImpl) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
@@ -1186,7 +1243,12 @@ func (s *mixCoordImpl) GetIndexStatistics(ctx context.Context, req *indexpb.GetI
 }
 
 func (s *mixCoordImpl) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.datacoordServer.DropIndex(ctx, req)
+	// Extension seam, see extension_seam.go: with none installed drainOnCommit is
+	// false and neither call does anything.
+	drainOnCommit := beforeDropIndex(ctx, req)
+	status, err := s.datacoordServer.DropIndex(ctx, req)
+	afterDropIndex(ctx, req, drainOnCommit, status, err)
+	return status, err
 }
 
 func (s *mixCoordImpl) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {

@@ -78,6 +78,24 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
+	// ProxyResourceGroupSQLatency records the latency of a search or query
+	// attributed to the resource group that served it.
+	//
+	// It is a family of its own rather than an rg label on ProxySQLatency
+	// because only a deployment form that scopes its queries to a resource group
+	// can attribute anything: adding the label to the existing family would give
+	// every stock milvus an extra, permanently empty dimension on a metric its
+	// dashboards and recording rules already read. Nothing scopes a query in a
+	// binary with no provider installed, so it exposes no series here at all.
+	ProxyResourceGroupSQLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "resource_group_sq_latency",
+			Help:      "latency of search or query successfully, per resource group",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
+
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
 	ProxyCollectionSQLatency = prometheus.NewHistogramVec(
@@ -491,6 +509,17 @@ var (
 			Name:      "scanned_total_mb",
 			Help:      "the scanned total megabytes",
 		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
+
+	// ProxyQuotaAdmissionFailOpen records admission checks that admitted a
+	// request because the check itself failed, so the bypass is visible
+	// rather than silent.
+	ProxyQuotaAdmissionFailOpen = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "quota_admission_fail_open_total",
+			Help:      "count of quota-admission calls that failed open due to a count RPC error",
+		}, []string{"resource", "rpc"})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -502,6 +531,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyDeleteVectors)
 
 	registry.MustRegister(ProxySQLatency)
+	registry.MustRegister(ProxyResourceGroupSQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)
 	registry.MustRegister(ProxyMutationLatency)
 	registry.MustRegister(ProxyCollectionMutationLatency)
@@ -564,6 +594,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyScannedRemoteMB)
 	registry.MustRegister(ProxyScannedTotalMB)
+	registry.MustRegister(ProxyQuotaAdmissionFailOpen)
 	RegisterStreamingServiceClient(registry)
 	RegisterLoggingMetrics(registry)
 }

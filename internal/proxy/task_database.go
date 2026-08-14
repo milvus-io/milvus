@@ -75,6 +75,33 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
+
+	// A database that already exists must let rootcoord's own CreateDatabase
+	// answer (idempotent success or a genuine conflict), not a quota
+	// rejection: an admission check run ahead of this would turn a harmless
+	// retry against an instance already at its cap into ResourceExhausted.
+	//
+	// Unlike createCollectionTask.PreExecute's checkCreateCollectionAdmission
+	// (admission first, existence lookup only on rejection), this check stays
+	// existence-first: CheckDatabase/HasDatabase is a local map lookup with no
+	// RPC fallback on a miss, so there is no coordinator round trip to move
+	// off the common path here.
+	//
+	// The whole block is gated on the admission capability being installed.
+	// admissionChecker() is resolved once, through c, and that same value
+	// drives both the gate and the check itself -- there is no second
+	// consultation of extension.Caps() hiding in a wrapper function, because
+	// this path calls the checker directly rather than through one. With no
+	// provider installed PreExecute performs neither the existence lookup nor
+	// the admission call, reaching exactly the statements it reached before
+	// this task existed: installing nothing must change nothing, not even a
+	// local map read.
+	if c := admissionChecker(); c != nil {
+		if !CheckDatabase(ctx, cdt.GetDbName()) {
+			return c.CheckCreateDatabase(ctx, mixCoordAdmissionClient{cdt.mixCoord})
+		}
+	}
+
 	return nil
 }
 

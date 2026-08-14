@@ -94,7 +94,13 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 		for _, replica := range replicas {
 			nodes := replica.GetRWNodes()
 			if streamingutil.IsStreamingServiceEnabled() {
-				nodes = replica.GetRWSQNodes()
+				// Keep the regular read-write nodes when no streaming node of
+				// this replica serves queries: the delegators this checker is
+				// looking for were placed on them. A replica whose streaming
+				// nodes do serve queries reports them here as it always did.
+				if sqNodes := replica.GetRWSQNodes(); len(sqNodes) > 0 {
+					nodes = sqNodes
+				}
 			}
 			for _, node := range nodes {
 				delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))

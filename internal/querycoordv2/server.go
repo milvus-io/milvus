@@ -139,6 +139,10 @@ type Server struct {
 type FileResourceObserver interface {
 	InitQueryCoord(manager *session.NodeManager, cluster session.Cluster)
 	Notify()
+	// CheckNodesSynced reports whether the given query nodes hold the current
+	// analyzer file resources. It answers nil unconditionally unless a form
+	// took the analyzer runtime over; see analyzer_seam.go.
+	CheckNodesSynced(nodeIDs []int64) error
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -313,7 +317,7 @@ func (s *Server) initQueryCoord() error {
 	// Init schedulers
 	mlog.Info(s.ctx, "init schedulers")
 	s.jobScheduler = job.NewScheduler()
-	s.taskScheduler = task.NewScheduler(
+	taskScheduler := task.NewScheduler(
 		s.ctx,
 		s.meta,
 		s.dist,
@@ -322,6 +326,11 @@ func (s *Server) initQueryCoord() error {
 		s.cluster,
 		s.nodeMgr,
 	)
+	// Install the analyzer file resource gate on the task executors. It is nil
+	// unless a form took the analyzer runtime over, and a nil gate is the
+	// native path: no executor consults anything.
+	taskScheduler.SetFileResourceGate(s.nodeFileResourceGate())
+	s.taskScheduler = taskScheduler
 
 	// init proxy client manager
 	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
@@ -750,6 +759,8 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 	// update all node statuses in resource manager based on session and node manager's node list.
 	// Therefore, manual status checking of all nodes in resource manager is needed.
 	s.meta.CheckNodesInResourceGroup(s.ctx)
+
+	s.notifyFileResourceOnNodeRediscovery()
 
 	return nil
 }

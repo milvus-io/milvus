@@ -207,6 +207,13 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
+
+	if err := s.checkFileResourceReadyForResourceGroups(ctx, req.GetResourceGroups()); err != nil {
+		logger.Warn(ctx, "load collection rejected, analyzer file resources not ready", mlog.Err(err))
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
 	// If refresh mode is ON.
 	if req.GetRefresh() {
 		err := s.refreshCollection(ctx, req.GetCollectionID())
@@ -276,6 +283,12 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		logger.Warn(ctx, "failed to load partitions", mlog.Err(err))
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := s.checkFileResourceReadyForResourceGroups(ctx, req.GetResourceGroups()); err != nil {
+		logger.Warn(ctx, "load partitions rejected, analyzer file resources not ready", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -779,6 +792,20 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
+	replicaFilter := func(replica *meta.Replica) bool {
+		return replica.IsQueryVisible()
+	}
+	// A request that names a resource group is asking which leaders THAT group
+	// can serve from, and the answer is not derivable from the unscoped one:
+	// the response flattens every replica into one list per channel, and a
+	// replica may borrow nodes from another resource group, so node-set
+	// membership is not replica membership. The replica is only in hand here.
+	if resourceGroup := req.GetResourceGroup(); resourceGroup != "" {
+		replicaFilter = func(replica *meta.Replica) bool {
+			return replica.IsQueryVisible() && replica.GetResourceGroup() == resourceGroup
+		}
+	}
+
 	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
 		s.meta,
 		s.targetMgr,
@@ -786,9 +813,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		s.nodeMgr,
 		req.GetCollectionID(),
 		req.GetWithUnserviceableShards(),
-		func(replica *meta.Replica) bool {
-			return replica.IsQueryVisible()
-		})
+		replicaFilter)
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,

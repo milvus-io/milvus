@@ -52,10 +52,15 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1443,6 +1448,87 @@ func TestHttpAuthenticate(t *testing.T) {
 		ctxName, _ := ctx.Get(httpserver.ContextUsername)
 		assert.Equal(t, "foo", ctxName)
 	}
+}
+
+// authenticateTestProvider and authenticateTestVerifier install a stub
+// extension.APIKeyVerifier for TestHttpAuthenticateHonorsExternalListenerPolicy.
+type authenticateTestProvider struct{ caps extension.Capabilities }
+
+func (authenticateTestProvider) Name() string                       { return "authenticate-test" }
+func (authenticateTestProvider) Requires() []extension.CapabilityID { return nil }
+func (p authenticateTestProvider) Capabilities() extension.Capabilities {
+	return p.caps
+}
+
+type authenticateTestVerifier struct {
+	err      error
+	external bool
+}
+
+func (v authenticateTestVerifier) Verify(string) (string, error) { return "", v.err }
+func (v authenticateTestVerifier) RequireAPIKeyOnExternalListener() bool {
+	return v.external
+}
+
+func TestHttpAuthenticateHonorsExternalListenerPolicy(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+	const (
+		basicAuthUsername = "basic-user"
+		basicAuthPassword = "basic-pass"
+	)
+
+	// A real credential, so the username and password path would succeed if it
+	// were reached; that is what makes the policy-on assertion meaningful.
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).
+		Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Maybe()
+	require.NoError(t, privilege.InitPrivilegeCache(context.Background(), mixCoord))
+	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	privilege.GetPrivilegeCache().UpdateCredential(&internalpb.CredentialInfo{
+		Username:       basicAuthUsername,
+		Sha256Password: crypto.SHA256(basicAuthPassword, basicAuthUsername),
+	})
+
+	newBasicAuthContext := func() (*gin.Context, *httptest.ResponseRecorder) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest("GET", "/test", nil)
+		ctx.Request.SetBasicAuth(basicAuthUsername, basicAuthPassword)
+		return ctx, recorder
+	}
+
+	t.Run("policy on rejects username and password", func(t *testing.T) {
+		extension.ResetForTest()
+		t.Cleanup(extension.ResetForTest)
+		assert.NoError(t, extension.SetProvider(authenticateTestProvider{
+			caps: extension.Capabilities{
+				APIKey: authenticateTestVerifier{external: true, err: errors.New("nope")},
+			},
+		}))
+
+		ctx, recorder := newBasicAuthContext()
+		authenticate(ctx)
+
+		_, ok := ctx.Get(httpserver.ContextUsername)
+		assert.False(t, ok,
+			"the username and password path must not run when the policy requires api keys, even with a valid credential")
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code,
+			"a request carrying only a milvus credential must be rejected when the policy requires api keys")
+	})
+
+	t.Run("no provider authenticates with username and password", func(t *testing.T) {
+		extension.ResetForTest()
+		t.Cleanup(extension.ResetForTest)
+
+		ctx, _ := newBasicAuthContext()
+		authenticate(ctx)
+
+		ctxName, ok := ctx.Get(httpserver.ContextUsername)
+		assert.True(t, ok, "the username and password path must authenticate when no verifier is installed")
+		assert.Equal(t, basicAuthUsername, ctxName)
+	})
 }
 
 func Test_Service_GracefulStop(t *testing.T) {

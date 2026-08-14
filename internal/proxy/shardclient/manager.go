@@ -68,7 +68,21 @@ type shardClientMgrImpl struct {
 	// leaders under another's name after an alias repoint or a cross-db rename. Eviction is by
 	// collection id only -- the cache deliberately does not depend on the mutable
 	// collection->database mapping. See issue #51533.
-	collLeader map[int64]*shardLeaders // collectionID -> collection_leaders
+	//
+	// The resource group is part of the key because it is part of the question: a request
+	// scoped to one resource group and an unscoped one ask GetShardLeaders different things and
+	// get different answers, so caching them under the same key would serve one scope's leaders
+	// to another. An unscoped lookup keys on the empty string and therefore keeps a cache of
+	// exactly the shape it had when the key was the bare collection id.
+	collLeader map[shardLeaderCacheKey]*shardLeaders
+}
+
+// shardLeaderCacheKey identifies one cached shard-leader answer: the collection
+// it is about, and the resource group the answer was restricted to ("" for the
+// collection-wide answer).
+type shardLeaderCacheKey struct {
+	collectionID  int64
+	resourceGroup string
 }
 
 const (
@@ -96,7 +110,7 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[int64]*shardLeaders),
+		collLeader: make(map[shardLeaderCacheKey]*shardLeaders),
 		mixCoord:   mixCoord,
 	}
 	for _, opt := range options {
@@ -112,11 +126,12 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 
 func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error) {
 	method := "GetShard"
+	key := shardLeaderCacheKey{collectionID: collectionID, resourceGroup: routingResourceGroup(ctx)}
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	cacheShardLeaders := m.getCachedShardLeaders(key, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, key)
 		if err != nil {
 			return nil, err
 		}
@@ -128,11 +143,12 @@ func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, datab
 
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
 	method := "GetShardLeaderList"
+	key := shardLeaderCacheKey{collectionID: collectionID, resourceGroup: routingResourceGroup(ctx)}
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	cacheShardLeaders := m.getCachedShardLeaders(key, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, key)
 		if err != nil {
 			return nil, err
 		}
@@ -142,9 +158,9 @@ func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, c
 	return cacheShardLeaders.GetShardLeaderList(), nil
 }
 
-func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller string) *shardLeaders {
+func (m *shardClientMgrImpl) getCachedShardLeaders(key shardLeaderCacheKey, caller string) *shardLeaders {
 	m.leaderMut.RLock()
-	cacheShardLeaders := m.collLeader[collectionID]
+	cacheShardLeaders := m.collLeader[key]
 	m.leaderMut.RUnlock()
 
 	if cacheShardLeaders != nil {
@@ -156,11 +172,13 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller st
 	return cacheShardLeaders
 }
 
-func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
+func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, key shardLeaderCacheKey) (*shardLeaders, error) {
+	collectionID := key.collectionID
 	log := mlog.With(
 		mlog.String("db", database),
 		mlog.FieldCollectionName(collectionName),
-		mlog.FieldCollectionID(collectionID))
+		mlog.FieldCollectionID(collectionID),
+		mlog.String("resourceGroup", key.resourceGroup))
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)
@@ -174,6 +192,13 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		),
 		CollectionID:            collectionID,
 		WithUnserviceableShards: true,
+		// Empty unless the request was scoped at its entry, in which case the
+		// coordinator answers only for the replicas in that resource group.
+		// The filter cannot be applied here: the response flattens every
+		// replica into one list per channel, so which replica - and therefore
+		// which resource group - a leader belongs to is gone by the time it
+		// arrives.
+		ResourceGroup: key.resourceGroup,
 	}
 	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
 	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
@@ -205,7 +230,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	}
 
 	m.leaderMut.Lock()
-	m.collLeader[collectionID] = newShardLeaders
+	m.collLeader[key] = newShardLeaders
 	m.leaderMut.Unlock()
 
 	return newShardLeaders, nil
@@ -253,14 +278,22 @@ func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
 func (m *shardClientMgrImpl) RemoveDatabase(database string) {}
 
 // InvalidateShardLeaderCache drops the cached shard leaders for the given collection ids.
-// Called on shard-leader balance (querycoord), collection drop, and search/query retry. Because
-// the cache is keyed by id, this is a direct O(len(collections)) delete instead of a full scan.
+// Called on shard-leader balance (querycoord), collection drop, and search/query retry.
+//
+// Every resource-group scope of the named collections goes, not just the collection-wide entry:
+// a caller invalidating a collection is saying its leaders moved, and leaving one scope's copy
+// behind would keep routing queries scoped to it at query nodes that no longer serve it. The
+// scan is over the whole cache because the scopes of a collection are not enumerable from the
+// id alone; the cache holds one entry per (loaded collection, scope in use), so it is small.
 func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 	mlog.Info(context.TODO(), "Invalidate shard cache for collections", mlog.Int64s("collectionIDs", collections))
+	invalidated := typeutil.NewSet(collections...)
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
-	for _, collectionID := range collections {
-		delete(m.collLeader, collectionID)
+	for key := range m.collLeader {
+		if invalidated.Contain(key.collectionID) {
+			delete(m.collLeader, key)
+		}
 	}
 }
 
