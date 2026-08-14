@@ -70,6 +70,155 @@ func Test_assignPKRangesToFiles_zeroTotal(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// stubRowCounts makes RowCountUpperBound answer from a per-path table, so a test
+// can pick the exact or the estimate path without building a real parquet/npy
+// fixture. The caller unpatches.
+func stubRowCounts(spec map[string]struct {
+	rows  int64
+	exact bool
+},
+) *mockey.Mocker {
+	return mockey.Mock(importutilv2.RowCountUpperBound).To(
+		func(_ context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema, f *internalpb.ImportFile) (int64, bool, error) {
+			s := spec[f.GetPaths()[0]]
+			return s.rows, s.exact, nil
+		}).Build()
+}
+
+// allocBlock is one [begin, end) handed out by a single allocN call.
+type allocBlock struct{ begin, end int64 }
+
+// recordingAlloc records what each allocN call asked for and leaves a gap between
+// blocks, so a range that straddles two calls is observable: a real allocator
+// gives no guarantee that consecutive AllocN results are adjacent.
+func recordingAlloc(calls *[]int64, blocks *[]allocBlock) func(int64) (int64, int64, error) {
+	next := int64(1000)
+	return func(n int64) (int64, int64, error) {
+		*calls = append(*calls, n)
+		begin := next
+		next += n + 1_000_000
+		if blocks != nil {
+			*blocks = append(*blocks, allocBlock{begin, begin + n})
+		}
+		return begin, begin + n, nil
+	}
+}
+
+func rangeWidths(files []*internalpb.ImportFile) []int64 {
+	out := make([]int64, len(files))
+	for i, f := range files {
+		out[i] = f.GetPkIdEnd() - f.GetPkIdBegin()
+	}
+	return out
+}
+
+// The reservation sizing and the batch packing are pinned here through the
+// package entry point, not through the helpers that implement them, so these
+// assertions stay valid across a change to those helpers' signatures.
+func Test_assignPKRangesToFiles_pinsReservationSizing(t *testing.T) {
+	type count = struct {
+		rows  int64
+		exact bool
+	}
+	cm := mocks.NewChunkManager(t)
+	schema := schemaVec(8, 0)
+	filesFor := func(paths ...string) []*internalpb.ImportFile {
+		out := make([]*internalpb.ImportFile, 0, len(paths))
+		for _, p := range paths {
+			out = append(out, &internalpb.ImportFile{Paths: []string{p}})
+		}
+		return out
+	}
+
+	t.Run("the expansion factor applies to an exact count only", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		defer stubRowCounts(map[string]count{
+			"exact.npy":     {rows: 100, exact: true},
+			"estimate.json": {rows: 100, exact: false},
+		}).UnPatch()
+
+		files := filesFor("exact.npy", "estimate.json")
+		var calls []int64
+		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files,
+			recordingAlloc(&calls, nil), 1))
+		assert.Equal(t, []int64{1000, 100}, rangeWidths(files))
+		assert.Equal(t, []int64{1100}, calls, "one batch holds both reservations")
+	})
+
+	t.Run("a zero-row file still reserves one id", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		defer stubRowCounts(map[string]count{"empty.npy": {rows: 0, exact: true}}).UnPatch()
+
+		files := filesFor("empty.npy")
+		var calls []int64
+		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files,
+			recordingAlloc(&calls, nil), 1))
+		// An empty range reads as "no range" on the datanode and silently falls back
+		// to the local allocator, which is the divergence this mechanism prevents.
+		assert.Equal(t, []int64{1}, rangeWidths(files))
+	})
+
+	t.Run("a total above the ceiling is split, and no range straddles a batch", func(t *testing.T) {
+		withExpansionFactor(t, "1")
+		half := maxIDsPerAllocBatch / 2
+		defer stubRowCounts(map[string]count{
+			"a.json": {rows: half, exact: false},
+			"b.json": {rows: half, exact: false},
+			"c.json": {rows: half, exact: false},
+		}).UnPatch()
+
+		files := filesFor("a.json", "b.json", "c.json")
+		var calls []int64
+		var blocks []allocBlock
+		// clusterID 0 so the recorded blocks are directly comparable: a non-zero
+		// clusterID ORs its bits into every id, which shifts the ranges out of the
+		// raw blocks the allocator handed back. The cluster bits themselves are
+		// pinned by Test_assignPKRangesToFiles.
+		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files,
+			recordingAlloc(&calls, &blocks), 0))
+		assert.Equal(t, []int64{2 * half, half}, calls)
+		assert.Equal(t, []int64{half, half, half}, rangeWidths(files),
+			"no reservation is shrunk to fit the ceiling")
+		for i, f := range files {
+			inOneBlock := false
+			for _, b := range blocks {
+				if f.GetPkIdBegin() >= b.begin && f.GetPkIdEnd() <= b.end {
+					inOneBlock = true
+				}
+			}
+			assert.True(t, inOneBlock, "file %d must sit inside a single batch", i)
+		}
+	})
+
+	t.Run("an exact count above one batch is refused on the raw row count", func(t *testing.T) {
+		withExpansionFactor(t, "2")
+		defer stubRowCounts(map[string]count{
+			"huge.npy": {rows: maxIDsPerAllocBatch + 1, exact: true},
+		}).UnPatch()
+
+		files := filesFor("huge.npy")
+		err := assignPKRangesToFiles(context.TODO(), cm, schema, files,
+			func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "more than one allocation batch can reserve")
+	})
+
+	t.Run("an estimate above one batch is refused with the estimate wording", func(t *testing.T) {
+		withExpansionFactor(t, "2")
+		defer stubRowCounts(map[string]count{
+			"huge.json": {rows: maxIDsPerAllocBatch + 1, exact: false},
+		}).UnPatch()
+
+		files := filesFor("huge.json")
+		err := assignPKRangesToFiles(context.TODO(), cm, schema, files,
+			func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "more than one allocation batch holds")
+	})
+}
+
 func withExpansionFactor(t *testing.T, factor string) {
 	paramtable.Init()
 	key := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.Key
