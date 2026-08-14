@@ -218,17 +218,21 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 	})
 }
 
-// pickNode selects the least-loaded node (the one with the most available slots)
-// for a task requiring taskSlot slots, instead of the first node that happens to
-// fit. Always assigning to the most-available node spreads tasks evenly across
-// DataNodes (water-filling on available slots) rather than packing them onto
-// whichever node is iterated first.
+// pickNode selects the least-loaded node -- the one with the most available
+// slots -- for a task requiring taskSlot slots.
 //
-// It returns NullNodeID when no node has any available slot for a positive-slot
-// task. Non-positive-slot tasks are scheduled on the most-available node without
-// consuming slots. When even the most-available node cannot fully satisfy
-// taskSlot, it falls back to that node on a best-effort basis and drains its
-// slots, preserving the previous behavior.
+// When no node can fully satisfy taskSlot it still dispatches, to that
+// most-available node, and drains its slots. That is deliberate and not the
+// defect issue #52180 named: a task larger than any worker has to run
+// somewhere, and the emptiest worker is where it will start soonest. The
+// worker admits such a task only once every other reservation has been
+// released and runs it alone (see internal/datanode/resource), so the harm in
+// #52180 -- an oversized task running *concurrently* with everything else --
+// cannot recur. Refusing to place it here would instead leave it pending
+// forever, because no node ever grows.
+//
+// It returns NullNodeID only when every node reports zero available slots, in
+// which case the task waits for the next scheduling round.
 //
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
