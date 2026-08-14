@@ -47,10 +47,10 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 			State:         commonpb.SegmentState_Flushed,
 			Binlogs:       binLogs,
 		}}
-		// Called once per input segment by GetTaskSlot (to size the
-		// requirement estimate) and once more per input segment when
-		// BuildCompactionRequest assembles the plan's segment binlogs.
-	}).Times(4)
+		// Once per input segment: BuildCompactionRequest's own loop fetches
+		// each segment to build its FieldBinlogs, and reuses that same slice
+		// to size the slot estimate instead of GetTaskSlot fetching again.
+	}).Times(2)
 	task := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:         1,
 		TriggerID:      19530,
@@ -107,9 +107,9 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 					State:         commonpb.SegmentState_Flushed,
 					Binlogs:       binLogs,
 				}}
-				// Once from GetTaskSlot's own segment scan, once more when
-				// BuildCompactionRequest assembles the plan's segment binlogs.
-			}).Times(2)
+				// Fetched once by BuildCompactionRequest's own loop; the slot
+				// estimate reuses that same segment instead of fetching again.
+			}).Once()
 			if testCase.expectResourceGet {
 				mockMeta.EXPECT().GetFileResources(mock.Anything, mock.Anything).Return(expectedResources, nil).Once()
 			}
@@ -147,8 +147,8 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 	s.Run("segment_not_found", func() {
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 			return nil
-		}).Times(3) // GetTaskSlot scans both nil segments (skipping each), then
-		// BuildCompactionRequest's own loop hits segment 200 again and fails fast.
+		}).Once() // BuildCompactionRequest's own loop hits segment 200 first and fails fast,
+		// before ever computing a slot estimate.
 		task := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:         1,
 			TriggerID:      19530,
@@ -187,7 +187,8 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
 			SchemaVersion: 3,
-		}}).Times(2) // once from GetTaskSlot, once from the segment binlog loop
+		}}).Once() // the segment binlog loop fetches it and fails the schema check
+		// before a slot estimate is ever computed.
 		task := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
@@ -253,21 +254,19 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 		},
 	} {
 		s.Run(test.name, func() {
-			// A pre-stored slotUsage (sort cases below) short-circuits
-			// GetTaskSlot's own segment scan, so only the segment binlog
-			// loop in BuildCompactionRequest calls GetHealthySegment; a
-			// mix task with no stored slotUsage pays for both.
-			wantCalls := 2
-			if test.storeSlotUsage {
-				wantCalls = 1
-			}
+			// The segment binlog loop in BuildCompactionRequest fetches the
+			// segment exactly once regardless of whether slotUsage was
+			// already cached: a pre-stored value (sort cases below) makes
+			// the slot estimate a cache hit, and an uncached one reuses the
+			// same segments the loop already fetched -- either way, no
+			// second meta call.
 			meta := NewMockCompactionMeta(s.T())
 			meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: test.inputSchema,
 				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
-			}}).Times(wantCalls)
+			}}).Once()
 			task := newMixCompactionTask(&datapb.CompactionTask{
 				PlanID:        1,
 				Type:          test.compactionType,
@@ -429,4 +428,85 @@ func TestMixCompactionSlotAggregatesAcrossSegments(t *testing.T) {
 
 		assert.Equal(t, want, task.GetTaskSlot(), "input order %v must not change the aggregated result", order)
 	}
+}
+
+// issue #52180's under-charge risk, the other direction: a segment that
+// cannot be resolved at slot-estimation time must not be silently treated as
+// contributing zero forever. GetTaskSlot must not cache an incomplete
+// estimate, so a transient resolution failure doesn't become a permanently
+// wrong (and too-low) slot count for the rest of this task instance's life.
+func TestMixCompactionSlotUnresolvedSegmentDoesNotCache(t *testing.T) {
+	paramtable.Init()
+
+	resolved := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:    200,
+		State: commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 50 * 1024 * 1024}}},
+		},
+	}}
+
+	meta := NewMockCompactionMeta(t)
+	// Segment 201 never resolves in this test. Each of the two GetTaskSlot
+	// calls below must re-attempt both segments; mockery's exact Times(2)
+	// fails the test if either call is skipped because the earlier, partial
+	// result got cached.
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(resolved).Times(2)
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(201)).Return(nil).Times(2)
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		InputSegments: []int64{200, 201},
+	}, nil, meta, newMockVersionManager())
+
+	first := task.GetTaskSlot()
+	assert.Greater(t, first, int64(0), "a partial estimate is still a usable, positive number")
+	assert.Zero(t, task.slotUsage.Load(), "an incomplete estimate must not be cached")
+
+	second := task.GetTaskSlot()
+	assert.Equal(t, first, second, "the same (still partial) inputs must produce the same estimate")
+	assert.Zero(t, task.slotUsage.Load())
+}
+
+// Complement to the above: once every input segment resolves, the estimate
+// must start being cached (and stop re-fetching) -- the fix is "don't cache a
+// wrong number", not "never cache".
+func TestMixCompactionSlotCachesOnceAllSegmentsResolve(t *testing.T) {
+	paramtable.Init()
+
+	resolved := func(id int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:    id,
+			State: commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 50 * 1024 * 1024}}},
+			},
+		}}
+	}
+
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(resolved(200)).Twice()
+	// Segment 201 fails to resolve on the first call, then recovers -- these
+	// two expectations are consumed in order, one per matching call.
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(201)).Return(nil).Once()
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(201)).Return(resolved(201)).Once()
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		InputSegments: []int64{200, 201},
+	}, nil, meta, newMockVersionManager())
+
+	task.GetTaskSlot() // partial: 201 unresolved, must not cache
+	assert.Zero(t, task.slotUsage.Load())
+
+	full := task.GetTaskSlot() // now fully resolved: caches
+	assert.NotZero(t, task.slotUsage.Load())
+
+	// A third call must not touch meta again: the exact expectation counts
+	// above (Twice / Once+Once, both now exhausted) make any further
+	// GetHealthySegment call fail the test.
+	again := task.GetTaskSlot()
+	assert.Equal(t, full, again)
 }
