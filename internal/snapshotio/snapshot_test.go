@@ -45,8 +45,6 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.Contains(t, AvroSchemaV3(), "commit_timestamp")
 	assert.NotContains(t, AvroSchemaV3(), "child_fields")
 	assert.Contains(t, AvroSchemaV4(), "child_fields")
-	assert.NotContains(t, AvroSchemaV4(), "delete_apply_start_after_timetick")
-	assert.Contains(t, AvroSchemaV5(), "delete_apply_start_after_timetick")
 
 	currentSchema, err := ManifestSchemaByVersion(SnapshotFormatVersion)
 	require.NoError(t, err)
@@ -68,7 +66,7 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":5}`))
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":4}`))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
 
@@ -144,12 +142,11 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 				JsonKeyStatsDataFormat: 25,
 			},
 		},
-		StartPosition:                 &msgpb.MsgPosition{ChannelName: "start", MsgID: []byte{1, 2}, MsgGroup: "g1", Timestamp: 100},
-		DmlPosition:                   &msgpb.MsgPosition{ChannelName: "dml", MsgID: []byte{3, 4}, MsgGroup: "g2", Timestamp: 200},
-		StorageVersion:                2,
-		IsSorted:                      true,
-		CommitTimestamp:               999,
-		DeleteApplyStartAfterTimetick: 998,
+		StartPosition:   &msgpb.MsgPosition{ChannelName: "start", MsgID: []byte{1, 2}, MsgGroup: "g1", Timestamp: 100},
+		DmlPosition:     &msgpb.MsgPosition{ChannelName: "dml", MsgID: []byte{3, 4}, MsgGroup: "g2", Timestamp: 200},
+		StorageVersion:  2,
+		IsSorted:        true,
+		CommitTimestamp: 999,
 	}
 
 	entry := SegmentToManifestEntry(segment)
@@ -168,7 +165,6 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 	assert.Equal(t, segment.GetStorageVersion(), parsed.GetStorageVersion())
 	assert.Equal(t, segment.GetIsSorted(), parsed.GetIsSorted())
 	assert.Equal(t, segment.GetCommitTimestamp(), parsed.GetCommitTimestamp())
-	assert.Equal(t, segment.GetDeleteApplyStartAfterTimetick(), parsed.GetDeleteApplyStartAfterTimetick())
 	require.Len(t, parsed.GetBinlogs(), 1)
 	assert.Equal(t, segment.GetBinlogs()[0].GetBinlogs()[0].GetLogPath(), parsed.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 	require.Len(t, parsed.GetDeltalogs(), 1)
@@ -203,7 +199,6 @@ func TestParseSegmentManifestV2DefaultsCommitTimestamp(t *testing.T) {
 	parsed, err := ParseSegmentManifest(data, 2)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), parsed.GetCommitTimestamp())
-	assert.Equal(t, uint64(0), parsed.GetDeleteApplyStartAfterTimetick())
 }
 
 func TestMarshalSegmentManifestErrors(t *testing.T) {

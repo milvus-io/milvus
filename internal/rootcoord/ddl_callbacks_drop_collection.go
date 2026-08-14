@@ -39,7 +39,6 @@ import (
 
 type collectionDataViewDropper interface {
 	DropCollectionDataView(ctx context.Context, collectionID int64) error
-	FinalizeDropCollectionDataView(ctx context.Context, collectionID int64) error
 }
 
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
@@ -130,8 +129,8 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 					mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 
-			// 3. mark and drop DataView metadata before the collection becomes
-			// unavailable. The ack callback retries this step after failures.
+			// 3. mark the DataView terminal before the collection becomes unavailable.
+			// The ack callback retries this step after failures.
 			if dropper, ok := c.mixCoord.(collectionDataViewDropper); ok {
 				if err := dropper.DropCollectionDataView(ctx, collectionID); err != nil {
 					return merr.Wrap(err, "failed to drop collection data view")
@@ -141,11 +140,6 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			// 4. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
 				return merr.Wrap(err, "failed to drop collection")
-			}
-			if dropper, ok := c.mixCoord.(collectionDataViewDropper); ok {
-				if err := dropper.FinalizeDropCollectionDataView(ctx, collectionID); err != nil {
-					return merr.Wrap(err, "failed to finalize collection data view drop")
-				}
 			}
 			continue
 		}

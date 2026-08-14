@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1614,32 +1615,6 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 	}
 }
 
-func UpdateDeleteApplyStartAfterTimetick(segmentID int64, timetick uint64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
-		segment := modPack.Get(segmentID)
-		if segment == nil {
-			mlog.Warn(context.TODO(), "meta update: update delete apply start after timetick failed - segment not found",
-				mlog.FieldSegmentID(segmentID))
-			return false
-		}
-		if timetick == 0 && segment.GetDeleteApplyStartAfterTimetick() != 0 {
-			return false
-		}
-		if timetick == 0 {
-			if ts := segment.GetCommitTimestamp(); ts != 0 {
-				timetick = ts
-			} else if segment.GetStartPosition() != nil {
-				timetick = segment.GetStartPosition().GetTimestamp()
-			}
-		}
-		if timetick == 0 || segment.GetDeleteApplyStartAfterTimetick() == timetick {
-			return false
-		}
-		segment.DeleteApplyStartAfterTimetick = timetick
-		return true
-	}
-}
-
 func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		if len(dmlPosition.GetMsgID()) == 0 {
@@ -1892,9 +1867,6 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			}
 		}
 		segment.CommitTimestamp = ts
-		if ts != 0 {
-			segment.DeleteApplyStartAfterTimetick = ts
-		}
 		return true
 	}
 }
@@ -2119,9 +2091,6 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 	// checkpoint
 	if seg2Drop.GetDmlPosition() != nil {
 		clonedSegment.DmlPosition = seg2Drop.GetDmlPosition()
-	}
-	if seg2Drop.GetDeleteApplyStartAfterTimetick() != 0 {
-		clonedSegment.DeleteApplyStartAfterTimetick = seg2Drop.GetDeleteApplyStartAfterTimetick()
 	}
 	clonedSegment.NumOfRows = seg2Drop.GetNumOfRows()
 	return clonedSegment, metricMutation
@@ -2824,26 +2793,31 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	if err != nil {
 		return nil, nil, err
 	}
-	m.publishDataViewAfterCompaction(ctx, t, lo.Map(newSegments, func(segment *SegmentInfo, _ int) int64 {
-		return segment.GetID()
-	}))
+	m.publishDataViewAfterCompaction(ctx, t, newSegments)
 	return newSegments, metricMutation, nil
 }
 
-func (m *meta) publishDataViewAfterCompaction(ctx context.Context, task *datapb.CompactionTask, compactTo []int64) {
+func (m *meta) publishDataViewAfterCompaction(ctx context.Context, task *datapb.CompactionTask, compactTo []*SegmentInfo) {
 	if m.dataViewManager == nil {
 		return
 	}
+	loadable := lo.Map(compactTo, func(segment *SegmentInfo, _ int) dataview.LoadableSegment {
+		return dataview.LoadableSegment{
+			SegmentID:   segment.GetID(),
+			VChannel:    segment.GetInsertChannel(),
+			PartitionID: segment.GetPartitionID(),
+		}
+	})
 	if _, err := m.dataViewManager.OnCompact(ctx, CompactDataViewEvent{
 		CollectionID: task.GetCollectionID(),
 		CompactFrom:  task.GetInputSegments(),
-		CompactTo:    compactTo,
+		CompactTo:    loadable,
 	}); err != nil {
 		mlog.Warn(ctx, "failed to publish DataView after compaction",
 			mlog.Int64("planID", task.GetPlanID()),
 			mlog.FieldCollectionID(task.GetCollectionID()),
 			mlog.Int64s("compactFrom", task.GetInputSegments()),
-			mlog.Int64s("compactTo", compactTo),
+			mlog.Int64s("compactTo", lo.Map(loadable, func(segment dataview.LoadableSegment, _ int) int64 { return segment.SegmentID })),
 			mlog.Err(err))
 	}
 }

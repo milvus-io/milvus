@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -701,7 +702,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	operators = append(operators,
 		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
-		UpdateDeleteApplyStartAfterTimetick(req.GetSegmentID(), req.GetDeleteApplyStartAfterTimetick()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 		// The request ships the complete cumulative Statistics published
 		// from the growing-segment collector; the receiver stores it
@@ -720,9 +720,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
 		if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
-			CollectionID:         req.GetCollectionID(),
-			SegmentIDs:           []int64{req.GetSegmentID()},
-			TemporaryUnavailable: enableSortCompaction(),
+			CollectionID: req.GetCollectionID(),
+			Segments: []dataview.LoadableSegment{{
+				SegmentID:   req.GetSegmentID(),
+				VChannel:    req.GetChannel(),
+				PartitionID: req.GetPartitionID(),
+			}},
 		}); err != nil {
 			mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
 		}
@@ -2200,10 +2203,15 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 			return err
 		}
 		if s.dataViewManager != nil {
+			segmentIDs := make([]int64, 0)
+			for _, segment := range s.meta.SelectSegments(ctx, WithCollection(collectionID), WithChannel(channelName)) {
+				if segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+					segmentIDs = append(segmentIDs, segment.GetID())
+				}
+			}
 			if _, err = s.dataViewManager.OnTruncate(ctx, TruncateDataViewEvent{
 				CollectionID: collectionID,
-				VChannel:     channelName,
-				FlushTs:      flushTs,
+				SegmentIDs:   segmentIDs,
 			}); err != nil {
 				mlog.Warn(ctx, "OnTruncate DataView failed", mlog.Err(err))
 				return err
@@ -3225,7 +3233,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
 	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
 	collectionID := int64(0)
-	if len(segIDs) > 0 {
+	if s.dataViewManager != nil && len(segIDs) > 0 {
 		if segment := s.meta.GetSegment(ctx, segIDs[0]); segment != nil {
 			collectionID = segment.GetCollectionID()
 		}
@@ -3249,9 +3257,19 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 			return err
 		}
 		if s.dataViewManager != nil && collectionID != 0 {
+			segments := make([]dataview.LoadableSegment, 0, len(segIDs))
+			for _, segID := range segIDs {
+				if segment := s.meta.GetSegment(ctx, segID); segment != nil {
+					segments = append(segments, dataview.LoadableSegment{
+						SegmentID:   segment.GetID(),
+						VChannel:    segment.GetInsertChannel(),
+						PartitionID: segment.GetPartitionID(),
+					})
+				}
+			}
 			if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
 				CollectionID: collectionID,
-				SegmentIDs:   segIDs,
+				Segments:     segments,
 			}); err != nil {
 				mlog.Warn(ctx, "failed to publish DataView after import commit",
 					mlog.FieldJobID(jobID),

@@ -479,11 +479,6 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
-
-  // Exclusive lower bound for delete data that must be retained and applied
-  // when this segment is loaded. DataView derives its shard frontier from this
-  // persisted segment field.
-  uint64 delete_apply_start_after_timetick = 40;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -570,7 +565,6 @@ message SaveBinlogPathsRequest {
   // from the cumulative arrays. Nil / zero for V2 flushes — V2 stats come
   // from req.Field2StatslogPaths via the iteration helper.
   Statistics stats = 19;
-  uint64 delete_apply_start_after_timetick = 20;
 }
 
 message CheckPoint {
@@ -1755,8 +1749,6 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
-  // Mirrors SegmentInfo.delete_apply_start_after_timetick.
-  uint64 delete_apply_start_after_timetick = 19;
 }
 
 message CollectionDescription {

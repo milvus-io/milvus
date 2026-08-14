@@ -219,8 +219,8 @@ type DataViewOfShard struct {
 
 	Vchannel   string                 `protobuf:"bytes,1,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
 	Partitions []*DataViewOfPartition `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
-	// TransformLog entries with timetick greater than this value must still be
-	// retained and applied when loading segments from this shard.
+	// Derived delete-retention metadata; membership-only DataViewManager does
+	// not populate or persist this field.
 	TransformStartAfterTimetick uint64 `protobuf:"varint,3,opt,name=transform_start_after_timetick,json=transformStartAfterTimetick,proto3" json:"transform_start_after_timetick,omitempty"`
 }
 
@@ -332,8 +332,7 @@ func (x *DataViewOfPartition) GetSegmentIds() []int64 {
 	return nil
 }
 
-// DataViewShardTimeTick is the lightweight delete-retention projection of a
-// visible DataView shard.
+// DataViewShardTimeTick is a derived delete-retention projection.
 type DataViewShardTimeTick struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

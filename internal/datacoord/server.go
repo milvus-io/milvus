@@ -102,17 +102,16 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli            *clientv3.Client
-	tikvCli            *txnkv.Client
-	address            string
-	watchClient        kv.WatchKV
-	kv                 kv.MetaKv
-	metaRootPath       string
-	meta               *meta
-	dataViewManager    DataViewManager
-	dataViewReferences *dataViewReferenceManager
-	segmentManager     Manager
-	allocator          allocator.Allocator
+	etcdCli         *clientv3.Client
+	tikvCli         *txnkv.Client
+	address         string
+	watchClient     kv.WatchKV
+	kv              kv.MetaKv
+	metaRootPath    string
+	meta            *meta
+	dataViewManager DataViewManager
+	segmentManager  Manager
+	allocator       allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -497,7 +496,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-		dataViewGC:       s.dataViewReferences,
+		dataViewGC:       s.dataViewManager,
 	})
 }
 
@@ -647,36 +646,19 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			return err
 		}
 
-		dataViewStore := &dataViewSegmentStore{meta: s.meta}
-		s.dataViewManager, err = dataview.RecoverManager(s.ctx, catalog, dataViewStore)
+		s.dataViewManager, err = dataview.RecoverManager(s.ctx, catalog)
 		if err != nil {
 			return err
 		}
 		s.meta.dataViewManager = s.dataViewManager
 
-		// DataView repair must observe the current collection and partition cache,
-		// so collection metadata recovery is part of DataCoord initialization.
-		if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
-			return err
-		}
-		s.dataViewReferences, err = recoverDataViewReferenceManager(
-			s.ctx,
-			catalog,
-			s.dataViewManager,
-			func(collectionID int64) bool { return s.meta.GetCollection(collectionID) != nil },
-		)
-		if err != nil {
-			return err
-		}
-		collectionIDs := make([]int64, 0)
-		for _, collection := range s.meta.GetCollections() {
-			if !s.dataViewReferences.IsTerminal(collection.ID) {
-				collectionIDs = append(collectionIDs, collection.ID)
-			}
-		}
-		if err := s.dataViewManager.RepairCollections(s.ctx, collectionIDs); err != nil {
-			return err
-		}
+		// Load collection information asynchronously.
+		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
+		go func() {
+			_ = retry.Do(s.ctx, func() error {
+				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
+		}()
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))

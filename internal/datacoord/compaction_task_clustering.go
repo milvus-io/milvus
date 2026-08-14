@@ -608,7 +608,13 @@ func (t *clusteringCompactionTask) completeTask() error {
 		return nil
 	}
 	if meta, ok := t.meta.(*meta); ok {
-		meta.publishDataViewAfterCompaction(context.TODO(), t.GetTaskProto(), t.GetTaskProto().GetResultSegments())
+		segments := make([]*SegmentInfo, 0, len(t.GetTaskProto().GetResultSegments()))
+		for _, segmentID := range t.GetTaskProto().GetResultSegments() {
+			if segment := meta.GetSegment(context.TODO(), segmentID); segment != nil {
+				segments = append(segments, segment)
+			}
+		}
+		meta.publishDataViewAfterCompaction(context.TODO(), t.GetTaskProto(), segments)
 	}
 
 	return nil

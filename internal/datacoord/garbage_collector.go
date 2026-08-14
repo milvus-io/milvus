@@ -955,27 +955,6 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		if gc.meta.dataViewManager != nil {
-			referenced, err := gc.meta.dataViewManager.IsSegmentReferenced(ctx, segment.GetCollectionID(), segmentID)
-			if err != nil {
-				log.Warn(ctx, "skip GC segment since DataView reference check failed",
-					mlog.FieldCollectionID(segment.GetCollectionID()),
-					mlog.FieldPartitionID(segment.GetPartitionID()),
-					mlog.String("channel", segInsertChannel),
-					mlog.FieldSegmentID(segmentID),
-					mlog.Err(err))
-				continue
-			}
-			if referenced {
-				log.Info(ctx, "skip GC segment since it is referenced by retained DataView",
-					mlog.FieldCollectionID(segment.GetCollectionID()),
-					mlog.FieldPartitionID(segment.GetPartitionID()),
-					mlog.String("channel", segInsertChannel),
-					mlog.FieldSegmentID(segmentID))
-				continue
-			}
-		}
-
 		// Skip segments protected by snapshot references. IsSegmentGCBlocked is O(1)
 		// and embeds the "RefIndex not loaded → fail-closed" check, so we don't need
 		// a separate loaded-state probe.
