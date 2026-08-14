@@ -319,6 +319,35 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 	s.NoError(err)
 }
 
+func (s *PackWriterV3Suite) TestWriteZeroRowInsertDataSkipsStorageWriter() {
+	s.logIDAlloc = allocator.NewLocalAllocator(1, 1)
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).
+		WithSegmentID(segmentID).WithChannelName(channelName).
+		WithInsertData(genEmptyInsertData(s.schema)).
+		WithBatchRows(0)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+
+	gotInserts, _, _, _, _, size, _, err := bw.Write(context.Background(), pack)
+	s.NoError(err)
+	s.Empty(gotInserts)
+	s.Zero(size)
+}
+
 func (s *PackWriterV3Suite) TestNoPkField() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "no pk field",

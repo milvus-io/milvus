@@ -218,6 +218,12 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err != nil {
 		return nil, "", err
 	}
+	if rec == nil || rec.Len() == 0 {
+		if rec != nil {
+			rec.Release()
+		}
+		return make(map[int64]*datapb.FieldBinlog), "", nil
+	}
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
