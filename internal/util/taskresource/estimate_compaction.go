@@ -18,6 +18,7 @@ package taskresource
 
 import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -127,10 +128,24 @@ func estimateL0Compaction(in CompactionInput) Requirement {
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, binlogChunkBytes())}
 }
 
-// estimateClusteringCompaction returns the grant that the task's internal
-// buffer will be capped to. Today the task sizes that buffer off the node
-// (GetMemoryCount x 0.3) regardless of how much data it actually has; phase 2
-// converts it to read this grant instead.
+// estimateClusteringCompaction charges what the clustering compactor allocates
+// TODAY, which is not the grant the factor/bounds below describe.
+// clusteringCompactor.getMemoryBufferHighWatermark
+// (internal/datanode/compactor/clustering_compactor.go) sizes the write buffer
+// as hardware.GetMemoryCount() x dataNode.clusteringCompaction.memoryBufferRatio
+// -- 0.3 of the whole node, 19.2GiB on a 64GiB node -- regardless of how much
+// data the task actually has. Phase 2 converts the task to read the grant
+// instead, and this function then reduces to the grant alone.
+//
+// Charging the grant before that conversion would be a live regression, not
+// just an under-estimate: until this branch clustering was serialized by
+// dataCoord.slot.clusteringCompactionSlotUsage=65535, and phase 0 reroutes
+// AvailableSlots onto the ledger so that constant no longer serializes
+// anything. Charging the real allocation normally makes the task oversized,
+// which the guard answers with exclusive execution -- the same one-at-a-time
+// behavior through the new mechanism. Note this estimator is DataNode-only:
+// DataCoord's clustering task still reports the 65535 constant and does not
+// call it.
 func estimateClusteringCompaction(in CompactionInput) Requirement {
 	cfg := &paramtable.Get().DataCoordCfg
 	want := int64(float64(in.TotalMemorySize) * cfg.ResourceClusteringFactor.GetAsFloat())
@@ -143,6 +158,15 @@ func estimateClusteringCompaction(in CompactionInput) Requirement {
 	if want > maxMem {
 		want = maxMem
 	}
+
+	// Today's allocation. Unlike analyze's training set this is a write buffer,
+	// not a bounded read of the input, so the input size does not cap it.
+	buffer := int64(float64(hardware.GetMemoryCount()) *
+		paramtable.Get().DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
+	if buffer > want {
+		want = buffer
+	}
+
 	cpu := float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt())
 	if cpu < 1 {
 		cpu = 1
