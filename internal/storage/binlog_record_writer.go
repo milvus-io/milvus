@@ -121,6 +121,35 @@ func (pw *packedBinlogRecordWriterBase) GetExpirQuantiles() []int64 {
 	return calculateExpirQuantiles(pw.ttlFieldID, pw.rowNum, pw.ttlFieldValues)
 }
 
+// collectTTLValues accumulates positive TTL field values from the record for
+// ExpirQuantiles calculation. Null and non-positive values mean "never expire"
+// and are skipped.
+func (pw *packedBinlogRecordWriterBase) collectTTLValues(r Record) error {
+	if pw.ttlFieldID < common.StartOfUserFieldID {
+		return nil
+	}
+	ttlColumn := r.Column(pw.ttlFieldID)
+	// Defensive check to prevent panic
+	if ttlColumn == nil {
+		return merr.WrapErrServiceInternal("ttl field not found")
+	}
+	ttlArray, ok := ttlColumn.(*array.Int64)
+	if !ok {
+		return merr.WrapErrServiceInternal("ttl field is not int64")
+	}
+	for i := 0; i < ttlArray.Len(); i++ {
+		if ttlArray.IsNull(i) {
+			continue
+		}
+		ttlValue := ttlArray.Value(i)
+		if ttlValue <= 0 {
+			continue
+		}
+		pw.ttlFieldValues = append(pw.ttlFieldValues, ttlValue)
+	}
+	return nil
+}
+
 func (pw *packedBinlogRecordWriterBase) writeStats() error {
 	// Write PK stats
 	pkStatsMap, err := pw.pkCollector.Digest(
@@ -253,26 +282,8 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		}
 	}
 
-	if pw.ttlFieldID >= common.StartOfUserFieldID {
-		ttlColumn := r.Column(pw.ttlFieldID)
-		// Defensive check to prevent panic
-		if ttlColumn == nil {
-			return merr.WrapErrServiceInternal("ttl field not found")
-		}
-		ttlArray, ok := ttlColumn.(*array.Int64)
-		if !ok {
-			return merr.WrapErrServiceInternal("ttl field is not int64")
-		}
-		for i := 0; i < rows; i++ {
-			if ttlArray.IsNull(i) {
-				continue
-			}
-			ttlValue := ttlArray.Value(i)
-			if ttlValue <= 0 {
-				continue
-			}
-			pw.ttlFieldValues = append(pw.ttlFieldValues, ttlValue)
-		}
+	if err := pw.collectTTLValues(r); err != nil {
+		return err
 	}
 
 	// Collect statistics
@@ -433,6 +444,10 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 		if ts > pw.tsTo {
 			pw.tsTo = ts
 		}
+	}
+
+	if err := pw.collectTTLValues(r); err != nil {
+		return err
 	}
 
 	// Collect statistics
@@ -662,6 +677,10 @@ func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
 		if ts > pw.tsTo {
 			pw.tsTo = ts
 		}
+	}
+
+	if err := pw.collectTTLValues(r); err != nil {
+		return err
 	}
 
 	// collect statistics
