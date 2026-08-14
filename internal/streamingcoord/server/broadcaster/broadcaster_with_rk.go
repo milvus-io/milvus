@@ -16,6 +16,21 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	// The idempotency lookup lives here rather than in an exported check method so
+	// it cannot be called before the resource keys are held: this object only
+	// exists once StartBroadcastWithResourceKeys acquired them. Without that
+	// ordering two concurrent same-key requests would both miss and create two
+	// tasks. The guards are deliberately NOT consumed on a hit, so the caller's
+	// deferred Close() releases the locks.
+	if key := message.IdempotencyKeyOf(msg); key != "" {
+		if dup, ok := b.broadcaster.getDuplicatedBroadcastMessage(key); ok {
+			return &types.BroadcastAppendResult{
+				BroadcastID: dup.BroadcastHeader().BroadcastID,
+				Duplicated:  dup,
+			}, nil
+		}
+	}
+
 	// Consume the guards before handing them to broadcast to avoid double unlock.
 	guards := b.guards
 	b.guards = nil
