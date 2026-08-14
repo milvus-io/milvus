@@ -557,6 +557,13 @@ func TestTaskResourceRequirements(t *testing.T) {
 	})
 
 	t.Run("analyze", func(t *testing.T) {
+		// EstimateAnalyze now reads the node, so both assertions below would
+		// otherwise depend on the build agent's RAM: the big-analyze bound in
+		// particular needs 0.8 x hostMemory to exceed the grant arm's 4GiB cap,
+		// which fails on any agent with 5GiB or less.
+		mkMem := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64 << 30)).Build()
+		defer mkMem.UnPatch()
+
 		req := &workerpb.AnalyzeRequest{
 			ClusterID: "c",
 			TaskID:    9003,
@@ -585,7 +592,10 @@ func TestTaskResourceRequirements(t *testing.T) {
 			SegmentStats: map[int64]*indexpb.SegmentStats{1: {NumRows: 2_000_000}},
 		}
 		bigTask := NewAnalyzeTask(context.Background(), func() {}, big, NewTaskManager(context.Background()), nil)
-		assert.Greater(t, bigTask.GetResourceRequirement().Memory, int64(4)<<30,
-			"8GiB of vectors must not be charged the same as 48MiB")
+		// 1024 dims x 2,000,000 rows x 4B is 8.192e9 bytes of vectors, and the
+		// training buffer is 0.8 x 64GiB, so the dataset is what binds and the
+		// charge is the whole of it.
+		assert.Equal(t, int64(1024)*2_000_000*4, bigTask.GetResourceRequirement().Memory,
+			"8GB of vectors must not be charged the same as 48MiB")
 	})
 }

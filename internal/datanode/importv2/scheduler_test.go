@@ -741,7 +741,7 @@ func TestImportTaskResourceRequirements(t *testing.T) {
 		// estimator floor. With the three files this subtest used to carry, the
 		// answer was 48MiB and therefore the floor -- which any implementation
 		// returning a constant would also have produced.
-		files := make([]*datapb.ImportFileStats, 8)
+		files := make([]*datapb.ImportFileStats, 12)
 		task := &PreImportTask{
 			PreImportTask: &datapb.PreImportTask{FileStats: files},
 		}
@@ -749,18 +749,22 @@ func TestImportTaskResourceRequirements(t *testing.T) {
 		got := task.GetResourceRequirement()
 		assert.Equal(t, taskresource.EstimateImport(taskresource.ImportInput{
 			IsPreImport: true,
-			FileNum:     8,
+			FileNum:     12,
 		}), got)
 
-		want := baseBuffer * 8
+		want := baseBuffer * 12
 		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
 		assert.Equal(t, want, got.Memory)
 
-		// And it really is per-file: half the files, half the charge.
+		// And it really is per-file: half the files, half the charge. Six
+		// rather than four, because four x 16MiB is exactly the 64MiB floor and
+		// the halving would then be satisfied by the clamp instead.
 		half := &PreImportTask{
-			PreImportTask: &datapb.PreImportTask{FileStats: make([]*datapb.ImportFileStats, 4)},
+			PreImportTask: &datapb.PreImportTask{FileStats: make([]*datapb.ImportFileStats, 6)},
 		}
-		assert.Equal(t, want/2, half.GetResourceRequirement().Memory)
+		halfGot := half.GetResourceRequirement().Memory
+		require.Greater(t, halfGot, floor, "setup: the halved value must not be the floor either")
+		assert.Equal(t, want/2, halfGot)
 	})
 
 	t.Run("import charges the vchannel and partition fan-out", func(t *testing.T) {
