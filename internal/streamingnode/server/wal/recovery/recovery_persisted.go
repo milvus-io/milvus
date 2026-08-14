@@ -26,8 +26,8 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if r.checkpoint == nil {
 		return errors.New("missing recovery checkpoint")
 	}
-	if r.checkpointManager == nil {
-		r.installCheckpointManager(r.checkpoint)
+	if r.ackTracker == nil {
+		r.installCheckpoint(r.checkpoint)
 	}
 	r.Logger().Info(context.TODO(), "recover checkpoint done",
 		mlog.String("checkpoint", r.checkpoint.MessageID.String()),
@@ -118,9 +118,7 @@ func (r *recoveryStorageImpl) ensureDataCheckpoint() error {
 			MessageID: r.checkpoint.MessageID,
 			TimeTick:  r.checkpoint.TimeTick,
 		}
-		if r.checkpointManager != nil {
-			r.checkpointManager.MarkDirty()
-		}
+		r.checkpointDirty = true
 	}
 	return nil
 }

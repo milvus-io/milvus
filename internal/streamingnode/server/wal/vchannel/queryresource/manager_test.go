@@ -77,6 +77,52 @@ func TestManagerBuildNotifiesAllCurrentRefsWithoutWaiterGoroutines(t *testing.T)
 	}, time.Second, time.Millisecond)
 }
 
+func TestManagerDefersBuildUntilViewBecomesReady(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+	manager := NewManager(Config{
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
+	})
+
+	ready := make(chan struct{})
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	buildReady := false
+	build := func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
+		return walview.VChannelWALView{}, buildReady
+	}
+
+	require.NotPanics(t, func() {
+		manager.AcquireLocked(snview.AcquireResource{
+			Key:     key,
+			Meta:    meta,
+			OnReady: func() { close(ready) },
+		}, build)
+	})
+	select {
+	case <-ready:
+		t.Fatal("query resource became ready while the WAL view was unavailable")
+	case <-time.After(20 * time.Millisecond):
+	}
+	_, ok := manager.QueryRuntime(key)
+	require.False(t, ok)
+
+	buildReady = true
+	manager.TryBuildLocked(build)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	_, ok = manager.QueryRuntime(key)
+	require.True(t, ok)
+}
+
 func TestManagerWaitsForExactDataVersionBeforeReady(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()

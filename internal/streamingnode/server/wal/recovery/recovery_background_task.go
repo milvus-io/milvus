@@ -22,17 +22,20 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 	}
 
 	rs.mu.Lock()
-	checkpointDirty := rs.checkpointManager != nil && rs.checkpointManager.HasDirty()
-	dirty := rs.dirtyCounter > 0 || rs.moduleDirty || rs.pendingSalvageCheckpoint != nil || checkpointDirty
+	dirty := rs.dirtyCounter > 0 || rs.moduleDirty || rs.pendingSalvageCheckpoint != nil || rs.checkpointDirty
+	persistedCheckpoint := rs.persistedCheckpoint
+	ackTracker := rs.ackTracker
 	rs.mu.Unlock()
+	if !dirty && ackTracker != nil {
+		completed := ackTracker.CompletedPoint()
+		dirty = persistedCheckpoint == nil || !consumeCheckpointEqual(persistedCheckpoint.DataCheckpoint, &completed)
+	}
 	if dirty {
 		return true
 	}
 
-	for _, module := range rs.modules {
-		if cleanupModule, ok := module.(moduleapi.PendingCleanupModule); ok && cleanupModule.HasPendingCleanup() {
-			return true
-		}
+	if rs.vchannelManager != nil && rs.vchannelManager.HasPendingCleanup() {
+		return true
 	}
 	return false
 }
@@ -126,7 +129,6 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	if err := rs.persistModuleDirtySnapshots(ctx, snapshot); err != nil {
 		return err
 	}
-	rs.refreshSnapshotCheckpoint(snapshot)
 	if err := rs.persistCheckpointSnapshot(ctx, snapshot, lvl >= mlog.InfoLevel); err != nil {
 		return err
 	}
@@ -146,7 +148,6 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshots(ctx context.Context, 
 		dirtySnapshot.MarkPersisted()
 	}
 	snapshot.ModuleSnapshotsAck = true
-	rs.NotifyBarrierUpdated()
 	return nil
 }
 
@@ -247,21 +248,6 @@ func (rs *recoveryStorageImpl) persistCheckpointSnapshot(ctx context.Context, sn
 		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
 	}
 	return nil
-}
-
-func (rs *recoveryStorageImpl) refreshSnapshotCheckpoint(snapshot *dirtyPersistSnapshot) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
-	if rs.checkpointManager == nil {
-		return
-	}
-	rs.checkpointManager.TryAdvanceMetaCheckpoint()
-	rs.checkpointManager.TryAdvanceDataCheckpoint()
-	if checkpointDirty := rs.checkpointManager.ConsumeDirty(); checkpointDirty {
-		snapshot.Checkpoint = rs.checkpointManager.Snapshot()
-		snapshot.CheckpointDirty = true
-	}
 }
 
 func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, checkpoint *WALCheckpoint) {

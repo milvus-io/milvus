@@ -2,14 +2,18 @@ package snview
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // snShardView manages all query view state machines for a single shard on a StreamingNode.
@@ -20,11 +24,8 @@ import (
 // contracts require that all callbacks are asynchronous, so this does not
 // cause deadlocks.
 type snShardView struct {
-	mu     sync.Mutex
-	closed bool
-
-	detached        bool
-	ctx             context.Context
+	mu              sync.Mutex
+	closed          bool
 	pchannel        string
 	shardID         qviews.ShardID
 	collectionID    int64
@@ -32,21 +33,22 @@ type snShardView struct {
 	views           map[qviews.QueryViewVersion]*snViewEntry
 	catalog         metastore.StreamingNodeCataLog
 	resMgr          StreamingNodeResourceManager
-	onEmpty         func(*snShardView) // called (under mu) when the last view entry is removed
+	onEmpty         func() // called (under mu) when the last view entry is removed
 }
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
-	releaseStarted bool
-	releaseDone    chan struct{}
+	recovered      bool
+	queryRefs      int
+	releasePending bool
 }
 
-// recoverSnShardView constructs an snShardView from pre-built recovered state machines.
-// Recovery starts only after the handler publishes the shard.
+// recoverSnShardView constructs an snShardView from pre-built recovered state machines
+// and starts recovery for each view via ResourceManager (under shard lock).
+// Called during handler construction.
 func recoverSnShardView(
-	ctx context.Context,
 	pchannel string,
 	shardID qviews.ShardID,
 	views map[qviews.QueryViewVersion]*snQueryViewStateMachine,
@@ -55,8 +57,8 @@ func recoverSnShardView(
 ) *snShardView {
 	entries := make(map[qviews.QueryViewVersion]*snViewEntry, len(views))
 	for version, sm := range views {
-		// Populate ApplyView.View from SM's meta+snView so that
-		// consumeAndRelease can safely call entry.View.QueryViewKey().
+		// Populate ApplyView.View from SM's full shard view so query planning
+		// after recovery still sees QueryNode topology.
 		view := qviews.NewQueryViewAtWorkNodeFromProto(&viewpb.QueryViewOfShard{
 			Meta:          sm.Meta(),
 			QueryNode:     sm.QueryNodes(),
@@ -65,10 +67,10 @@ func recoverSnShardView(
 		entries[version] = &snViewEntry{
 			ApplyView: handler.ApplyView{View: view},
 			sm:        sm,
+			recovered: true,
 		}
 	}
 	s := &snShardView{
-		ctx:      ctx,
 		pchannel: pchannel,
 		shardID:  shardID,
 		views:    entries,
@@ -80,29 +82,25 @@ func recoverSnShardView(
 		break
 	}
 
-	return s
-}
-
-// startRecovery starts resource acquisition for recovered views after the
-// handler has published the shard and installed its empty callback.
-func (s *snShardView) startRecovery() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	versions := make([]qviews.QueryViewVersion, 0, len(s.views))
-	for version := range s.views {
+	// Start recovery for each view via ResourceManager under shard lock.
+	versions := make([]qviews.QueryViewVersion, 0, len(views))
+	for version := range views {
 		versions = append(versions, version)
 	}
 	sort.Slice(versions, func(i, j int) bool {
 		return versions[j].GT(versions[i])
 	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, version := range versions {
-		key := qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
-		entry := s.views[version]
+		key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
 		v := version // capture loop variable
-		s.resMgr.Acquire(AcquireResource{
+		qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeRecoverAcquireResourceEvent{
+			View: key,
+		})
+		resMgr.Acquire(AcquireResource{
 			Key:  key,
-			Meta: entry.sm.Meta(),
+			Meta: views[version].Meta(),
 			OnReady: func() {
 				s.notifyRecoveringDone(v)
 			},
@@ -111,15 +109,18 @@ func (s *snShardView) startRecovery() {
 			},
 		})
 	}
+
+	return s
 }
 
 // ApplyViews applies a batch of coord-pushed views atomically.
-func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
+// Preparing and Up views are processed first so new serving candidates are
+// installed before old views are released.
+func (s *snShardView) ApplyViews(views []handler.ApplyView) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if s.closed || s.detached {
-		return false
+	if s.closed {
+		return
 	}
 
 	for i := range views {
@@ -134,26 +135,84 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 			s.applyOneLocked(&views[i])
 		}
 	}
-	return true
 }
 
 func (s *snShardView) CloseForHandoff() {
 	s.mu.Lock()
 	s.closed = true
-
-	s.detached = true
-	releases := make([]<-chan struct{}, 0, len(s.views))
+	releases := make([]qviews.QueryViewKey, 0, len(s.views))
 	for version, entry := range s.views {
-		releases = append(releases, s.startReleaseLocked(version, entry))
+		key := entry.View.QueryViewKey()
+		if key.QueryViewVersion == (qviews.QueryViewVersion{}) {
+			key = qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
+		}
+		releases = append(releases, key)
 	}
 	s.views = make(map[qviews.QueryViewVersion]*snViewEntry)
 	if s.onEmpty != nil {
-		s.onEmpty(s)
+		s.onEmpty()
 	}
 	s.mu.Unlock()
 
-	for _, releaseDone := range releases {
-		<-releaseDone
+	var wg sync.WaitGroup
+	wg.Add(len(releases))
+	for _, key := range releases {
+		k := key
+		s.resMgr.Release(ReleaseResource{
+			Key: k,
+			OnDropped: func() {
+				wg.Done()
+			},
+		})
+	}
+	wg.Wait()
+}
+
+func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var selected *snViewEntry
+	var selectedVersion qviews.QueryViewVersion
+	for version, entry := range s.views {
+		if entry.sm.State() != qviews.QueryViewStateUp {
+			continue
+		}
+		if selected == nil || version.GT(selectedVersion) {
+			selected = entry
+			selectedVersion = version
+		}
+	}
+	if selected == nil {
+		return nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
+	}
+	selected.queryRefs++
+	view := proto.Clone(selected.View.IntoProto()).(*viewpb.QueryViewOfShard)
+	var once sync.Once
+	return &QueryViewLease{
+		Version: selectedVersion,
+		Meta:    proto.Clone(view.GetMeta()).(*viewpb.QueryViewMeta),
+		View:    view,
+		Release: func() { once.Do(func() { s.releaseQueryViewLease(selectedVersion) }) },
+	}, nil
+}
+
+func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, exists := s.views[version]
+	if !exists || entry.queryRefs == 0 {
+		return
+	}
+	entry.queryRefs--
+	if entry.queryRefs == 0 && entry.releasePending {
+		s.releaseQueryResourceLocked(version, entry)
 	}
 }
 
@@ -170,9 +229,16 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 			// New Preparing view: create SM and acquire resources.
 			snView := av.View.(*qviews.QueryViewAtStreamingNode)
 			pb := snView.IntoProto()
-			sm := newSNQueryViewStateMachine(pb.Meta, pb.StreamingNode, pb.QueryNode)
+			sm := newSNQueryViewStateMachine(
+				pb.Meta,
+				pb.StreamingNode,
+				pb.QueryNode,
+			)
 			entry = &snViewEntry{ApplyView: *av, sm: sm}
 			s.views[key.QueryViewVersion] = entry
+			qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeAcquireResourceEvent{
+				View: key,
+			})
 			// SN SM constructor generates a Preparing report.
 			s.consumeReport(entry)
 
@@ -188,14 +254,11 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 					s.notifyUnrecoverable(version)
 				},
 			})
-		case qviews.QueryViewStateDown, qviews.QueryViewStateDropped:
-			// A missing teardown view means the SN has already lost its local
-			// state and resources. Report Dropped so Coord can finish cleanup
-			// and notify all QueryNodes.
+		case qviews.QueryViewStateDropped:
+			// View doesn't exist (e.g., SN restarted). Report Dropped immediately
+			// so Coord can finish cleanup.
 			if av.OnReport != nil {
-				pb := av.View.IntoProto()
-				pb.Meta.State = viewpb.QueryViewState(qviews.QueryViewStateDropped)
-				av.OnReport(qviews.NewQueryViewAtWorkNodeFromProto(pb))
+				av.OnReport(av.View)
 			}
 		default:
 			// View unknown to this node (e.g., state lost after restart).
@@ -209,11 +272,52 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 		return
 	}
 
+	if pushedState == qviews.QueryViewStateUp {
+		s.retireSupersededRecoveredViewsLocked(key.QueryViewVersion)
+	}
+
 	// Existing view: replace callback and deliver coord push.
 	entry.ApplyView = *av
 	entry.sm.UpdateView(av.View.IntoProto())
+	before := entry.sm.State()
 	entry.sm.OnCoordStateDelivered(pushedState)
+	qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeApplyCoordViewEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
+}
+
+// retireSupersededRecoveredViewsLocked removes startup-only views that are no
+// longer known by Coord. A higher Up view is sufficient proof that these older
+// recovered views must not keep the shared query runtime at an obsolete
+// DataVersion. Normal handoff views are not marked recovered and remain under
+// Coord's lease-driven lifecycle.
+func (s *snShardView) retireSupersededRecoveredViewsLocked(upVersion qviews.QueryViewVersion) {
+	for version, entry := range s.views {
+		if !entry.recovered || !upVersion.GT(version) {
+			continue
+		}
+		state := entry.sm.State()
+		if state != qviews.QueryViewStateUp && state != qviews.QueryViewStateUpRecovering {
+			continue
+		}
+		key := entry.View.QueryViewKey()
+		entry.sm.OnCoordStateDelivered(qviews.QueryViewStateDropped)
+		qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeApplyCoordViewEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: collectionIDForEntry(entry),
+				View:         key,
+				From:         state,
+				To:           entry.sm.State(),
+			},
+		})
+		s.consumeReportPersistAndCleanup(version, entry)
+	}
 }
 
 func (s *snShardView) setCollectionIDLocked(collectionID int64) {
@@ -238,21 +342,17 @@ func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
 		return
 	}
 
+	key := entry.View.QueryViewKey()
+	before := entry.sm.State()
 	entry.sm.OnReady()
-	s.consumeReportPersistAndCleanup(version, entry)
-}
-
-// notifyUnrecoverable is called by ResourceManager when the requested
-// resources can no longer be reconstructed at the QueryView DataVersion.
-func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	entry, exists := s.views[version]
-	if !exists {
-		return
-	}
-	entry.sm.OnUnrecoverable()
+	qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeResourceReadyEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
@@ -281,7 +381,17 @@ func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
 		return
 	}
 
+	key := entry.View.QueryViewKey()
+	before := entry.sm.State()
 	entry.sm.OnRecoveringDone()
+	qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeRecoveringDoneEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
@@ -290,6 +400,10 @@ func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
 func (s *snShardView) consumeReport(entry *snViewEntry) {
 	report := entry.sm.ConsumeReport()
 	if report != nil && entry.OnReport != nil {
+		qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeReportViewEvent{
+			View:  entry.View.QueryViewKey(),
+			State: qviews.QueryViewState(report.GetMeta().GetState()),
+		})
 		entry.OnReport(qviews.NewQueryViewAtWorkNodeFromProto(report))
 	}
 }
@@ -305,7 +419,17 @@ func (s *snShardView) notifyDropped(version qviews.QueryViewVersion) {
 		return
 	}
 
+	key := entry.View.QueryViewKey()
+	before := entry.sm.State()
 	entry.sm.OnDropped()
+	qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeReleaseDoneEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
@@ -315,9 +439,7 @@ func (s *snShardView) notifyDropped(version qviews.QueryViewVersion) {
 // persisting, Coord would believe the state advanced while SN lost it.
 // Caller must hold s.mu.
 func (s *snShardView) consumeReportPersistAndCleanup(version qviews.QueryViewVersion, entry *snViewEntry) {
-	if !s.consumeAndPersist(entry) {
-		return
-	}
+	s.consumeAndPersist(entry)
 	s.consumeReport(entry)
 	s.consumeAndRelease(version, entry)
 	s.cleanupIfDropped(version, entry)
@@ -332,26 +454,25 @@ func (s *snShardView) cleanupIfDropped(version qviews.QueryViewVersion, entry *s
 	}
 	delete(s.views, version)
 	if len(s.views) == 0 && s.onEmpty != nil {
-		s.detached = true
-		s.onEmpty(s)
+		s.onEmpty()
 	}
 }
 
 // consumeAndPersist drains pending persist and writes to catalog.
 // The catalog handles save vs delete based on the view's state.
 // Caller must hold s.mu.
-func (s *snShardView) consumeAndPersist(entry *snViewEntry) bool {
+func (s *snShardView) consumeAndPersist(entry *snViewEntry) {
 	persist := entry.sm.ConsumePersist()
 	if persist == nil {
-		return true
+		return
 	}
-	if err := s.catalog.SaveQueryViews(s.ctx, s.pchannel, []*viewpb.QueryViewOfShard{persist}); err != nil {
-		if s.ctx.Err() != nil {
-			return false
-		}
-		panic(merr.Wrapf(err, "persist query view %s failed", persist.GetMeta().GetVchannel()))
+	qvobserve.Observe(context.TODO(), qvobserve.StreamingNodePersistViewEvent{
+		View:  entry.View.QueryViewKey(),
+		State: qviews.QueryViewState(persist.GetMeta().GetState()),
+	})
+	if err := s.catalog.SaveQueryViews(context.Background(), s.pchannel, []*viewpb.QueryViewOfShard{persist}); err != nil {
+		panic(fmt.Sprintf("persist query view %s failed: %v", persist.GetMeta().GetVchannel(), err))
 	}
-	return true
 }
 
 // consumeAndRelease drains pending release and calls ResourceManager.Release.
@@ -360,28 +481,27 @@ func (s *snShardView) consumeAndRelease(version qviews.QueryViewVersion, entry *
 	if !entry.sm.ConsumeRelease() {
 		return
 	}
-	s.startReleaseLocked(version, entry)
+	if entry.queryRefs > 0 {
+		entry.releasePending = true
+		return
+	}
+	s.releaseQueryResourceLocked(version, entry)
 }
 
-// startReleaseLocked starts exactly one resource release for an entry and
-// returns the completion channel shared by normal dropping and handoff.
-// Caller must hold s.mu.
-func (s *snShardView) startReleaseLocked(version qviews.QueryViewVersion, entry *snViewEntry) <-chan struct{} {
-	if entry.releaseStarted {
-		return entry.releaseDone
-	}
-	entry.releaseStarted = true
-	entry.releaseDone = make(chan struct{})
+func (s *snShardView) releaseQueryResourceLocked(version qviews.QueryViewVersion, entry *snViewEntry) {
+	entry.releasePending = false
 	key := entry.View.QueryViewKey()
-	if key.QueryViewVersion == (qviews.QueryViewVersion{}) {
-		key = qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
-	}
+	qvobserve.Observe(context.TODO(), qvobserve.StreamingNodeReleaseResourceEvent{
+		View: key,
+	})
 	s.resMgr.Release(ReleaseResource{
 		Key: key,
 		OnDropped: func() {
-			defer close(entry.releaseDone)
 			s.notifyDropped(version)
 		},
 	})
-	return entry.releaseDone
+}
+
+func collectionIDForEntry(entry *snViewEntry) int64 {
+	return entry.sm.Meta().GetCollectionId()
 }

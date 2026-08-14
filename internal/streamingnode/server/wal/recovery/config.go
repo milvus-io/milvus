@@ -13,10 +13,12 @@ func newConfig() *config {
 	persistInterval := params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse()
 	maxDirtyMessages := params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt()
 	gracefulTimeout := params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse()
+	taskConcurrency := params.StreamingCfg.WALRecoveryTaskConcurrency.GetAsInt()
 	cfg := &config{
 		persistInterval:  persistInterval,
 		maxDirtyMessages: maxDirtyMessages,
 		gracefulTimeout:  gracefulTimeout,
+		taskConcurrency:  taskConcurrency,
 	}
 	if err := cfg.validate(); err != nil {
 		panic(err)
@@ -29,6 +31,7 @@ type config struct {
 	persistInterval  time.Duration // persistInterval is the interval to persist the dirty recovery snapshot.
 	maxDirtyMessages int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
 	gracefulTimeout  time.Duration // gracefulTimeout is the timeout for graceful close of recovery module.
+	taskConcurrency  int           // taskConcurrency is the max number of async recovery tasks running concurrently.
 }
 
 func (cfg *config) validate() error {

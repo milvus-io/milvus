@@ -28,25 +28,28 @@ func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMes
 	if r == nil || msg == nil {
 		return
 	}
-	if err := r.dispatchMessage(ctx, msg); err != nil {
+	timeTick := msg.TimeTick()
+	applyGrowing := timeTick > r.appliedGrowingTimeTick.Load()
+	applyTransform := messageAdvancesTransformFrontier(msg) && timeTick > r.appliedTransformTimeTick.Load()
+	if err := r.dispatchMessage(ctx, msg, applyGrowing, applyTransform); err != nil {
 		panic(errors.Wrap(err, "failed to apply live message to growing runtime"))
 	}
-	timeTick := msg.TimeTick()
-	advancesTransform := messageAdvancesTransformFrontier(msg)
-	r.markGrowingTimeTick(timeTick)
-	if advancesTransform {
+	if applyGrowing {
+		r.markGrowingTimeTick(timeTick)
+	}
+	if applyTransform {
 		r.markTransformTimeTick(timeTick)
 	}
 	mlog.Debug(ctx, "applied live message to growing runtime",
 		mlog.FieldVChannel(msg.VChannel()),
 		mlog.String("messageType", msg.MessageType().String()),
 		mlog.Uint64("timeTick", timeTick),
-		mlog.Bool("advancesTransform", advancesTransform),
+		mlog.Bool("applyGrowing", applyGrowing),
+		mlog.Bool("applyTransform", applyTransform),
 		mlog.Uint64("appliedGrowingTimeTick", r.appliedGrowingTimeTick.Load()),
 		mlog.Uint64("appliedTransformTimeTick", r.appliedTransformTimeTick.Load()),
 	)
 }
-
 func messageAdvancesTransformFrontier(msg message.ImmutableMessage) bool {
 	return messageutil.ClassifyTransformLogMessage(msg) != messageutil.TransformLogKindNone
 }

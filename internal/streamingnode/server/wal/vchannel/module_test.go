@@ -3,8 +3,8 @@ package vchannel
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,14 +30,12 @@ func TestVChannelRecoveryModuleObservesOnlyItsVChannel(t *testing.T) {
 	assert.Empty(t, module.segments)
 	module.SwitchIntoMetaAndData()
 
-	result := module.ObserveMessage(ctx, newTestDeleteMessage(t, "v2", 10))
-	assert.Nil(t, result.Meta)
-	assert.Nil(t, result.Data)
+	record := observeTestMessage(ctx, t, module, newTestDeleteMessage(t, "v2", 10))
+	assert.Equal(t, uint64(10), record.TimeTick())
 	assert.Empty(t, module.ConsumeDirtySnapshots())
 
-	result = module.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 20))
-	require.NotNil(t, result.Data)
-	assert.Equal(t, uint64(0), result.Data.TimeTick())
+	record = observeTestMessage(ctx, t, module, newTestDeleteMessage(t, "v1", 20))
+	assert.Equal(t, uint64(20), record.TimeTick())
 }
 
 func TestVChannelRecoveryModuleLazilyAllocatesDirtySegments(t *testing.T) {
@@ -214,47 +212,43 @@ func TestAcquireQueryResourceRejectsDataVersionOlderThanSummary(t *testing.T) {
 func TestVChannelRecoveryModuleRecoveryBarrierFlushesOwnedTransformLog(t *testing.T) {
 	ctx := context.Background()
 	module := newTestModule(t, "p1", "v1")
+	module.runtime.Scheduler = &recordingScheduler{}
 	module.SwitchIntoMetaAndData()
-	module.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 20))
+	deleteRecord := observeTestMessage(ctx, t, module, newTestDeleteMessage(t, "v1", 20))
 
-	result := module.ObserveMessage(ctx, newTestRecoveryBarrierMessage(t, 30))
+	barrierRecord := observeTestMessage(ctx, t, module, newTestRecoveryBarrierMessage(t, 30))
 
-	require.NotNil(t, result.Data)
-	assert.Equal(t, uint64(0), result.Data.TimeTick())
+	assert.Equal(t, uint64(20), deleteRecord.TimeTick())
+	assert.Equal(t, uint64(30), barrierRecord.TimeTick())
+	assert.Equal(t, uint64(30), module.transformLog.LatestTimeTick())
 }
 
 func TestVChannelRecoveryModuleEmptyRecoveryBarrierDoesNotDirtyTransformLog(t *testing.T) {
 	module := newTestModule(t, "p1", "v1")
 	module.SwitchIntoMetaAndData()
 
-	result := module.ObserveMessage(context.Background(), newTestRecoveryBarrierMessage(t, 30))
+	record := observeTestMessage(context.Background(), t, module, newTestRecoveryBarrierMessage(t, 30))
 
-	require.NotNil(t, result.Data)
-	assert.Equal(t, uint64(30), result.Data.TimeTick())
+	assert.Equal(t, uint64(30), record.TimeTick())
 	for _, snapshot := range module.ConsumeDirtySnapshots() {
 		assert.NotEqual(t, moduleapi.ModuleNameTransformLog, snapshot.ModuleName())
 	}
 }
 
-func TestVChannelRecoveryModuleReturnsOwnedDataFrontier(t *testing.T) {
-	ctx := context.Background()
+func TestVChannelRecoveryModuleConsumeDirtySnapshotsWaitsForModuleLock(t *testing.T) {
 	module := newTestModule(t, "p1", "v1")
 	module.SwitchIntoMetaAndData()
-	module.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 20))
 
-	frontier := module.DataFrontier(moduleapi.Scope{
-		Type:     moduleapi.ScopeVChannel,
-		Kind:     moduleapi.DataProgressDurable,
-		VChannel: "v1",
-	})
+	module.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		_ = module.ConsumeDirtySnapshots()
+		close(done)
+	}()
 
-	require.NotNil(t, frontier)
-	assert.Equal(t, uint64(0), frontier.TimeTick())
-	assert.Nil(t, module.DataFrontier(moduleapi.Scope{
-		Type:     moduleapi.ScopeVChannel,
-		Kind:     moduleapi.DataProgressDurable,
-		VChannel: "v2",
-	}))
+	assert.Never(t, channelClosed(done), 20*time.Millisecond, time.Millisecond)
+	module.mu.Unlock()
+	require.Eventually(t, channelClosed(done), time.Second, time.Millisecond)
 }
 
 func TestVChannelRecoveryModuleRuntimeCreatedSegmentInheritsMetaAndData(t *testing.T) {
@@ -264,54 +258,31 @@ func TestVChannelRecoveryModuleRuntimeCreatedSegmentInheritsMetaAndData(t *testi
 	module.runtime.Scheduler = scheduler
 	module.SwitchIntoMetaAndData()
 
-	result := module.ObserveMessage(ctx, newTestCreateSegmentMessage(t, "v1", 10, 20))
+	createRecord := observeTestMessage(ctx, t, module, newTestCreateSegmentMessage(t, "v1", 10, 20))
 
-	require.NotNil(t, result.Data)
+	assert.Equal(t, uint64(20), createRecord.TimeTick())
 	require.Len(t, scheduler.tasks, 1)
 	require.NotNil(t, module.segments[10])
 
-	result = module.ObserveMessage(ctx, newTestManualFlushMessage(t, "v1", 30))
+	flushRecord := observeTestMessage(ctx, t, module, newTestManualFlushMessage(t, "v1", 30))
 
-	require.NotNil(t, result.Data)
+	assert.Equal(t, uint64(30), flushRecord.TimeTick())
 	assert.Len(t, scheduler.tasks, 2)
-}
-
-func TestVChannelRecoveryModuleRefreshesFrontierAfterTransformSnapshotPersisted(t *testing.T) {
-	var frontierUpdates atomic.Int32
-	module, err := NewModule(ModuleConfig{
-		PChannel: "p1",
-		VChannel: "v1",
-		VChannelMeta: &streamingpb.VChannelMeta{
-			Vchannel: "v1",
-			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-				CollectionId: 100,
-			},
-		},
-		TransformLogMeta: &streamingpb.VChannelTransformLogMeta{},
-		OnFrontierUpdated: func() {
-			frontierUpdates.Add(1)
-		},
-	})
-	require.NoError(t, err)
-	before := frontierUpdates.Load()
-	module.markTransformSnapshotPersisted(module.transformLog.SnapshotMeta())
-	assert.Greater(t, frontierUpdates.Load(), before)
 }
 
 func TestVChannelRecoveryModuleConsumesOnlyDirtySegments(t *testing.T) {
 	module := newTestModule(t, "p1", "v1")
 	module.runtime.Scheduler = &recordingScheduler{}
 	module.SwitchIntoMetaAndData()
-	module.ObserveMessage(context.Background(), newTestCreateSegmentMessage(t, "v1", 10, 20))
-	module.ObserveMessage(context.Background(), newTestCreateSegmentMessage(t, "v1", 20, 21))
+	observeTestMessage(context.Background(), t, module, newTestCreateSegmentMessage(t, "v1", 10, 20))
+	observeTestMessage(context.Background(), t, module, newTestCreateSegmentMessage(t, "v1", 20, 21))
 
 	for _, snapshot := range module.ConsumeDirtySnapshots() {
 		snapshot.MarkPersisted()
 	}
 	assert.Empty(t, module.ConsumeDirtySnapshots())
 
-	module.ObserveMessage(context.Background(), newTestCreateSegmentMessage(t, "v1", 30, 22))
+	observeTestMessage(context.Background(), t, module, newTestCreateSegmentMessage(t, "v1", 30, 22))
 	segmentIDs := make([]int64, 0)
 	for _, snapshot := range module.ConsumeDirtySnapshots() {
 		if snapshot.ModuleName() == moduleapi.ModuleNameSegment {
@@ -332,26 +303,18 @@ func TestVChannelRecoveryModuleConcurrentObserveAndSnapshot(t *testing.T) {
 	for i := 0; i < segmentCount; i++ {
 		messages = append(messages, newTestCreateSegmentMessage(t, "v1", int64(i+1), uint64(i+10)))
 	}
-	frontier := module.DataFrontier(moduleapi.Scope{
-		Type:     moduleapi.ScopeVChannel,
-		Kind:     moduleapi.DataProgressDurable,
-		VChannel: "v1",
-	})
-	require.NotNil(t, frontier)
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		for _, msg := range messages {
-			module.ObserveMessage(ctx, msg)
+			observeTestMessage(ctx, t, module, msg)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for range messages {
 			module.ConsumeDirtySnapshots()
-			frontier.TimeTick()
 			module.IsActive()
 		}
 	}()
@@ -390,13 +353,6 @@ func TestRecoveredDurableSegmentRetriesMissingFinalCommit(t *testing.T) {
 			module.SwitchIntoMetaAndData()
 
 			require.Len(t, taskScheduler.tasks, 1)
-			frontier := module.DataFrontier(moduleapi.Scope{
-				Type:     moduleapi.ScopeVChannel,
-				Kind:     moduleapi.DataProgressDurable,
-				VChannel: "v1",
-			})
-			require.NotNil(t, frontier)
-			assert.Equal(t, uint64(29), frontier.TimeTick())
 			require.NoError(t, taskScheduler.tasks[0].Execute(ctx))
 
 			assert.Equal(t, []int64{10}, lifecycle.committedSegmentIDs)
@@ -425,16 +381,18 @@ func TestManualFlushDeduplicatesPendingSegmentFinalCommit(t *testing.T) {
 	}
 	module.SwitchIntoMetaAndData()
 
-	first := module.ObserveMessage(ctx, newTestManualFlushMessage(t, "v1", 30))
-	second := module.ObserveMessage(ctx, newTestManualFlushMessage(t, "v1", 40))
+	first := observeTestMessage(ctx, t, module, newTestManualFlushMessage(t, "v1", 30))
+	second := observeTestMessage(ctx, t, module, newTestManualFlushMessage(t, "v1", 40))
 
-	require.NotNil(t, first.Data)
-	require.NotNil(t, second.Data)
+	assert.Equal(t, uint64(30), first.TimeTick())
+	assert.Equal(t, uint64(40), second.TimeTick())
 	require.Len(t, taskScheduler.tasks, 2)
 	for _, task := range taskScheduler.tasks {
 		require.NoError(t, task.Execute(ctx))
 	}
 
+	assert.Equal(t, uint64(30), first.TimeTick())
+	assert.Equal(t, uint64(40), second.TimeTick())
 	assert.Equal(t, []int64{10, 20}, lifecycle.committedSegmentIDs)
 	assert.Equal(t, int64(1), module.segments[10].AssignmentMeta().GetSealedAtDataVersion().GetStreamingVersion())
 	assert.Equal(t, int64(2), module.segments[20].AssignmentMeta().GetSealedAtDataVersion().GetStreamingVersion())
@@ -561,6 +519,17 @@ func newTestGrowingSegmentMeta(segmentID int64, createTimeTick uint64) *streamin
 			CreateSegmentTimeTick: createTimeTick,
 			Level:                 datapb.SegmentLevel_L1,
 		},
+	}
+}
+
+func channelClosed(ch <-chan struct{}) func() bool {
+	return func() bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
 	}
 }
 

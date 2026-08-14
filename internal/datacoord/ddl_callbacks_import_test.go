@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -47,6 +49,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -62,6 +66,10 @@ type ImportCallbacksSuite struct {
 
 func TestImportCallbacksSuite(t *testing.T) {
 	suite.Run(t, new(ImportCallbacksSuite))
+}
+
+func (s *ImportCallbacksSuite) SetupTest() {
+	streaming.SetupNoopWALForTest()
 }
 
 // --------------------------------
@@ -599,6 +607,11 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	)
 
 	s.NoError(err)
+	s.Require().NotNil(mockBroadcastAPI.captured)
+	s.ElementsMatch(
+		[]string{"v1", streaming.WAL().ControlChannel()},
+		mockBroadcastAPI.captured.BroadcastHeader().VChannels,
+	)
 }
 
 // --------------------------------
@@ -634,6 +647,7 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	captured        message.BroadcastMutableMessage
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -656,6 +670,7 @@ func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.Broadc
 	if msg == nil {
 		return nil, errors.New("message is nil")
 	}
+	m.captured = msg
 	if m.broadcastErr != nil {
 		return nil, m.broadcastErr
 	}
@@ -920,6 +935,49 @@ func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRoll
 	}
 }
 
+func buildCommitImportAckResult(t *testing.T, jobID int64, vchannel string) message.AckResultCommitImportMessageV2 {
+	t.Helper()
+	msgs := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		WithBroadcast([]string{vchannel}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()
+	require.Len(t, msgs, 1)
+	msgID := walimplstest.NewTestMessageID(1)
+	immutable := msgs[0].
+		WithTimeTick(1).
+		WithLastConfirmed(msgID).
+		IntoImmutableMessage(msgID)
+	return message.AckResultCommitImportMessageV2{
+		Message: message.MustAsImmutableCommitImportMessageV2(immutable),
+	}
+}
+
+func TestCommitImportAckOnceIgnoresControlChannel(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      1,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	require.NoError(t, importMeta.AddJob(ctx, job))
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
+
+	require.NoError(t, callbacks.commitImportV2AckOnceCallback(
+		ctx,
+		buildCommitImportAckResult(t, 1, controlChannel),
+	))
+
+	assert.Equal(t, internalpb.ImportJobState_Uncommitted, importMeta.GetJob(ctx, 1).GetState())
+}
+
 func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
@@ -1182,9 +1240,11 @@ func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.Broadcast
 
 func (c *captureBroadcastAPI) Close() {}
 
-func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+func testImportBroadcastTargetsOrderedChannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
+	streaming.SetupNoopWALForTest()
+	wantBroadcastChannels := append(append([]string(nil), wantVchannels...), streaming.WAL().ControlChannel())
 
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
@@ -1212,24 +1272,21 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	err := broadcastFn(server, ctx, job)
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels, not the control channel")
+	assert.ElementsMatch(t, wantBroadcastChannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels and the control channel")
 }
 
-// TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
-// CommitImport WAL message is broadcast to the job's data vchannels.
-// Control-channel-only broadcasts are dropped by the WAL flusher's
-// IsControlChannel guard before reaching the CommitImport case, so the
-// message must reach data vchannels for HandleCommitVchannel to run.
-func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
-	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+// TestBroadcastCommitImportMessage_TargetsOrderedChannels asserts that the
+// CommitImport WAL message reaches data vchannels and carries CChannel as the
+// common ordering point used by replicated broadcasts.
+func TestBroadcastCommitImportMessage_TargetsOrderedChannels(t *testing.T) {
+	testImportBroadcastTargetsOrderedChannels(t, (*Server).broadcastCommitImportMessage)
 }
 
-// TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
-// RollbackImport WAL message is broadcast to the job's data vchannels,
-// matching the CommitImport routing.
-func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
-	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
+// TestBroadcastRollbackImportMessage_TargetsOrderedChannels asserts that the
+// RollbackImport WAL message uses the same data and control channels.
+func TestBroadcastRollbackImportMessage_TargetsOrderedChannels(t *testing.T) {
+	testImportBroadcastTargetsOrderedChannels(t, (*Server).broadcastRollbackImportMessage)
 }
 
 func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {

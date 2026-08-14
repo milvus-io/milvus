@@ -41,8 +41,8 @@ catchup, and the transition to `Ready`.
 | `GrowingRuntime` | QueryRuntime module that owns the vchannel segment map and segment-level dispatch. | It does not decide resource references or call WAL modules directly. |
 | `GrowingSegment` | Owns one segment's local resource handle and applies segment-scoped persisted data, inserts, deletes, and sealed metadata. | It does not own vchannel-level message dispatch or DataVersion watermarks. |
 | `VChannelWALView` | Provides no-gap WAL input for the selected base DataVersion. | Its contract is defined in [StreamingNode VChannel WAL View Design](../../wal/streamingnode_vchannel_wal_view.md). |
-| `SegmentModule` | Owns segment metadata, visible snapshot construction, and segment metadata GC. | It is consumed only through `VChannelWALView`; runtime components do not call it directly. |
-| `TransformLogModule` | Owns transform log storage published through the PChannel-level shared stream. | `GrowingRuntime.Prepare` creates and closes its own bounded vchannel subscription. |
+| `SegmentView` | VChannelRecoveryModule-internal owner of segment metadata, visible snapshot construction, and segment metadata GC. | It is consumed only through `VChannelWALView`; runtime components do not call it directly. |
+| `TransformLog` | VChannelRecoveryModule-internal owner of transform log storage published through the PChannel-level shared stream. | `GrowingRuntime.Prepare` creates and closes its own bounded vchannel subscription. |
 
 ## 3. Component Relationships And Invariants
 
@@ -140,8 +140,8 @@ DataVersion.
 2. `GrowingRuntime` does not own the vchannel live-event buffer.
 3. `GrowingRuntime` does not own pending live-event buffering.
 4. `GrowingRuntime` does not expose a catchup handle.
-5. Runtime preparation never reads `SegmentModule` or `TransformLogModule`
-   directly.
+5. Runtime preparation never reads `SegmentView` or `TransformLog` internal
+   state directly.
 6. `VChannelWALView` owns the no-gap input guarantee.
 7. Snapshot segment membership during preparation comes only from
    `VChannelWALView.SegmentSnapshot.Segments`.
@@ -156,6 +156,11 @@ DataVersion.
     corrupted and the StreamingNode must fail critically.
 12. `Advance(oldestDataVersion)` is the only external GC signal from
     QueryView references.
+13. Initial preparation never receives a `FLUSHED` segment with a nil
+    `SealedAtDataVersion`; the owning `VChannelRecoveryModule` resolves such
+    final commits before capturing the WAL view.
+14. DataVersion is not a VChannel frontier. Preparation never waits for a local
+    maximum sealed version to reach the target QueryView version.
 
 ## 4. Interface Description
 
@@ -240,9 +245,11 @@ Live resource events are not applied directly to a single segment. They first
 enter `QueryRuntime`, then `GrowingRuntime`, which performs vchannel-level
 dispatch and calls segment-scoped methods.
 
-`MarkSealed` records the `DataVersion` assigned after the segment's flush commit
-is acknowledged. WAL `Flush` closes the segment for writes, but it does not
-carry this `DataVersion`.
+`MarkSealed` records the exact first `DataVersion` whose DataView membership
+contains the segment. WAL `Flush` closes the segment for writes, but it does not
+carry this `DataVersion`. Retrying the final commit must return the same first
+join version even if other VChannels have advanced the collection DataVersion
+since the original commit.
 
 Segment-scoped replay must be idempotent. For a flushed segment, any
 `CreateSegment` or `Insert` at or before the segment's `flushTimeTick` is an
@@ -250,9 +257,23 @@ old WAL entry and must be ignored instead of recreating a queryable growing
 segment. A `CreateSegment` or `Insert` after the flush timetick is invalid for
 that segment and is treated as corrupted runtime input.
 
+For a queryable segment recovered from `SegmentSnapshot.Segments`,
+`SegmentAssignmentMeta.DataCheckpointTimeTick` is an additional segment-local
+Insert replay boundary. An Insert at or before that point is already represented
+by the segment's persisted storage and is skipped even when the VChannel-level
+`BaseGrowingTimeTick` is older. This segment boundary is only a duplicate replay
+filter; it does not advance the runtime's global MVCC frontier.
+
 ## 5. Actual Behavior
 
 ### 5.1 Preparation
+
+Before `VChannelWALView` is captured, bounded Meta-only recovery must be
+complete and the owning module must have resolved every retained
+`FLUSHED && SealedAtDataVersion == nil` segment. Resolution schedules or reuses
+the segment's idempotent final-commit task and delays QueryView readiness; the
+runtime must not conservatively load an unresolved flushed segment as queryable
+because QueryNode may already serve it.
 
 ```text
 QueryRuntime.Initialize
@@ -281,6 +302,22 @@ consumed.
 controlled by the `QueryRuntime` initialization scheduler, not by
 `GrowingRuntime`.
 
+The classification is per segment using the complete lexicographically ordered
+`(streaming_version, compact_version)` value:
+
+```text
+GROWING
+    -> queryable growing segment
+
+FLUSHED && SealedAtDataVersion > QueryView.DataVersion
+    -> queryable flushed-as-growing segment
+
+FLUSHED && SealedAtDataVersion <= QueryView.DataVersion
+    -> non-queryable replay marker
+```
+
+No aggregate or maximum sealed version participates in this decision.
+
 ### 5.2 Live Event Apply
 
 ```text
@@ -293,8 +330,14 @@ QueryRuntime.applyLiveEvent(event)
 `QueryRuntime` owns event ordering. `GrowingRuntime` assumes calls come from the
 single `QueryRuntime` consumer and are already serialized in WAL order.
 
-Recovery baseline events are defined by
-[RecoveryBarrier](../../../../agent_guides/streaming-system/message/message-semantic-recovery-barrier.md).
+Recovery baselines are the WALView's independent `BaseGrowingTimeTick` and
+`BaseTransformTimeTick`. `BaseGrowingTimeTick` covers only data-path messages
+already represented by the captured WALView state; it is not automatically
+advanced to the startup `RecoveryBarrier`. Later DataScanner replay is applied
+through live events and filtered against the corresponding runtime frontier.
+For Inserts, each recovered segment also filters through its persisted
+`DataCheckpointTimeTick`; this prevents duplicate rows when a segment's object
+storage checkpoint is ahead of the PChannel Data checkpoint.
 
 ### 5.3 Segment Seal DataVersion
 
@@ -305,7 +348,13 @@ Segment sealing has two relevant moments:
 
 The second value is required for retention. It is delivered through live
 resource events captured by `RecoveryStorage` and forwarded by `QueryRuntime`.
-`GrowingRuntime` must not query `SegmentModule` directly to refresh it.
+`GrowingRuntime` must not query `SegmentView` directly to refresh it.
+
+`SealedAtDataVersion` is a membership fact, not an acknowledgement timestamp:
+it identifies the first DataView snapshot containing the segment. An
+idempotent final-commit retry must recover that original value rather than the
+collection's current latest DataVersion. Otherwise a QueryView between those
+two versions could query the segment from both QueryNode and StreamingNode.
 
 ### 5.4 Truncation
 

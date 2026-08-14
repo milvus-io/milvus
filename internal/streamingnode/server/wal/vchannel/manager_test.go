@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -29,13 +30,10 @@ func TestPChannelRecoveryManagerCreatesAndRoutesVChannelModules(t *testing.T) {
 	manager := newTestManager(t, "p1", "v1")
 	manager.SwitchIntoMetaAndData()
 
-	result := manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v2", 10))
-	assert.Nil(t, result.Meta)
-	assert.Nil(t, result.Data)
+	observeTestMessage(ctx, t, manager, newTestDeleteMessage(t, "v2", 10))
 	assert.Nil(t, manager.Module("v2"))
 
-	result = manager.ObserveMessage(ctx, newTestCreateCollectionMessage(t, "v2", 20))
-	require.NotNil(t, result.Meta)
+	observeTestMessage(ctx, t, manager, newTestCreateCollectionMessage(t, "v2", 20))
 	require.NotNil(t, manager.Module("v2"))
 	assert.True(t, manager.Module("v2").metaAndData)
 
@@ -48,13 +46,13 @@ func TestPChannelRecoveryManagerBroadcastsPChannelMessages(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestManager(t, "p1", "v1", "v2")
 	manager.SwitchIntoMetaAndData()
-	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 10))
-	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v2", 11))
+	observeTestMessage(ctx, t, manager, newTestDeleteMessage(t, "v1", 10))
+	observeTestMessage(ctx, t, manager, newTestDeleteMessage(t, "v2", 11))
 
-	result := manager.ObserveMessage(ctx, newTestRecoveryBarrierMessage(t, 20))
+	observeTestMessage(ctx, t, manager, newTestRecoveryBarrierMessage(t, 20))
 
-	require.NotNil(t, result.Data)
-	assert.Equal(t, uint64(0), result.Data.TimeTick())
+	assert.Equal(t, uint64(20), manager.Module("v1").transformLog.LatestTimeTick())
+	assert.Equal(t, uint64(20), manager.Module("v2").transformLog.LatestTimeTick())
 }
 
 func TestPChannelRecoveryManagerModuleIndexSupportsConcurrentRange(t *testing.T) {
@@ -195,8 +193,7 @@ func TestPChannelRecoveryManagerConsumesDirtySnapshotsFromUpdatedModule(t *testi
 	manager := newTestManager(t, "p1", "v1")
 	manager.SwitchIntoMetaAndData()
 
-	result := manager.ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v1", 20))
-	require.NotNil(t, result.Meta)
+	observeTestMessage(ctx, t, manager, newTestCreatePartitionMessage(t, "v1", 20))
 
 	snapshots := manager.ConsumeDirtySnapshots()
 	require.NotEmpty(t, snapshots)
@@ -208,10 +205,8 @@ func TestPChannelRecoveryManagerDoesNotScanCleanModulesForDirtySnapshots(t *test
 	manager := newTestManager(t, "p1", "v1", "v2")
 	manager.SwitchIntoMetaAndData()
 
-	result := manager.Module("v2").ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v2", 20))
-	require.NotNil(t, result.Meta)
-	result = manager.ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v1", 20))
-	require.NotNil(t, result.Meta)
+	observeTestMessage(ctx, t, manager.Module("v2"), newTestCreatePartitionMessage(t, "v2", 20))
+	observeTestMessage(ctx, t, manager, newTestCreatePartitionMessage(t, "v1", 20))
 
 	snapshots := manager.ConsumeDirtySnapshots()
 	assert.Contains(t, dirtySnapshotVChannels(snapshots), "v1")
@@ -223,7 +218,7 @@ func TestPChannelRecoveryManagerTracksAsyncModuleUpdates(t *testing.T) {
 	module := manager.Module("v1")
 	require.NotNil(t, module.runtime.Notifier)
 
-	module.runtime.Notifier.NotifyBarrierUpdated()
+	module.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameTransformLog)
 	dirty := manager.takeDirtyModules()
 	assert.Same(t, module, dirty["v1"])
 }
@@ -232,7 +227,7 @@ func TestPChannelRecoveryManagerKeepsInFlightDirtyVChannelSnapshots(t *testing.T
 	ctx := context.Background()
 	manager := newTestManager(t, "p1", "v1", "v2")
 
-	manager.ObserveMessage(ctx, newTestCreateCollectionMessage(t, "v3", 20))
+	observeTestMessage(ctx, t, manager, newTestCreateCollectionMessage(t, "v3", 20))
 	first := manager.ConsumeDirtySnapshots()
 	require.NotEmpty(t, first)
 	assert.Contains(t, dirtySnapshotVChannels(first), "v3")
@@ -245,36 +240,6 @@ func TestPChannelRecoveryManagerKeepsInFlightDirtyVChannelSnapshots(t *testing.T
 		snapshot.MarkPersisted()
 	}
 	assert.Empty(t, manager.ConsumeDirtySnapshots())
-}
-
-func TestPChannelRecoveryManagerAggregatesDataFrontier(t *testing.T) {
-	ctx := context.Background()
-	manager := newTestManager(t, "p1", "v1", "v2")
-	manager.SwitchIntoMetaAndData()
-	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 10))
-
-	v1Frontier := manager.DataFrontier(moduleapi.Scope{
-		Type:     moduleapi.ScopeVChannel,
-		Kind:     moduleapi.DataProgressDurable,
-		VChannel: "v1",
-	})
-	require.NotNil(t, v1Frontier)
-	assert.Equal(t, uint64(0), v1Frontier.TimeTick())
-
-	v2Frontier := manager.DataFrontier(moduleapi.Scope{
-		Type:     moduleapi.ScopeVChannel,
-		Kind:     moduleapi.DataProgressDurable,
-		VChannel: "v2",
-	})
-	require.NotNil(t, v2Frontier)
-	assert.NotZero(t, v2Frontier.TimeTick())
-
-	allFrontier := manager.DataFrontier(moduleapi.Scope{
-		Type: moduleapi.ScopeAll,
-		Kind: moduleapi.DataProgressDurable,
-	})
-	require.NotNil(t, allFrontier)
-	assert.Equal(t, uint64(0), allFrontier.TimeTick())
 }
 
 func TestPChannelRecoveryManagerProvidesTransformLogStream(t *testing.T) {
@@ -315,8 +280,7 @@ func TestPChannelRecoveryManagerRemovesClosedVChannelTransformLog(t *testing.T) 
 	require.NoError(t, err)
 	require.NoError(t, sub.Close())
 
-	result := manager.ObserveMessage(ctx, newTestDropCollectionMessage(t, "v1", 20))
-	require.NotNil(t, result.Meta)
+	observeTestMessage(ctx, t, manager, newTestDropCollectionMessage(t, "v1", 20))
 
 	_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
 		VChannel:           "v1",
@@ -326,8 +290,9 @@ func TestPChannelRecoveryManagerRemovesClosedVChannelTransformLog(t *testing.T) 
 	require.Error(t, err)
 }
 
-func TestPChannelRecoveryManagerAcquireBuildsQueryRuntimeWithoutLoadConfigCallback(t *testing.T) {
+func TestPChannelRecoveryManagerAcquireBuildsBeforeRecoveryBarrier(t *testing.T) {
 	manager := newTestManager(t, "p1", "v1")
+	manager.SwitchIntoMetaAndData()
 	version := qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1}
 	meta, key := testQueryViewMetaAndKey(100, 2, "v1", version, 3)
 
@@ -341,11 +306,127 @@ func TestPChannelRecoveryManagerAcquireBuildsQueryRuntimeWithoutLoadConfigCallba
 	select {
 	case <-ready:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ready callback")
+		t.Fatal("timed out waiting for query runtime before the recovery barrier")
 	}
 	runtime, ok := manager.GetQueryRuntime(key)
 	require.True(t, ok)
 	require.NotNil(t, runtime)
+}
+
+func TestPChannelRecoveryManagerWALViewUsesDataObservedFrontier(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	t.Cleanup(scheduler.Close)
+	vchannelMeta := newTestVChannelMeta("v1")
+	vchannelMeta.CollectionInfo.Partitions = []*streamingpb.PartitionInfoOfVChannel{
+		{PartitionId: 10, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
+	}
+	manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+		PChannel:               "p1",
+		DataCheckpointTimeTick: 7,
+		VChannelMetas:          map[string]*streamingpb.VChannelMeta{"v1": vchannelMeta},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			10: {
+				CollectionId:           100,
+				PartitionId:            10,
+				SegmentId:              10,
+				Vchannel:               "v1",
+				State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+				CheckpointTimeTick:     7,
+				DataCheckpointTimeTick: 7,
+				PersistedStorage:       &streamingpb.L1SegmentPersistedStorage{},
+				Stat:                   &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 1},
+			},
+		},
+		TransformLogMetas: map[string]*streamingpb.VChannelTransformLogMeta{},
+		NodeScheduler:     scheduler,
+	})
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	insert := newTestInsertMessage(t, "v1", 10, 20)
+	metaOwner := message.NewOwnedImmutableMessage(insert, nil)
+	metaDispatch := metaOwner.Clone()
+	manager.ObserveMessage(context.Background(), metaDispatch)
+	metaDispatch.Release()
+	metaOwner.Release()
+	manager.SwitchIntoMetaAndData()
+	meta, _ := testQueryViewMetaAndKey(100, 2, "v1", qviews.DataVersion{}, 3)
+	module := manager.Module("v1")
+	require.Contains(t, module.segments, int64(10))
+
+	module.mu.Lock()
+	beforeData, ok := module.queryWALViewLocked(meta)
+	module.mu.Unlock()
+	require.True(t, ok)
+	assert.Equal(t, uint64(7), beforeData.BaseGrowingTimeTick)
+	require.Len(t, beforeData.SegmentSnapshot.Segments, 1)
+	assert.Empty(t, beforeData.SegmentSnapshot.Segments[0].Data.InsertMessages)
+
+	observeTestMessage(context.Background(), t, manager, insert)
+
+	module.mu.Lock()
+	afterData, ok := module.queryWALViewLocked(meta)
+	module.mu.Unlock()
+	require.True(t, ok)
+	assert.Equal(t, uint64(20), afterData.BaseGrowingTimeTick)
+	require.Len(t, afterData.SegmentSnapshot.Segments, 1)
+	require.Len(t, afterData.SegmentSnapshot.Segments[0].Data.InsertMessages, 1)
+	assert.Equal(t, uint64(20), afterData.SegmentSnapshot.Segments[0].Data.InsertMessages[0].TimeTick())
+}
+
+func TestPChannelRecoveryManagerAcquireWaitsForRecoveredSegmentFinalCommit(t *testing.T) {
+	scheduler := &recordingScheduler{}
+	lifecycle := &recordingSegmentLifecycle{}
+	manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+		PChannel:      "p1",
+		VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": newTestVChannelMeta("v1")},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			10: {
+				CollectionId:           100,
+				PartitionId:            10,
+				SegmentId:              10,
+				Vchannel:               "v1",
+				State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+				CheckpointTimeTick:     30,
+				DataCheckpointTimeTick: 20,
+				PersistedStorage:       &streamingpb.L1SegmentPersistedStorage{},
+				Stat:                   &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 10},
+			},
+		},
+		TransformLogMetas: map[string]*streamingpb.VChannelTransformLogMeta{},
+		Runtime:           moduleapi.Runtime{Scheduler: scheduler},
+		SegmentLifecycle:  lifecycle,
+		NodeScheduler:     scheduler,
+		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
+			testQueryRuntimeModuleBuilder{},
+		},
+	})
+	require.NoError(t, err)
+	defer manager.Close()
+	manager.SwitchIntoMetaAndData()
+
+	version := qviews.DataVersion{StreamingVersion: 1}
+	meta, key := testQueryViewMetaAndKey(100, 2, "v1", version, 3)
+	ready := false
+	manager.Acquire(snview.AcquireResource{
+		Key:     key,
+		Meta:    meta,
+		OnReady: func() { ready = true },
+	})
+	observeTestMessage(context.Background(), t, manager, newTestRecoveryBarrierMessage(t, 40))
+
+	require.Len(t, scheduler.tasks, 1)
+	assert.False(t, ready)
+	require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
+	require.Equal(t, []int64{10}, lifecycle.committedSegmentIDs)
+	require.Len(t, scheduler.tasks, 2)
+	assert.False(t, ready)
+
+	require.NoError(t, scheduler.tasks[1].Execute(context.Background()))
+	require.Len(t, scheduler.tasks, 3)
+	assert.False(t, ready)
+	require.NoError(t, scheduler.tasks[2].Execute(context.Background()))
+	assert.True(t, ready)
+	require.NotNil(t, manager.Module("v1").segments[10].AssignmentMeta().GetSealedAtDataVersion())
 }
 
 func newTestManager(t *testing.T, pchannel string, vchannels ...string) *PChannelRecoveryManager {
@@ -436,6 +517,30 @@ func newTestCreateCollectionMessage(t *testing.T, vchannel string, timetick uint
 		WithBody(&msgpb.CreateCollectionRequest{
 			CollectionSchema: &schemapb.CollectionSchema{Name: "c100"},
 		}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	return mutableMsg.WithTimeTick(timetick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
+}
+
+func newTestInsertMessage(t *testing.T, vchannel string, segmentID int64, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	mutableMsg := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{
+			CollectionId: 100,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{
+					PartitionId: 10,
+					Rows:        1,
+					BinarySize:  1,
+					SegmentAssignment: &messagespb.SegmentAssignment{
+						SegmentId: segmentID,
+					},
+				},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{NumRows: 1}).
 		WithVChannel(vchannel).
 		MustBuildMutable()
 	return mutableMsg.WithTimeTick(timetick).

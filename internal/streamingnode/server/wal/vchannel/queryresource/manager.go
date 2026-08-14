@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
@@ -38,6 +39,7 @@ type Manager struct {
 }
 
 type queryViewRef struct {
+	meta    *viewpb.QueryViewMeta
 	onReady func()
 }
 
@@ -68,9 +70,12 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 		if m.refs == nil {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
-		m.refs[req.Key] = queryViewRef{onReady: req.OnReady}
+		m.refs[req.Key] = queryViewRef{
+			meta:    proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
+			onReady: req.OnReady,
+		}
 		if m.runtime == nil && m.task == nil {
-			m.startBuildLocked(req.Meta, build)
+			m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
 		} else if m.runtime != nil && m.task == nil && m.err == nil {
 			notifyReady = true
 		}
@@ -79,6 +84,20 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	if notifyReady {
 		m.submitReady(req.Key, req.OnReady)
 	}
+}
+
+// TryBuildLocked retries a deferred query runtime build after the owning
+// VChannel state changes. The caller should hold the owning VChannel lock.
+func (m *Manager) TryBuildLocked(build ViewBuilder) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || len(m.refs) == 0 || m.runtime != nil || m.task != nil {
+		return
+	}
+	m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
 }
 
 func (m *Manager) Release(req snview.ReleaseResource) {
@@ -177,9 +196,13 @@ func (m *Manager) assertAcquireMonotonic(version qviews.DataVersion) {
 	}
 }
 
-func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder) {
+func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder) bool {
 	if build == nil {
 		panic("query resource view builder is nil")
+	}
+	view, ok := build(meta)
+	if !ok {
+		return false
 	}
 	if m.scheduler == nil {
 		m.scheduler = nodescheduler.Get()
@@ -188,10 +211,6 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		m.dispatcher = NewDispatcher(defaultLiveEventDispatchConcurrency)
 	}
 	runtime := newQueryRuntime(m.dispatcher, m.newModules()...)
-	view, ok := build(meta)
-	if !ok {
-		panic("failed to build vchannel query resource view")
-	}
 	task := newResourceBuildTask(func(ctx context.Context) (*QueryRuntime, error) {
 		resolved, err := m.resolveLoadInfo(ctx, view)
 		if err != nil {
@@ -205,6 +224,19 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 	m.runtime = runtime
 	m.task = scheduleResourceBuild(m.scheduler, task, m.finishBuild)
 	m.err = nil
+	return true
+}
+
+func (m *Manager) oldestQueryViewMetaLocked() *viewpb.QueryViewMeta {
+	var oldest qviews.QueryViewVersion
+	var meta *viewpb.QueryViewMeta
+	for key, ref := range m.refs {
+		if meta == nil || oldest.GT(key.QueryViewVersion) {
+			oldest = key.QueryViewVersion
+			meta = ref.meta
+		}
+	}
+	return meta
 }
 
 func (m *Manager) resolveLoadInfo(ctx context.Context, view walview.VChannelWALView) (walview.VChannelWALView, error) {

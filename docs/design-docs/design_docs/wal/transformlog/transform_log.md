@@ -8,6 +8,9 @@ TransformLog is now a component owned by `VChannelRecoveryModule`. A
 `PChannelRecoveryManager` owns all vchannel modules on one PChannel and exposes
 the PChannel-level TransformLog stream manager.
 
+Per-message persistence completion and checkpoint semantics are defined by
+[WAL Message Ack Design](../message_ack.md).
+
 ## 1. TransformLog Definition
 
 TransformLog is the vchannel-level ordered log of transform events used by both
@@ -54,9 +57,9 @@ PChannelRecoveryManager
               +-- per-vchannel subscriptions
 ```
 
-`VChannelRecoveryModule.ObserveMessage` is the message dispatch owner for a
-single vchannel. It first handles vchannel metadata and segment state, then
-forwards the same WAL message to its `TransformLog.ObserveMessage`.
+`VChannelRecoveryModule.ObserveMessage` receives one Retained dispatch handle
+for a single vchannel. It first handles vchannel metadata and segment state,
+then forwards that same handle to `TransformLog.ObserveMessage`.
 
 `PChannelRecoveryManager` owns the vchannel index and registers active
 vchannels into `transformlog.StreamManager`. QueryNode accesses TransformLog
@@ -126,7 +129,7 @@ for the Delete bodies inside the Txn.
 | `entry.time_tick` | WAL TimeTick and transform MVCC TimeTick for one Delete entry. |
 | `checkpoint_time_tick` | Delete entries up to this TimeTick are durably written into TransformLog chunks and published in in-memory meta. It is not a barrier frontier. |
 | `sync_up_time_tick` | Volatile in-memory transform frontier. It advances on Delete entries and sync-up barrier messages and is delivered to subscribers through `SyncUp(TimeTick)`. |
-| `persistedDataTimeTick` | Persisted `checkpoint_time_tick`; it protects Delete payload recovery. |
+| `persistedDataTimeTick` | Persisted `checkpoint_time_tick`; it is used by TransformLog recovery and cleanup logic. |
 | `materialized_time_tick` | Delete entries up to this TimeTick have been emitted as L0 deltalog output and published in in-memory meta. |
 | `persistedMaterialized` | Persisted `materialized_time_tick`, used by TransformLog GC. |
 | `truncate_time_tick` | Entries with `time_tick <= truncate_time_tick` are outside the readable retained window. A subscription starting before this point is invalid. |
@@ -150,14 +153,20 @@ For every observed WAL message:
    `checkpoint_time_tick` or the open buffer tail.
 6. Append Delete entries to the open buffer.
 7. Notify local scanners and the PChannel stream manager.
-8. Submit flush or materialization tasks when the message requires them.
-9. Return a RecoveryStorage data barrier backed by `persistedDataTimeTick`.
+8. Call `Clone()` on the Retained dispatch handle and attach the returned
+   retained immutable message to the
+   entry or barrier before exposing required asynchronous flush work.
+9. Submit flush or materialization tasks when the message requires them.
+10. Return after synchronous observation. Metadata is exposed later through
+    `ConsumeDirtySnapshots`; data-side completion is represented only by the
+    retained message handles.
 
 The Delete append step is immediately readable by live subscriptions. It is not
-durable until a TransformLog chunk is written and the corresponding meta is
-persisted. A sync-up barrier is immediately visible to live subscriptions as a
+object-storage durable until a TransformLog chunk is written. It is not
+recoverably published until the corresponding meta is persisted to etcd. A
+sync-up barrier is immediately visible to live subscriptions as a
 `SyncUp(TimeTick)` event, but it is not written into chunks and does not advance
-`checkpoint_time_tick`.
+`checkpoint_time_tick` when there is no preceding payload to flush.
 
 ### Chunk Flush
 
@@ -181,9 +190,15 @@ open buffer entries up to target T
   -> advance next_chunk_id
   -> advance checkpoint_time_tick to the last flushed Delete entry TimeTick
   -> mark TransformLog dirty
+  -> release retained message handles contained in the committed chunk
   -> RecoveryStorage persists VChannelTransformLogMeta
   -> MarkSnapshotPersisted advances persistedDataTimeTick
 ```
+
+Handle release does not wait for `MarkSnapshotPersisted`: object data completion
+does not wait for catalog IO. Before releasing covered handles, the flush task
+commits the updated TransformLog state and marks it dirty. A persist batch then
+captures that metadata and writes it before the batch checkpoint.
 
 Chunk object path is deterministic:
 
@@ -209,9 +224,17 @@ For TransformLog snapshots:
 - `MarkPersisted` updates both `persistedDataTimeTick` and
   `persistedMaterialized` from the persisted snapshot
 
-The RecoveryStorage data checkpoint is allowed to advance only after the
-TransformLog dirty snapshot has been persisted. This prevents WAL checkpoint
-from passing a Delete whose TransformLog entry is not recoverable.
+RecoveryStorage freezes the batch boundary before consuming this snapshot. A
+batch whose DataPoint covers a TransformLog message therefore satisfies both
+conditions:
+
+```text
+TransformLog message Ack is complete
+AND its DirtySnapshot is persisted before the batch checkpoint
+```
+
+This prevents WAL checkpoint publication from passing a Delete whose object
+data or recovery metadata is incomplete.
 
 ### L0 Materialization
 
@@ -234,6 +257,10 @@ LatestTransformTimeTick() >= target materialize TimeTick
 The scheduler serializes materialization after preceding TransformLog flush
 tasks. Materialization scans Delete entries in the retained window and ignores
 sync-up frontier updates because they are not payload entries.
+
+Materialization does not retain a message handle. BroadcastAck and
+RecoveryStorage Data checkpoint advancement do not wait for
+`materialized_time_tick`.
 
 Materialization flow:
 
@@ -278,8 +305,9 @@ During RecoveryStorage startup:
 8. Replayed Delete messages with TimeTick already covered by
    `checkpoint_time_tick` are skipped.
 9. Replayed sync-up barrier messages advance volatile `sync_up_time_tick` again.
-10. Delete messages after `checkpoint_time_tick` append to the open buffer and
-    are flushed again before the RecoveryStorage data checkpoint can pass them.
+10. Delete messages after `checkpoint_time_tick` append to the open buffer,
+    retain fresh message handles, and are flushed again before the Ack completed
+    frontier can pass them.
 
 Cold chunks are loaded on demand by subscription, materialization, or truncation.
 Loading validates:

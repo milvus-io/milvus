@@ -88,6 +88,7 @@ type fakeGCDataViewManager struct {
 	createEvents       []CreateCollectionDataViewEvent
 	droppedCollections []int64
 	flushEvents        []FlushDataViewEvent
+	flushVersion       *viewpb.DataVersion
 	l0CompactEvents    []L0CompactDataViewEvent
 	snapshotRequested  []int64
 	snapshotViews      []*viewpb.DataViewOfCollection
@@ -108,7 +109,7 @@ func (m *fakeGCDataViewManager) OnCreateCollection(ctx context.Context, event Cr
 
 func (m *fakeGCDataViewManager) OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error) {
 	m.flushEvents = append(m.flushEvents, event)
-	return nil, nil
+	return m.flushVersion, nil
 }
 
 func (m *fakeGCDataViewManager) OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error) {

@@ -36,7 +36,6 @@ func (m *VChannelRecoveryModule) ReleaseQueryResource(req snview.ReleaseResource
 	m.mu.Unlock()
 	if changed && m.runtime.Notifier != nil {
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
-		m.runtime.Notifier.NotifyBarrierUpdated()
 	}
 }
 
@@ -69,8 +68,17 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	if !ok {
 		return walview.VChannelWALView{}, false
 	}
+	finalCommitsReady := true
+	for _, segment := range m.segments {
+		if !segment.EnsureFinalCommit() {
+			finalCommitsReady = false
+		}
+	}
+	if !finalCommitsReady {
+		return walview.VChannelWALView{}, false
+	}
 	baseTransformTimeTick := m.transformLog.LatestTimeTick()
-	baseGrowingTimeTick := max(m.latestInsertTimeTick, baseTransformTimeTick)
+	baseGrowingTimeTick := m.dataObservedTimeTick
 	dataVersion := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
 	segmentSnapshot := m.visibleSnapshot(baseGrowingTimeTick, dataVersion)
 	return walview.VChannelWALView{

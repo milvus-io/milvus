@@ -5,7 +5,7 @@ A system-generated WAL message acting as a **visibility barrier**: when a consum
 TimeTick is only an ordering and confirmation barrier. It must not be used to
 create per-VChannel query MVCC entries. WAL recovery uses a separate
 [RecoveryBarrier](message-semantic-recovery-barrier.md) message when it needs to
-establish a query-resource baseline for every recovered live VChannel.
+establish a query-plan MVCC target for every recovered live VChannel.
 
 ## Persistence
 

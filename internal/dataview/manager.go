@@ -128,9 +128,10 @@ type collectionDataViewState struct {
 	mu           sync.RWMutex
 	collectionID int64
 
-	latestResident *viewpb.DataViewOfCollection
-	latestVisible  *viewpb.DataViewOfCollection
-	dropped        bool
+	latestResident     *viewpb.DataViewOfCollection
+	latestVisible      *viewpb.DataViewOfCollection
+	segmentJoinVersion map[int64]*viewpb.DataVersion
+	dropped            bool
 }
 
 type dataViewManager struct {
@@ -273,13 +274,14 @@ const (
 )
 
 type dataViewMembershipMutation struct {
-	collectionID    int64
-	addSegmentIDs   []int64
-	dropSegmentIDs  []int64
-	advance         dataViewAdvance
-	allowInvisible  bool
-	dropPredicate   func(segmentID int64, partitionID int64, vchannel string) bool
-	classifyAdvance func(removed bool, added bool) dataViewAdvance
+	collectionID            int64
+	addSegmentIDs           []int64
+	dropSegmentIDs          []int64
+	advance                 dataViewAdvance
+	allowInvisible          bool
+	returnSingleJoinVersion bool
+	dropPredicate           func(segmentID int64, partitionID int64, vchannel string) bool
+	classifyAdvance         func(removed bool, added bool) dataViewAdvance
 }
 
 func NewManager(catalog Catalog, segments SegmentStore) Manager {
@@ -321,6 +323,7 @@ func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCo
 	if latestPersisted != nil {
 		state.latestResident = canonicalDataViewClone(latestPersisted)
 		state.latestVisible = m.latestVisiblePersistedView(ctx, persistedViews)
+		state.segmentJoinVersion = segmentJoinVersionsFromDataViews(persistedViews)
 		return dataVersionFromView(state.latestResident), nil
 	}
 
@@ -332,15 +335,17 @@ func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCo
 	}
 	state.latestResident = canonicalDataViewClone(toPersist)
 	state.latestVisible = m.withDeleteTimetick(ctx, state.latestResident)
+	state.recordSegmentJoinVersions(state.latestResident)
 	return dataVersionFromView(state.latestResident), nil
 }
 
 func (m *dataViewManager) OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error) {
 	return m.applyMembershipMutation(ctx, dataViewMembershipMutation{
-		collectionID:   event.CollectionID,
-		addSegmentIDs:  event.SegmentIDs,
-		advance:        dataViewAdvanceStreaming,
-		allowInvisible: event.TemporaryUnavailable,
+		collectionID:            event.CollectionID,
+		addSegmentIDs:           event.SegmentIDs,
+		advance:                 dataViewAdvanceStreaming,
+		allowInvisible:          event.TemporaryUnavailable,
+		returnSingleJoinVersion: len(event.SegmentIDs) == 1,
 	})
 }
 
@@ -451,6 +456,7 @@ func (m *dataViewManager) OnDropCollection(ctx context.Context, collectionID int
 	}
 	state.latestResident = nil
 	state.latestVisible = nil
+	state.segmentJoinVersion = nil
 	state.dropped = true
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -546,12 +552,14 @@ func (m *dataViewManager) recoverCollectionFromDataViews(collectionID int64, per
 	state.dropped = false
 	state.latestResident = canonicalDataViewClone(latestDataView(persistedViews))
 	state.latestVisible = canonicalDataViewClone(state.latestResident)
+	state.segmentJoinVersion = segmentJoinVersionsFromDataViews(persistedViews)
 }
 
 func (m *dataViewManager) repairCollectionWithDataViews(ctx context.Context, collectionID int64, persistedViews []*viewpb.DataViewOfCollection) error {
 	state := m.getOrCreateState(collectionID)
 	state.mu.Lock()
 	state.dropped = false
+	state.mergeSegmentJoinVersions(persistedViews)
 
 	latestPersisted := latestDataView(persistedViews)
 	segments := m.segments.SelectSegments(ctx, collectionID)
@@ -586,6 +594,7 @@ func (m *dataViewManager) repairCollectionWithDataViews(ctx context.Context, col
 	m.rememberRecoveredDataView(toPersist)
 
 	state.latestResident = canonicalDataViewClone(toPersist)
+	state.recordSegmentJoinVersions(state.latestResident)
 	if m.isDataViewVisibleFromBase(ctx, latestPersisted, state.latestResident, pendingRetainedInputs) {
 		state.latestVisible = m.withDeleteTimetick(ctx, state.latestResident)
 	} else {
@@ -887,6 +896,13 @@ func (m *dataViewManager) applyMembershipMutation(ctx context.Context, mutation 
 			state.latestVisible = m.withDeleteTimetick(ctx, state.latestVisible)
 		}
 		version := dataVersionFromView(state.latestResident)
+		if mutation.returnSingleJoinVersion {
+			if joined := state.segmentJoinVersion[mutation.addSegmentIDs[0]]; joined != nil {
+				version = cloneDataVersion(joined)
+			} else {
+				version = nil
+			}
+		}
 		state.mu.Unlock()
 		return version, nil
 	}
@@ -903,6 +919,7 @@ func (m *dataViewManager) applyMembershipMutation(ctx context.Context, mutation 
 	}
 
 	state.latestResident = canonicalDataViewClone(toPersist)
+	state.recordSegmentJoinVersions(state.latestResident)
 	if m.isDataViewVisibleFromBase(ctx, previousResident, state.latestResident, nil) {
 		state.latestVisible = m.withDeleteTimetick(ctx, state.latestResident)
 	}
@@ -915,6 +932,47 @@ func (m *dataViewManager) getState(collectionID int64) *collectionDataViewState 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.states[collectionID]
+}
+
+func segmentJoinVersionsFromDataViews(views []*viewpb.DataViewOfCollection) map[int64]*viewpb.DataVersion {
+	ordered := cloneDataViews(views)
+	sort.Slice(ordered, func(i, j int) bool {
+		return compareDataVersion(ordered[i].GetDataVersion(), ordered[j].GetDataVersion()) < 0
+	})
+	versions := make(map[int64]*viewpb.DataVersion)
+	for _, view := range ordered {
+		for segmentID := range dataViewSegmentIDSet(view) {
+			if versions[segmentID] == nil {
+				versions[segmentID] = dataVersionFromView(view)
+			}
+		}
+	}
+	return versions
+}
+
+func (s *collectionDataViewState) recordSegmentJoinVersions(view *viewpb.DataViewOfCollection) {
+	if view == nil {
+		return
+	}
+	if s.segmentJoinVersion == nil {
+		s.segmentJoinVersion = make(map[int64]*viewpb.DataVersion)
+	}
+	for segmentID := range dataViewSegmentIDSet(view) {
+		if s.segmentJoinVersion[segmentID] == nil {
+			s.segmentJoinVersion[segmentID] = dataVersionFromView(view)
+		}
+	}
+}
+
+func (s *collectionDataViewState) mergeSegmentJoinVersions(views []*viewpb.DataViewOfCollection) {
+	if s.segmentJoinVersion == nil {
+		s.segmentJoinVersion = make(map[int64]*viewpb.DataVersion)
+	}
+	for segmentID, version := range segmentJoinVersionsFromDataViews(views) {
+		if s.segmentJoinVersion[segmentID] == nil {
+			s.segmentJoinVersion[segmentID] = version
+		}
+	}
 }
 
 func (m *dataViewManager) getOrCreateState(collectionID int64) *collectionDataViewState {

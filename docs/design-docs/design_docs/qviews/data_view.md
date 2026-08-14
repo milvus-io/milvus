@@ -162,6 +162,16 @@ storage version, segment-level data version, and segment-level
 QueryCoord may fetch that metadata separately for balancer scoring, but it must
 not recompute DataView membership from it.
 
+DataCoord additionally needs a recoverable way to answer the idempotent Flush
+result for one segment: the first DataVersion whose membership contains that
+segment. This may be represented by a durable segment-to-join-version index or
+an equivalent derivation from retained DataView history. It is an internal
+DataCoord idempotency record and is not part of the QueryCoord-facing DataView
+membership payload. Looking only at `latestResident.DataVersion` is not a valid
+derivation for an already-present segment. If recovery cannot derive the stable
+first-join version from retained history, the result remains unknown (`nil`);
+DataCoord must not invent the current latest resident version.
+
 `DataViewOfShard.transform_start_after_timetick` is a snapshot/transport
 field derived from the current loadable membership. It does not need to be
 stored durably with DataView; DataCoord may recompute it from segment metadata
@@ -372,6 +382,13 @@ If the event only refreshes derived metadata, for example L0 compaction changing
 `delete_apply_start_after_timetick`, it returns the current DataVersion without
 advancing it.
 
+`OnFlush` has a stronger idempotency contract because StreamingNode stores its
+result as `SealedAtDataVersion`. The first successful Flush that adds a segment
+to DataView returns the first DataVersion containing that segment. Every retry
+of the same logical Flush must return that same version, including retries after
+other VChannels have advanced the collection DataVersion. Returning the current
+latest DataVersion for an already-present segment is incorrect.
+
 Internal helpers should keep the normal path event-driven:
 
 ```go
@@ -422,6 +439,11 @@ If the flushed segment is immediately usable, it joins DataView and advances:
 ```
 (S, C) -> (S+1, 0)
 ```
+
+The generated version is the segment's stable first-join version. DataCoord
+must retain or derive this association for the lifetime in which StreamingNode
+can retry the final commit. A duplicate `OnFlush` for a segment already present
+in DataView returns its original first-join version without advancing DataView.
 
 If the flush output must pass through sort compaction first, the flush-side
 DataView advances to `(S+1, 0)` in DataCoord but remains unavailable to
@@ -866,6 +888,13 @@ difference does not create a new DataVersion; DataCoord refreshes the derived
 timetick for the latest view and syncs it through the normal DataView metadata
 refresh path.
 
+Recovery may see a dropped segment that is no longer present in retained
+DataView history. A repeated Flush for that segment succeeds idempotently but
+returns no `SealedAtDataVersion` when its original first-join version is
+unknown. Falling back to the latest collection DataVersion would falsely delay
+StreamingNode retention and can create a visibility conflict with an older
+QueryView.
+
 For DataView-first DropPartition or truncate, recovery must apply the persisted
 DDL/trim metadata when computing the expected DataView, even if the segmentMeta
 state mutation has not completed yet.
@@ -909,6 +938,9 @@ The first implementation should cover at least:
 7. Delete-timetick-only recovery refreshes metadata without creating a new
    DataVersion.
 8. Duplicate, stale, or already-reconciled events are no-op success cases.
+9. A Flush succeeds and adds a segment at D1, its response is lost, unrelated
+   VChannels advance the collection to D2, and retrying the same Flush still
+   returns D1.
 
 ## 13. Invariants
 
@@ -934,6 +966,8 @@ The first implementation should cover at least:
     that segment metadata cannot describe.
 14. QueryCoord only consumes DataViews that DataCoord marks visible/available
     for QueryView construction.
+15. A repeated Flush returns the segment's stable first-join DataVersion; it
+    never substitutes the collection's current latest DataVersion.
 
 ## 14. Open Implementation Choices
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -93,4 +94,28 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
 	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
 	assert.NotNil(t, checkpoint2.ReplicateConfig)
+}
+
+func TestWALCheckpointCloneDeepCopiesMutableProtoFields(t *testing.T) {
+	checkpoint := &WALCheckpoint{
+		ReplicateConfig: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{{ClusterId: "source"}},
+		},
+		AlterWalState: &streamingpb.AlterWALState{
+			Configs: map[string]string{"endpoint": "original"},
+			Stage:   streamingpb.AlterWALStage_FLUSHING,
+		},
+	}
+
+	cloned := checkpoint.Clone()
+	checkpoint.ReplicateConfig.Clusters[0].ClusterId = "mutated"
+	checkpoint.AlterWalState.Configs["endpoint"] = "mutated"
+	checkpoint.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
+
+	require.NotNil(t, cloned.ReplicateConfig)
+	require.Len(t, cloned.ReplicateConfig.Clusters, 1)
+	assert.Equal(t, "source", cloned.ReplicateConfig.Clusters[0].GetClusterId())
+	require.NotNil(t, cloned.AlterWalState)
+	assert.Equal(t, "original", cloned.AlterWalState.GetConfigs()["endpoint"])
+	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, cloned.AlterWalState.GetStage())
 }

@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types2 "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -450,6 +451,63 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	addSegment(14, commonpb.SegmentState_Dropped, storage.StorageV2)
 	resp = saveBinlog(14, true, storage.StorageV2, nil)
 	s.True(merr.Ok(resp))
+}
+
+func (s *ServerSuite) TestSaveBinlogPath_DroppedSegmentReturnsOriginalDataVersion() {
+	manager := &fakeGCDataViewManager{
+		flushVersion: &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
+	}
+	s.testServer.dataViewManager = manager
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            11,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Dropped,
+		Level:         datapb.SegmentLevel_L1,
+	}))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		SegmentID:    11,
+		CollectionID: 100,
+		PartitionID:  10,
+		Channel:      "ch1",
+		SegLevel:     datapb.SegmentLevel_L1,
+		Flushed:      true,
+	})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(resp))
+	s.Equal("2", resp.GetExtraInfo()[statusExtraInfoDataViewStreamingVersion])
+	s.Equal("1", resp.GetExtraInfo()[statusExtraInfoDataViewCompactVersion])
+	s.Equal([]FlushDataViewEvent{{CollectionID: 100, SegmentIDs: []int64{11}}}, manager.flushEvents)
+}
+
+func (s *ServerSuite) TestSaveBinlogPath_DroppedSegmentOmitsUnknownDataVersion() {
+	manager := &fakeGCDataViewManager{}
+	s.testServer.dataViewManager = manager
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            11,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Dropped,
+		Level:         datapb.SegmentLevel_L1,
+	}))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		SegmentID:    11,
+		CollectionID: 100,
+		PartitionID:  10,
+		Channel:      "ch1",
+		SegLevel:     datapb.SegmentLevel_L1,
+		Flushed:      true,
+	})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(resp))
+	s.Empty(resp.GetExtraInfo())
+	s.Equal([]FlushDataViewEvent{{CollectionID: 100, SegmentIDs: []int64{11}}}, manager.flushEvents)
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {

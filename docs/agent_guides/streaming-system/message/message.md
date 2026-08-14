@@ -40,7 +40,7 @@ Messages transition through three stages:
 - [Transaction Messages](message-semantic-txn.md) — begin, commit, rollback
 - [Cluster Messages](message-semantic-cluster.md) — global barriers, replication config, resource groups
 - [TimeTick Message](message-semantic-time-tick.md) — visibility barrier
-- [RecoveryBarrier Message](message-semantic-recovery-barrier.md) — recovery-start query-resource baseline
+- [RecoveryBarrier Message](message-semantic-recovery-barrier.md) — recovery-start writer fence and query-plan MVCC target
 
 ## Adding a New Message Type
 

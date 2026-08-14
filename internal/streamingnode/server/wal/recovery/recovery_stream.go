@@ -86,10 +86,10 @@ L:
 
 func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
-		Checkpoint: r.checkpointManager.Snapshot(),
+		Checkpoint: r.checkpoint.Clone(),
 	}
-	for _, module := range r.modules {
-		moduleSnapshot := module.SwitchIntoMetaAndData()
+	if r.vchannelManager != nil {
+		moduleSnapshot := r.vchannelManager.SwitchIntoMetaAndData()
 		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
 			switch typed := s.(type) {
 			case *moduleapi.WritePathRecoveryModuleSnapshot:
