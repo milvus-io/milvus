@@ -189,6 +189,13 @@ func fieldBinlogCarries(fb *datapb.FieldBinlog, fieldID int64) bool {
 // sumFieldBinlogMemoryForField sums Binlog.MemorySize for the first
 // FieldBinlog carrying fieldID, mirroring getFieldDataSizeFromBinlogs in
 // internal/datanode/index/util.go (which also stops at the first match).
+//
+// Deliberate difference from DataCoord's getFieldBinlogSize, recorded so a
+// future reader does not have to rediscover it: that one keeps going and sums
+// every match, this one stops at the first. They agree on every layout in use,
+// because a field appears in exactly one column group (v2/v3) or in exactly one
+// FieldBinlog (v1). A layout that ever put one field in two groups would make
+// this the lower of the two.
 func sumFieldBinlogMemoryForField(logs []*datapb.FieldBinlog, fieldID int64) int64 {
 	for _, fb := range logs {
 		if !fieldBinlogCarries(fb, fieldID) {
@@ -232,6 +239,12 @@ func estimateFieldMemorySize(req *workerpb.CreateJobRequest) int64 {
 	// scalar index build came to be priced at the floor. DataCoord's
 	// SegmentInfo.getFieldBinlogSize makes the same choice for the same reason:
 	// when the per-field figure is <= 0 it falls back to the whole segment.
+	//
+	// The two fallbacks are not byte-identical -- DataCoord's getSegmentSize
+	// adds delta and stats logs, this one has only the insert logs the request
+	// carries -- so this is the lower of the two, which keeps it bounded by the
+	// segment's own insert total and means it can never manufacture an
+	// oversized task out of a lookup miss.
 	return sumFieldBinlogMemory(req.GetInsertLogs())
 }
 
