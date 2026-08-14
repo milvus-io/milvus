@@ -957,7 +957,7 @@ class SkipIndexStatsBuilder {
     template <typename T>
     metricsInfo<T>
     ProcessFieldMetrics(const T* data,
-                        const bool* valid_data,
+                        ValidityView validity,
                         int64_t count) const {
         bool has_first_valid = false;
         T min{}, max{};
@@ -969,7 +969,7 @@ class SkipIndexStatsBuilder {
 
         for (int64_t i = 0; i < count; i++) {
             T value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
+            if (validity && !validity[i]) {
                 null_count++;
                 continue;
             }

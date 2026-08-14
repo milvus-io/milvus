@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "common/Tracer.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "exec/Task.h"
 #include "fmt/core.h"
@@ -153,7 +154,7 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // Always copy validity data from ColumnVector
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
-    auto valid_data = data_array.mutable_valid_data();
+    auto valid_data = MutableFieldDataRowValidData(&data_array);
     const uint8_t* src_bitmap =
         static_cast<const uint8_t*>(column_vector->GetValidRawData());
     AssertInfo(src_bitmap,

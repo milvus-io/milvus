@@ -305,7 +305,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	dr.dbID = db.dbID
+	dr.dbID = db.DBID
 
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
@@ -335,7 +335,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
 	start := time.Now()
-	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
+	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.SchemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))

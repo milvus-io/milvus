@@ -685,7 +685,7 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                 stream_data->scalars().has_geometry_data()) {
                 const auto& geometry_array =
                     stream_data->scalars().geometry_data();
-                const auto& valid_data = stream_data->valid_data();
+                const auto& valid_data = GetFieldDataRowValidData(*stream_data);
 
                 // Create accessor for DataArray
                 auto accessor = [&geometry_array, &valid_data](

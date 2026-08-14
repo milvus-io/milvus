@@ -426,8 +426,9 @@ class GrowingIndexRawOwnershipTest : public ::testing::Test {
     FieldDataPtr
     CreateNullableFloatFieldData(const DataArray& data) const {
         std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+        const auto& valid_data = GetFieldDataRowValidData(data);
         for (int64_t i = 0; i < row_count; ++i) {
-            if (data.valid_data(i)) {
+            if (valid_data[i]) {
                 valid_bitmap[i / 8] |= uint8_t{1} << (i % 8);
             }
         }
@@ -444,9 +445,11 @@ class GrowingIndexRawOwnershipTest : public ::testing::Test {
     void
     AssertNullableFloatDataEqual(const DataArray& actual,
                                  const DataArray& expected) const {
-        ASSERT_EQ(actual.valid_data_size(), expected.valid_data_size());
-        for (int i = 0; i < actual.valid_data_size(); ++i) {
-            EXPECT_EQ(actual.valid_data(i), expected.valid_data(i));
+        const auto& actual_valid_data = GetFieldDataRowValidData(actual);
+        const auto& expected_valid_data = GetFieldDataRowValidData(expected);
+        ASSERT_EQ(actual_valid_data.size(), expected_valid_data.size());
+        for (int i = 0; i < actual_valid_data.size(); ++i) {
+            EXPECT_EQ(actual_valid_data[i], expected_valid_data[i]);
         }
 
         const auto& actual_values = actual.vectors().float_vector().data();

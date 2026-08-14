@@ -29,6 +29,7 @@
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
@@ -2470,10 +2471,11 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     auto array_data = insert_record_proto->add_fields_data();
     array_data->set_field_id(int_array_fid.get());
     array_data->set_type(proto::schema::DataType::Array);
-    array_data->add_valid_data(true);
-    array_data->add_valid_data(false);
-    array_data->add_valid_data(true);
-    auto arrays = array_data->mutable_scalars()->mutable_array_data();
+    auto* array_scalars = array_data->mutable_scalars();
+    array_scalars->add_valid_data(true);
+    array_scalars->add_valid_data(false);
+    array_scalars->add_valid_data(true);
+    auto arrays = array_scalars->mutable_array_data();
     arrays->set_element_type(proto::schema::DataType::Int32);
     auto row0 = arrays->mutable_data()->Add();
     row0->mutable_int_data()->mutable_data()->Add(10);
@@ -3773,7 +3775,7 @@ MakeNullableElementSearchFixture() {
             }
         }
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         for (int row = 0; row < kNullableElemN; ++row) {
             valid_data->Add(true);
@@ -3801,9 +3803,10 @@ BuildFieldValidBitmap(const GeneratedData& data, FieldId field_id) {
         if (fd.field_id() != field_id.get()) {
             continue;
         }
+        const auto& row_valid_data = GetFieldDataRowValidData(fd);
         for (int row = 0; row < row_count; ++row) {
             const bool valid =
-                fd.valid_data_size() == 0 ? true : fd.valid_data(row);
+                row_valid_data.empty() ? true : row_valid_data[row];
             if (valid) {
                 valid_bitmap[row >> 3] |= (1 << (row & 0x07));
             }
@@ -3852,7 +3855,7 @@ MakeNullableElementSearchWithNullAndEmptyRowsFixture() {
             target_values{7.0F, 7.0F, 7.0F, 7.0F, 1.0F, 0.0F, 0.0F, 0.0F};
         target_row->Add(target_values.begin(), target_values.end());
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         valid_data->Add(false);  // row 0: null
         valid_data->Add(true);   // row 1: empty
@@ -3895,7 +3898,7 @@ MakeNullableElementSearchWithOnlyNullRowsFixture() {
                 ->Clear();
         }
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         for (int row = 0; row < kNullableElemN; ++row) {
             valid_data->Add(false);
@@ -4664,10 +4667,11 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
         for (int d = 0; d < dim; ++d) {
             target->mutable_float_vector()->add_data(1.0f + d);
         }
-        field_data->mutable_valid_data()->Clear();
-        field_data->add_valid_data(false);
-        field_data->add_valid_data(true);
-        field_data->add_valid_data(true);
+        auto* valid_data = field_data->mutable_vectors()->mutable_valid_data();
+        valid_data->Clear();
+        valid_data->Add(false);
+        valid_data->Add(true);
+        valid_data->Add(true);
         break;
     }
 
@@ -4731,10 +4735,11 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
     auto data_array =
         segment->bulk_subscript(/*op_ctx=*/nullptr, vec_fid, seg_offsets, N);
     ASSERT_NE(data_array, nullptr);
-    ASSERT_EQ(data_array->valid_data_size(), N);
-    EXPECT_FALSE(data_array->valid_data(0));
-    EXPECT_TRUE(data_array->valid_data(1));
-    EXPECT_TRUE(data_array->valid_data(2));
+    const auto& valid_data = GetFieldDataRowValidData(*data_array);
+    ASSERT_EQ(valid_data.size(), N);
+    EXPECT_FALSE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
     const auto& out_rows = data_array->vectors().vector_array().data();
     ASSERT_EQ(out_rows.size(), N);
     EXPECT_EQ(out_rows[1].float_vector().data_size(), 0);

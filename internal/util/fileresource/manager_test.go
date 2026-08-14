@@ -30,6 +30,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,7 +75,7 @@ func (suite *BaseManagerSuite) TestSync() {
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := suite.manager.Sync(1, resources)
+	err := suite.manager.Sync(context.Background(), 1, resources)
 	suite.NoError(err)
 }
 
@@ -140,19 +142,23 @@ func (suite *SyncManagerSuite) TestSync_Success() {
 		{Id: 2, Name: "test2.file", Path: "/storage/test2.file"},
 	}
 
-	// Mock the Reader calls
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test1.file").Return(newMockReader("test content 1"), nil)
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test2.file").Return(newMockReader("test content 2"), nil)
+	// Mock the Size and Reader calls
+	suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/test1.file").Return(int64(len("test content 1")), nil)
+	suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/test2.file").Return(int64(len("test content 2")), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/test1.file").Return(newMockReader("test content 1"), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/test2.file").Return(newMockReader("test content 2"), nil)
 
-	err := suite.manager.Sync(1, resources)
+	err := suite.manager.Sync(context.Background(), 1, resources)
 	suite.NoError(err)
 
-	// Verify files were created
+	// Verify files were created directly in their resource directories.
 	file1Path := path.Join(suite.tempDir, "1", "test1.file")
 	file2Path := path.Join(suite.tempDir, "2", "test2.file")
 
 	suite.FileExists(file1Path)
 	suite.FileExists(file2Path)
+	suite.NoDirExists(path.Join(suite.tempDir, "1.downloading-1"))
+	suite.NoDirExists(path.Join(suite.tempDir, "2.downloading-1"))
 
 	// Verify content
 	content1, err := os.ReadFile(file1Path)
@@ -164,15 +170,57 @@ func (suite *SyncManagerSuite) TestSync_Success() {
 	suite.Equal("test content 2", string(content2))
 }
 
+func (suite *SyncManagerSuite) TestSync_LargeFile() {
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "large.file", Path: "/storage/large.file"},
+	}
+	content := strings.Repeat("x", 2048)
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[0].GetPath()).Return(int64(len(content)), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, resources[0].GetPath()).Return(newMockReader(content), nil)
+
+	err := suite.manager.Sync(context.Background(), 1, resources)
+	suite.NoError(err)
+	suite.Equal(uint64(1), suite.manager.GetVersion())
+	filePath := path.Join(suite.tempDir, "1", "large.file")
+	suite.FileExists(filePath)
+	info, err := os.Stat(filePath)
+	suite.NoError(err)
+	suite.Equal(int64(len(content)), info.Size())
+}
+
+func (suite *SyncManagerSuite) TestSync_TimeoutUsesLatestConfig() {
+	params := paramtable.Get()
+	key := params.CommonCfg.FileResourceDownloadTimeout.Key
+	suite.Require().NoError(params.Save(key, "1s"))
+	suite.T().Cleanup(func() {
+		suite.NoError(params.Reset(key))
+	})
+
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "slow.file", Path: "/storage/slow.file"},
+	}
+	suite.Require().NoError(params.Save(key, "10ms"))
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[0].GetPath()).RunAndReturn(func(ctx context.Context, _ string) (int64, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})
+
+	err := suite.manager.Sync(context.Background(), 1, resources)
+	suite.ErrorIs(err, context.DeadlineExceeded)
+	suite.Equal(uint64(0), suite.manager.GetVersion())
+	suite.NoFileExists(path.Join(suite.tempDir, "1", "slow.file"))
+}
+
 func (suite *SyncManagerSuite) TestSync_ReaderError() {
 	resources := []*internalpb.FileResourceInfo{
 		{Id: 1, Name: "test.file", Path: "/storage/nonexistent.file"},
 	}
 
 	// Mock reader to return error
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/nonexistent.file").Return(nil, io.ErrUnexpectedEOF)
+	suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/nonexistent.file").Return(int64(1), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/nonexistent.file").Return(nil, io.ErrUnexpectedEOF)
 
-	err := suite.manager.Sync(1, resources)
+	err := suite.manager.Sync(context.Background(), 1, resources)
 	suite.Error(err)
 	suite.ErrorIs(err, io.ErrUnexpectedEOF)
 }
@@ -185,9 +233,10 @@ func (suite *SyncManagerSuite) TestSync_NotifyListener() {
 	resources := []*internalpb.FileResourceInfo{
 		{Id: 1, Name: "test.file", Path: "/storage/test.file"},
 	}
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil)
+	suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/test.file").Return(int64(len("test content")), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/test.file").Return(newMockReader("test content"), nil)
 
-	err := suite.manager.Sync(1, resources)
+	err := suite.manager.Sync(context.Background(), 1, resources)
 	suite.Require().NoError(err)
 
 	suite.Require().Len(listener.events, 1)
@@ -208,14 +257,16 @@ func (suite *SyncManagerSuite) TestSync_UpdateAndRemoveNotifyListener() {
 	resources := []*internalpb.FileResourceInfo{
 		{Id: 1, Name: "test.file", Path: "/storage/test.file"},
 	}
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil)
-	suite.Require().NoError(suite.manager.Sync(1, resources))
+	suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/test.file").Return(int64(len("test content")), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/test.file").Return(newMockReader("test content"), nil)
+	suite.Require().NoError(suite.manager.Sync(context.Background(), 1, resources))
 
 	updated := []*internalpb.FileResourceInfo{
 		{Id: 2, Name: "test.file", Path: "/storage/test_v2.file"},
 	}
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test_v2.file").Return(newMockReader("test content v2"), nil)
-	suite.Require().NoError(suite.manager.Sync(2, updated))
+	suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/test_v2.file").Return(int64(len("test content v2")), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/test_v2.file").Return(newMockReader("test content v2"), nil)
+	suite.Require().NoError(suite.manager.Sync(context.Background(), 2, updated))
 
 	suite.Require().Len(listener.events, 2)
 	suite.Require().Len(listener.events[1].Resources, 1)
@@ -224,35 +275,97 @@ func (suite *SyncManagerSuite) TestSync_UpdateAndRemoveNotifyListener() {
 	suite.Equal(path.Join(suite.tempDir, "2", "test_v2.file"), listener.events[1].Resources[0].LocalPath)
 	suite.NoDirExists(path.Join(suite.tempDir, "1"))
 
-	suite.Require().NoError(suite.manager.Sync(3, nil))
+	suite.Require().NoError(suite.manager.Sync(context.Background(), 3, nil))
 	suite.Require().Len(listener.events, 3)
 	suite.Empty(listener.events[2].Resources)
 	suite.NoDirExists(path.Join(suite.tempDir, "2"))
 }
 
-func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersion() {
-	mockey.PatchConvey("failed analyzer update keeps version retryable", suite.T(), func() {
-		expectedErr := errors.New("mock analyzer update failed")
-		mocker := mockey.Mock(analyzer.UpdateGlobalResourceInfo).Return(expectedErr).Build()
+func (suite *SyncManagerSuite) TestSync_MultiResourceFailureDoesNotPublishVersion() {
+	listener := &mockFileResourceListener{}
+	RegisterListener("atomic", listener)
+	defer UnregisterListener("atomic")
 
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "first", Path: "/storage/first.file"},
+		{Id: 2, Name: "second", Path: "/storage/second.file"},
+	}
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[0].GetPath()).Return(int64(5), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, resources[0].GetPath()).Return(newMockReader("first"), nil)
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[1].GetPath()).Return(int64(1), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, resources[1].GetPath()).Return(nil, io.ErrUnexpectedEOF)
+
+	err := suite.manager.Sync(context.Background(), 1, resources)
+	suite.ErrorIs(err, io.ErrUnexpectedEOF)
+	suite.Equal(uint64(0), suite.manager.GetVersion())
+	suite.Empty(listener.events)
+	suite.FileExists(path.Join(suite.tempDir, "1", "first.file"))
+	suite.NoFileExists(path.Join(suite.tempDir, "2", "second.file"))
+	suite.NoDirExists(path.Join(suite.tempDir, "1.downloading-1"))
+	suite.NoDirExists(path.Join(suite.tempDir, "2.downloading-1"))
+}
+
+func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateAfterFileActivation() {
+	mockey.PatchConvey("analyzer update runs after file activation", suite.T(), func() {
 		resources := []*internalpb.FileResourceInfo{
 			{Id: 1, Name: "test.file", Path: "/storage/test.file"},
 		}
-		suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil).Once()
+		suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/test.file").Return(int64(len("test content")), nil)
+		suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/test.file").Return(newMockReader("test content"), nil)
+		mockey.Mock(analyzer.UpdateGlobalResourceInfo).To(func(resourceMap map[string]int64) error {
+			suite.Equal(map[string]int64{"test.file": 1}, resourceMap)
+			content, err := os.ReadFile(path.Join(suite.tempDir, "1", "test.file"))
+			suite.Require().NoError(err)
+			suite.Equal("test content", string(content))
+			return nil
+		}).Build()
 
-		err := suite.manager.Sync(1, resources)
+		suite.Require().NoError(suite.manager.Sync(context.Background(), 1, resources))
+		suite.Equal(uint64(1), suite.manager.GetVersion())
+	})
+}
+
+func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersion() {
+	mockey.PatchConvey("failed analyzer update keeps previous state retryable", suite.T(), func() {
+		oldResourcePath := path.Join(suite.tempDir, "1")
+		suite.Require().NoError(os.MkdirAll(oldResourcePath, os.ModePerm))
+		suite.Require().NoError(os.WriteFile(path.Join(oldResourcePath, "old.file"), []byte("old content"), 0o600))
+		suite.manager.resourceMap = map[string]int64{"test.file": 1}
+		suite.manager.version.Store(1)
+
+		listener := &mockFileResourceListener{}
+		RegisterListener("analyzer-failure", listener)
+		defer UnregisterListener("analyzer-failure")
+
+		expectedErr := errors.New("mock analyzer update failed")
+		mocker := mockey.Mock(analyzer.UpdateGlobalResourceInfo).Return(expectedErr).Build()
+		resources := []*internalpb.FileResourceInfo{
+			{Id: 2, Name: "test.file", Path: "/storage/new.file"},
+		}
+		suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/new.file").Return(int64(len("new content")), nil).Once()
+		suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/new.file").Return(newMockReader("new content"), nil).Once()
+
+		err := suite.manager.Sync(context.Background(), 2, resources)
 		suite.ErrorIs(err, expectedErr)
-		suite.Equal(uint64(0), suite.manager.GetVersion())
+		suite.Equal(uint64(1), suite.manager.GetVersion())
+		suite.Equal(map[string]int64{"test.file": 1}, suite.manager.resourceMap)
+		suite.Empty(listener.events)
+		suite.FileExists(path.Join(suite.tempDir, "1", "old.file"))
+		suite.FileExists(path.Join(suite.tempDir, "2", "new.file"))
 
-		// the same version is retried and reaches the analyzer again, re-downloading the resource
-		suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil).Once()
+		// The same version retries the Analyzer update after replacing the unpublished new resource.
+		suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/new.file").Return(int64(len("new content")), nil).Once()
+		suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/new.file").Return(newMockReader("new content"), nil).Once()
 		mocker.Return(nil)
 
-		suite.Require().NoError(suite.manager.Sync(1, resources))
-		suite.Equal(uint64(1), suite.manager.GetVersion())
-		content, err := os.ReadFile(path.Join(suite.tempDir, "1", "test.file"))
+		suite.Require().NoError(suite.manager.Sync(context.Background(), 2, resources))
+		suite.Equal(uint64(2), suite.manager.GetVersion())
+		suite.Equal(map[string]int64{"test.file": 2}, suite.manager.resourceMap)
+		suite.Require().Len(listener.events, 1)
+		suite.NoDirExists(path.Join(suite.tempDir, "1"))
+		content, err := os.ReadFile(path.Join(suite.tempDir, "2", "new.file"))
 		suite.NoError(err)
-		suite.Equal("test content", string(content))
+		suite.Equal("new content", string(content))
 	})
 }
 
@@ -304,14 +417,16 @@ func (suite *RefManagerSuite) TearDownTest() {
 	}
 }
 
-func (suite *RefManagerSuite) TestNormal() {
+func (suite *RefManagerSuite) TestDownload_LargeFile() {
 	resources := []*internalpb.FileResourceInfo{
-		{Id: 1, Name: "test", Path: "/storage/test.file"},
+		{Id: 1, Name: "large", Path: "/storage/large.file"},
 	}
+	content := strings.Repeat("x", 2048)
 
 	// Set up mock
 	suite.mockStorage.EXPECT().RootPath().Return("/test/storage")
-	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil)
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[0].GetPath()).Return(int64(len(content)), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, resources[0].GetPath()).Return(newMockReader(content), nil)
 
 	err := suite.manager.Download(context.Background(), suite.mockStorage, resources...)
 	suite.Require().NoError(err)
@@ -328,9 +443,9 @@ func (suite *RefManagerSuite) TestNormal() {
 	filePath := path.Join(suite.tempDir, "/test/storage", fmt.Sprint(1), path.Base(resources[0].GetPath()))
 	suite.FileExists(filePath)
 
-	content, err := os.ReadFile(filePath)
+	downloaded, err := os.ReadFile(filePath)
 	suite.NoError(err)
-	suite.Equal("test content", string(content))
+	suite.Equal(content, string(downloaded))
 
 	// release and clean all file
 	suite.manager.Release(resources...)
@@ -346,8 +461,10 @@ func (suite *RefManagerSuite) TestDownloadErrorRollsBackReferences() {
 	}
 
 	suite.mockStorage.EXPECT().RootPath().Return(rootPath)
-	suite.mockStorage.EXPECT().Reader(context.Background(), resources[0].GetPath()).Return(newMockReader("test content"), nil)
-	suite.mockStorage.EXPECT().Reader(context.Background(), resources[1].GetPath()).Return(nil, io.ErrUnexpectedEOF)
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[0].GetPath()).Return(int64(len("test content")), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, resources[0].GetPath()).Return(newMockReader("test content"), nil)
+	suite.mockStorage.EXPECT().Size(mock.Anything, resources[1].GetPath()).Return(int64(1), nil)
+	suite.mockStorage.EXPECT().Reader(mock.Anything, resources[1].GetPath()).Return(nil, io.ErrUnexpectedEOF)
 
 	err := suite.manager.Download(context.Background(), suite.mockStorage, resources...)
 	suite.ErrorIs(err, io.ErrUnexpectedEOF)
@@ -427,22 +544,25 @@ func (suite *GlobalFunctionsSuite) TestInitManager() {
 	suite.NotNil(GlobalFileManager)
 	suite.Equal(SyncMode, GlobalFileManager.Mode())
 
-	// Test that calling InitManager again doesn't change the manager
 	oldManager := GlobalFileManager
 	InitManager(suite.mockStorage, RefMode)
-	suite.Equal(oldManager, GlobalFileManager)
-	suite.Equal(SyncMode, GlobalFileManager.Mode()) // Should still be SyncMode
+	suite.Same(oldManager, GlobalFileManager)
+	suite.Equal(SyncMode, GlobalFileManager.Mode())
+}
+
+func (suite *GlobalFunctionsSuite) TestResolveMode() {
+	suite.Equal(CloseMode, ResolveMode())
+	suite.Equal(RefMode, ResolveMode(CloseMode, RefMode))
+	suite.Equal(SyncMode, ResolveMode(RefMode, SyncMode, CloseMode))
 }
 
 func (suite *GlobalFunctionsSuite) TestSync_NotInitialized() {
-	GlobalFileManager = nil
-
 	resources := []*internalpb.FileResourceInfo{
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := Sync(1, resources)
-	suite.NoError(err) // Should not error when not initialized
+	err := Sync(context.Background(), 1, resources)
+	suite.NoError(err)
 }
 
 func (suite *GlobalFunctionsSuite) TestSync_Initialized() {
@@ -452,7 +572,7 @@ func (suite *GlobalFunctionsSuite) TestSync_Initialized() {
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := Sync(1, resources)
+	err := Sync(context.Background(), 1, resources)
 	suite.NoError(err)
 }
 

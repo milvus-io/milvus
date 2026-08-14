@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -54,6 +55,24 @@ func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T)
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
 	params.Save(params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.Key, "-1")
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
+}
+
+func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
+	Init()
+	params := Get()
+	key := params.DataCoordCfg.SnapshotExportCopyConcurrency.Key
+	params.Reset(key)
+	t.Cleanup(func() { params.Reset(key) })
+
+	assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+
+	params.Save(key, "3")
+	assert.Equal(t, 3, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+
+	for _, invalid := range []string{"0", "-1", "invalid"} {
+		params.Save(key, invalid)
+		assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+	}
 }
 
 func TestComponentParam(t *testing.T) {
@@ -194,6 +213,20 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
+
+		assert.Equal(t, "close", params.CommonCfg.ProxyFileResourceMode.GetValue())
+		params.Save("common.fileResource.mode.proxy", "sync")
+		assert.Equal(t, "sync", params.CommonCfg.ProxyFileResourceMode.GetValue())
+		assert.Equal(t, int64(0), params.CommonCfg.FileResourceMaxFileSize.GetAsSize())
+		params.Save("common.fileResource.maxFileSize", "2g")
+		assert.Equal(t, int64(2*1024*1024*1024), params.CommonCfg.FileResourceMaxFileSize.GetAsSize())
+		params.Save("common.fileResource.maxFileSize", "-1")
+		assert.Equal(t, int64(0), params.CommonCfg.FileResourceMaxFileSize.GetAsSize())
+		assert.Equal(t, 5*time.Minute, params.CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse())
+		params.Save("common.fileResource.downloadTimeout", "30s")
+		assert.Equal(t, 30*time.Second, params.CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse())
+		params.Save("common.fileResource.downloadTimeout", "invalid")
+		assert.Equal(t, 5*time.Minute, params.CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse())
 
 		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
 		params.Save("common.clusterID", "32")
@@ -776,6 +809,28 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 10.0, Params.ImportMemoryLimitPercentage.GetAsFloat())
 		assert.Equal(t, 0, Params.ImportMaxWriteRetryAttempts.GetAsInt())
+		assert.Equal(t, 1, Params.ImportWriteRetryInitialInterval.GetAsInt())
+		assert.Equal(t, 60, Params.ImportWriteRetryMaxInterval.GetAsInt())
+		// a non-positive or unparseable interval must fall back to the default,
+		// otherwise retry.Sleep(0) yields a zero-delay unbounded retry loop.
+		for _, invalid := range []string{"0", "-1", "1s"} {
+			params.Save(Params.ImportWriteRetryInitialInterval.Key, invalid)
+			assert.Equal(t, 1, Params.ImportWriteRetryInitialInterval.GetAsInt())
+			params.Save(Params.ImportWriteRetryMaxInterval.Key, invalid)
+			assert.Equal(t, 60, Params.ImportWriteRetryMaxInterval.GetAsInt())
+		}
+		params.Save(Params.ImportWriteRetryInitialInterval.Key, "2")
+		assert.Equal(t, 2, Params.ImportWriteRetryInitialInterval.GetAsInt())
+		params.Save(Params.ImportWriteRetryMaxInterval.Key, "120")
+		assert.Equal(t, 120, Params.ImportWriteRetryMaxInterval.GetAsInt())
+		params.Reset(Params.ImportWriteRetryInitialInterval.Key)
+		params.Reset(Params.ImportWriteRetryMaxInterval.Key)
+		assert.Equal(t, time.Hour, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
+		params.Save(Params.ImportCopyObjectTimeout.Key, "120")
+		assert.Equal(t, 2*time.Minute, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
+		params.Save(Params.ImportCopyObjectTimeout.Key, "0")
+		assert.Equal(t, time.Hour, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
+		params.Reset(Params.ImportCopyObjectTimeout.Key)
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
@@ -826,6 +881,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 		assert.Equal(t, 128, params.StreamingCfg.WALReadAheadBufferLength.GetAsInt())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
+		assert.Equal(t, int64(640000000), params.StreamingCfg.PartialUpdateVersionIndexMaxBytes.GetAsSize())
 		assert.Equal(t, 3*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
@@ -977,6 +1033,41 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.enableVectorClusteringKey", "true")
 		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
+}
+
+func TestDataCoordCompactionTargetConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	var params ComponentParam
+	params.Init(base)
+
+	cfg := &params.DataCoordCfg
+	assert.Equal(t, "dataCoord.compaction.enableTargetBasedCompaction", cfg.EnableTargetBasedCompaction.Key)
+	assert.Equal(t, "3.0.0", cfg.EnableTargetBasedCompaction.Version)
+	assert.Equal(t, "false", cfg.EnableTargetBasedCompaction.DefaultValue)
+	assert.False(t, cfg.EnableTargetBasedCompaction.GetAsBool())
+
+	base.Save(cfg.EnableTargetBasedCompaction.Key, "true")
+	assert.True(t, cfg.EnableTargetBasedCompaction.GetAsBool())
+
+	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableTargetBasedCompaction")
+	assert.True(t, ok)
+	assert.Equal(t, "false", field.Tag.Get("refreshable"))
+
+	assert.Equal(t, "dataCoord.compaction.target.maxEventsPerReconcile", cfg.TargetCompactionMaxEvents.Key)
+	assert.Equal(t, "3.0.0", cfg.TargetCompactionMaxEvents.Version)
+	assert.Equal(t, "100", cfg.TargetCompactionMaxEvents.DefaultValue)
+	assert.Equal(t, 100, cfg.TargetCompactionMaxEvents.GetAsInt())
+
+	for _, value := range []string{"0", "-1", "invalid"} {
+		base.Save(cfg.TargetCompactionMaxEvents.Key, value)
+		assert.Equal(t, 100, cfg.TargetCompactionMaxEvents.GetAsInt())
+	}
+	base.Save(cfg.TargetCompactionMaxEvents.Key, "25")
+	assert.Equal(t, 25, cfg.TargetCompactionMaxEvents.GetAsInt())
+
+	field, ok = reflect.TypeOf(dataCoordConfig{}).FieldByName("TargetCompactionMaxEvents")
+	assert.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
 
 func TestForbiddenItem(t *testing.T) {

@@ -2974,10 +2974,11 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
         *rows->Add() = expected_empty;
         *rows->Add() = expected_empty;
         *rows->Add() = expected_target;
-        field_data->mutable_valid_data()->Clear();
-        field_data->add_valid_data(false);
-        field_data->add_valid_data(true);
-        field_data->add_valid_data(true);
+        auto* valid_data = field_data->mutable_vectors()->mutable_valid_data();
+        valid_data->Clear();
+        valid_data->Add(false);
+        valid_data->Add(true);
+        valid_data->Add(true);
         break;
     }
 

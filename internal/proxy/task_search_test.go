@@ -119,6 +119,72 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
 }
 
+func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
+	mockey.PatchConvey("TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter", t, func() {
+		globalMetaCache = &MetaCache{}
+
+		const (
+			dbName         = "db"
+			collectionName = "timestamptz_collection"
+			collectionID   = int64(100)
+		)
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: testInt64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{
+					FieldID:  101,
+					Name:     testFloatVecField,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+					},
+				},
+				{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+			},
+		})
+
+		mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+			UpdateTimestamp:  100,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		}, nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
+		mockey.Mock((*searchTask).checkNq).Return(int64(1), nil).Build()
+
+		searchParams := append([]*commonpb.KeyValuePair{}, getValidSearchParams()...)
+		searchParams = append(searchParams, &commonpb.KeyValuePair{
+			Key:   common.TimezoneKey,
+			Value: "Asia/Shanghai",
+		})
+		task := &searchTask{
+			Condition:     NewTaskCondition(context.Background()),
+			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
+			ctx:           context.Background(),
+			request: &milvuspb.SearchRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Nq:             1,
+				Dsl:            "ts > ISO '2025-01-01T00:00:00'",
+				SearchParams:   searchParams,
+			},
+			result: &milvuspb.SearchResults{Status: merr.Success()},
+		}
+
+		err := task.PreExecute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, "Asia/Shanghai", task.resolvedTimezoneStr)
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		rangeExpr := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		require.NotNil(t, rangeExpr)
+		shanghai, err := time.LoadLocation("Asia/Shanghai")
+		require.NoError(t, err)
+		assert.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, shanghai).UnixMicro(), rangeExpr.GetValue().GetInt64Val())
+	})
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
@@ -1092,7 +1158,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.NoError(t, st.PreExecute(ctx))
-		assert.Equal(t, collInfo.updateTimestamp, st.GuaranteeTimestamp)
+		assert.Equal(t, collInfo.UpdateTimestamp, st.GuaranteeTimestamp)
 	})
 	t.Run("search with rerank", func(t *testing.T) {
 		collName := "search_with_rerank" + funcutil.GenRandomStr()
@@ -2873,6 +2939,7 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			Type: schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: valids,
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{
 							Data: groupByValues,
@@ -2880,7 +2947,6 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 					},
 				},
 			},
-			ValidData: valids,
 		}
 		return result
 	}
@@ -2941,12 +3007,12 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 0, 1, 2, 3, 4, 0}},
 						},
 					},
 				},
-				ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
 			},
 		},
 	}
@@ -3530,9 +3596,10 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 	t.Run("parseSearchInfo groupBy info for hybrid search", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{FieldID: 101, Name: "c1"},
-				{FieldID: 102, Name: "c2"},
-				{FieldID: 103, Name: "c3"},
+				// group-by now checks the field type, so the fixtures carry one
+				{FieldID: 101, Name: "c1", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "c2", DataType: schemapb.DataType_Int64},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_VarChar},
 			},
 		}
 		// 1. first parse rank params
@@ -3714,8 +3781,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		})
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3733,8 +3801,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		})
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3753,6 +3822,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		fields = append(fields, &schemapb.FieldSchema{
 			FieldID:  int64(101),
 			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 			Nullable: true,
 		})
 		schema := &schemapb.CollectionSchema{
@@ -3771,8 +3841,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		resetSearchParamsValue(normalParam, TopKKey, `1024000`)
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3830,8 +3901,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		})
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3906,8 +3978,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			})
 			fields := make([]*schemapb.FieldSchema, 0)
 			fields = append(fields, &schemapb.FieldSchema{
-				FieldID: int64(101),
-				Name:    "string_field",
+				FieldID:  int64(101),
+				Name:     "string_field",
+				DataType: schemapb.DataType_VarChar,
 			})
 			schema := &schemapb.CollectionSchema{
 				Fields: fields,
@@ -4907,8 +4980,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
 
 		skip := st.CanSkipAllocTimestamp()
@@ -4916,16 +4989,16 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
 		skip = st.CanSkipAllocTimestamp()
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Strong,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
 		skip = st.CanSkipAllocTimestamp()
 		assert.False(t, skip)
@@ -4934,8 +5007,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 	t.Run("request consistency level", func(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
 
 		st := &searchTask{
@@ -5006,8 +5079,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, errors.New("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil)
 
 		skip = st.CanSkipAllocTimestamp()
@@ -5061,8 +5134,8 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
 	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 		&collectionInfo{
-			collID:                s.colID,
-			partitionKeyIsolation: true,
+			CollID:                s.colID,
+			PartitionKeyIsolation: true,
 		}, nil)
 	globalMetaCache = s.mockMetaCache
 }
@@ -6014,8 +6087,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
@@ -6071,8 +6144,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
@@ -6113,8 +6186,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
@@ -6153,8 +6226,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
@@ -6192,8 +6265,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
@@ -6231,8 +6304,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
@@ -6271,8 +6344,8 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 				},
 			},
 		}
-		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
-		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		qt.schema.SchemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.PkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
