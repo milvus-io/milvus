@@ -23,7 +23,9 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -884,6 +887,216 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 
 	s.NotNil(savedJob)
 	s.Equal(internalpb.ImportJobState_Pending, savedJob.GetState())
+}
+
+const testCollectionID = int64(100)
+
+func TestCheckL0ImportAllowed(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableL0Import.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableL0Import.Key)
+
+	t.Run("legacy l0_import still rejected", func(t *testing.T) {
+		err := checkL0ImportAllowed([]*commonpb.KeyValuePair{
+			{Key: importutilv2.L0Import, Value: "true"},
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("write_mode delete allowed", func(t *testing.T) {
+		err := checkL0ImportAllowed([]*commonpb.KeyValuePair{
+			{Key: importutilv2.WriteMode, Value: "Delete"},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("write_mode upsert allowed", func(t *testing.T) {
+		err := checkL0ImportAllowed([]*commonpb.KeyValuePair{
+			{Key: importutilv2.WriteMode, Value: "Upsert"},
+		})
+		assert.NoError(t, err)
+	})
+}
+
+// newTestServerWithCollection builds a *Server backed by a bare *meta (no gRPC/etcd plumbing)
+// with testCollectionID registered as a collection, following the lightweight meta construction
+// pattern used in import_checker_test.go's ImportCheckerSuite.SetupTest.
+func newTestServerWithCollection(t *testing.T) *Server {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+
+	m, err := newMeta(context.TODO(), catalog, nil, mockBroker)
+	require.NoError(t, err)
+	m.AddCollection(&collectionInfo{ID: testCollectionID})
+
+	s := &Server{meta: m}
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	return s
+}
+
+func TestCheckWriteModeSupported(t *testing.T) {
+	t.Run("rejected when the collection has manifest-less segments", func(t *testing.T) {
+		s := newTestServerWithCollection(t)
+		require.NoError(t, s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L1,
+			State: commonpb.SegmentState_Flushed, ManifestPath: "",
+		})))
+		err := s.checkWriteModeSupported(context.TODO(), testCollectionID,
+			[]*commonpb.KeyValuePair{{Key: importutilv2.WriteMode, Value: "Delete"}})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "storage v3")
+	})
+
+	t.Run("allowed when every data segment is manifest-based", func(t *testing.T) {
+		s := newTestServerWithCollection(t)
+		require.NoError(t, s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 2, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L1,
+			State: commonpb.SegmentState_Flushed, ManifestPath: "s3://base/100",
+		})))
+		err := s.checkWriteModeSupported(context.TODO(), testCollectionID,
+			[]*commonpb.KeyValuePair{{Key: importutilv2.WriteMode, Value: "Upsert"}})
+		assert.NoError(t, err)
+	})
+
+	t.Run("append mode is never gated", func(t *testing.T) {
+		s := newTestServerWithCollection(t)
+		require.NoError(t, s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 3, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L1,
+			State: commonpb.SegmentState_Flushed, ManifestPath: "",
+		})))
+		assert.NoError(t, s.checkWriteModeSupported(context.TODO(), testCollectionID, nil))
+	})
+
+	t.Run("L0 segments are not counted", func(t *testing.T) {
+		s := newTestServerWithCollection(t)
+		require.NoError(t, s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 4, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L0,
+			State: commonpb.SegmentState_Flushed, ManifestPath: "",
+		})))
+		err := s.checkWriteModeSupported(context.TODO(), testCollectionID,
+			[]*commonpb.KeyValuePair{{Key: importutilv2.WriteMode, Value: "Delete"}})
+		assert.NoError(t, err, "L0 segments never receive folded deletes; they are the source")
+	})
+
+	t.Run("malformed write_mode is rejected, not treated as append", func(t *testing.T) {
+		s := newTestServerWithCollection(t)
+		// A manifest-less segment would make Delete/Upsert fail the gate, but a value that
+		// degrades to Append would pass it — so this asserts the parse error surfaces first.
+		require.NoError(t, s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 5, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L1,
+			State: commonpb.SegmentState_Flushed, ManifestPath: "s3://base/100",
+		})))
+		err := s.checkWriteModeSupported(context.TODO(), testCollectionID,
+			[]*commonpb.KeyValuePair{{Key: importutilv2.WriteMode, Value: "Replace"}})
+		assert.Error(t, err)
+	})
+}
+
+// TestImportV2_WriteModeRequiresManifestSegments covers the ImportV2 wiring of
+// checkWriteModeSupported, mirroring TestImportV2_L0ImportDisabledReturnsError's pattern of
+// driving ImportV2 directly and asserting on the returned status.
+func TestImportV2_WriteModeRequiresManifestSegments(t *testing.T) {
+	paramtable.Init()
+	s := newTestServerWithCollection(t)
+	require.NoError(t, s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 6, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L1,
+		State: commonpb.SegmentState_Flushed, ManifestPath: "",
+	})))
+
+	req := &internalpb.ImportRequestInternal{
+		CollectionID: testCollectionID,
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: importutilv2.WriteMode, Value: "Delete"},
+		},
+	}
+
+	resp, err := s.ImportV2(context.Background(), req)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	assert.Contains(t, resp.GetStatus().GetReason(), "storage v3")
+}
+
+// TestCreateImportJobFromAck_WriteModeRequiresManifestSegments covers the createImportJobFromAck
+// wiring of checkWriteModeSupported: a replicated write_mode=Delete message targeting a
+// collection with a manifest-less segment must not error the ack callback (which retries
+// forever); it must create the job directly in Failed state.
+func TestCreateImportJobFromAck_WriteModeRequiresManifestSegments(t *testing.T) {
+	ctx := context.Background()
+	s := newTestServerWithCollection(t)
+	require.NoError(t, s.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 77, CollectionID: testCollectionID, Level: datapb.SegmentLevel_L1,
+		State: commonpb.SegmentState_Flushed, ManifestPath: "",
+	})))
+
+	mockHandler := NewNMockHandler(t)
+	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID:            testCollectionID,
+		VChannelNames: []string{"v1"},
+	}, nil)
+	s.handler = mockHandler
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
+	s.allocator = mockAllocator
+
+	// A second, independent catalog mock backs importMeta; it is unrelated to the catalog
+	// newTestServerWithCollection used to build s.meta.
+	importCatalog := mocks.NewDataCoordCatalog(t)
+	importCatalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	importCatalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	importCatalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	var savedJob *datapb.ImportJob
+	importCatalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, job *datapb.ImportJob) error {
+		savedJob = job
+		return nil
+	})
+	importMeta, err := NewImportMeta(ctx, importCatalog, s.allocator, s.meta)
+	require.NoError(t, err)
+	s.importMeta = importMeta
+
+	req := &internalpb.ImportRequestInternal{
+		CollectionID:   testCollectionID,
+		CollectionName: "test_collection",
+		PartitionIDs:   []int64{1},
+		ChannelNames:   []string{"v1"},
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
+		Files: []*internalpb.ImportFile{
+			{Id: 1, Paths: []string{"/test/file.json"}},
+		},
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: importutilv2.WriteMode, Value: "Delete"},
+		},
+		DataTimestamp: 123456789,
+		JobID:         2000,
+	}
+
+	resp, err := s.createImportJobFromAck(ctx, req)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+	assert.Equal(t, "2000", resp.GetJobID())
+
+	assert.NotNil(t, savedJob)
+	assert.Equal(t, internalpb.ImportJobState_Failed, savedJob.GetState())
+	assert.Contains(t, savedJob.GetReason(), "storage v3")
 }
 
 // Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)
