@@ -33,7 +33,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -834,6 +836,171 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// TestCheckStatsJob_UpsertSkipsOnlyL0Segments covers an upsert job that owns one L1 (data) segment
+// and one L0 (delete) segment. checkSortingJob must enqueue a sort compaction task for the L1
+// segment, must not enqueue one for the L0 segment, and must not short-circuit the whole job.
+func (s *ImportCheckerSuite) TestCheckStatsJob_UpsertSkipsOnlyL0Segments() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+
+	upsertJobProto := &datapb.ImportJob{
+		JobID:        1000,
+		CollectionID: 1,
+		PartitionIDs: []int64{2},
+		Vchannels:    []string{"ch0"},
+		State:        internalpb.ImportJobState_Sorting,
+		TimeoutTs:    1000,
+		CleanupTs:    tsoutil.ComposeTSByTime(time.Now()),
+		Schema:       s.importMeta.GetJob(context.TODO(), s.jobID).GetSchema(),
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.WriteMode, Value: "upsert"},
+		},
+	}
+	upsertJob := &importJob{ImportJob: upsertJobProto, tr: timerecord.NewTimeRecorder("import job")}
+	err := s.importMeta.AddJob(context.TODO(), upsertJob)
+	s.NoError(err)
+
+	l1SegmentID := int64(5100)
+	l0SegmentID := int64(5200)
+	sortedL1ID := int64(5101)
+	sortedL0ID := int64(5201) // preallocated placeholder for the L0 segment; never used.
+
+	l1Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            l1SegmentID,
+			CollectionID:  1,
+			PartitionID:   2,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: "ch0",
+			NumOfRows:     100,
+		},
+	}
+	l0Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            l0SegmentID,
+			CollectionID:  1,
+			PartitionID:   2,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: "ch0",
+			NumOfRows:     50,
+		},
+	}
+	s.NoError(s.checker.meta.AddSegment(context.Background(), l1Segment))
+	s.NoError(s.checker.meta.AddSegment(context.Background(), l0Segment))
+
+	taskProto := &datapb.ImportTaskV2{
+		JobID:            upsertJob.GetJobID(),
+		TaskID:           2000,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{l1SegmentID, l0SegmentID},
+		SortedSegmentIDs: []int64{sortedL1ID, sortedL0ID},
+	}
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(taskProto)
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	s.alloc.EXPECT().AllocN(mock.Anything).Return(rand.Int63(), 0, nil).Maybe()
+
+	cim := s.checker.ci.(*MockCompactionInspector)
+	cim.EXPECT().enqueueCompaction(mock.MatchedBy(func(t *datapb.CompactionTask) bool {
+		return len(t.GetInputSegments()) == 1 && t.GetInputSegments()[0] == l1SegmentID
+	})).Return(nil).Once()
+
+	s.checker.checkSortingJob(upsertJob)
+
+	// The L0 segment is counted done without a compaction task; the L1 segment still awaits
+	// its sort compaction task, so the job stays in Sorting rather than being skipped wholesale.
+	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), upsertJob.GetJobID()).GetState())
+}
+
+// TestCheckIndexBuildingJob_UpsertSkipsL0Segments covers an upsert job whose L1 segment already
+// has a finished index and whose L0 (delete) segment has none. checkIndexBuildingJob must not
+// count the L0 segment as unindexed, so the job advances to Uncommitted instead of waiting
+// forever for an index that a delete-only segment will never get.
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJob_UpsertSkipsL0Segments() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+
+	upsertJobProto := &datapb.ImportJob{
+		JobID:        3000,
+		CollectionID: 1,
+		PartitionIDs: []int64{2},
+		Vchannels:    []string{"ch0"},
+		State:        internalpb.ImportJobState_IndexBuilding,
+		TimeoutTs:    1000,
+		CleanupTs:    tsoutil.ComposeTSByTime(time.Now()),
+		Schema:       s.importMeta.GetJob(context.TODO(), s.jobID).GetSchema(),
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.WriteMode, Value: "upsert"},
+		},
+	}
+	upsertJob := &importJob{ImportJob: upsertJobProto, tr: timerecord.NewTimeRecorder("import job")}
+	err := s.importMeta.AddJob(context.TODO(), upsertJob)
+	s.NoError(err)
+
+	err = s.checker.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		CollectionID: 1,
+		FieldID:      101,
+		IndexID:      101,
+	})
+	s.NoError(err)
+
+	l1SegmentID := int64(6100)
+	l0SegmentID := int64(6200)
+
+	l1Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            l1SegmentID,
+			CollectionID:  1,
+			PartitionID:   2,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: "ch0",
+			NumOfRows:     100,
+		},
+	}
+	l0Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            l0SegmentID,
+			CollectionID:  1,
+			PartitionID:   2,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: "ch0",
+			NumOfRows:     50,
+		},
+	}
+	s.NoError(s.checker.meta.AddSegment(context.Background(), l1Segment))
+	s.NoError(s.checker.meta.AddSegment(context.Background(), l0Segment))
+
+	s.checker.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: 1,
+		SegmentID:    l1SegmentID,
+		IndexID:      101,
+		IndexState:   commonpb.IndexState_Finished,
+	})
+
+	taskProto := &datapb.ImportTaskV2{
+		JobID:            upsertJob.GetJobID(),
+		TaskID:           7000,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{l1SegmentID, l0SegmentID},
+		SortedSegmentIDs: []int64{l1SegmentID, l0SegmentID},
+	}
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(taskProto)
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	s.checker.checkIndexBuildingJob(upsertJob)
+
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), upsertJob.GetJobID()).GetState())
 }
 
 func TestImportChecker(t *testing.T) {
