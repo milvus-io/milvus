@@ -2195,6 +2195,24 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
+	// A streamingnode or datanode still on a pre-upgrade build does not
+	// recognize MessageTypeCreateSnapshot: the streamingnode shard interceptor
+	// falls back to a plain append that declares the boundary without sealing
+	// anything (see the TODO below), and any consumer's fromMessageToTsMsgV2
+	// (pkg/streaming/util/message/adaptor) panics on the unrecognized type
+	// instead of silently ignoring it. Refuse the request until every node
+	// that can see this message type is on a build new enough to have this
+	// case, rather than let a rolling upgrade corrupt or crash mid-flight.
+	if incompatible, role, err := s.hasSnapshotIncompatibleSession(ctx); err != nil {
+		mlog.Warn(context.TODO(), "CreateSnapshot: failed to check cluster session versions", mlog.Err(err))
+		return merr.Status(err), nil
+	} else if incompatible {
+		mlog.Warn(context.TODO(), "CreateSnapshot rejected: rolling upgrade in progress", mlog.String("role", role))
+		return merr.Status(merr.WrapErrServiceUnavailableMsg(
+			"cluster has a %s node older than this DataCoord build (%s); finish the rolling upgrade before creating a snapshot",
+			role, common.Version.String())), nil
+	}
+
 	mlog.Info(context.TODO(), "receive CreateSnapshot request", mlog.String("name", req.GetName()),
 		mlog.String("description", req.GetDescription()),
 		mlog.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))
@@ -2315,6 +2333,35 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 
 	mlog.Info(context.TODO(), "CreateSnapshot completed successfully")
 	return merr.Success(), nil
+}
+
+// hasSnapshotIncompatibleSession reports whether any currently registered
+// streamingnode or datanode session is on a build older than this DataCoord
+// binary. session.Version only separates release lines -- two builds within
+// the same unreleased line report the identical version and cannot be told
+// apart here (see GetClusterMinIndexStorePathVersion's comment for the same
+// caveat) -- but that is exactly the granularity a rolling-upgrade check
+// needs: it only has to catch "some node predates this feature's release
+// line", not "some node predates this exact commit".
+func (s *Server) hasSnapshotIncompatibleSession(ctx context.Context) (bool, string, error) {
+	if s.session == nil {
+		// Only unset in tests that construct a bare Server{} without going
+		// through the real startup path (which always calls SetSession); a
+		// live DataCoord always has one.
+		return false, "", nil
+	}
+	for _, role := range []string{typeutil.StreamingNodeRole, typeutil.DataNodeRole} {
+		sessions, _, err := s.session.GetSessions(ctx, role)
+		if err != nil {
+			return false, "", err
+		}
+		for _, session := range sessions {
+			if session.Version.LT(common.Version) {
+				return true, role, nil
+			}
+		}
+	}
+	return false, "", nil
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
