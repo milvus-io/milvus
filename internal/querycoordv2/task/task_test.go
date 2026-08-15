@@ -305,7 +305,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	Wait(ctx, timeout, tasks...)
+	Wait(ctx, tasks...)
 	for _, task := range tasks {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())

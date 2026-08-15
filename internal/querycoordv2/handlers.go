@@ -158,12 +158,14 @@ func (s *Server) balanceSegments(ctx context.Context,
 	}
 
 	if sync {
-		// The task's own deadline doesn't start until it's actually dispatched
-		// (see Task.ActivateDeadline), so give this caller's wait window some
-		// slack beyond SegmentTaskTimeout to cover queueing time; otherwise a
-		// busy scheduler could make this synchronous call time out before the
-		// task itself ever gets a chance to fail with the real error.
-		err := task.Wait(ctx, 2*Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// No extra timeout here: each task already carries its own real
+		// deadline (armed on first dispatch, see Task.ActivateDeadline) and
+		// is guaranteed to finish within it. Bounding this wait with another,
+		// independently-guessed duration would only race against that real
+		// deadline -- as it did before, when both used SegmentTaskTimeout and
+		// this wait usually won, masking the task's actual result. Callers
+		// that want to bound how long they wait should set a deadline on ctx.
+		err := task.Wait(ctx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
@@ -241,10 +243,9 @@ func (s *Server) balanceChannels(ctx context.Context,
 	}
 
 	if sync {
-		// See the matching comment in balanceSegments: give this wait window
-		// slack beyond ChannelTaskTimeout so it doesn't time out purely due to
-		// scheduler queueing before the task's own deadline is even armed.
-		err := task.Wait(ctx, 2*Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// See the matching comment in balanceSegments: no extra timeout here,
+		// each task already has a real, guaranteed-to-fire deadline of its own.
+		err := task.Wait(ctx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
