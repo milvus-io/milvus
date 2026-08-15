@@ -2320,6 +2320,18 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			return merr.Status(err), nil
 		}
 
+		// Refuse now if the capture's sort wait could never finish. This has to
+		// happen before the append: Broadcast returns once the message is in the
+		// WAL, not once the ack callback runs, so past this point the client is
+		// told the call succeeded and any unsatisfiable condition the callback
+		// hits becomes an unbounded retry that never releases this collection's
+		// exclusive DDL resource key.
+		if err := checkSnapshotSortReachable(ctx, s.meta, req.GetCollectionId()); err != nil {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot rejected: its sort wait could never finish", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
 		// Broadcast CreateSnapshot message via DDL framework.
 		// Snapshot ID is allocated in the callback.
 		//

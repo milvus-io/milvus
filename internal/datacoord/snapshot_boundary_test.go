@@ -365,7 +365,27 @@ func TestWaitForSortedBoundary(t *testing.T) {
 		assert.Less(t, time.Since(start), 5*time.Second)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
-		assert.Contains(t, err.Error(), "enableSortCompaction")
+		assert.Contains(t, err.Error(), "sort compaction is off")
+	})
+
+	t.Run("fails fast when the compaction subsystem is off", func(t *testing.T) {
+		// EnableCompaction gates startCompaction(), the only caller of the
+		// trigger manager and inspector, so sort never runs even though its own
+		// switch is on. Checking EnableSortCompaction alone would miss this and
+		// wait out the full budget on every retry, forever.
+		sm := boundaryTestManager(boundaryTestSegment(1))
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+		paramtable.Get().Save(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key, "60")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
+
+		start := time.Now()
+		err := sm.waitForSortedBoundary(context.Background(), 100, boundaryTestBoundary())
+		assert.Less(t, time.Since(start), 5*time.Second)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
+		assert.Contains(t, err.Error(), "sort compaction is off")
 	})
 
 	t.Run("returns once the segment is sorted", func(t *testing.T) {
@@ -388,6 +408,131 @@ func TestWaitForSortedBoundary(t *testing.T) {
 		}()
 
 		assert.NoError(t, sm.waitForSortedBoundary(context.Background(), 100, boundaryTestBoundary()))
+	})
+}
+
+// checkSnapshotSortReachable is the pre-broadcast half of the same question
+// waitForSortedBoundary asks after the fact. It has to be the one that actually
+// rejects: once the message is appended the client has been told the call
+// succeeded, and the callback's error only buys an unbounded retry that never
+// gives the collection's DDL resource key back.
+func TestCheckSnapshotSortReachable(t *testing.T) {
+	protectedSnapshotMeta := func(segmentIDs ...int64) *snapshotMeta {
+		until := make(map[int64]uint64, len(segmentIDs))
+		for _, id := range segmentIDs {
+			until[id] = uint64(time.Now().Add(time.Hour).Unix())
+		}
+		return &snapshotMeta{
+			compactionBlockedCollections: typeutil.NewUniqueSet(),
+			snapshotPendingCollections:   typeutil.NewUniqueSet(),
+			snapshotStagingCollections:   typeutil.NewUniqueSet(),
+			segmentProtectionUntil:       until,
+		}
+	}
+
+	t.Run("passes when everything is already sorted", func(t *testing.T) {
+		sm := boundaryTestManager(boundaryTestSegment(1, func(s *datapb.SegmentInfo) { s.IsSorted = true }))
+		assert.NoError(t, checkSnapshotSortReachable(context.Background(), sm.meta, 100))
+	})
+
+	t.Run("passes with sort off when nothing needs sorting", func(t *testing.T) {
+		// Refusing here would be a false rejection: a fully sorted collection is
+		// snapshottable whether or not sort compaction is switched on.
+		sm := boundaryTestManager(boundaryTestSegment(1, func(s *datapb.SegmentInfo) { s.IsSorted = true }))
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		assert.NoError(t, checkSnapshotSortReachable(context.Background(), sm.meta, 100))
+	})
+
+	t.Run("rejects when sort compaction is disabled", func(t *testing.T) {
+		sm := boundaryTestManager(boundaryTestSegment(1))
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		err := checkSnapshotSortReachable(context.Background(), sm.meta, 100)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
+		assert.Contains(t, err.Error(), "sort compaction is off")
+	})
+
+	t.Run("rejects when the compaction subsystem is disabled", func(t *testing.T) {
+		sm := boundaryTestManager(boundaryTestSegment(1))
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+
+		err := checkSnapshotSortReachable(context.Background(), sm.meta, 100)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sort compaction is off")
+	})
+
+	t.Run("rejects an unsorted segment pinned by an older snapshot", func(t *testing.T) {
+		// Both sort-triggering paths skip a protected segment while
+		// segmentsAwaitingSort still waits for it, so this would spin until the
+		// old protection lapses -- up to 7 days by default.
+		sm := boundaryTestManager(boundaryTestSegment(1))
+		sm.meta.snapshotMeta = protectedSnapshotMeta(1)
+
+		err := checkSnapshotSortReachable(context.Background(), sm.meta, 100)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
+		assert.Contains(t, err.Error(), "compaction protection")
+	})
+
+	t.Run("ignores protection on a segment that is already sorted", func(t *testing.T) {
+		sm := boundaryTestManager(boundaryTestSegment(1, func(s *datapb.SegmentInfo) { s.IsSorted = true }))
+		sm.meta.snapshotMeta = protectedSnapshotMeta(1)
+
+		assert.NoError(t, checkSnapshotSortReachable(context.Background(), sm.meta, 100))
+	})
+
+	t.Run("counts a growing segment, which the fence turns into an unsorted one", func(t *testing.T) {
+		sm := boundaryTestManager(boundaryTestSegment(1, func(s *datapb.SegmentInfo) {
+			s.State = commonpb.SegmentState_Growing
+			s.IsSorted = true // ignored for growing: the fence reseals it unsorted
+		}))
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		err := checkSnapshotSortReachable(context.Background(), sm.meta, 100)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sort compaction is off")
+	})
+
+	t.Run("ignores empty and L0 segments", func(t *testing.T) {
+		sm := boundaryTestManager(
+			boundaryTestSegment(1, func(s *datapb.SegmentInfo) {
+				s.Binlogs = nil
+				s.NumOfRows = 0
+			}),
+			boundaryTestSegment(2, func(s *datapb.SegmentInfo) { s.Level = datapb.SegmentLevel_L0 }),
+		)
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		assert.NoError(t, checkSnapshotSortReachable(context.Background(), sm.meta, 100))
+	})
+
+	t.Run("passes for an external collection", func(t *testing.T) {
+		// segmentsAwaitingSort short-circuits external collections, so the wait
+		// never blocks on them and there is nothing to refuse.
+		sm := boundaryTestManager(boundaryTestSegment(1))
+		sm.meta.collections.Insert(100, &collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{ExternalField: "col"}},
+			},
+		})
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		assert.NoError(t, checkSnapshotSortReachable(context.Background(), sm.meta, 100))
 	})
 }
 

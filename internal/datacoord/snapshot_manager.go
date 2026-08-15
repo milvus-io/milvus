@@ -610,6 +610,116 @@ func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionI
 	return awaiting, nil
 }
 
+// segmentsNeedingSortNow returns the collection's segments that a snapshot cut at
+// this instant would have to wait for sort compaction on.
+//
+// Unlike segmentsAwaitingSort it takes no boundary, because it runs before the
+// CreateSnapshot message is appended and there is no boundary yet. It is
+// deliberately the wider set: a flushed unsorted segment is already inside any
+// boundary cut now, and a segment still growing becomes one, because the fence
+// seals it at the boundary and flushFlushingSegment publishes a sealed segment
+// unsorted.
+func segmentsNeedingSortNow(ctx context.Context, m *meta, collectionID int64) ([]int64, error) {
+	candidates := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		if info.GetLevel() == datapb.SegmentLevel_L0 || info.GetIsImporting() {
+			return false
+		}
+		switch info.GetState() {
+		case commonpb.SegmentState_Flushed:
+			return !info.GetIsSorted() && !info.GetIsSortedByNamespace()
+		case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing:
+			return true
+		default:
+			return false
+		}
+	}))
+
+	needing := make([]int64, 0, len(candidates))
+	for _, info := range candidates {
+		hasData, err := segmentHasSnapshotData(info)
+		if err != nil {
+			return nil, err
+		}
+		// A growing segment has no binlogs until it flushes, so its row count is
+		// the only evidence it will become a segment worth waiting on.
+		if !hasData && info.GetNumOfRows() == 0 {
+			continue
+		}
+		needing = append(needing, info.GetID())
+	}
+	return needing, nil
+}
+
+// checkSnapshotSortReachable rejects a CreateSnapshot whose sort wait could never
+// finish, before the message is appended to the WAL.
+//
+// The placement is the whole point. Broadcast returns once the message is
+// appended, not once the ack callback runs, so by the time the callback
+// discovers it cannot proceed the client has already been told the call
+// succeeded. The callback is then retried forever --
+// callMessageAckCallbackUntilDone sets MaxElapsedTime=0 and retries every error
+// -- and the collection's exclusive DDL resource key is released only by
+// MarkAckCallbackDone on success. A condition the callback can never satisfy
+// therefore does not fail the request: it silently wedges every later DDL on
+// that collection for the life of the process. Both conditions below are exactly
+// that, which is why they are caught here rather than in the wait.
+func checkSnapshotSortReachable(ctx context.Context, m *meta, collectionID int64) error {
+	// External collections never wait: no compaction policy touches them, so
+	// segmentsAwaitingSort reports their set as empty by construction.
+	if collection := m.GetCollection(collectionID); collection != nil && collection.IsExternal() {
+		return nil
+	}
+
+	needing, err := segmentsNeedingSortNow(ctx, m, collectionID)
+	if err != nil {
+		return err
+	}
+	if len(needing) == 0 {
+		// Nothing to sort, so neither stall below applies -- a fully sorted
+		// collection can still be snapshotted with sort compaction switched off.
+		return nil
+	}
+
+	// enableSortCompaction() is the real precondition, not EnableSortCompaction
+	// on its own: EnableCompaction gates startCompaction(), the only caller of
+	// compactionTriggerManager.Start() and compactionInspector.start(), so with
+	// it off no sort task is ever created and already-queued ones stop being
+	// scheduled. It is also refreshable:"false", so the operator cannot undo
+	// this without restarting DataCoord -- all the more reason to refuse now.
+	if !enableSortCompaction() {
+		return merr.WrapErrServiceUnavailableMsg(
+			"snapshot for collection %d needs %d segment(s) sort-compacted first, but sort compaction is off "+
+				"(dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t)",
+			collectionID, len(needing),
+			Params.DataCoordCfg.EnableCompaction.GetAsBool(),
+			Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
+	}
+
+	// A segment pinned by an older snapshot's compaction protection is skipped by
+	// both sort-triggering paths (triggerSegmentSortCompaction and
+	// triggerSortCompaction), while segmentsAwaitingSort still waits for it --
+	// the two predicates are asymmetric, and the wait is the wider one. Snapshots
+	// written before this branch existed could reference unsorted segments, since
+	// GenSnapshot filtered only on Dropped and IsImporting, so this is reachable
+	// on any upgraded cluster. The wait would then last until that protection
+	// lapses: up to dataCoord.snapshot.maxCompactionProtectionSeconds, 7 days by
+	// default.
+	protected := make([]int64, 0, len(needing))
+	for _, segmentID := range needing {
+		if m.isSegmentCompactionProtected(segmentID) {
+			protected = append(protected, segmentID)
+		}
+	}
+	if len(protected) > 0 {
+		return merr.WrapErrServiceUnavailableMsg(
+			"snapshot for collection %d cannot proceed: %d segment(s) still need sort compaction but are pinned by an "+
+				"existing snapshot's compaction protection, which blocks sort until it expires (e.g. segments %v); "+
+				"retry after it lapses, or drop the snapshot holding it",
+			collectionID, len(protected), protected[:min(len(protected), 5)])
+	}
+	return nil
+}
+
 // waitForSortedBoundary blocks until every segment inside the boundary has been
 // sorted.
 //
@@ -662,20 +772,32 @@ func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collection
 					mlog.Duration("waited", time.Since(start)))
 				return nil
 			}
-			// Fail fast rather than retry forever holding the collection lock:
-			// with sort compaction disabled cluster-wide, nothing will ever
-			// clear this set (triggerSegmentSortCompaction/triggerSortCompaction
-			// both skip while the switch is off), so every retry of this call
-			// would otherwise repeat the same unresolvable wait. This is checked
-			// fresh on every attempt, so re-enabling the switch lets a later
-			// retry proceed normally.
-			if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
+			// Backstop for the same condition checkSnapshotSortReachable
+			// refuses before the broadcast: the switches can be flipped after
+			// the message is already in the WAL, and this is the only place
+			// that would otherwise notice. enableSortCompaction() rather than
+			// EnableSortCompaction alone -- EnableCompaction gates the whole
+			// compaction subsystem's startup, so with it off no sort task is
+			// created and nothing ever clears this set. Checked fresh on every
+			// attempt, so re-enabling lets a later retry proceed.
+			//
+			// This still returns a retryable error rather than abandoning the
+			// snapshot: the message is in the WAL, so the snapshot has to exist
+			// eventually. It cannot release the collection's resource-key lock
+			// -- see the function doc -- which is exactly why the pre-broadcast
+			// check matters more than this one.
+			if !enableSortCompaction() {
 				mlog.Warn(ctx, "snapshot cannot proceed: sort compaction is disabled cluster-wide",
 					mlog.FieldCollectionID(collectionID),
+					mlog.Bool("enableCompaction", Params.DataCoordCfg.EnableCompaction.GetAsBool()),
+					mlog.Bool("enableSortCompaction", Params.DataCoordCfg.EnableSortCompaction.GetAsBool()),
 					mlog.Int64s("awaitingSort", awaiting))
 				return merr.WrapErrServiceUnavailableMsg(
-					"snapshot for collection %d needs %d segment(s) to finish sort compaction, but dataCoord.enableSortCompaction is disabled cluster-wide",
-					collectionID, len(awaiting))
+					"snapshot for collection %d needs %d segment(s) to finish sort compaction, but sort compaction is off "+
+						"(dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t)",
+					collectionID, len(awaiting),
+					Params.DataCoordCfg.EnableCompaction.GetAsBool(),
+					Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
 			}
 		}
 

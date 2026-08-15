@@ -6579,8 +6579,17 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Key:          "dataCoord.snapshot.sortWaitPollIntervalSeconds",
 		Version:      "3.0.1",
 		DefaultValue: "1",
-		Doc:          "How often snapshot creation re-checks whether its segments have finished sort compaction while waiting. Default 1.",
-		Export:       true,
+		Doc: "How often snapshot creation re-checks whether its segments have finished sort compaction while waiting. Default 1. " +
+			"Values ≤0 and unparseable values are coerced to the default: this feeds time.NewTicker, which panics on a " +
+			"non-positive duration, and the key is refreshable, so the coercion has to happen here rather than at the call site.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				return "1"
+			}
+			return v
+		},
+		Export: true,
 	}
 	p.SnapshotSortWaitPollInterval.Init(base.mgr)
 
