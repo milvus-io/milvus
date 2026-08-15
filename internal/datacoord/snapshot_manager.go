@@ -380,7 +380,7 @@ type snapshotManager struct {
 	// from interleaving with themselves.
 	//
 	// Per collection rather than process-wide: the lock is held across
-	// waitForSortedBoundary, which can run for the whole life of a snapshot,
+	// waitForVisibleBoundary, which can run for the whole life of a snapshot,
 	// and a global lock made one collection with stalled sort compaction starve
 	// snapshot creation on every other collection. The keyspace it actually
 	// protects is (collectionID, name), so collection scope is already wider
@@ -529,7 +529,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	// This runs before SetSnapshotPending, and the order is not cosmetic: pending
 	// blocks sort compaction too, so waiting under it would be waiting for tasks
 	// this call has itself forbidden.
-	if err := sm.waitForSortedBoundary(ctx, collectionID, boundary); err != nil {
+	if err := sm.waitForVisibleBoundary(ctx, collectionID, boundary); err != nil {
 		return 0, err
 	}
 
@@ -634,27 +634,45 @@ func (sm *snapshotManager) channelsBehindBoundary(boundary *SnapshotBoundary) []
 	return behind
 }
 
-// segmentsAwaitingSort returns the segments inside the boundary that the snapshot
-// is not yet allowed to capture.
+// segmentsAwaitingVisibility returns the segments inside the boundary that the
+// snapshot is not yet allowed to capture.
 //
-// A segment qualifies while it is either still on its way to Flushed or flushed
-// but unsorted. The first half matters because the fence is asynchronous: the
-// broadcast acks once the message is appended, but the write buffer seals and
-// reports to DataCoord afterwards, so at this point the segments the snapshot
-// just fenced are typically still Growing here. Waiting only on Flushed would
-// find an empty set and capture the boundary before its own data arrived.
+// The predicate is IsInvisible, not unsortedness. Invisibility is the flag that
+// actually decides whether a segment is part of the collection a reader sees:
+// handler.go routes an invisible segment into UnflushedSegmentIds, so
+// GetRecoveryInfoV2 leaves it out of the sealed load set and a querynode picks
+// it up on the growing path with no index; schema-bump backfill refuses it
+// outright (isSchemaBumpDataSegment, and a hard reject in
+// CompleteCompactionMutation); and the DDL schema-consistency gate counts only
+// visible segments. Capturing one puts a segment in the snapshot that is
+// unindexed and un-backfilled relative to the collection it claims to copy.
+//
+// Unsortedness only tracks that while sort compaction is on, because
+// flushFlushingSegment stamps IsInvisible exactly when enableSortCompaction()
+// holds. With sort off, a flushed segment is unsorted AND visible -- indexed,
+// sealed-loaded, backfill-eligible, its manifest exactly what a reader sees --
+// and there is nothing about it to wait for. Waiting on unsortedness there
+// waits forever for a state change that is not coming and was never needed.
+// The two also differ the other way: a clustering result is published invisible
+// and its sort output inherits that, so it can be sorted yet still invisible,
+// which the old predicate skipped and should not have.
+//
+// A segment still on its way to Flushed is not in this set. That is covered by
+// channelsBehindBoundary in front of this call: until every channel checkpoint
+// has passed the boundary the segment list is still filling in, so an empty
+// answer here would be about the wrong set.
 //
 // The predicate deliberately differs from canTriggerSortCompaction in one way:
 // it does not exclude segments that are already compacting. A segment with a
-// sort task in flight has not been sorted yet, and the point of the wait is to
-// stay until it has. It also needs no segment-id bookkeeping -- a sort replaces
-// its input with a new id, and the replacement leaves this set on its own
-// because it is sorted, while the input leaves it because it is Dropped.
-func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) ([]int64, error) {
+// sort task in flight has not become visible yet, and the point of the wait is
+// to stay until it has. It also needs no segment-id bookkeeping -- a sort
+// replaces its input with a new id, and the replacement leaves this set on its
+// own once it is published visible, while the input leaves it as Dropped.
+func (sm *snapshotManager) segmentsAwaitingVisibility(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) ([]int64, error) {
 	// External collections never get sort compaction: every compaction policy
 	// (single/clustering/forcemerge/storage-version) skips IsExternal() collections
-	// outright, so their segments can never leave the unsorted state. Waiting on a
-	// sort that structurally cannot happen would hang CreateSnapshot forever --
+	// outright, so nothing would ever publish their segments visible. Waiting on a
+	// transition that structurally cannot happen would hang CreateSnapshot forever --
 	// there is nothing to wait for, so report the set as already empty.
 	if collection := sm.meta.GetCollection(collectionID); collection != nil && collection.IsExternal() {
 		return nil, nil
@@ -663,8 +681,7 @@ func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionI
 	candidates := sm.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.GetState() == commonpb.SegmentState_Flushed &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			!info.GetIsSorted() &&
-			!info.GetIsSortedByNamespace() &&
+			info.GetIsInvisible() &&
 			!info.GetIsImporting()
 	}))
 
@@ -695,25 +712,27 @@ func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionI
 	return awaiting, nil
 }
 
-// segmentsNeedingSortNow returns the collection's segments that a snapshot cut at
-// this instant would have to wait for sort compaction on.
+// segmentsWouldAwaitVisibility returns the collection's segments that the wait
+// would block on if a boundary were cut right now.
 //
-// Unlike segmentsAwaitingSort it takes no boundary, because it runs before the
-// CreateSnapshot message is appended and there is no boundary yet. It is
-// deliberately the wider set: a flushed unsorted segment is already inside any
-// boundary cut now, and a segment still growing becomes one, because the fence
-// seals it at the boundary and flushFlushingSegment publishes a sealed segment
-// unsorted.
-func segmentsNeedingSortNow(ctx context.Context, m *meta, collectionID int64) ([]int64, error) {
+// Unlike segmentsAwaitingVisibility it takes no boundary, because it runs before
+// the CreateSnapshot message is appended and there is no boundary yet. It has to
+// predict rather than observe for segments that are not flushed: the fence seals
+// them at the boundary, and flushFlushingSegment publishes a sealed segment
+// invisible exactly when enableSortCompaction() holds. So with sort on they will
+// join the wait set, and with sort off they will flush straight to visible and
+// never enter it.
+func segmentsWouldAwaitVisibility(ctx context.Context, m *meta, collectionID int64) ([]int64, error) {
+	sortWillRun := enableSortCompaction()
 	candidates := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		if info.GetLevel() == datapb.SegmentLevel_L0 || info.GetIsImporting() {
 			return false
 		}
 		switch info.GetState() {
 		case commonpb.SegmentState_Flushed:
-			return !info.GetIsSorted() && !info.GetIsSortedByNamespace()
+			return info.GetIsInvisible()
 		case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing:
-			return true
+			return sortWillRun
 		default:
 			return false
 		}
@@ -728,14 +747,14 @@ func segmentsNeedingSortNow(ctx context.Context, m *meta, collectionID int64) ([
 			// segmentHasSnapshotData -- that parses the StorageV3 manifest path
 			// and errors on a malformed one, which would abort this whole check
 			// (and so reject the snapshot) over a segment neither
-			// segmentsAwaitingSort nor GenSnapshot would ever have inspected.
+			// segmentsAwaitingVisibility nor GenSnapshot would ever have inspected.
 			if info.GetNumOfRows() > 0 || len(info.GetBinlogs()) > 0 {
 				needing = append(needing, info.GetID())
 			}
 			continue
 		}
-		// Flushed: the same emptiness test segmentsAwaitingSort applies, so the
-		// pre-check and the wait agree on which segments count.
+		// Flushed: the same emptiness test segmentsAwaitingVisibility applies, so
+		// the pre-check and the wait agree on which segments count.
 		hasData, err := segmentHasSnapshotData(info)
 		if err != nil {
 			return nil, err
@@ -747,8 +766,8 @@ func segmentsNeedingSortNow(ctx context.Context, m *meta, collectionID int64) ([
 	return needing, nil
 }
 
-// checkSnapshotSortReachable rejects a CreateSnapshot whose sort wait could never
-// finish, before the message is appended to the WAL.
+// checkSnapshotVisibilityReachable rejects a CreateSnapshot whose wait could
+// never finish, before the message is appended to the WAL.
 //
 // The placement is the whole point. Broadcast returns once the message is
 // appended, not once the ack callback runs, so by the time the callback
@@ -760,33 +779,42 @@ func segmentsNeedingSortNow(ctx context.Context, m *meta, collectionID int64) ([
 // therefore does not fail the request: it silently wedges every later DDL on
 // that collection for the life of the process. Both conditions below are exactly
 // that, which is why they are caught here rather than in the wait.
-func checkSnapshotSortReachable(ctx context.Context, m *meta, collectionID int64) error {
+//
+// It refuses only what is genuinely unresolvable. A cluster running with sort
+// compaction switched off is NOT refused: its segments flush straight to visible
+// and the snapshot has nothing to wait for, so it is allowed through.
+func checkSnapshotVisibilityReachable(ctx context.Context, m *meta, collectionID int64) error {
 	// External collections never wait: no compaction policy touches them, so
-	// segmentsAwaitingSort reports their set as empty by construction.
+	// segmentsAwaitingVisibility reports their set as empty by construction.
 	if collection := m.GetCollection(collectionID); collection != nil && collection.IsExternal() {
 		return nil
 	}
 
-	needing, err := segmentsNeedingSortNow(ctx, m, collectionID)
+	needing, err := segmentsWouldAwaitVisibility(ctx, m, collectionID)
 	if err != nil {
 		return err
 	}
 	if len(needing) == 0 {
-		// Nothing to sort, so neither stall below applies -- a fully sorted
-		// collection can still be snapshotted with sort compaction switched off.
+		// Nothing to wait for, so neither stall below applies. This is the normal
+		// answer on a cluster with sort compaction off: everything flushes
+		// visible, and the snapshot proceeds immediately.
 		return nil
 	}
 
-	// enableSortCompaction() is the real precondition, not EnableSortCompaction
-	// on its own: EnableCompaction gates startCompaction(), the only caller of
-	// compactionTriggerManager.Start() and compactionInspector.start(), so with
-	// it off no sort task is ever created and already-queued ones stop being
-	// scheduled. It is also refreshable:"false", so the operator cannot undo
-	// this without restarting DataCoord -- all the more reason to refuse now.
+	// Reaching here with sort off means the set is entirely already-invisible
+	// segments -- segmentsWouldAwaitVisibility excludes not-yet-flushed ones in
+	// that configuration. Those are stranded: nothing clears IsInvisible except a
+	// sort or clustering completion, and with the subsystem off neither will run.
+	// EnableCompaction gates startCompaction(), the only caller of
+	// compactionTriggerManager.Start() and compactionInspector.start(), so no
+	// task is created and already-queued ones stop being scheduled; it is also
+	// refreshable:"false", so the operator cannot undo it without restarting
+	// DataCoord. Refuse rather than wait for something nothing will deliver.
 	if !enableSortCompaction() {
 		return merr.WrapErrServiceUnavailableMsg(
-			"snapshot for collection %d needs %d segment(s) sort-compacted first, but sort compaction is off "+
-				"(dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t)",
+			"snapshot for collection %d has %d segment(s) stranded invisible by a previous sort compaction run, and sort "+
+				"compaction is now off (dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t) so they can "+
+				"never be published; re-enable it to let them finish",
 			collectionID, len(needing),
 			Params.DataCoordCfg.EnableCompaction.GetAsBool(),
 			Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
@@ -794,13 +822,13 @@ func checkSnapshotSortReachable(ctx context.Context, m *meta, collectionID int64
 
 	// A segment pinned by an older snapshot's compaction protection is skipped by
 	// both sort-triggering paths (triggerSegmentSortCompaction and
-	// triggerSortCompaction), while segmentsAwaitingSort still waits for it --
-	// the two predicates are asymmetric, and the wait is the wider one. Snapshots
-	// written before this branch existed could reference unsorted segments, since
-	// GenSnapshot filtered only on Dropped and IsImporting, so this is reachable
-	// on any upgraded cluster. The wait would then last until that protection
-	// lapses: up to dataCoord.snapshot.maxCompactionProtectionSeconds, 7 days by
-	// default.
+	// triggerSortCompaction), while segmentsAwaitingVisibility still waits for it
+	// -- the two predicates are asymmetric, and the wait is the wider one.
+	// Snapshots written before this branch existed could reference invisible
+	// segments, since GenSnapshot filtered only on Dropped and IsImporting, so
+	// this is reachable on any upgraded cluster. The wait would then last until
+	// that protection lapses: up to
+	// dataCoord.snapshot.maxCompactionProtectionSeconds, 7 days by default.
 	protected := make([]int64, 0, len(needing))
 	for _, segmentID := range needing {
 		if m.isSegmentCompactionProtected(segmentID) {
@@ -809,21 +837,27 @@ func checkSnapshotSortReachable(ctx context.Context, m *meta, collectionID int64
 	}
 	if len(protected) > 0 {
 		return merr.WrapErrServiceUnavailableMsg(
-			"snapshot for collection %d cannot proceed: %d segment(s) still need sort compaction but are pinned by an "+
-				"existing snapshot's compaction protection, which blocks sort until it expires (e.g. segments %v); "+
-				"retry after it lapses, or drop the snapshot holding it",
+			"snapshot for collection %d cannot proceed: %d segment(s) are still invisible and need sort compaction, but "+
+				"are pinned by an existing snapshot's compaction protection, which blocks sort until it expires "+
+				"(e.g. segments %v); retry after it lapses, or drop the snapshot holding it",
 			collectionID, len(protected), protected[:min(len(protected), 5)])
 	}
 	return nil
 }
 
-// waitForSortedBoundary blocks until every segment inside the boundary has been
-// sorted.
+// waitForVisibleBoundary blocks until every segment inside the boundary is one
+// the collection's readers can see.
+//
+// Usually that means waiting for sort compaction, which is what publishes a
+// stream-flushed segment visible -- but the wait is on visibility itself, not on
+// sortedness. See segmentsAwaitingVisibility for why the distinction matters:
+// with sort compaction off, segments flush straight to visible and this returns
+// on the first poll rather than waiting for a sort that is not coming.
 //
 // The set is closed: the CreateSnapshot message fenced its collection's growing
 // segments at this boundary, so anything flushed afterwards starts after it and
-// can never enter. The wait therefore terminates on its own as sort compaction
-// drains it -- it is not racing ingestion.
+// can never enter. The wait therefore terminates on its own as the set drains
+// -- it is not racing ingestion.
 //
 // The per-attempt cap below does NOT give the collection's resource-key lock
 // back. This runs inside a DDL ack callback, and the broadcaster's ack-callback
@@ -836,10 +870,9 @@ func checkSnapshotSortReachable(ctx context.Context, m *meta, collectionID int64
 // yielding the lock: an unbounded wait here would hold it for exactly as long
 // either way, since the outer retry has nowhere else to hand it off to. The
 // message is already in the WAL, so the snapshot is created eventually either
-// way, once sort compaction can actually drain the set -- see the
-// EnableSortCompaction check below for the one case where it structurally
-// cannot.
-func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) error {
+// way, once the set can actually drain -- see the enableSortCompaction check
+// below for the one case where it structurally cannot.
+func (sm *snapshotManager) waitForVisibleBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) error {
 	// The budget is a deadline, so express it as one: the same select then covers
 	// both running out of budget and DataCoord shutting down, and both want the
 	// same thing -- give the lock back and let the scheduler come again.
@@ -853,30 +886,29 @@ func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collection
 	for {
 		// Completeness before cleanliness. Until every channel checkpoint has
 		// passed the boundary, the segments inside it are still arriving, and
-		// asking whether they are all sorted answers about a set that is not yet
+		// asking whether they are all visible answers about a set that is not yet
 		// the one being captured -- typically an empty one, which reads as "done".
 		behind := sm.channelsBehindBoundary(boundary)
 		var awaiting []int64
 		if len(behind) == 0 {
 			var err error
-			if awaiting, err = sm.segmentsAwaitingSort(ctx, collectionID, boundary); err != nil {
+			if awaiting, err = sm.segmentsAwaitingVisibility(ctx, collectionID, boundary); err != nil {
 				return err
 			}
 			if len(awaiting) == 0 {
-				mlog.Info(ctx, "snapshot boundary complete and fully sorted",
+				mlog.Info(ctx, "snapshot boundary complete and fully visible",
 					mlog.FieldCollectionID(collectionID),
 					mlog.Uint64("snapshotTs", boundary.SnapshotTs),
 					mlog.Duration("waited", time.Since(start)))
 				return nil
 			}
-			// Backstop for the same condition checkSnapshotSortReachable
+			// Backstop for the same condition checkSnapshotVisibilityReachable
 			// refuses before the broadcast: the switches can be flipped after
 			// the message is already in the WAL, and this is the only place
-			// that would otherwise notice. enableSortCompaction() rather than
-			// EnableSortCompaction alone -- EnableCompaction gates the whole
-			// compaction subsystem's startup, so with it off no sort task is
-			// created and nothing ever clears this set. Checked fresh on every
-			// attempt, so re-enabling lets a later retry proceed.
+			// that would otherwise notice. Anything still invisible once sort
+			// compaction is off is stranded -- only a sort or clustering
+			// completion clears the flag, and neither will run. Checked fresh
+			// on every attempt, so re-enabling lets a later retry proceed.
 			//
 			// This still returns a retryable error rather than abandoning the
 			// snapshot: the message is in the WAL, so the snapshot has to exist
@@ -884,14 +916,14 @@ func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collection
 			// -- see the function doc -- which is exactly why the pre-broadcast
 			// check matters more than this one.
 			if !enableSortCompaction() {
-				mlog.Warn(ctx, "snapshot cannot proceed: sort compaction is disabled cluster-wide",
+				mlog.Warn(ctx, "snapshot cannot proceed: segments are stranded invisible with sort compaction off",
 					mlog.FieldCollectionID(collectionID),
 					mlog.Bool("enableCompaction", Params.DataCoordCfg.EnableCompaction.GetAsBool()),
 					mlog.Bool("enableSortCompaction", Params.DataCoordCfg.EnableSortCompaction.GetAsBool()),
-					mlog.Int64s("awaitingSort", awaiting))
+					mlog.Int64s("awaitingVisibility", awaiting))
 				return merr.WrapErrServiceUnavailableMsg(
-					"snapshot for collection %d needs %d segment(s) to finish sort compaction, but sort compaction is off "+
-						"(dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t)",
+					"snapshot for collection %d has %d segment(s) stranded invisible, and sort compaction is off "+
+						"(dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t) so nothing will publish them",
 					collectionID, len(awaiting),
 					Params.DataCoordCfg.EnableCompaction.GetAsBool(),
 					Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
@@ -912,16 +944,16 @@ func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collection
 				mlog.Uint64("snapshotTs", boundary.SnapshotTs),
 				mlog.Duration("waited", time.Since(start)),
 				mlog.Strings("channelsBehindBoundary", behind),
-				mlog.Int64s("awaitingSort", awaiting))
+				mlog.Int64s("awaitingVisibility", awaiting))
 			return merr.WrapErrServiceUnavailableMsg(
-				"snapshot for collection %d is waiting for %d channel(s) to reach its boundary and %d segment(s) to finish sort compaction",
+				"snapshot for collection %d is waiting for %d channel(s) to reach its boundary and %d segment(s) to become visible",
 				collectionID, len(behind), len(awaiting))
 		case <-ticker.C:
 			mlog.RatedInfo(ctx, 0.1, "snapshot waiting for its boundary",
 				mlog.FieldCollectionID(collectionID),
 				mlog.Duration("waited", time.Since(start)),
 				mlog.Strings("channelsBehindBoundary", behind),
-				mlog.Int64s("awaitingSort", awaiting))
+				mlog.Int64s("awaitingVisibility", awaiting))
 		}
 	}
 }

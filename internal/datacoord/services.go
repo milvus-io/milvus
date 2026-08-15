@@ -2326,7 +2326,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		// told the call succeeded and any unsatisfiable condition the callback
 		// hits becomes an unbounded retry that never releases this collection's
 		// exclusive DDL resource key.
-		if err := checkSnapshotSortReachable(ctx, s.meta, req.GetCollectionId()); err != nil {
+		if err := checkSnapshotVisibilityReachable(ctx, s.meta, req.GetCollectionId()); err != nil {
 			broadcaster.Close()
 			mlog.Warn(context.TODO(), "CreateSnapshot rejected: its sort wait could never finish", mlog.Err(err))
 			return merr.Status(err), nil

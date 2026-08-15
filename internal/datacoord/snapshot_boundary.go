@@ -114,7 +114,7 @@ func NewSnapshotBoundary(results map[string]*message.AppendResult) (*SnapshotBou
 // of production binaries. NOTE for whoever adds a fifth WAL: extend the adaptor
 // AND add a matching pre-broadcast check. Failing here is after the append, and
 // an error after the append is retried forever without releasing the
-// collection's DDL resource key -- the silent wedge checkSnapshotSortReachable
+// collection's DDL resource key -- the silent wedge checkSnapshotVisibilityReachable
 // exists to prevent.
 func snapshotSeekMsgID(messageID message.MessageID) ([]byte, commonpb.WALName, error) {
 	switch messageID.WALName() {

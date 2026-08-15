@@ -3373,7 +3373,7 @@ func TestSnapshotExportManager_LockTargetSerializesEquivalentRoots(t *testing.T)
 	<-secondDone
 }
 
-// The create lock is held across waitForSortedBoundary, which can run for the
+// The create lock is held across waitForVisibleBoundary, which can run for the
 // whole life of a snapshot. While it was process-wide, one collection with
 // stalled sort compaction starved snapshot creation on every other collection.
 func TestLockCreateSnapshot_ScopedPerCollection(t *testing.T) {
