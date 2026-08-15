@@ -128,7 +128,7 @@ func TestPChannel(t *testing.T) {
 	newServerID := types.StreamingNodeInfo{
 		ServerID: 456,
 	}
-	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, newServerID))
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, newServerID))
 	updatedChannelInfo := newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 
 	assert.Equal(t, "test-channel", pchannel.Name())
@@ -144,7 +144,7 @@ func TestPChannel(t *testing.T) {
 
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 
-	mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789})
+	mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 789})
 	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 	assert.Equal(t, "test-channel", updatedChannelInfo.Name())
 	assert.Equal(t, int64(3), updatedChannelInfo.CurrentTerm())
@@ -169,7 +169,7 @@ func TestPChannel(t *testing.T) {
 
 	// Test reassigned
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
-	assert.False(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789}))
+	assert.False(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 789}))
 
 	// Test MarkAsUnavailable
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
@@ -185,19 +185,35 @@ func TestPChannel(t *testing.T) {
 
 	// Test assign on unavailable
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
-	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789}))
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 789}))
 	assert.Len(t, mutablePChannel.AssignHistories(), 1)
 
-	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 790}))
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 790}))
 	assert.Len(t, mutablePChannel.AssignHistories(), 1)
 
-	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 790}))
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 790}))
 	assert.Len(t, mutablePChannel.AssignHistories(), 2)
-	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 790}))
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 790}))
 	assert.Len(t, mutablePChannel.AssignHistories(), 2)
 	for _, h := range mutablePChannel.AssignHistories() {
 		if h.Node.ServerID == 790 {
 			assert.Equal(t, h.Channel.Term, mutablePChannel.CurrentTerm()-1)
 		}
 	}
+}
+
+func TestPChannelRecoveryStorageVersionIsMonotonic(t *testing.T) {
+	pchannel := NewPChannelMeta("test-channel", types.AccessModeRW)
+	mutable := pchannel.CopyForWrite()
+	assert.True(t, mutable.TryAssignToServerID(types.PChannelInfo{
+		AccessMode:                     types.AccessModeRW,
+		RequiredRecoveryStorageVersion: types.RecoveryStorageVersionV2,
+	}, types.StreamingNodeInfo{ServerID: 1}))
+	assert.Equal(t, types.RecoveryStorageVersionV2, mutable.RequiredRecoveryStorageVersion())
+
+	assert.True(t, mutable.TryAssignToServerID(types.PChannelInfo{
+		AccessMode:                     types.AccessModeRW,
+		RequiredRecoveryStorageVersion: types.RecoveryStorageVersionLegacy,
+	}, types.StreamingNodeInfo{ServerID: 2}))
+	assert.Equal(t, types.RecoveryStorageVersionV2, mutable.RequiredRecoveryStorageVersion())
 }

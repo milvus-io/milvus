@@ -113,10 +113,16 @@ func (p *expectedLayoutForVChannelFairPolicy) Assign(channelID types.ChannelID, 
 	if !ok {
 		panic("node info not found")
 	}
+	if !p.CurrentLayout.CanAssign(channelID, serverID) {
+		panic("node does not support the required recovery storage version")
+	}
 
 	// assign to the node that already has pchannel at highest priority.
 	info := p.CurrentLayout.Channels[channelID]
 	info.AccessMode = expectedAccessMode
+	if info.AccessMode == types.AccessModeRW && node.RecoveryStorageVersion >= types.RecoveryStorageVersionV2 {
+		info.RequiredRecoveryStorageVersion = max(info.RequiredRecoveryStorageVersion, types.RecoveryStorageVersionV2)
+	}
 	info.Term++
 	p.Assignments[channelID] = types.PChannelInfoAssigned{
 		Channel: info,

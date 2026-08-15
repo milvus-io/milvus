@@ -601,6 +601,15 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, merr.Wrap(err, "fail to balance")
 	}
+	for channelID, requiredVersion := range expectedLayout.BlockedChannels {
+		b.Logger().Warn(ctx, "pchannel assignment blocked by recovery storage compatibility",
+			mlog.FieldPChannel(channelID.Name),
+			mlog.Int32("requiredRecoveryStorageVersion", int32(requiredVersion)),
+		)
+	}
+	if err := validateExpectedLayoutCapabilities(currentLayout, expectedLayout); err != nil {
+		return false, err
+	}
 
 	b.Logger().Info(ctx, "balance policy generate result success, try to assign...", mlog.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
@@ -653,6 +662,25 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 // applyBalanceResultToStreamingNode apply the balance result to streaming node.
 func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[types.ChannelID]*channel.PChannelMeta) error {
 	b.Logger().Info(ctx, "balance result need to be applied...", mlog.Int("modifiedChannelCount", len(modifiedChannels)))
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	if err != nil {
+		return merr.Wrap(err, "failed to refresh streaming node capabilities before assignment")
+	}
+	for _, pchannel := range modifiedChannels {
+		node, ok := nodes[pchannel.CurrentServerID()]
+		if !ok {
+			return status.NewInner("target streaming node %d disappeared before assigning pchannel %s", pchannel.CurrentServerID(), pchannel.Name())
+		}
+		if node.RecoveryStorageVersion < pchannel.RequiredRecoveryStorageVersion() {
+			return status.NewInner(
+				"target streaming node %d supports recovery storage version %d, below required version %d for pchannel %s",
+				pchannel.CurrentServerID(),
+				node.RecoveryStorageVersion,
+				pchannel.RequiredRecoveryStorageVersion(),
+				pchannel.Name(),
+			)
+		}
+	}
 
 	// different channel can be execute concurrently.
 	g, _ := errgroup.WithContext(ctx)
@@ -693,6 +721,23 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	// huge unavaiable time may be caused by this,
 	// should be fixed in future.
 	return g.Wait()
+}
+
+func validateExpectedLayoutCapabilities(currentLayout CurrentLayout, expectedLayout ExpectedLayout) error {
+	for channelID, assignment := range expectedLayout.ChannelAssignment {
+		nodeInfo, ok := currentLayout.AllNodesInfo[assignment.Node.ServerID]
+		if ok && nodeInfo.RecoveryStorageVersion >= assignment.Channel.RequiredRecoveryStorageVersion {
+			continue
+		}
+		return status.NewInner(
+			"streaming node %d supports recovery storage version %d, below required version %d for pchannel %s",
+			assignment.Node.ServerID,
+			nodeInfo.RecoveryStorageVersion,
+			assignment.Channel.RequiredRecoveryStorageVersion,
+			channelID.Name,
+		)
+	}
+	return nil
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.

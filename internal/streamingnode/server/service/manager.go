@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -32,10 +33,25 @@ type managerServiceImpl struct {
 // After assign returns, the wal instance is ready to use.
 func (ms *managerServiceImpl) Assign(ctx context.Context, req *streamingpb.StreamingNodeManagerAssignRequest) (*streamingpb.StreamingNodeManagerAssignResponse, error) {
 	pchannelInfo := types.NewPChannelInfoFromProto(req.GetPchannel())
+	if err := validateAssignRecoveryStorageVersion(pchannelInfo); err != nil {
+		return nil, err
+	}
 	if err := ms.walManager.Open(ctx, pchannelInfo); err != nil {
 		return nil, err
 	}
 	return &streamingpb.StreamingNodeManagerAssignResponse{}, nil
+}
+
+func validateAssignRecoveryStorageVersion(pchannelInfo types.PChannelInfo) error {
+	if pchannelInfo.AccessMode != types.AccessModeRW || pchannelInfo.RequiredRecoveryStorageVersion == types.RecoveryStorageVersionV2 {
+		return nil
+	}
+	return status.NewInner(
+		"streaming node requires recovery storage version %d for read-write pchannel %s, assignment requested version %d",
+		types.RecoveryStorageVersionV2,
+		pchannelInfo.Name,
+		pchannelInfo.RequiredRecoveryStorageVersion,
+	)
 }
 
 // Remove removes the wal instance for the channel.

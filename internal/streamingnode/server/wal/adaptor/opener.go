@@ -196,6 +196,9 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, errors.Wrap(err, "failed to get checkpoint from catalog")
 	}
 	cp := utility.NewWALCheckpointFromProto(cpProto)
+	if err := validateRWWALRecoveryStorageVersion(opt.Channel, cp); err != nil {
+		return nil, err
+	}
 
 	// recover the wal state.
 	param, err := buildInterceptorParams(ctx, l, cp)
@@ -249,6 +252,32 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	o.walInstances.Insert(id, wal)
 	resources.Release()
 	return wal, nil
+}
+
+func validateRWWALRecoveryStorageVersion(channel types.PChannelInfo, checkpoint *utility.WALCheckpoint) error {
+	if checkpoint != nil && checkpoint.Magic > utility.RecoveryMagicRecoveryStorageV2 {
+		return status.NewInner(
+			"pchannel %s recovery checkpoint version %d is newer than supported version %d",
+			channel.Name,
+			checkpoint.Magic,
+			utility.RecoveryMagicRecoveryStorageV2,
+		)
+	}
+	if checkpoint != nil && checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2 && channel.RequiredRecoveryStorageVersion < types.RecoveryStorageVersionV2 {
+		return status.NewInner(
+			"pchannel %s contains recovery storage V2 data but assignment requires version %d",
+			channel.Name,
+			channel.RequiredRecoveryStorageVersion,
+		)
+	}
+	if channel.RequiredRecoveryStorageVersion != types.RecoveryStorageVersionV2 {
+		return status.NewInner(
+			"read-write pchannel %s is not authorized to use recovery storage V2: required version %d",
+			channel.Name,
+			channel.RequiredRecoveryStorageVersion,
+		)
+	}
+	return nil
 }
 
 // determineLastConfirmedMessageID determines the last confirmed message id after recovery.

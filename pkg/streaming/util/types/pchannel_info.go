@@ -7,12 +7,18 @@ import (
 )
 
 const (
-	InitialTerm  int64      = -1
+	InitialTerm int64 = -1
+
 	AccessModeRW AccessMode = AccessMode(streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE) // It's the default option.
 	AccessModeRO AccessMode = AccessMode(streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY)
+
+	RecoveryStorageVersionLegacy RecoveryStorageVersion = RecoveryStorageVersion(streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY)
+	RecoveryStorageVersionV2     RecoveryStorageVersion = RecoveryStorageVersion(streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_V2)
 )
 
 type AccessMode streamingpb.PChannelAccessMode
+
+type RecoveryStorageVersion streamingpb.RecoveryStorageVersion
 
 func (m AccessMode) String() string {
 	switch m {
@@ -36,9 +42,10 @@ func NewPChannelInfoFromProto(pchannel *streamingpb.PChannelInfo) PChannelInfo {
 	accessMode := AccessMode(pchannel.GetAccessMode())
 	_ = accessMode.String() // assertion.
 	return PChannelInfo{
-		Name:       pchannel.GetName(),
-		Term:       pchannel.GetTerm(),
-		AccessMode: accessMode,
+		Name:                           pchannel.GetName(),
+		Term:                           pchannel.GetTerm(),
+		AccessMode:                     accessMode,
+		RequiredRecoveryStorageVersion: RecoveryStorageVersion(pchannel.GetRequiredRecoveryStorageVersion()),
 	}
 }
 
@@ -51,9 +58,10 @@ func NewProtoFromPChannelInfo(pchannel PChannelInfo) *streamingpb.PChannelInfo {
 		panic("pchannel term is empty or negetive")
 	}
 	return &streamingpb.PChannelInfo{
-		Name:       pchannel.Name,
-		Term:       pchannel.Term,
-		AccessMode: streamingpb.PChannelAccessMode(pchannel.AccessMode),
+		Name:                           pchannel.Name,
+		Term:                           pchannel.Term,
+		AccessMode:                     streamingpb.PChannelAccessMode(pchannel.AccessMode),
+		RequiredRecoveryStorageVersion: streamingpb.RecoveryStorageVersion(pchannel.RequiredRecoveryStorageVersion),
 	}
 }
 
@@ -78,9 +86,10 @@ func (id1 ChannelID) LT(id2 ChannelID) bool {
 
 // PChannelInfo is the struct for pchannel info.
 type PChannelInfo struct {
-	Name       string     // name of pchannel.
-	Term       int64      // term of pchannel.
-	AccessMode AccessMode // Access mode, if AccessModeRO, the wal impls should be read-only, the append operation will panics.
+	Name                           string                 // name of pchannel.
+	Term                           int64                  // term of pchannel.
+	AccessMode                     AccessMode             // Access mode, if AccessModeRO, the wal impls should be read-only, the append operation will panics.
+	RequiredRecoveryStorageVersion RecoveryStorageVersion // Minimum RecoveryStorage version required to own this pchannel.
 	// If accessMode is AccessModeRW, the wal impls should be read-write,
 	// and it will fence the old rw wal impls or wait the old rw wal impls close.
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -32,6 +33,10 @@ const (
 var ErrChannelNotExist = errors.New("channel not exist")
 
 type (
+	recoveryStorageVersionCatalog interface {
+		GetRecoveryStorageVersion(ctx context.Context, pchannel string) (streamingpb.RecoveryStorageVersion, error)
+	}
+
 	AllocVChannelParam struct {
 		CollectionID int64
 		Num          int
@@ -150,7 +155,6 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 	channels := make(map[ChannelID]*PChannelMeta, len(channelMetas))
 	for _, channel := range channelMetas {
 		c := newPChannelMetaFromProto(channel, replicateConfig)
-		metrics.AssignPChannelStatus(c)
 		channels[c.ChannelID()] = c
 	}
 
@@ -169,7 +173,42 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 			channels[c.ChannelID()] = c
 		}
 	}
+	if err := reconcileRecoveryStorageVersions(ctx, channels, replicateConfig); err != nil {
+		return nil, metrics, err
+	}
+	for _, channel := range channels {
+		metrics.AssignPChannelStatus(channel)
+	}
 	return channels, metrics, nil
+}
+
+func reconcileRecoveryStorageVersions(
+	ctx context.Context,
+	channels map[ChannelID]*PChannelMeta,
+	replicateConfig *replicateutil.ConfigHelper,
+) error {
+	catalog, ok := resource.Resource().StreamingCatalog().(recoveryStorageVersionCatalog)
+	if !ok {
+		return nil
+	}
+	repairs := make([]*streamingpb.PChannelMeta, 0)
+	for channelID, channel := range channels {
+		persistedVersion, err := catalog.GetRecoveryStorageVersion(ctx, channel.Name())
+		if err != nil {
+			return merr.Wrapf(err, "reconcile recovery storage version for pchannel %s", channel.Name())
+		}
+		mutable := channel.CopyForWrite()
+		if !mutable.PromoteRecoveryStorageVersion(types.RecoveryStorageVersion(persistedVersion)) {
+			continue
+		}
+		raw := mutable.IntoRawMeta()
+		repairs = append(repairs, raw)
+		channels[channelID] = newPChannelMetaFromProto(raw, replicateConfig)
+	}
+	if len(repairs) == 0 {
+		return nil
+	}
+	return resource.Resource().StreamingCatalog().SavePChannels(ctx, repairs)
 }
 
 func recoverReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
@@ -454,7 +493,7 @@ func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreami
 			return nil, ErrChannelNotExist
 		}
 		mutablePchannel := pchannel.CopyForWrite()
-		if mutablePchannel.TryAssignToServerID(assign.Channel.AccessMode, assign.Node) {
+		if mutablePchannel.TryAssignToServerID(assign.Channel, assign.Node) {
 			pChannelMetas = append(pChannelMetas, mutablePchannel.IntoRawMeta())
 		}
 	}

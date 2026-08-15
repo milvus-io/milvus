@@ -60,9 +60,10 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 
 func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testing.T) {
 	channel := types.PChannelInfo{
-		Name:       "replicate-recovery-failure-cleanup",
-		Term:       1,
-		AccessMode: types.AccessModeRW,
+		Name:                           "replicate-recovery-failure-cleanup",
+		Term:                           1,
+		AccessMode:                     types.AccessModeRW,
+		RequiredRecoveryStorageVersion: types.RecoveryStorageVersionV2,
 	}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, channel.Name).Return(
@@ -120,6 +121,28 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 	if registered {
 		resource.Resource().SegmentStatsManager().UnregisterSealOperator(sealOperator)
 	}
+}
+
+func TestValidateRWWALRecoveryStorageVersion(t *testing.T) {
+	v2Channel := types.PChannelInfo{
+		Name:                           "pchannel",
+		RequiredRecoveryStorageVersion: types.RecoveryStorageVersionV2,
+	}
+	assert.NoError(t, validateRWWALRecoveryStorageVersion(v2Channel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicStreamingInitialized,
+	}))
+
+	legacyChannel := v2Channel
+	legacyChannel.RequiredRecoveryStorageVersion = types.RecoveryStorageVersionLegacy
+	assert.Error(t, validateRWWALRecoveryStorageVersion(legacyChannel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicRecoveryStorageV2,
+	}))
+	assert.Error(t, validateRWWALRecoveryStorageVersion(legacyChannel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicStreamingInitialized,
+	}))
+	assert.Error(t, validateRWWALRecoveryStorageVersion(v2Channel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicRecoveryStorageV2 + 1,
+	}))
 }
 
 func TestDetermineLastConfirmedMessageID(t *testing.T) {

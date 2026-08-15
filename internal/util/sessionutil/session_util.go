@@ -59,6 +59,10 @@ const (
 	ExitCodeEtcd = 80
 
 	serverVersionKey = "version"
+
+	// RecoveryStorageVersionV2 is advertised by StreamingNodes that can safely
+	// recover and persist the V2 RecoveryStorage format.
+	RecoveryStorageVersionV2 int32 = 2
 )
 
 var errSessionVersionCheckFailure = errors.New("session version check failure")
@@ -137,6 +141,8 @@ type SessionRaw struct {
 
 	HostName     string            `json:"HostName,omitempty"`
 	ServerLabels map[string]string `json:"ServerLabels,omitempty"`
+
+	StreamingNodeRecoveryStorageVersion int32 `json:"StreamingNodeRecoveryStorageVersion,omitempty"`
 }
 
 func (s *SessionRaw) GetAddress() string {
@@ -157,6 +163,13 @@ func (s *SessionRaw) GetResourceGroupName() string {
 		return ""
 	}
 	return s.ServerLabels[LabelResourceGroup]
+}
+
+// GetStreamingNodeRecoveryStorageVersion returns the maximum RecoveryStorage
+// format version supported by this StreamingNode. Old sessions omit the field
+// and are treated as legacy-only.
+func (s *SessionRaw) GetStreamingNodeRecoveryStorageVersion() int32 {
+	return s.StreamingNodeRecoveryStorageVersion
 }
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -324,6 +337,9 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 	}
 	s.ServerID = serverID
 	s.ServerLabels = getServerLabelsFromEnv(serverName)
+	if serverName == typeutil.StreamingNodeRole {
+		s.StreamingNodeRecoveryStorageVersion = RecoveryStorageVersionV2
+	}
 	s.versionKey = path.Join(s.metaRoot, DefaultServiceRoot, serverVersionKey)
 
 	s.SetLogger(mlog.With(

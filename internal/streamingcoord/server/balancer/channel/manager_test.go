@@ -8,9 +8,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -22,6 +24,47 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+type recoveryStorageVersionTestCatalog struct {
+	metastore.StreamingCoordCataLog
+	versions map[string]streamingpb.RecoveryStorageVersion
+	saved    []*streamingpb.PChannelMeta
+}
+
+func (c *recoveryStorageVersionTestCatalog) GetRecoveryStorageVersion(_ context.Context, pchannel string) (streamingpb.RecoveryStorageVersion, error) {
+	return c.versions[pchannel], nil
+}
+
+func (c *recoveryStorageVersionTestCatalog) SavePChannels(_ context.Context, channels []*streamingpb.PChannelMeta) error {
+	c.saved = append(c.saved, channels...)
+	return nil
+}
+
+func TestReconcileRecoveryStorageVersions(t *testing.T) {
+	legacy := NewPChannelMeta("legacy", types.AccessModeRW)
+	v2Mutable := NewPChannelMeta("v2", types.AccessModeRW).CopyForWrite()
+	require.True(t, v2Mutable.PromoteRecoveryStorageVersion(types.RecoveryStorageVersionV2))
+	v2 := newPChannelMetaFromProto(v2Mutable.IntoRawMeta(), nil)
+
+	catalog := &recoveryStorageVersionTestCatalog{
+		versions: map[string]streamingpb.RecoveryStorageVersion{
+			"legacy": streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_V2,
+			"v2":     streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY,
+		},
+	}
+	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	channels := map[ChannelID]*PChannelMeta{
+		legacy.ChannelID(): legacy,
+		v2.ChannelID():     v2,
+	}
+
+	require.NoError(t, reconcileRecoveryStorageVersions(context.Background(), channels, nil))
+	assert.Equal(t, types.RecoveryStorageVersionV2, channels[legacy.ChannelID()].RequiredRecoveryStorageVersion())
+	assert.Equal(t, types.RecoveryStorageVersionV2, channels[v2.ChannelID()].RequiredRecoveryStorageVersion())
+	require.Len(t, catalog.saved, 1)
+	assert.Equal(t, "legacy", catalog.saved[0].GetChannel().GetName())
+	assert.Equal(t, streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_V2, catalog.saved[0].GetChannel().GetRequiredRecoveryStorageVersion())
+}
 
 func TestChannelManager(t *testing.T) {
 	ResetStaticPChannelStatsManager()

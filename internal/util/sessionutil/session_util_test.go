@@ -93,6 +93,13 @@ func TestInit(t *testing.T) {
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
 }
 
+func TestSessionRawRecoveryStorageVersion(t *testing.T) {
+	legacy := &SessionRaw{}
+	assert.Equal(t, int32(0), legacy.GetStreamingNodeRecoveryStorageVersion())
+	v2 := &SessionRaw{StreamingNodeRecoveryStorageVersion: RecoveryStorageVersionV2}
+	assert.Equal(t, RecoveryStorageVersionV2, v2.GetStreamingNodeRecoveryStorageVersion())
+}
+
 func TestInitNoArgs(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()

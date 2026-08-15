@@ -31,6 +31,7 @@ message PChannelInfo {
                       // recovered or moved to another streamingnode, the term
                       // will increase by meta server.
     PChannelAccessMode access_mode = 3;  // access mode of the channel.
+    RecoveryStorageVersion required_recovery_storage_version = 4;
 }
 
 // PChannelAssignmentLog is the log of meta information of a pchannel, should
@@ -844,4 +845,12 @@ message ReplicatePChannelMeta {
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
+}
+
+// RecoveryStorageVersion is the minimum RecoveryStorage format version that a
+// StreamingNode must support before it can own a pchannel. The value is
+// monotonic for the lifetime of a pchannel.
+enum RecoveryStorageVersion {
+    RECOVERY_STORAGE_VERSION_LEGACY = 0;
+    RECOVERY_STORAGE_VERSION_V2 = 2;
 }

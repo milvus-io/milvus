@@ -44,6 +44,20 @@ type CurrentLayout struct {
 	ExpectedAccessMode map[channel.ChannelID]types.AccessMode // ExpectedAccessMode is the expected access mode of all channel.
 }
 
+// CanAssign reports whether the node can safely own the pchannel's persisted
+// RecoveryStorage format.
+func (layout *CurrentLayout) CanAssign(channelID channel.ChannelID, serverID int64) bool {
+	channelInfo, ok := layout.Channels[channelID]
+	if !ok {
+		return false
+	}
+	nodeInfo, ok := layout.AllNodesInfo[serverID]
+	if !ok {
+		return false
+	}
+	return nodeInfo.RecoveryStorageVersion >= channelInfo.RequiredRecoveryStorageVersion
+}
+
 // TotalChannels returns the total number of channels in the layout.
 func (layout *CurrentLayout) TotalChannels() int {
 	return len(layout.Channels)
@@ -145,6 +159,7 @@ func (a byVChannelCountDesc) Less(i, j int) bool {
 // ExpectedLayout is the expected layout of streaming node and pChannel.
 type ExpectedLayout struct {
 	ChannelAssignment map[types.ChannelID]types.PChannelInfoAssigned // ChannelAssignment is the assignment of channel to node.
+	BlockedChannels   map[types.ChannelID]types.RecoveryStorageVersion
 }
 
 // String returns the string representation of the expected layout.
@@ -173,7 +188,7 @@ type Policy interface {
 	Name() string
 
 	// Balance is a function to balance the load of streaming node.
-	// 1. all channel should be assigned.
+	// 1. all assignable channels should be assigned; blocked channels should be reported explicitly.
 	// 2. incoming layout should not be changed.
 	// 3. return a expected layout.
 	// 4. otherwise, error must be returned.

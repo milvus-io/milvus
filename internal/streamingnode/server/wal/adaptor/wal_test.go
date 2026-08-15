@@ -151,8 +151,9 @@ func (f *testOneWALFramework) Run() {
 
 	for ; f.term <= 3; f.term++ {
 		pChannel := types.PChannelInfo{
-			Name: f.pchannel,
-			Term: int64(f.term),
+			Name:                           f.pchannel,
+			Term:                           int64(f.term),
+			RequiredRecoveryStorageVersion: types.RecoveryStorageVersionV2,
 		}
 		rwWAL, err := f.opener.Open(ctx, &wal.OpenOption{
 			Channel:        pChannel,
