@@ -3368,6 +3368,98 @@ func TestSnapshotExportManager_LockTargetSerializesEquivalentRoots(t *testing.T)
 	<-secondDone
 }
 
+// The create lock is held across waitForSortedBoundary, which can run for the
+// whole life of a snapshot. While it was process-wide, one collection with
+// stalled sort compaction starved snapshot creation on every other collection.
+func TestLockCreateSnapshot_ScopedPerCollection(t *testing.T) {
+	// Bare literal on purpose: this is how the tests build the manager, and
+	// KeyLock's zero value has a nil map, so the lazy init has to cover it.
+	sm := &snapshotManager{}
+
+	unlockFirst := sm.lockCreateSnapshot(100)
+
+	otherCollection := make(chan struct{})
+	go func() {
+		defer close(otherCollection)
+		sm.lockCreateSnapshot(200)()
+	}()
+	select {
+	case <-otherCollection:
+	case <-time.After(time.Second):
+		require.FailNow(t, "a different collection must not wait on collection 100's snapshot lock")
+	}
+
+	sameCollection := make(chan struct{})
+	go func() {
+		defer close(sameCollection)
+		sm.lockCreateSnapshot(100)()
+	}()
+	select {
+	case <-sameCollection:
+		require.FailNow(t, "the same collection must still serialize, for the name-uniqueness TOCTOU")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	unlockFirst()
+	select {
+	case <-sameCollection:
+	case <-time.After(time.Second):
+		require.FailNow(t, "second create did not acquire the released collection lock")
+	}
+}
+
+func TestAcquireCaptureSlot(t *testing.T) {
+	sm := &snapshotManager{}
+
+	releases := make([]func(), 0, maxConcurrentSnapshotCaptures)
+	for range maxConcurrentSnapshotCaptures {
+		release, err := sm.acquireCaptureSlot(context.Background())
+		require.NoError(t, err)
+		releases = append(releases, release)
+	}
+
+	// Saturated: the next capture waits rather than piling another collection's
+	// cloned segment list onto the heap.
+	blocked := make(chan struct{})
+	go func() {
+		defer close(blocked)
+		release, err := sm.acquireCaptureSlot(context.Background())
+		if err == nil {
+			release()
+		}
+	}()
+	select {
+	case <-blocked:
+		require.FailNow(t, "capture slots must be bounded")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releases[0]()
+	select {
+	case <-blocked:
+	case <-time.After(time.Second):
+		require.FailNow(t, "releasing a slot did not admit the waiting capture")
+	}
+	for _, release := range releases[1:] {
+		release()
+	}
+
+	// A cancelled context must not leak a slot or block forever.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	saturate := make([]func(), 0, maxConcurrentSnapshotCaptures)
+	for range maxConcurrentSnapshotCaptures {
+		release, err := sm.acquireCaptureSlot(context.Background())
+		require.NoError(t, err)
+		saturate = append(saturate, release)
+	}
+	_, err := sm.acquireCaptureSlot(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	for _, release := range saturate {
+		release()
+	}
+}
+
 func TestNamespacedSnapshotExportTarget(t *testing.T) {
 	const namespace = "550e8400-e29b-41d4-a716-446655440000"
 	tests := []struct {

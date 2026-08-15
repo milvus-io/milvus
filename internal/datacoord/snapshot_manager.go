@@ -373,8 +373,35 @@ type snapshotManager struct {
 	getChannelsByCollectionID func(context.Context, int64) ([]RWChannel, error) // For channel mapping
 
 	// Concurrency control
-	// createSnapshotMu protects CreateSnapshot to prevent TOCTOU race on snapshot name uniqueness
-	createSnapshotMu sync.Mutex
+	//
+	// createSnapshotLock serializes CreateSnapshot per collection, closing the
+	// TOCTOU between the name-uniqueness check and SaveSnapshot, and keeping the
+	// staging/pending flags -- which are plain set membership, not refcounts --
+	// from interleaving with themselves.
+	//
+	// Per collection rather than process-wide: the lock is held across
+	// waitForSortedBoundary, which can run for the whole life of a snapshot,
+	// and a global lock made one collection with stalled sort compaction starve
+	// snapshot creation on every other collection. The keyspace it actually
+	// protects is (collectionID, name), so collection scope is already wider
+	// than required. It is defense in depth either way -- the broadcaster's
+	// exclusive collection-name resource key already admits at most one
+	// in-flight CreateSnapshot callback per collection.
+	createSnapshotLockOnce sync.Once
+	createSnapshotLock     *lock.KeyLock[int64]
+
+	// captureSlots bounds how many snapshots may be in their GenSnapshot ->
+	// SaveSnapshot window at once. GenSnapshot clones every in-boundary
+	// SegmentInfo and expands per-segment binlog and index paths, all held live
+	// until the save returns -- tens of MB for a large collection. The old
+	// process-wide createSnapshotMu capped that at one by accident; making the
+	// lock per-collection removes the cap, and ack callbacks are spawned one
+	// goroutine per task with no parallelism limit, so a bulk "snapshot every
+	// collection" could otherwise multiply peak memory without bound. The wait
+	// is deliberately outside this: it is the long part, and holding a slot
+	// through it would rebuild the head-of-line blocking just removed.
+	captureSlotsOnce sync.Once
+	captureSlots     chan struct{}
 
 	// Serialize external restores by target name without holding RootCoord's DDL lock.
 	externalRestoreTargetLockOnce sync.Once
@@ -440,14 +467,13 @@ func (sm *snapshotManager) CreateSnapshot(
 	boundary *SnapshotBoundary,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
-	sm.createSnapshotMu.Lock()
-	defer sm.createSnapshotMu.Unlock()
+	defer sm.lockCreateSnapshot(collectionID)()
 
 	mlog.Info(context.TODO(), "create snapshot request received",
 		mlog.String("description", description),
 		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
 
-	// Validate snapshot name uniqueness within collection (protected by createSnapshotMu)
+	// Validate snapshot name uniqueness within collection (protected by createSnapshotLock)
 	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
@@ -508,6 +534,14 @@ func (sm *snapshotManager) CreateSnapshot(
 	// tasks the next attempt's wait is waiting on.
 	sm.snapshotMeta.SetSnapshotPending(collectionID)
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
+
+	// Bound how many collections hold a captured segment list in memory at once.
+	// Taken after the wait, so the long part of a snapshot never occupies a slot.
+	releaseCaptureSlot, err := sm.acquireCaptureSlot(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer releaseCaptureSlot()
 
 	// Allocate snapshot ID
 	snapshotID, err := sm.allocator.AllocID(ctx)
@@ -1358,6 +1392,47 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 		mlog.Int64("jobID", jobID),
 		mlog.Bool("external", external))
 	return jobID, nil
+}
+
+// maxConcurrentSnapshotCaptures bounds concurrent GenSnapshot -> SaveSnapshot
+// windows. Sized as a safety bound against a bulk snapshot of many collections
+// exhausting memory, not as a throughput knob -- the window holds no long waits
+// and no blocking object reads, so a small number keeps it off the critical
+// path while capping peak footprint at a few collections' worth of cloned
+// segment metadata.
+const maxConcurrentSnapshotCaptures = 4
+
+// acquireCaptureSlot blocks until a capture slot is free and returns its
+// release. Safe to call on a snapshotManager built as a bare struct literal,
+// which the tests do in place of NewSnapshotManager.
+func (sm *snapshotManager) acquireCaptureSlot(ctx context.Context) (func(), error) {
+	sm.captureSlotsOnce.Do(func() {
+		if sm.captureSlots == nil {
+			sm.captureSlots = make(chan struct{}, maxConcurrentSnapshotCaptures)
+		}
+	})
+	select {
+	case sm.captureSlots <- struct{}{}:
+		return func() { <-sm.captureSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// lockCreateSnapshot serializes snapshot creation for one collection and returns
+// its unlock. Lazily initialized because most snapshotManagers in tests are
+// built as bare struct literals rather than through NewSnapshotManager, and
+// KeyLock's zero value has a nil map.
+func (sm *snapshotManager) lockCreateSnapshot(collectionID int64) func() {
+	sm.createSnapshotLockOnce.Do(func() {
+		if sm.createSnapshotLock == nil {
+			sm.createSnapshotLock = lock.NewKeyLock[int64]()
+		}
+	})
+	sm.createSnapshotLock.Lock(collectionID)
+	return func() {
+		sm.createSnapshotLock.Unlock(collectionID)
+	}
 }
 
 func (sm *snapshotManager) lockExternalRestoreTarget(dbName, collectionName string) func() {
