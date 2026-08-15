@@ -610,19 +610,88 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	if err := validateExpectedLayoutCapabilities(currentLayout, expectedLayout); err != nil {
 		return false, err
 	}
+	blockedLayoutChanged, blockedErr := b.fenceIncompatibleBlockedChannels(ctx, pchannelView, currentLayout, expectedLayout)
 
 	b.Logger().Info(ctx, "balance policy generate result success, try to assign...", mlog.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
 	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
 	if err != nil {
-		return false, merr.Wrap(err, "fail to assign pchannels")
+		return blockedLayoutChanged, errors.CombineErrors(blockedErr, merr.Wrap(err, "fail to assign pchannels"))
 	}
 
 	if len(modifiedChannels) == 0 {
 		b.Logger().Info(ctx, "no change of balance result need to be applied")
+		return blockedLayoutChanged, blockedErr
+	}
+	return true, errors.CombineErrors(blockedErr, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels))
+}
+
+func (b *balancerImpl) fenceIncompatibleBlockedChannels(
+	ctx context.Context,
+	view *channel.PChannelView,
+	currentLayout CurrentLayout,
+	expectedLayout ExpectedLayout,
+) (bool, error) {
+	currentAssignments := make(map[types.ChannelID]types.PChannelInfoAssigned)
+	for channelID, meta := range view.Channels {
+		if meta.IsAssignedOrAssigning() {
+			currentAssignments[channelID] = meta.CurrentAssignment()
+		}
+	}
+	channelIDs := incompatibleBlockedChannelIDs(currentLayout, expectedLayout, currentAssignments)
+	if len(channelIDs) == 0 {
 		return false, nil
 	}
-	return true, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels)
+
+	assignments := make([]types.PChannelInfoAssigned, 0, len(channelIDs))
+	channels := make([]types.PChannelInfo, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		meta := view.Channels[channelID]
+		assignments = append(assignments, meta.CurrentAssignment())
+		channels = append(channels, meta.ChannelInfo())
+	}
+
+	g, _ := errgroup.WithContext(ctx)
+	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
+	for _, assignment := range assignments {
+		assignment := assignment
+		g.Go(func() error {
+			opCtx, cancel := context.WithTimeout(ctx, opTimeout)
+			defer cancel()
+			if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
+				return merr.Wrapf(err, "fence incompatible assignment %s", assignment.String())
+			}
+			b.Logger().Info(ctx, "fenced incompatible pchannel assignment", mlog.String("assignment", assignment.String()))
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return false, err
+	}
+	if err := b.channelMetaManager.MarkAsUnavailable(ctx, channels); err != nil {
+		return false, merr.Wrap(err, "mark incompatible blocked pchannels unavailable")
+	}
+	return true, nil
+}
+
+func incompatibleBlockedChannelIDs(
+	currentLayout CurrentLayout,
+	expectedLayout ExpectedLayout,
+	currentAssignments map[types.ChannelID]types.PChannelInfoAssigned,
+) []types.ChannelID {
+	channelIDs := make([]types.ChannelID, 0, len(expectedLayout.BlockedChannels))
+	for channelID := range expectedLayout.BlockedChannels {
+		assignment, ok := currentAssignments[channelID]
+		if !ok {
+			continue
+		}
+		node, ok := currentLayout.AllNodesInfo[assignment.Node.ServerID]
+		if !ok || node.RecoveryStorageVersion >= assignment.Channel.RequiredRecoveryStorageVersion {
+			continue
+		}
+		channelIDs = append(channelIDs, channelID)
+	}
+	return channelIDs
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.

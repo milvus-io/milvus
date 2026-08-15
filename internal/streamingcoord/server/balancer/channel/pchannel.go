@@ -220,7 +220,7 @@ func (m *mutablePChannel) AssignToServerDone() {
 
 // MarkAsUnavailable marks the channel as unavailable.
 func (m *mutablePChannel) MarkAsUnavailable(term int64) {
-	if m.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED && m.CurrentTerm() == term {
+	if m.IsAssignedOrAssigning() && m.CurrentTerm() == term {
 		m.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE
 	}
 }

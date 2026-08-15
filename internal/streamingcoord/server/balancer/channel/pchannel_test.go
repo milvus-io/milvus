@@ -183,6 +183,13 @@ func TestPChannel(t *testing.T) {
 	assert.False(t, updatedChannelInfo.IsAssigned())
 	assert.Equal(t, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE, updatedChannelInfo.State())
 
+	// Test mark assigning channel as unavailable.
+	mutablePChannel = updatedChannelInfo.CopyForWrite()
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 789}))
+	mutablePChannel.MarkAsUnavailable(mutablePChannel.CurrentTerm())
+	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
+	assert.Equal(t, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE, updatedChannelInfo.State())
+
 	// Test assign on unavailable
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 	assert.True(t, mutablePChannel.TryAssignToServerID(types.PChannelInfo{AccessMode: types.AccessModeRW}, types.StreamingNodeInfo{ServerID: 789}))
