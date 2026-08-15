@@ -70,7 +70,7 @@ type queryResourceGroupKey struct{}
 // QueryPlacement.ResourceGroup, so with no provider installed nothing calls
 // this and no request context carries a scope. The value travels on the
 // context rather than on the request structs because every stage that has to
-// honour it - the task, the load balancer, the shard-client cache, the
+// honor it - the task, the load balancer, the shard-client cache, the
 // coordinator call - already has the request's context in hand, and threading
 // a field through all of them instead would put the routing scope in reach of
 // code that has no business changing it.

@@ -2,9 +2,9 @@ package extension
 
 import (
 	"context"
-	"errors"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -19,12 +19,15 @@ func (fakeCredentialStore) CreateCredential(context.Context, string, string) err
 func (fakeCredentialStore) CreateRole(context.Context, string, *milvuspb.RoleEntity) error {
 	return nil
 }
+
 func (fakeCredentialStore) AlterUserRole(context.Context, string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error {
 	return nil
 }
+
 func (fakeCredentialStore) ListUser(context.Context, string, *milvuspb.UserEntity, bool) ([]*milvuspb.UserResult, error) {
 	return nil, nil
 }
+
 func (fakeCredentialStore) AlterGrant(context.Context, string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error {
 	return nil
 }

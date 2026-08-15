@@ -29,7 +29,7 @@ type CredentialStore interface {
 //
 // It runs once during rootcoord initialisation, single-threaded and before any
 // request is accepted, so an implementation needs no locking of its own. It must
-// be idempotent: rootcoord initialises on every restart.
+// be idempotent: rootcoord initializes on every restart.
 type RBACBootstrapper interface {
 	// Bootstrap seeds accounts and roles. A non-nil error fails rootcoord
 	// startup, because a form whose accounts are missing cannot serve.

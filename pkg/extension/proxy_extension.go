@@ -11,7 +11,7 @@ import (
 
 // ProxyConnections is the slice of the proxy's connection registry a
 // ProxyExtension may consult. The proxy hands it to Start and it stays valid
-// until the context Start was given is cancelled.
+// until the context Start was given is canceled.
 //
 // It is an interface rather than the connection manager itself for the reason
 // every other capability parameter is: pkg/v3 is a separate Go module and must
@@ -45,7 +45,7 @@ type ProxyConnections interface {
 // added here in the same change as the seam that consults it - never earlier.
 // A capability method with no call site is worse than an absent one: an
 // implementation can fill it, compile, pass its own tests and ship, believing
-// a behaviour is in effect that nothing ever asks for. An absent method fails
+// a behavior is in effect that nothing ever asks for. An absent method fails
 // to compile instead, which is the honest answer.
 //
 // # Request annotation
@@ -255,7 +255,7 @@ type ProxyExtension interface {
 
 	// Start runs the extension's proxy-side background work. It is called once
 	// while the proxy starts, must return promptly rather than blocking, and
-	// whatever it started must stop when ctx is cancelled.
+	// whatever it started must stop when ctx is canceled.
 	//
 	// OBSERVE ONLY: it cannot fail the proxy's start-up and cannot change what
 	// any request does.

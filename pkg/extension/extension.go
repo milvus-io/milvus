@@ -6,16 +6,16 @@
 package extension
 
 import (
-	"errors"
-	"fmt"
 	"sync/atomic"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // CapabilityID names one entry of the capability table.
 type CapabilityID string
 
 const (
-	// CapProxyExtension is the proxy-side behaviour takeover.
+	// CapProxyExtension is the proxy-side behavior takeover.
 	CapProxyExtension CapabilityID = "proxy_extension"
 
 	// CapAPIKey is API key verification.
@@ -110,16 +110,16 @@ var installed atomic.Pointer[box]
 // It may be called at most once, before any component starts.
 func SetProvider(p Provider) error {
 	if p == nil {
-		return errors.New("extension: nil provider")
+		return merr.WrapErrServiceInternal("extension: nil provider")
 	}
 	c := p.Capabilities()
 	for _, id := range p.Requires() {
 		if !c.has(id) {
-			return fmt.Errorf("extension: provider %q requires capability %q but did not supply it", p.Name(), id)
+			return merr.WrapErrServiceInternalMsg("extension: provider %q requires capability %q but did not supply it", p.Name(), id)
 		}
 	}
 	if !installed.CompareAndSwap(nil, &box{provider: p, caps: c}) {
-		return fmt.Errorf("extension: provider %q already installed", installed.Load().provider.Name())
+		return merr.WrapErrServiceInternalMsg("extension: provider %q already installed", installed.Load().provider.Name())
 	}
 	return nil
 }

@@ -93,7 +93,7 @@ type StreamingNodeInfoWithResourceGroup struct {
 	// their checkpoints.
 	//
 	// It is stated negatively so that the zero value is the answer milvus gave
-	// before the field existed: a node nobody labelled serves queries.
+	// before the field existed: a node nobody labeled serves queries.
 	NoQueryService bool
 }
 

@@ -16,7 +16,7 @@ import (
 // collection broken - allow the drop, then release the collection - and this
 // capability is the three points at which milvus has to ask it.
 //
-// The three are one protocol, not three behaviours, which is why they are one
+// The three are one protocol, not three behaviors, which is why they are one
 // interface: the first decides whether a drop is allowed at all, and the other
 // two bracket the drop, because only before it can milvus be told which field
 // the index was on and only after it is the drop a fact. A form that
@@ -36,7 +36,7 @@ import (
 //
 // Every method is called from milvus's own request goroutines, concurrently
 // and without any lock of milvus's held, so an implementation does its own
-// synchronisation.
+// synchronization.
 type IndexDrainer interface {
 	// AllowVectorIndexDropWhileLoaded reports whether milvus may drop a vector
 	// index whose collection is loaded, instead of refusing the request.

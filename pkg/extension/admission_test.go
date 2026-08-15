@@ -2,9 +2,9 @@ package extension
 
 import (
 	"context"
-	"errors"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
