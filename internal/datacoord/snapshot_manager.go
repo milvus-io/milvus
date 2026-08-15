@@ -459,8 +459,21 @@ func (sm *snapshotManager) CreateSnapshot(
 	// Sort compaction is deliberately still allowed -- it is what the wait below
 	// is waiting for, and it rewrites one segment into one segment, so it cannot
 	// move a boundary.
+	//
+	// Staging is deliberately NOT cleared when this call fails. It is cleared
+	// only once the snapshot is saved, below. This runs inside an ack callback
+	// the scheduler retries forever, and the boundary stays cut across every
+	// retry -- so its protection has to as well. Clearing it per attempt left
+	// the collection unfrozen for the whole backoff (up to 10s out of every
+	// wait attempt), which is ample for a straddling mix compaction to be
+	// planned, validated and committed.
+	//
+	// This cannot strand a collection: the flag is in-memory only, nothing else
+	// clears it, and the retry loop can be abandoned only by cancelling the ack
+	// scheduler's context -- which happens solely on process shutdown, the same
+	// shutdown that drops the flag. On restart the callback is replayed from
+	// persisted state and re-establishes staging from scratch.
 	sm.snapshotMeta.SetSnapshotStaging(collectionID)
-	defer sm.snapshotMeta.ClearSnapshotStaging(collectionID)
 
 	// Every segment the snapshot will reference has to carry its sorted form
 	// first. A flushed segment that still owes a sort is published
@@ -483,13 +496,18 @@ func (sm *snapshotManager) CreateSnapshot(
 	// could drop segments that the in-flight snapshot is about to reference, leaving
 	// the freshly-created snapshot immediately broken.
 	//
-	// Pending goes on before staging comes off, so there is no instant in which
-	// sort may commit while the segment list is being captured: a sorted
-	// replacement landing in that gap would swap out a segment the snapshot has
-	// already decided to reference.
+	// Pending is layered on top of staging rather than replacing it, so there is
+	// no instant in which sort may commit while the segment list is being
+	// captured: a sorted replacement landing in that gap would swap out a
+	// segment the snapshot has already decided to reference. Holding both is
+	// equivalent to holding pending alone -- every consumer ORs the two sets --
+	// and it keeps staging continuous if this attempt fails past this point.
+	//
+	// Unlike staging, pending IS released per attempt. It also blocks sort
+	// compaction, so leaving it set across a retry would forbid exactly the
+	// tasks the next attempt's wait is waiting on.
 	sm.snapshotMeta.SetSnapshotPending(collectionID)
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
-	sm.snapshotMeta.ClearSnapshotStaging(collectionID)
 
 	// Allocate snapshot ID
 	snapshotID, err := sm.allocator.AllocID(ctx)
@@ -520,6 +538,12 @@ func (sm *snapshotManager) CreateSnapshot(
 		mlog.Error(context.TODO(), "failed to save snapshot", mlog.Err(err))
 		return 0, err
 	}
+
+	// The boundary no longer needs freezing: the snapshot references a concrete
+	// segment list now, and SaveSnapshot's registerSnapshotProtection has taken
+	// over guarding those segments. This is the only place staging comes off --
+	// see the comment where it goes on.
+	sm.snapshotMeta.ClearSnapshotStaging(collectionID)
 
 	mlog.Info(context.TODO(), "snapshot created successfully", mlog.Int64("snapshotID", snapshotID))
 	return snapshotID, nil

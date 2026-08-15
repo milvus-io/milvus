@@ -406,8 +406,13 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
 	assert.Error(t, err)
 
-	// Verify snapshot pending intent is cleared even on error
-	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
+	// Pending comes off: it blocks sort compaction too, so holding it across the
+	// retry would forbid the very tasks the next attempt waits for.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlockedIgnoringStaging(100))
+	// Staging deliberately stays on. The boundary is still cut and the ack
+	// callback will be retried, so releasing the freeze here would let a
+	// boundary-changing compaction commit before the next attempt.
+	assert.True(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
 func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *testing.T) {
@@ -452,8 +457,9 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
 	assert.Error(t, err)
 
-	// Verify snapshot pending intent is cleared after save failure
-	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
+	// Pending off, staging still on -- see the GenSnapshot-error case above.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlockedIgnoringStaging(100))
+	assert.True(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
 // Regression for PR #48227 review comment #4: even when the user requests zero
@@ -540,8 +546,9 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
 	assert.Error(t, err)
 
-	// Verify snapshot pending intent is cleared after alloc failure
-	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
+	// Pending off, staging still on -- see the GenSnapshot-error case above.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlockedIgnoringStaging(100))
+	assert.True(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
 // --- Test DropSnapshot ---

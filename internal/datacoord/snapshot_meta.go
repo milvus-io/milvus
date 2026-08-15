@@ -1223,8 +1223,16 @@ func (sm *snapshotMeta) SetSnapshotStaging(collectionID int64) {
 	sm.snapshotStagingCollections.Insert(collectionID)
 }
 
-// ClearSnapshotStaging ends the staging window. Always called from a defer, so a
-// failed or abandoned snapshot cannot leave a collection frozen.
+// ClearSnapshotStaging ends the staging window.
+//
+// Called only once the snapshot is saved, NOT from a defer on every failed
+// attempt: the ack callback that creates a snapshot is retried indefinitely and
+// the boundary stays cut across those retries, so releasing the freeze between
+// attempts would leave a window in which a boundary-changing compaction can
+// commit. A snapshot that never completes therefore keeps its collection frozen
+// for the life of the process -- acceptable because the flag is in-memory, the
+// retry can only be abandoned by process shutdown, and CreateSnapshot refuses
+// up front (checkSnapshotSortReachable) the conditions that can never resolve.
 func (sm *snapshotMeta) ClearSnapshotStaging(collectionID int64) {
 	sm.segmentProtectionMu.Lock()
 	defer sm.segmentProtectionMu.Unlock()
