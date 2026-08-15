@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -88,6 +89,10 @@ type Task interface {
 	SetPriority(priority Priority)
 	Index() string // dedup indexing string
 
+	// ActivateDeadline starts the task's execution timeout the first time it is
+	// actually dispatched to a QueryNode, so time spent waiting for a scheduler
+	// slot doesn't count against the RPC budget. No-op after the first call.
+	ActivateDeadline()
 	// cancel the task as we don't need to continue it
 	Cancel(err error)
 	// fail the task as we encounter some error so be unable to continue,
@@ -111,8 +116,17 @@ type Task interface {
 }
 
 type baseTask struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
+	// ctxMu guards ctx/cancel, which are swapped once by ActivateDeadline
+	// and read concurrently by Context()/Cancel()/Fail() from the scheduler
+	// loop and the executor's per-action goroutines.
+	ctxMu   sync.Mutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	timeout time.Duration
+	// deadlineOnce ensures the execution timeout is applied at most once,
+	// on the first call to ActivateDeadline.
+	deadlineOnce sync.Once
+
 	doneCh   chan struct{}
 	canceled *atomic.Bool
 
@@ -139,15 +153,13 @@ type baseTask struct {
 }
 
 func newBaseTask(ctx context.Context, timeout time.Duration, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		// The deadline bounds the action RPCs issued with task.Context() and
-		// propagates through gRPC to the serving node, so a stuck server-side
-		// operation cannot pin the scheduler slot forever.
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
+	// The deadline is deliberately NOT applied here: at construction time the
+	// task hasn't been scheduled yet and may sit in the wait queue or be
+	// repeatedly rejected by the executor's admission cap. Starting the clock
+	// now would burn the RPC budget on queueing delay rather than on the
+	// action RPCs it's meant to bound. ActivateDeadline arms it on first
+	// dispatch instead.
+	ctx, cancel := context.WithCancel(ctx)
 	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
 	startTs := atomic.Time{}
 	startTs.Store(time.Now())
@@ -162,6 +174,7 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 		priority: TaskPriorityNormal,
 		ctx:      ctx,
 		cancel:   cancel,
+		timeout:  timeout,
 		doneCh:   make(chan struct{}),
 		canceled: atomic.NewBool(false),
 		span:     span,
@@ -169,7 +182,34 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 	}
 }
 
+// ActivateDeadline arms the task's execution timeout, bounding the action
+// RPCs issued with task.Context() from this point on so a stuck server-side
+// operation cannot pin the scheduler slot forever. It is a no-op if the task
+// was constructed with timeout <= 0, or if called more than once (only the
+// first dispatch starts the clock).
+func (task *baseTask) ActivateDeadline() {
+	if task.timeout <= 0 {
+		return
+	}
+	task.deadlineOnce.Do(func() {
+		task.ctxMu.Lock()
+		defer task.ctxMu.Unlock()
+		if task.canceled.Load() {
+			return
+		}
+		parentCtx, parentCancel := task.ctx, task.cancel
+		ctx, cancel := context.WithTimeout(parentCtx, task.timeout)
+		task.ctx = ctx
+		task.cancel = func() {
+			cancel()
+			parentCancel()
+		}
+	})
+}
+
 func (task *baseTask) Context() context.Context {
+	task.ctxMu.Lock()
+	defer task.ctxMu.Unlock()
 	return task.ctx
 }
 
@@ -246,7 +286,10 @@ func (task *baseTask) Err() error {
 
 func (task *baseTask) Cancel(err error) {
 	if task.canceled.CompareAndSwap(false, true) {
-		task.cancel()
+		task.ctxMu.Lock()
+		cancel := task.cancel
+		task.ctxMu.Unlock()
+		cancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusCanceled)
 		}
@@ -260,7 +303,10 @@ func (task *baseTask) Cancel(err error) {
 
 func (task *baseTask) Fail(err error) {
 	if task.canceled.CompareAndSwap(false, true) {
-		task.cancel()
+		task.ctxMu.Lock()
+		cancel := task.cancel
+		task.ctxMu.Unlock()
+		cancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusFailed)
 		}

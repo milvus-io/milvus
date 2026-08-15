@@ -175,6 +175,12 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	}
 
+	// Only now is the task actually admitted to run: it cleared the wait
+	// queue and the executor's capacity gates above. Arm its deadline here
+	// (no-op after the first action/step) so time spent queued or bounced
+	// by admission doesn't count against the RPC budget.
+	task.ActivateDeadline()
+
 	go func() {
 		mlog.Info(context.TODO(), "execute the action of task")
 		switch task.Actions()[step].(type) {
