@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	msgadaptor "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -119,6 +120,27 @@ func TestNewSnapshotBoundary(t *testing.T) {
 		// The positions double as the restore point, so they carry a real MsgID:
 		// a timestamp alone cannot be seeked in the WAL.
 		assert.NotEmpty(t, boundary.SeekPositions[0].GetMsgID())
+	})
+
+	t.Run("writes a seek position a reader can actually decode", func(t *testing.T) {
+		// The bytes are only worth persisting if they survive the round trip
+		// the restore path will make. Marshal() does not: for rocksmq it is
+		// ASCII decimal while the decoder reads a big-endian uint64, so a
+		// position written that way decodes to a different message -- or
+		// panics, when the decimal form is under 8 bytes.
+		boundary, err := NewSnapshotBoundary(map[string]*message.AppendResult{
+			boundaryTestChannelA: {MessageID: rmq.NewRmqID(7), TimeTick: 1000},
+		})
+		assert.NoError(t, err)
+
+		position := boundary.SeekPositions[0]
+		// WALName has to be stamped, or the decoder falls back to whatever WAL
+		// is the current default -- which AlterWAL rewrites cluster-wide.
+		assert.Equal(t, commonpb.WALName_RocksMQ, position.GetWALName())
+
+		decoded := msgadaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(
+			message.WALName(position.GetWALName()), position.GetMsgID())
+		assert.Equal(t, rmq.NewRmqID(7), decoded)
 	})
 
 	t.Run("rejects a result with no data vchannel", func(t *testing.T) {

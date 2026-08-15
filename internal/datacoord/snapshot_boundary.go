@@ -23,9 +23,11 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	msgadaptor "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -62,10 +64,15 @@ func NewSnapshotBoundary(results map[string]*message.AppendResult) (*SnapshotBou
 		if result == nil || result.MessageID == nil {
 			return nil, merr.WrapErrServiceInternalMsg("missing append result for snapshot channel %s", vchannel)
 		}
+		msgID, walName, err := snapshotSeekMsgID(result.MessageID)
+		if err != nil {
+			return nil, err
+		}
 		positions = append(positions, &msgpb.MsgPosition{
 			ChannelName: vchannel,
-			MsgID:       []byte(result.MessageID.Marshal()),
+			MsgID:       msgID,
 			Timestamp:   result.TimeTick,
+			WALName:     walName,
 		})
 		if result.TimeTick < snapshotTs {
 			snapshotTs = result.TimeTick
@@ -78,6 +85,38 @@ func NewSnapshotBoundary(results map[string]*message.AppendResult) (*SnapshotBou
 		return positions[i].GetChannelName() < positions[j].GetChannelName()
 	})
 	return &SnapshotBoundary{SeekPositions: positions, SnapshotTs: snapshotTs}, nil
+}
+
+// snapshotSeekMsgID renders a MessageID into the wire form a MsgPosition
+// consumer expects: the bytes, and the WAL that produced them.
+//
+// Two things have to be right here and both are easy to get wrong.
+//
+// The bytes must be Serialize(), not Marshal(). Every other MsgPosition
+// producer in the repo uses Serialize(), and the decoder side
+// (MustGetMessageIDFromMQWrapperIDBytesWithWALName) assumes it. Marshal() is a
+// different format per WAL: for rocksmq it is ASCII decimal while the decoder
+// reads a big-endian uint64, and for pulsar and woodpecker it is base64 of the
+// bytes the decoder wants raw. Neither round-trips.
+//
+// WALName must be stamped. Left at its zero value it decodes as
+// WALNameUnknown, and the decoder then falls back to whatever WAL is currently
+// registered as the default -- which AlterWAL rewrites cluster-wide, so a
+// position written before a WAL switch would be handed to the new WAL's
+// decoder afterwards.
+//
+// Returns an error rather than letting the adaptor panic on a MessageID it does
+// not recognize: this runs inside the DDL ack callback, where a panic takes
+// DataCoord down with it.
+func snapshotSeekMsgID(messageID message.MessageID) ([]byte, commonpb.WALName, error) {
+	switch messageID.WALName() {
+	case message.WALNameRocksmq, message.WALNameKafka, message.WALNamePulsar, message.WALNameWoodpecker:
+	default:
+		return nil, commonpb.WALName_Unknown, merr.WrapErrServiceInternalMsg(
+			"snapshot boundary cannot encode a %s message id", messageID.WALName().String())
+	}
+	mqID, walName := msgadaptor.MustGetMQWrapperIDAndWALNameFromMessage(messageID)
+	return mqID.Serialize(), walName, nil
 }
 
 // SeekTs returns the boundary timestamp for a channel, and whether the channel
