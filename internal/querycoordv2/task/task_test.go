@@ -3286,9 +3286,9 @@ func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
 	_, ok := channelTask.Context().Deadline()
 	assert.False(t, ok, "channel task context must not carry a deadline before ActivateDeadline")
 
-	channelTask.ActivateDeadline()
+	channelTask.ActivateDeadline(0)
 	// A second call must be a no-op and not push the deadline out further.
-	channelTask.ActivateDeadline()
+	channelTask.ActivateDeadline(0)
 
 	deadline, ok := channelTask.Context().Deadline()
 	assert.True(t, ok, "channel task context must carry the task timeout as a deadline once activated")
@@ -3315,7 +3315,7 @@ func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
 	defer segmentTask.Cancel(nil)
 	_, ok = segmentTask.Context().Deadline()
 	assert.False(t, ok, "segment task context must not carry a deadline before ActivateDeadline")
-	segmentTask.ActivateDeadline()
+	segmentTask.ActivateDeadline(0)
 	_, ok = segmentTask.Context().Deadline()
 	assert.True(t, ok, "segment task context must carry the task timeout as a deadline once activated")
 
@@ -3331,7 +3331,7 @@ func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
 	defer leaderTask.Cancel(nil)
 	_, ok = leaderTask.Context().Deadline()
 	assert.False(t, ok, "leader task context must not carry a deadline before ActivateDeadline")
-	leaderTask.ActivateDeadline()
+	leaderTask.ActivateDeadline(0)
 	_, ok = leaderTask.Context().Deadline()
 	assert.True(t, ok, "leader task context must carry the task timeout as a deadline once activated")
 }
@@ -3354,7 +3354,7 @@ func TestTaskDeadlineExcludesQueueingTime(t *testing.T) {
 	time.Sleep(80 * time.Millisecond)
 	assert.NoError(t, task.Context().Err(), "queueing time must not count against the deadline")
 
-	task.ActivateDeadline()
+	task.ActivateDeadline(0)
 	assert.NoError(t, task.Context().Err(), "deadline must not have expired immediately on activation")
 
 	select {
@@ -3363,4 +3363,104 @@ func TestTaskDeadlineExcludesQueueingTime(t *testing.T) {
 		t.Fatal("task context did not expire after the task timeout once activated")
 	}
 	assert.ErrorIs(t, task.Context().Err(), context.DeadlineExceeded)
+}
+
+func TestActivateDeadlinePerStepGetsFreshBudget(t *testing.T) {
+	task, err := NewSegmentTask(
+		context.Background(),
+		80*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeGrow, "test-channel", 2),
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer task.Cancel(nil)
+
+	task.ActivateDeadline(0)
+	deadline0, _ := task.Context().Deadline()
+
+	// Spend most of step 0's budget before it "finishes" and step 1 is armed.
+	time.Sleep(60 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "step 0 must not have expired yet")
+
+	// Re-arming for the same step must be a no-op: the deadline must not move.
+	task.ActivateDeadline(0)
+	sameDeadline, _ := task.Context().Deadline()
+	assert.Equal(t, deadline0, sameDeadline, "re-arming the same step must not reset its deadline")
+
+	// Moving to step 1 must grant a full fresh budget, not inherit whatever
+	// was left of step 0's -- even though step 0 already used most of it.
+	task.ActivateDeadline(1)
+	deadline1, ok := task.Context().Deadline()
+	assert.True(t, ok)
+	assert.True(t, deadline1.After(deadline0), "step 1's deadline must be later than step 0's, not reuse it")
+
+	time.Sleep(60 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "step 1 must have its own fresh 80ms budget, not step 0's leftover ~20ms")
+
+	select {
+	case <-task.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("step 1's context did not expire after its own timeout")
+	}
+	assert.ErrorIs(t, task.Context().Err(), context.DeadlineExceeded)
+}
+
+// TestExecutorActivatesDeadlineOnlyAfterAdmission exercises the real
+// Executor.Execute() wiring end-to-end, rather than calling
+// task.ActivateDeadline() directly the way TestTaskDeadlineExcludesQueueingTime
+// does. It would catch the ActivateDeadline call being removed from Execute,
+// or moved ahead of the admission-cap check, either of which a
+// direct-call-style test cannot detect.
+func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
+	paramtable.Init()
+	nodeMgr := session.NewNodeManager()
+	broker := meta.NewMockBroker(t)
+	// Any error is fine here: the point is to let the background goroutine
+	// Execute() spawns on successful admission exit quickly via task.Fail,
+	// without touching the nil meta/dist/targetMgr/cluster this test doesn't
+	// otherwise set up.
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+		Return(nil, merr.WrapErrCollectionNotFound(int64(1))).Maybe()
+
+	executor := NewExecutor(1, nil, nil, broker, nil, nil, nodeMgr)
+
+	task, err := NewSegmentTask(
+		context.Background(),
+		80*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		// Grow routes to loadSegment, which fails gracefully through
+		// getMetaInfo -> getCollectionInfo -> the mocked broker error above.
+		// Reduce routes to releaseSegment, which needs a working dist/cluster
+		// this test doesn't set up and would nil-panic in the background
+		// goroutine instead.
+		NewSegmentAction(1, ActionTypeGrow, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer task.Cancel(nil)
+
+	// Saturate the non-channel admission pool directly so Execute rejects
+	// this task at the capacity gate without ever reaching ActivateDeadline.
+	// (GetNonChannelTaskCap floors to >=1 regardless of config, so it can't
+	// be driven to reject via TaskExecutionCap -- see its doc comment.)
+	executor.nonChannelTaskNum.Store(1 << 20)
+
+	admitted := executor.Execute(task, 0)
+	assert.False(t, admitted, "Execute must reject the task when the admission pool is saturated")
+	_, ok := task.Context().Deadline()
+	assert.False(t, ok, "deadline must not be armed for a task rejected at admission")
+
+	// Clear the pool: the same task, dispatched again, must now be admitted
+	// and get its deadline armed by Execute itself, not by a direct test call.
+	executor.nonChannelTaskNum.Store(0)
+	admitted = executor.Execute(task, 0)
+	assert.True(t, admitted, "Execute must admit the task once the pool is clear")
+	_, ok = task.Context().Deadline()
+	assert.True(t, ok, "Execute must have armed the deadline on successful admission")
 }

@@ -89,10 +89,13 @@ type Task interface {
 	SetPriority(priority Priority)
 	Index() string // dedup indexing string
 
-	// ActivateDeadline starts the task's execution timeout the first time it is
-	// actually dispatched to a QueryNode, so time spent waiting for a scheduler
-	// slot doesn't count against the RPC budget. No-op after the first call.
-	ActivateDeadline()
+	// ActivateDeadline arms a fresh execution timeout for the given step once
+	// it's actually dispatched to a QueryNode, so time spent waiting for a
+	// scheduler slot doesn't count against the RPC budget, and each step of a
+	// multi-action task gets its own full budget instead of sharing one
+	// deadline across the whole task lifetime. No-op if already armed for
+	// this step.
+	ActivateDeadline(step int)
 	// cancel the task as we don't need to continue it
 	Cancel(err error)
 	// fail the task as we encounter some error so be unable to continue,
@@ -116,16 +119,27 @@ type Task interface {
 }
 
 type baseTask struct {
-	// ctxMu guards ctx/cancel, which are swapped once by ActivateDeadline
-	// and read concurrently by Context()/Cancel()/Fail() from the scheduler
-	// loop and the executor's per-action goroutines.
-	ctxMu   sync.Mutex
-	ctx     context.Context
-	cancel  context.CancelFunc
-	timeout time.Duration
-	// deadlineOnce ensures the execution timeout is applied at most once,
-	// on the first call to ActivateDeadline.
-	deadlineOnce sync.Once
+	// ctxMu guards rootCtx/ctx/stepCancel/armedStep, which are read
+	// concurrently by Context()/Cancel()/Fail() from the scheduler loop and
+	// the executor's per-action goroutines, and swapped on every call to
+	// ActivateDeadline.
+	ctxMu sync.Mutex
+	// rootCtx/rootCancel are deadline-free (only canceled by Cancel/Fail/
+	// parent cancellation) and never replaced; every per-step deadline in ctx
+	// is derived from rootCtx, so canceling rootCtx always tears down
+	// whichever per-step deadline is currently active too.
+	rootCtx    context.Context
+	rootCancel context.CancelFunc
+	// ctx is the context task.Context() currently returns: rootCtx itself
+	// before the first ActivateDeadline call, or rootCtx wrapped in a fresh
+	// context.WithTimeout for the step ActivateDeadline was last called for.
+	ctx        context.Context
+	stepCancel context.CancelFunc
+	timeout    time.Duration
+	// armedStep is the step ActivateDeadline last armed a deadline for, or -1
+	// if never armed. Re-arming for the same step is a no-op so repeated
+	// dispatch attempts within one step don't reset the clock.
+	armedStep int
 
 	doneCh   chan struct{}
 	canceled *atomic.Bool
@@ -159,8 +173,8 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 	// now would burn the RPC budget on queueing delay rather than on the
 	// action RPCs it's meant to bound. ActivateDeadline arms it on first
 	// dispatch instead.
-	ctx, cancel := context.WithCancel(ctx)
-	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
+	rootCtx, rootCancel := context.WithCancel(ctx)
+	rootCtx, span := otel.Tracer(typeutil.QueryCoordRole).Start(rootCtx, taskTag)
 	startTs := atomic.Time{}
 	startTs.Store(time.Now())
 
@@ -170,48 +184,63 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 		replica:      replica,
 		shard:        shard,
 
-		status:   atomic.NewString(TaskStatusStarted),
-		priority: TaskPriorityNormal,
-		ctx:      ctx,
-		cancel:   cancel,
-		timeout:  timeout,
-		doneCh:   make(chan struct{}),
-		canceled: atomic.NewBool(false),
-		span:     span,
-		startTs:  startTs,
+		status:     atomic.NewString(TaskStatusStarted),
+		priority:   TaskPriorityNormal,
+		rootCtx:    rootCtx,
+		rootCancel: rootCancel,
+		ctx:        rootCtx,
+		armedStep:  -1,
+		timeout:    timeout,
+		doneCh:     make(chan struct{}),
+		canceled:   atomic.NewBool(false),
+		span:       span,
+		startTs:    startTs,
 	}
 }
 
-// ActivateDeadline arms the task's execution timeout, bounding the action
-// RPCs issued with task.Context() from this point on so a stuck server-side
-// operation cannot pin the scheduler slot forever. It is a no-op if the task
-// was constructed with timeout <= 0, or if called more than once (only the
-// first dispatch starts the clock).
+// ActivateDeadline arms a fresh execution timeout for the given step,
+// bounding the action RPC issued with task.Context() for that step so a
+// stuck server-side operation cannot pin the scheduler slot forever. Called
+// by Executor.Execute once a step actually clears admission. It is a no-op
+// if the task was constructed with timeout <= 0, or if already armed for
+// this step (so repeated dispatch attempts within one step don't reset the
+// clock). Each step gets its own full budget rather than sharing one
+// deadline across the whole task lifetime, so an earlier step finishing
+// under budget doesn't eat into a later step's.
 //
-// TODO: this is a flat wall-clock budget covering every remaining action RPC
-// once armed, on the assumption a single segment/channel op always finishes
-// within its configured timeout (segmentTaskTimeout defaults to 3min). A real
-// operation that legitimately runs longer never gets a chance to finish: the
-// checker rebuilds it with the same budget on every check tick, forever. See
+// TODO: the budget still covers the dist-confirmation wait between this
+// step's RPC returning and the step being marked finished (see
+// taskScheduler.checkActionFinish) -- a step whose RPC returns quickly but
+// whose distribution/leader-promotion confirmation is slow can still be
+// starved by a deadline armed for an earlier, already-returned RPC. Fully
+// isolating "wait for dist confirmation" from "RPC in flight" needs its own
+// design, in the same bucket as the no-backoff TODO below.
+//
+// TODO: this is still a flat wall-clock budget per step, on the assumption a
+// single action always finishes within its configured timeout
+// (segmentTaskTimeout defaults to 3min). A real operation that legitimately
+// runs longer never gets a chance to finish: the checker rebuilds it with the
+// same budget on every check tick, forever. See
 // SegmentChecker.createSegmentLoadTasks / ChannelChecker's equivalent.
-func (task *baseTask) ActivateDeadline() {
+func (task *baseTask) ActivateDeadline(step int) {
 	if task.timeout <= 0 {
 		return
 	}
-	task.deadlineOnce.Do(func() {
-		task.ctxMu.Lock()
-		defer task.ctxMu.Unlock()
-		if task.canceled.Load() {
-			return
-		}
-		parentCtx, parentCancel := task.ctx, task.cancel
-		ctx, cancel := context.WithTimeout(parentCtx, task.timeout)
-		task.ctx = ctx
-		task.cancel = func() {
-			cancel()
-			parentCancel()
-		}
-	})
+	task.ctxMu.Lock()
+	defer task.ctxMu.Unlock()
+	if task.canceled.Load() || task.armedStep == step {
+		return
+	}
+	if task.stepCancel != nil {
+		// Release the previous step's timer now that a new step is starting;
+		// rootCtx being canceled would also propagate this, but there's no
+		// need to wait for that to happen.
+		task.stepCancel()
+	}
+	ctx, cancel := context.WithTimeout(task.rootCtx, task.timeout)
+	task.ctx = ctx
+	task.stepCancel = cancel
+	task.armedStep = step
 }
 
 func (task *baseTask) Context() context.Context {
@@ -294,9 +323,9 @@ func (task *baseTask) Err() error {
 func (task *baseTask) Cancel(err error) {
 	if task.canceled.CompareAndSwap(false, true) {
 		task.ctxMu.Lock()
-		cancel := task.cancel
+		rootCancel := task.rootCancel
 		task.ctxMu.Unlock()
-		cancel()
+		rootCancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusCanceled)
 		}
@@ -311,9 +340,9 @@ func (task *baseTask) Cancel(err error) {
 func (task *baseTask) Fail(err error) {
 	if task.canceled.CompareAndSwap(false, true) {
 		task.ctxMu.Lock()
-		cancel := task.cancel
+		rootCancel := task.rootCancel
 		task.ctxMu.Unlock()
-		cancel()
+		rootCancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusFailed)
 		}
