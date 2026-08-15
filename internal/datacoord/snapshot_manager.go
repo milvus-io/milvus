@@ -618,13 +618,20 @@ func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionI
 // can never enter. The wait therefore terminates on its own as sort compaction
 // drains it -- it is not racing ingestion.
 //
-// It is bounded anyway. This runs in a DDL ack callback whose context has no
-// deadline, and the callback holds the collection's resource-key lock, so an
-// unbounded wait here would block the collection's other DDL indefinitely. Past
-// the cap it gives the lock back by returning an error; the ack scheduler
-// retries with backoff, which is the same waiting done in a way that lets other
-// work through. The message is already in the WAL, so the snapshot is created
-// eventually either way -- there is no "give up" at this layer.
+// The per-attempt cap below does NOT give the collection's resource-key lock
+// back. This runs inside a DDL ack callback, and the broadcaster's ack-callback
+// scheduler (streamingcoord/server/broadcaster/ack_callback_scheduler.go,
+// callMessageAckCallbackUntilDone) retries any error the callback returns in an
+// inner loop that never returns to its caller -- so the lock guard is only
+// released by MarkAckCallbackDone on success, never on an intermediate error.
+// The cap's real purpose is bounding a single polling attempt's log/CPU
+// footprint and refreshing "waited so far" visibility on each retry, not
+// yielding the lock: an unbounded wait here would hold it for exactly as long
+// either way, since the outer retry has nowhere else to hand it off to. The
+// message is already in the WAL, so the snapshot is created eventually either
+// way, once sort compaction can actually drain the set -- see the
+// EnableSortCompaction check below for the one case where it structurally
+// cannot.
 func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) error {
 	// The budget is a deadline, so express it as one: the same select then covers
 	// both running out of budget and DataCoord shutting down, and both want the
@@ -655,12 +662,33 @@ func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collection
 					mlog.Duration("waited", time.Since(start)))
 				return nil
 			}
+			// Fail fast rather than retry forever holding the collection lock:
+			// with sort compaction disabled cluster-wide, nothing will ever
+			// clear this set (triggerSegmentSortCompaction/triggerSortCompaction
+			// both skip while the switch is off), so every retry of this call
+			// would otherwise repeat the same unresolvable wait. This is checked
+			// fresh on every attempt, so re-enabling the switch lets a later
+			// retry proceed normally.
+			if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
+				mlog.Warn(ctx, "snapshot cannot proceed: sort compaction is disabled cluster-wide",
+					mlog.FieldCollectionID(collectionID),
+					mlog.Int64s("awaitingSort", awaiting))
+				return merr.WrapErrServiceUnavailableMsg(
+					"snapshot for collection %d needs %d segment(s) to finish sort compaction, but dataCoord.enableSortCompaction is disabled cluster-wide",
+					collectionID, len(awaiting))
+			}
 		}
 
 		select {
 		case <-waitCtx.Done():
-			// Info, not Warn: the snapshot is yielding its lock, not failing.
-			mlog.Info(ctx, "snapshot still waiting for its boundary, releasing for retry",
+			// This attempt's budget is spent, not the snapshot's: the ack
+			// callback that runs this holds the collection's resource-key lock
+			// for as long as this call keeps returning an error, regardless of
+			// whether that error comes from here or from looping past this
+			// point -- see the function doc. Returning still matters for
+			// bounding one attempt's log/CPU footprint and refreshing the
+			// "waited" duration on the next one.
+			mlog.Info(ctx, "snapshot still waiting for its boundary, will retry",
 				mlog.FieldCollectionID(collectionID),
 				mlog.Uint64("snapshotTs", boundary.SnapshotTs),
 				mlog.Duration("waited", time.Since(start)),

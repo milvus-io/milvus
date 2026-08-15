@@ -333,7 +333,7 @@ func TestWaitForSortedBoundary(t *testing.T) {
 		assert.NoError(t, sm.waitForSortedBoundary(ctx, 100, boundaryTestBoundary()))
 	})
 
-	t.Run("yields the lock past the budget", func(t *testing.T) {
+	t.Run("returns a retryable error past the per-attempt budget", func(t *testing.T) {
 		sm := boundaryTestManager(boundaryTestSegment(1))
 
 		paramtable.Get().Save(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key, "0")
@@ -342,9 +342,30 @@ func TestWaitForSortedBoundary(t *testing.T) {
 		err := sm.waitForSortedBoundary(context.Background(), 100, boundaryTestBoundary())
 		assert.Error(t, err)
 		// Retryable: the ack scheduler has to come back, since the message is
-		// already in the WAL and the snapshot must eventually exist.
+		// already in the WAL and the snapshot must eventually exist. This does
+		// NOT release the collection's resource-key lock -- see the function
+		// doc -- it only bounds one polling attempt.
 		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
 		assert.Contains(t, err.Error(), "sort compaction")
+	})
+
+	t.Run("fails fast when sort compaction is disabled cluster-wide", func(t *testing.T) {
+		sm := boundaryTestManager(boundaryTestSegment(1))
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		// A long per-attempt budget proves this returns because the switch is
+		// off, not because the attempt timed out.
+		paramtable.Get().Save(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key, "60")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
+
+		start := time.Now()
+		err := sm.waitForSortedBoundary(context.Background(), 100, boundaryTestBoundary())
+		assert.Less(t, time.Since(start), 5*time.Second)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
+		assert.Contains(t, err.Error(), "enableSortCompaction")
 	})
 
 	t.Run("returns once the segment is sorted", func(t *testing.T) {
