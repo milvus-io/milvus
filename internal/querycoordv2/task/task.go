@@ -187,6 +187,13 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 // operation cannot pin the scheduler slot forever. It is a no-op if the task
 // was constructed with timeout <= 0, or if called more than once (only the
 // first dispatch starts the clock).
+//
+// TODO: this is a flat wall-clock budget covering every remaining action RPC
+// once armed, on the assumption a single segment/channel op always finishes
+// within its configured timeout (segmentTaskTimeout defaults to 3min). A real
+// operation that legitimately runs longer never gets a chance to finish: the
+// checker rebuilds it with the same budget on every check tick, forever. See
+// SegmentChecker.createSegmentLoadTasks / ChannelChecker's equivalent.
 func (task *baseTask) ActivateDeadline() {
 	if task.timeout <= 0 {
 		return
