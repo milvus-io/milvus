@@ -69,20 +69,28 @@ NoThrow(const std::string& index_type,
 // builds register them, but this UT is built without them.
 TEST(ValidateVectorSearchParams, EmptyParamsLoadAllIndexTypes) {
     // dense float — IVF family (incl. RaBitQ variants) + HNSW + DISKANN
-    for (const auto* index_type :
-         {"IVF_FLAT", "IVF_PQ", "IVF_SQ8", "SCANN", "IVF_RABITQ",
-          "IVF_RABITQ_FASTSCAN", "HNSW", "DISKANN"}) {
+    for (const auto* index_type : {"IVF_FLAT",
+                                   "IVF_PQ",
+                                   "IVF_SQ8",
+                                   "SCANN",
+                                   "IVF_RABITQ",
+                                   "IVF_RABITQ_FASTSCAN",
+                                   "HNSW",
+                                   "DISKANN"}) {
         NoThrow(index_type, DataType::VECTOR_FLOAT, R"({})");
     }
     // binary — flat and IVF, Hamming
     for (const auto* index_type : {"BIN_FLAT", "BIN_IVF_FLAT"}) {
-        NoThrow(index_type, DataType::VECTOR_BINARY, R"({})",
+        NoThrow(index_type,
+                DataType::VECTOR_BINARY,
+                R"({})",
                 knowhere::metric::HAMMING);
     }
     // sparse
-    for (const auto* index_type :
-         {"SPARSE_INVERTED_INDEX", "SPARSE_WAND"}) {
-        NoThrow(index_type, DataType::VECTOR_SPARSE_U32_F32, R"({})",
+    for (const auto* index_type : {"SPARSE_INVERTED_INDEX", "SPARSE_WAND"}) {
+        NoThrow(index_type,
+                DataType::VECTOR_SPARSE_U32_F32,
+                R"({})",
                 knowhere::metric::IP);
     }
 }
