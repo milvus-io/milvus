@@ -647,6 +647,105 @@ func TestGenSnapshot_RequiresBoundary(t *testing.T) {
 	assert.Contains(t, err.Error(), "boundary is required")
 }
 
+// A compaction publishes its output before its inputs go away -- atomically for
+// mix and sort, but across several catalog writes for clustering, which marks
+// results visible and only then drops inputs. Anywhere in that gap both
+// generations look capturable, and the snapshot would hold the same rows twice.
+func TestDropSupersededByLineage(t *testing.T) {
+	newMeta := func(segments ...*SegmentInfo) *meta {
+		m := &meta{ctx: context.Background(), segments: NewSegmentsInfo()}
+		for _, segment := range segments {
+			m.segments.SetSegment(segment.GetID(), segment)
+		}
+		return m
+	}
+	ids := func(segments []*SegmentInfo) []int64 {
+		out := make([]int64, 0, len(segments))
+		for _, segment := range segments {
+			out = append(out, segment.GetID())
+		}
+		return out
+	}
+	child := func(id int64, from ...int64) *SegmentInfo {
+		return boundaryTestSegment(id, func(s *datapb.SegmentInfo) {
+			s.IsInvisible = false
+			s.CreatedByCompaction = true
+			s.CompactionFrom = from
+		})
+	}
+	leaf := func(id int64) *SegmentInfo {
+		return boundaryTestSegment(id, func(s *datapb.SegmentInfo) { s.IsInvisible = false })
+	}
+
+	t.Run("drops an output whose inputs are also captured", func(t *testing.T) {
+		// The clustering window: results already visible, inputs not yet Dropped.
+		in1, in2, out := leaf(1), leaf(2), child(3, 1, 2)
+		m := newMeta(in1, in2, out)
+
+		kept := dropSupersededByLineage(context.Background(), m, []*SegmentInfo{in1, in2, out})
+		assert.ElementsMatch(t, []int64{1, 2}, ids(kept))
+	})
+
+	t.Run("keeps the output once its inputs are gone", func(t *testing.T) {
+		// Inputs Dropped, so they never entered the selected set. The output is
+		// the only representation left and must be kept.
+		out := child(3, 1, 2)
+		m := newMeta(
+			boundaryTestSegment(1, func(s *datapb.SegmentInfo) { s.State = commonpb.SegmentState_Dropped }),
+			boundaryTestSegment(2, func(s *datapb.SegmentInfo) { s.State = commonpb.SegmentState_Dropped }),
+			out,
+		)
+
+		kept := dropSupersededByLineage(context.Background(), m, []*SegmentInfo{out})
+		assert.Equal(t, []int64{3}, ids(kept))
+	})
+
+	t.Run("keeps the output when its inputs were GC'd from meta", func(t *testing.T) {
+		out := child(3, 1, 2)
+		m := newMeta(out) // parents absent entirely
+
+		kept := dropSupersededByLineage(context.Background(), m, []*SegmentInfo{out})
+		assert.Equal(t, []int64{3}, ids(kept))
+	})
+
+	t.Run("walks through a Dropped intermediate generation", func(t *testing.T) {
+		// A -> C -> E with C already Dropped. C is not capturable, but without
+		// it as a waypoint the walk stops and both A and E survive.
+		a, e := leaf(1), child(5, 3)
+		m := newMeta(a, boundaryTestSegment(3, func(s *datapb.SegmentInfo) {
+			s.State = commonpb.SegmentState_Dropped
+			s.CreatedByCompaction = true
+			s.CompactionFrom = []int64{1}
+		}), e)
+
+		kept := dropSupersededByLineage(context.Background(), m, []*SegmentInfo{a, e})
+		assert.Equal(t, []int64{1}, ids(kept))
+	})
+
+	t.Run("never adds a segment the caller did not select", func(t *testing.T) {
+		// The reason this removes instead of replacing: an out-of-boundary or
+		// Dropped input must not be pulled in. Selecting only the output must
+		// leave the result exactly the output.
+		out := child(3, 1, 2)
+		m := newMeta(leaf(1), leaf(2), out)
+
+		kept := dropSupersededByLineage(context.Background(), m, []*SegmentInfo{out})
+		assert.Equal(t, []int64{3}, ids(kept))
+	})
+
+	t.Run("keeps everything rather than nothing on a cyclic lineage", func(t *testing.T) {
+		// Impossible with allocator-issued ids, but each segment is the other's
+		// selected parent, so the rule would drop both. Capturing nothing is
+		// silent data loss; capturing a duplicate is at least detectable.
+		a := child(1, 2)
+		b := child(2, 1)
+		m := newMeta(a, b)
+
+		kept := dropSupersededByLineage(context.Background(), m, []*SegmentInfo{a, b})
+		assert.ElementsMatch(t, []int64{1, 2}, ids(kept))
+	})
+}
+
 // ── what staging blocks ──────────────────────────────────────────────────────
 
 func TestIsCompactionBlockedForType(t *testing.T) {

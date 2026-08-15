@@ -765,6 +765,26 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		}
 	}
 
+	// Keep one generation per compaction lineage. The tests above are all
+	// per-segment, and a compaction publishes its output before its inputs go
+	// away -- atomically for mix and sort, but across several catalog writes for
+	// clustering, which marks its results visible and only then drops its inputs
+	// (compaction_task_clustering.go completeTask). Anywhere in that gap both
+	// generations pass every test above, and the snapshot would carry the same
+	// rows twice.
+	//
+	// The query path answers the same question with two mechanisms: it skips
+	// IsInvisible && CreatedByCompaction outright, then resolves the rest by
+	// lineage in retrieveSegment. Only the second is reproduced here, because it
+	// subsumes the first for every reachable state -- an invisible compaction
+	// output always has its inputs still alive, since clustering does not drop
+	// them until it has published the output visible -- and because skipping on
+	// invisibility alone drops a segment without checking whether anything else
+	// covers its rows. That distinction matters: this runs on the capture path,
+	// where dropping an uncovered segment is silent data loss rather than a
+	// query that reads one generation older.
+	segments = dropSupersededByLineage(ctx, h.s.meta, segments)
+
 	if len(segments) == 0 {
 		mlog.Info(ctx, "no segments found for collection when generating snapshot",
 			mlog.FieldCollectionID(collectionID),
@@ -910,6 +930,95 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 		}
 	}
 	return indexesFiles
+}
+
+// dropSupersededByLineage removes any selected segment that has a selected
+// ancestor, so a compaction lineage contributes exactly one generation to a
+// snapshot.
+//
+// It only ever removes. retrieveSegment, which the query path uses for the same
+// job, instead *replaces* an output with its inputs -- correct there, wrong
+// here, because it can introduce ids that were never eligible for this
+// snapshot. A Dropped input would be one: a snapshot must not reference a
+// segment whose files GC may already be reclaiming, and snapshot protection is
+// registered by SaveSnapshot, which runs after this. An out-of-boundary input
+// would be another: a compaction output takes its StartPosition from the
+// earliest of its inputs, so an output can sit inside the boundary while a
+// later input sits outside it, and descending would pull post-boundary rows in.
+// Removal cannot do either, because everything it considers has already passed
+// the boundary and state tests.
+//
+// Preferring the inputs loses nothing. GenSnapshot already walks forward with
+// GetDeltaLogFromCompactTo and merges a descendant's deltalogs onto the
+// captured segment before trimming them at the boundary, so deletes that landed
+// on the output still apply.
+//
+// The walk needs segments the snapshot itself will not capture -- a lineage can
+// run A -> C -> E with C already Dropped -- so parents resolve against
+// unfiltered meta rather than against the selected set. A parent missing from
+// meta entirely (GC'd) ends that branch and the output is kept, which is the
+// same conclusion the query path reaches for that shape.
+func dropSupersededByLineage(ctx context.Context, m *meta, selected []*SegmentInfo) []*SegmentInfo {
+	if len(selected) < 2 {
+		return selected
+	}
+
+	selectedIDs := typeutil.NewUniqueSet()
+	for _, info := range selected {
+		selectedIDs.Insert(info.GetID())
+	}
+
+	// Unfiltered on purpose: Dropped segments are needed as waypoints, never as
+	// results. Nothing from this map is emitted.
+	lineage := make(map[int64]*SegmentInfo)
+	for _, info := range m.SelectSegments(ctx, WithCollection(selected[0].GetCollectionID())) {
+		lineage[info.GetID()] = info
+	}
+
+	memo := make(map[int64]bool, len(lineage))
+	var hasSelectedAncestor func(segmentID int64) bool
+	hasSelectedAncestor = func(segmentID int64) bool {
+		if answer, ok := memo[segmentID]; ok {
+			return answer
+		}
+		// Seeding false before recursing terminates on a cycle in
+		// CompactionFrom instead of recursing forever.
+		memo[segmentID] = false
+		info, ok := lineage[segmentID]
+		if !ok {
+			return false
+		}
+		for _, parentID := range info.GetCompactionFrom() {
+			if selectedIDs.Contain(parentID) || hasSelectedAncestor(parentID) {
+				memo[segmentID] = true
+				return true
+			}
+		}
+		return false
+	}
+
+	kept := make([]*SegmentInfo, 0, len(selected))
+	for _, info := range selected {
+		if len(info.GetCompactionFrom()) > 0 && hasSelectedAncestor(info.GetID()) {
+			mlog.Info(ctx, "snapshot skips a compaction output whose inputs it already captures",
+				mlog.FieldSegmentID(info.GetID()),
+				mlog.Int64s("compactionFrom", info.GetCompactionFrom()))
+			continue
+		}
+		kept = append(kept, info)
+	}
+
+	// A DAG always leaves its minimal elements standing, so an empty result
+	// means CompactionFrom has a cycle -- impossible with allocator-issued ids,
+	// but capturing nothing would be silent data loss, which is a far worse way
+	// to be wrong than capturing a duplicate. Keep everything and say so.
+	if len(kept) == 0 {
+		mlog.Error(ctx, "snapshot lineage dedup would drop every segment, keeping all: compaction lineage has a cycle",
+			mlog.Int64("collectionID", selected[0].GetCollectionID()),
+			mlog.Int64s("segmentIDs", selectedIDs.Collect()))
+		return selected
+	}
+	return kept
 }
 
 func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error) {

@@ -1886,6 +1886,107 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }
 
+// A compaction publishes its output before its inputs go away. Clustering makes
+// that gap wide -- completeClusterCompactionMutation adds only the new segments,
+// and the inputs are not dropped until completeTask has already marked the
+// results visible -- so both generations are capturable at once and the snapshot
+// would carry the same rows twice. Driven through GenSnapshot with a real meta,
+// because mocking SelectSegments away would skip the very filters under test.
+func TestGenSnapshot_CapturesOneGenerationPerLineage(t *testing.T) {
+	const channel = "dml_0_200v0"
+
+	segment := func(id int64, opts ...func(*datapb.SegmentInfo)) *SegmentInfo {
+		info := &datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  200,
+			PartitionID:   0,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
+			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: id, LogSize: 100}}}},
+		}
+		for _, opt := range opts {
+			opt(info)
+		}
+		return NewSegmentInfo(info)
+	}
+	clusteringOutput := func(id int64, invisible bool, from ...int64) *SegmentInfo {
+		return segment(id, func(s *datapb.SegmentInfo) {
+			s.CreatedByCompaction = true
+			s.CompactionFrom = from
+			s.IsInvisible = invisible
+			s.Level = datapb.SegmentLevel_L2
+		})
+	}
+
+	capturedIDs := func(t *testing.T, segments ...*SegmentInfo) []int64 {
+		t.Helper()
+
+		realMeta := &meta{ctx: context.Background(), indexMeta: &indexMeta{}, segments: NewSegmentsInfo()}
+		for _, s := range segments {
+			realMeta.segments.SetSegment(s.GetID(), s)
+		}
+
+		mixCoord := mocks2.NewMixCoord(t)
+		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), Schema: newTestSchema(), ShardsNum: 1, NumPartitions: 1,
+			CollectionID: 200, VirtualChannelNames: []string{channel},
+		}, nil).Maybe()
+		mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status: merr.Success(), PartitionIDs: []int64{0}, PartitionNames: []string{"_default"},
+		}, nil).Maybe()
+
+		handler := &ServerHandler{s: &Server{broker: broker.NewCoordinatorBroker(mixCoord), meta: realMeta}}
+
+		noIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
+			func(*indexMeta, UniqueID, string) []*model.Index { return nil }).Build()
+		defer noIndexes.UnPatch()
+		noSegIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
+			func(*indexMeta, int64, int64) map[int64]*model.SegmentIndex { return nil }).Build()
+		defer noSegIndexes.UnPatch()
+
+		data, err := handler.GenSnapshot(context.Background(), 200, &SnapshotBoundary{
+			SeekPositions: []*msgpb.MsgPosition{{ChannelName: channel, Timestamp: 12345, MsgID: []byte{1}}},
+			SnapshotTs:    12345,
+		})
+		require.NoError(t, err)
+
+		ids := make([]int64, 0, len(data.Segments))
+		for _, s := range data.Segments {
+			ids = append(ids, s.SegmentId)
+		}
+		return ids
+	}
+
+	t.Run("output still invisible: captures the inputs", func(t *testing.T) {
+		// The query path skips an invisible compaction output the same way; the
+		// inputs are what readers are being served from.
+		ids := capturedIDs(t, segment(1), segment(2), clusteringOutput(3, true, 1, 2))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("output visible but inputs not yet dropped: still captures the inputs", func(t *testing.T) {
+		// markResultSegmentsVisible has run, markInputSegmentsDropped has not.
+		// Every per-segment filter passes for all three, so only the lineage
+		// walk keeps this from double-counting.
+		ids := capturedIDs(t, segment(1), segment(2), clusteringOutput(3, false, 1, 2))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("inputs dropped: captures the output", func(t *testing.T) {
+		dropped := func(s *datapb.SegmentInfo) { s.State = commonpb.SegmentState_Dropped }
+		ids := capturedIDs(t,
+			segment(1, dropped), segment(2, dropped), clusteringOutput(3, false, 1, 2))
+		assert.Equal(t, []int64{3}, ids)
+	})
+
+	t.Run("multi-level chain collapses to the oldest captured generation", func(t *testing.T) {
+		ids := capturedIDs(t, segment(1), segment(2),
+			clusteringOutput(3, false, 1, 2), clusteringOutput(4, false, 3))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+}
+
 func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 	properties := []*commonpb.KeyValuePair{
 		{Key: common.CollectionTTLConfigKey, Value: "360"},
