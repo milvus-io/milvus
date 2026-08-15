@@ -158,7 +158,12 @@ func (s *Server) balanceSegments(ctx context.Context,
 	}
 
 	if sync {
-		err := task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// The task's own deadline doesn't start until it's actually dispatched
+		// (see Task.ActivateDeadline), so give this caller's wait window some
+		// slack beyond SegmentTaskTimeout to cover queueing time; otherwise a
+		// busy scheduler could make this synchronous call time out before the
+		// task itself ever gets a chance to fail with the real error.
+		err := task.Wait(ctx, 2*Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
@@ -236,7 +241,10 @@ func (s *Server) balanceChannels(ctx context.Context,
 	}
 
 	if sync {
-		err := task.Wait(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// See the matching comment in balanceSegments: give this wait window
+		// slack beyond ChannelTaskTimeout so it doesn't time out purely due to
+		// scheduler queueing before the task's own deadline is even armed.
+		err := task.Wait(ctx, 2*Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))

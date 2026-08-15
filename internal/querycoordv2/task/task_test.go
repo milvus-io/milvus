@@ -3283,8 +3283,15 @@ func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
 	assert.NoError(t, err)
 	defer channelTask.Cancel(nil)
 
+	_, ok := channelTask.Context().Deadline()
+	assert.False(t, ok, "channel task context must not carry a deadline before ActivateDeadline")
+
+	channelTask.ActivateDeadline()
+	// A second call must be a no-op and not push the deadline out further.
+	channelTask.ActivateDeadline()
+
 	deadline, ok := channelTask.Context().Deadline()
-	assert.True(t, ok, "channel task context must carry the task timeout as a deadline")
+	assert.True(t, ok, "channel task context must carry the task timeout as a deadline once activated")
 
 	select {
 	case <-channelTask.Context().Done():
@@ -3307,7 +3314,10 @@ func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
 	assert.NoError(t, err)
 	defer segmentTask.Cancel(nil)
 	_, ok = segmentTask.Context().Deadline()
-	assert.True(t, ok, "segment task context must carry the task timeout as a deadline")
+	assert.False(t, ok, "segment task context must not carry a deadline before ActivateDeadline")
+	segmentTask.ActivateDeadline()
+	_, ok = segmentTask.Context().Deadline()
+	assert.True(t, ok, "segment task context must carry the task timeout as a deadline once activated")
 
 	leaderTask := NewLeaderSegmentTask(
 		context.Background(),
@@ -3320,5 +3330,37 @@ func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
 	)
 	defer leaderTask.Cancel(nil)
 	_, ok = leaderTask.Context().Deadline()
-	assert.True(t, ok, "leader task context must carry the task timeout as a deadline")
+	assert.False(t, ok, "leader task context must not carry a deadline before ActivateDeadline")
+	leaderTask.ActivateDeadline()
+	_, ok = leaderTask.Context().Deadline()
+	assert.True(t, ok, "leader task context must carry the task timeout as a deadline once activated")
+}
+
+func TestTaskDeadlineExcludesQueueingTime(t *testing.T) {
+	task, err := NewSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer task.Cancel(nil)
+
+	// Simulate the task sitting in the wait queue / being bounced by the
+	// executor's admission cap for longer than its configured timeout.
+	time.Sleep(80 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "queueing time must not count against the deadline")
+
+	task.ActivateDeadline()
+	assert.NoError(t, task.Context().Err(), "deadline must not have expired immediately on activation")
+
+	select {
+	case <-task.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("task context did not expire after the task timeout once activated")
+	}
+	assert.ErrorIs(t, task.Context().Err(), context.DeadlineExceeded)
 }

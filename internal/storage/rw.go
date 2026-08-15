@@ -607,6 +607,10 @@ func NewDeltalogReaderFromBinlogs(
 		}
 		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
+		// Unlike NewDeltalogReader, this path builds the FFI reader from all
+		// fragments up front rather than iterating file-by-file, so there is
+		// no per-file boundary to check ctx at; ctx is accepted for signature
+		// symmetry with the V1 branch above but does not bound this call.
 		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
 		if err != nil {
 			return nil, err

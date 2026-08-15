@@ -509,7 +509,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	)
 	s.Require().NoError(err)
 	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			s.Equal(schemapb.DataType_Int64, pkType)
 			s.Equal([]string{sourceDeltalogPath}, paths)
 			return &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}, nil
@@ -1069,7 +1069,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
 		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
 				s.Equal([]string{ref.sourcePath}, paths)
 				return reader, nil
@@ -1095,7 +1095,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		legacyRef := milvusTableDeltalogRef{sourcePath: "files/delta_log/1/2/3/10", logID: 10, numEntries: 2}
 		reader := &fakeMilvusTableDeltalogReader{}
 		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
 				s.Equal([]string{legacyRef.sourcePath}, paths)
 				return reader, nil
