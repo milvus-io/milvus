@@ -19,13 +19,11 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -366,38 +364,6 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 	)
 
 	mlog.Info(t.ctx, "start copying single segment", logFields...)
-
-	// StorageV3 index metadata is authoritative in the manifest. Older
-	// snapshots may not carry the legacy IndexFiles projection, so recover it
-	// before generating copy mappings.
-	if source.GetStorageVersion() >= storage.StorageV3 && len(source.GetIndexFiles()) == 0 && source.GetManifestPath() != "" {
-		manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), t.req.GetStorageConfig())
-		if err != nil {
-			return nil, merr.Wrap(err, "failed to load index metadata from source manifest")
-		}
-		for _, manifestIndex := range manifestIndexes {
-			if manifestIndex.Path == "" || len(manifestIndex.IndexFileKeys) == 0 {
-				continue
-			}
-			if manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 || manifestIndex.NumRows < 0 {
-				return nil, merr.WrapErrServiceInternalMsg("invalid index sizes in source manifest for segment %d", source.GetSegmentId())
-			}
-			filePaths := make([]string, 0, len(manifestIndex.IndexFileKeys))
-			for _, key := range manifestIndex.IndexFileKeys {
-				filePaths = append(filePaths, path.Join(manifestIndex.Path, key))
-			}
-			source.IndexFiles = append(source.IndexFiles, &indexpb.IndexFilePathInfo{
-				SegmentID: source.GetSegmentId(), FieldID: manifestIndex.FieldID,
-				IndexID: manifestIndex.IndexID, BuildID: manifestIndex.BuildID,
-				IndexName: manifestIndex.IndexName, IndexFilePaths: filePaths,
-				SerializedSize: uint64(manifestIndex.SerializedSize), MemSize: uint64(manifestIndex.MemSize),
-				IndexVersion: manifestIndex.IndexVersion, NumRows: manifestIndex.NumRows,
-				CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
-				CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
-				IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
-			})
-		}
-	}
 
 	// Step 1: Validate source has required binlogs or a StorageV3 manifest.
 	hasManifestInsert := source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != ""
