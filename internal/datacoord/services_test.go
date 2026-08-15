@@ -3780,8 +3780,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-		defer mockHasCollection.UnPatch()
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			&milvuspb.DescribeCollectionResponse{DbName: "default", CollectionName: "test_collection"}, nil,
+		).Build()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3838,13 +3840,13 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 
 		hasCollectionCalled := false
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).To(
-			func(_ *embeddedBroker, _ context.Context, collectionID int64) (bool, error) {
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).To(
+			func(_ *embeddedBroker, _ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 				hasCollectionCalled = true
 				assert.Equal(t, int64(100), collectionID)
-				return false, nil
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
 			}).Build()
-		defer mockHasCollection.UnPatch()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3900,10 +3902,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockStartBroadcast.UnPatch()
 
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(
-			false, errors.New("rootcoord unavailable"),
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			nil, errors.New("rootcoord unavailable"),
 		).Build()
-		defer mockHasCollection.UnPatch()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),

@@ -2242,97 +2242,129 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Resolve collection identity for the broadcast lock set (also validates
-	// collection existence). Read from the datacoord-local meta cache via
-	// handler.GetCollection — avoids a cross-component RPC to MixCoord on every
-	// CreateSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
-	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if coll == nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found")
-		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
-	}
-	dbName := coll.DatabaseName
-	collectionName := coll.Schema.GetName()
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(dbName),
-		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
-	)
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot failed to start broadcast", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	defer broadcaster.Close()
-
-	// Re-check collection availability while holding the collection resource
-	// lock. DropCollection may win the race between the pre-lock collection
-	// resolution above and lock acquisition; in that case this request must
-	// terminate before broadcasting a CreateSnapshot message whose ack callback
-	// can no longer generate a valid snapshot.
-	hasCollection, err := s.broker.HasCollection(ctx, req.GetCollectionId())
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check collection existence after lock", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if !hasCollection {
-		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
-		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
-	}
-
-	// Double-check after acquiring lock — another goroutine may have created it.
-	// Same error-handling discipline as the pre-lock check above: only treat
-	// ErrSnapshotNotFound as "good to proceed"; surface every other error.
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot failed: snapshot name already exists in collection")
-		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
-	} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
-		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check snapshot existence after lock", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	// Broadcast CreateSnapshot message via DDL framework.
-	// Snapshot ID is allocated in the callback.
+	// collection existence), acquire the lock, then re-resolve the identity
+	// fresh (bypassing the handler cache) while holding it.
 	//
-	// The message goes to the collection's data vchannels, not only the control
-	// channel, because it is the snapshot's boundary: the shard interceptor seals
-	// every growing segment at the message's position, so "written before the
-	// snapshot" becomes a property of whole segments rather than a guess from
-	// channel checkpoints. A control-channel-only message has no position in the
-	// data WAL and therefore no ordering against inserts at all, which is why the
-	// snapshot could not define its own cut before.
-	//
-	// TODO(rolling upgrade): a streamingnode that predates
-	// shardInterceptor.handleCreateSnapshot does not recognize this message type,
-	// and the interceptor's fallback is a plain append -- so it declares the
-	// boundary without sealing anything, and a growing segment ends up spanning
-	// it. The snapshot then captures a segment holding rows from both sides,
-	// silently. header.FlushedSegmentIds cannot be used to detect this, since it
-	// is legitimately empty when the collection had no growing segment. Until
-	// this is handled, the upgrade window is not safe for snapshot creation.
-	channels := []string{streaming.WAL().ControlChannel()}
-	channels = append(channels, coll.VChannelNames...)
-	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
-		WithHeader(&message.CreateSnapshotMessageHeader{
-			CollectionId:                req.GetCollectionId(),
-			Name:                        req.GetName(),
-			Description:                 req.GetDescription(),
-			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
-		}).
-		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast(channels).
-		WithUnreplicable().
-		MustBuildBroadcast(),
-	); err != nil {
-		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
-		return merr.Status(err), nil
-	}
+	// The two resolutions are not atomic, and neither is "resolve then lock":
+	// a RenameCollection landing in the gap acquires only ExclusiveDBName locks
+	// (see startBroadcastWithCollectionLock's callers), not
+	// ExclusiveCollectionName, so it is never serialized against by the lock
+	// taken below. If we locked once on the pre-rename name and proceeded, this
+	// call would hold an exclusive lock on a name the collection just vacated —
+	// the collection's real (renamed) identity would have no protection from
+	// this call at all, letting a concurrent DropCollection on the new name
+	// race the broadcast. So the identity is re-checked after locking, and the
+	// lock is re-acquired under the new name if it changed. Renames are rare
+	// enough that this only ever loops when one actually landed in the window.
+	const maxCollectionRenameRetries = 5
+	var coll *collectionInfo
+	for attempt := 0; ; attempt++ {
+		var err error
+		coll, err = s.handler.GetCollection(ctx, req.GetCollectionId())
+		if err != nil {
+			mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		if coll == nil {
+			mlog.Warn(context.TODO(), "CreateSnapshot: collection not found")
+			return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
+		}
+		dbName := coll.DatabaseName
+		collectionName := coll.Schema.GetName()
 
-	mlog.Info(context.TODO(), "CreateSnapshot completed successfully")
-	return merr.Success(), nil
+		broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+			message.NewSharedDBNameResourceKey(dbName),
+			message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+			message.NewExclusiveSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
+		)
+		if err != nil {
+			mlog.Warn(context.TODO(), "CreateSnapshot failed to start broadcast", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
+		// Re-check collection identity fresh while holding the collection
+		// resource lock: DescribeCollectionInternal goes to MixCoord directly
+		// rather than the (potentially stale) handler cache used above, so a
+		// DropCollection or RenameCollection that won the race between the
+		// pre-lock resolution and lock acquisition is caught here.
+		resp, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+		if err != nil {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check collection identity after lock", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		if resp.GetDbName() != dbName || resp.GetCollectionName() != collectionName {
+			broadcaster.Close()
+			if attempt >= maxCollectionRenameRetries {
+				mlog.Warn(context.TODO(), "CreateSnapshot: collection kept being renamed while acquiring the snapshot lock, giving up",
+					mlog.Int("attempts", attempt+1))
+				return merr.Status(merr.WrapErrServiceInternalMsg(
+					"collection %d was renamed repeatedly while creating snapshot %s", req.GetCollectionId(), req.GetName())), nil
+			}
+			mlog.Info(context.TODO(), "CreateSnapshot: collection was renamed while acquiring the snapshot lock, retrying with its new name",
+				mlog.Int("attempts", attempt+1))
+			continue
+		}
+
+		// Double-check after acquiring lock — another goroutine may have
+		// created it. Same error-handling discipline as the pre-lock check
+		// above: only treat ErrSnapshotNotFound as "good to proceed"; surface
+		// every other error.
+		if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot failed: snapshot name already exists in collection")
+			return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
+		} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check snapshot existence after lock", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
+		// Broadcast CreateSnapshot message via DDL framework.
+		// Snapshot ID is allocated in the callback.
+		//
+		// The message goes to the collection's data vchannels, not only the
+		// control channel, because it is the snapshot's boundary: the shard
+		// interceptor seals every growing segment at the message's position,
+		// so "written before the snapshot" becomes a property of whole
+		// segments rather than a guess from channel checkpoints. A
+		// control-channel-only message has no position in the data WAL and
+		// therefore no ordering against inserts at all, which is why the
+		// snapshot could not define its own cut before.
+		//
+		// TODO(rolling upgrade): a streamingnode that predates
+		// shardInterceptor.handleCreateSnapshot does not recognize this
+		// message type, and the interceptor's fallback is a plain append --
+		// so it declares the boundary without sealing anything, and a
+		// growing segment ends up spanning it. The snapshot then captures a
+		// segment holding rows from both sides, silently.
+		// header.FlushedSegmentIds cannot be used to detect this, since it
+		// is legitimately empty when the collection had no growing segment.
+		// Until this is handled, the upgrade window is not safe for
+		// snapshot creation.
+		channels := []string{streaming.WAL().ControlChannel()}
+		channels = append(channels, coll.VChannelNames...)
+		if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
+			WithHeader(&message.CreateSnapshotMessageHeader{
+				CollectionId:                req.GetCollectionId(),
+				Name:                        req.GetName(),
+				Description:                 req.GetDescription(),
+				CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
+			}).
+			WithBody(&message.CreateSnapshotMessageBody{}).
+			WithBroadcast(channels).
+			WithUnreplicable().
+			MustBuildBroadcast(),
+		); err != nil {
+			broadcaster.Close()
+			mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		broadcaster.Close()
+
+		mlog.Info(context.TODO(), "CreateSnapshot completed successfully")
+		return merr.Success(), nil
+	}
 }
 
 // hasSnapshotIncompatibleSession reports whether any currently registered
