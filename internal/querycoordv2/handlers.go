@@ -158,14 +158,19 @@ func (s *Server) balanceSegments(ctx context.Context,
 	}
 
 	if sync {
-		// No extra timeout here: each task already carries its own real
-		// deadline (armed on first dispatch, see Task.ActivateDeadline) and
-		// is guaranteed to finish within it. Bounding this wait with another,
-		// independently-guessed duration would only race against that real
-		// deadline -- as it did before, when both used SegmentTaskTimeout and
-		// this wait usually won, masking the task's actual result. Callers
-		// that want to bound how long they wait should set a deadline on ctx.
-		err := task.Wait(ctx, tasks...)
+		// This bound exists for a different reason than the task's own
+		// deadline: a task only gets its real deadline once it's actually
+		// admitted by the executor (see Task.ActivateDeadline). If the target
+		// node's executor stays saturated, the task can sit rejected in the
+		// queue indefinitely without ever being admitted, and callers commonly
+		// pass no deadline of their own (e.g. pymilvus defaults to
+		// timeout=None) -- so without a bound here, this handler could hang
+		// forever. SegmentTaskTimeout is a reasonable ceiling for "how long
+		// this synchronous call is willing to wait" independent of whether it
+		// matches the task's own execution budget.
+		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		err := task.Wait(waitCtx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
@@ -243,9 +248,10 @@ func (s *Server) balanceChannels(ctx context.Context,
 	}
 
 	if sync {
-		// See the matching comment in balanceSegments: no extra timeout here,
-		// each task already has a real, guaranteed-to-fire deadline of its own.
-		err := task.Wait(ctx, tasks...)
+		// See the matching comment in balanceSegments.
+		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		err := task.Wait(waitCtx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
