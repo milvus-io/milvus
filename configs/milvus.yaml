@@ -502,7 +502,7 @@ queryCoord:
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
   channelTaskTimeout: 120000 # 2 minutes
-  segmentTaskTimeout: 180000 # 3 minutes
+  segmentTaskTimeout: 300000 # 5 minutes
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
