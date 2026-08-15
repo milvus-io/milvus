@@ -557,7 +557,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", response), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				HTTPReturnMessage: resultErrMessage(err),
 			})
 		} else {
 			HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
@@ -637,7 +637,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", response), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				HTTPReturnMessage: resultErrMessage(err),
 			})
 		} else {
 			HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
@@ -1036,7 +1036,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+					HTTPReturnMessage: resultErrMessage(err),
 				})
 			} else {
 				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})

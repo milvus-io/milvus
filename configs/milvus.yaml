@@ -448,11 +448,21 @@ proxy:
     # itself is the risk the setting exists to remove; values below 1 are read as 1.
     maxExprParamsDepth: 100
     # high-level restful api, return a JSON field as the document it holds rather than as a string.
-    # A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
-    # Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
-    # hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
-    # form and a warning is logged, so a caller always sees one shape or the other and never a mixture.
-    nativeJSONResponse: false
+    # Turn this off only to keep clients written against the older shape working while they migrate: there a JSON field read
+    # back as "{\"a\":1}" while the same value in the dynamic field read back as {"a":1}. The insert path follows the same
+    # switch, so either shape can be sent back unchanged: while the field reads back as text, a JSON string is read as the
+    # document it spells; once it reads back as the document itself, a string is stored as the string it is. Rows written
+    # before the insert path stopped storing non-JSON bytes may not hold a document; if any row in a response is such a row,
+    # every JSON field in that response falls back to the string form and a warning is logged, so a caller always sees one
+    # shape or the other and never a mixture.
+    nativeJSONResponse: true
+    # high-level restful api, whether to return Array fields wrapped in the raw protobuf ScalarField shape
+    # ({"tags":{"Data":{"StringData":{"data":["a","b"]}}}}) instead of a native JSON array ({"tags":["a","b"]}).
+    # Only enable this to keep clients written against the old, incorrect shape working while they migrate;
+    # it will be removed in a future release. It covers the shape of a top-level Array field and nothing else:
+    # a struct array's sub-fields are unaffected, and so is Accept-Type-Allow-Int64, which renders an Int64 as a
+    # string wherever one appears, including inside either kind of array.
+    legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
