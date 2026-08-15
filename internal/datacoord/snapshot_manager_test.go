@@ -226,34 +226,39 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	assert.Equal(t, int64(2001), snapshotID)
 }
 
-func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
+// An ack callback is at-least-once, so finding the snapshot already created
+// means this invocation is a replay, not a duplicate request. Returning an error
+// would be retried forever, and the collection's exclusive DDL resource key is
+// released only when the callback succeeds -- so every later DDL on the
+// collection would block permanently. Duplicate user requests are rejected far
+// earlier, in Server.CreateSnapshot, under the snapshot-name resource key.
+func TestSnapshotManager_CreateSnapshot_ReplayIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
-	// Mock snapshotMeta.GetSnapshot to return existing snapshot
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return &datapb.SnapshotInfo{Id: 1, Name: name}, nil // Name already exists
+		return &datapb.SnapshotInfo{Id: 42, Name: name}, nil // already created by the first invocation
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 	sm := NewSnapshotManager(
 		emptySnapshotTestMeta(),
-		&snapshotMeta{},
+		snapshotMetaInstance,
 		nil,
-		nil,
-		nil,
+		nil, // no allocator: a replay must not allocate a second ID
+		nil, // no handler: a replay must not regenerate snapshot data
 		nil,
 		nil,
 		nil, /* indexEngineVersionManager */
 	)
 
-	// Execute
 	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0, testCreateSnapshotBoundary())
 
-	// Verify
-	assert.Error(t, err)
-	assert.Equal(t, int64(0), snapshotID)
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
-	assert.Contains(t, err.Error(), "already exists")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(42), snapshotID)
+	// It returns before touching the freeze, so a replay leaves no protection
+	// behind for a snapshot that is already saved and protected on its own.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
 func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {

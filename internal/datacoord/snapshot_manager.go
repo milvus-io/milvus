@@ -473,9 +473,27 @@ func (sm *snapshotManager) CreateSnapshot(
 		mlog.String("description", description),
 		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
 
-	// Validate snapshot name uniqueness within collection (protected by createSnapshotLock)
-	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
-		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
+	// Already created: report success rather than an error (protected by
+	// createSnapshotLock).
+	//
+	// This runs as an ack callback, whose contract is at-least-once, so a second
+	// invocation for the same message is normal rather than a caller mistake. It
+	// is reachable in production: doAckCallback saves the snapshot inside
+	// callMessageAckCallbackUntilDone and only then calls MarkAckCallbackDone,
+	// and MarkAckCallbackDone panics outright if its etcd write fails -- so one
+	// etcd blip in that window deterministically replays the callback against a
+	// snapshot that already exists. Returning an error there would be retried
+	// forever, and since the collection's exclusive DDL resource key is released
+	// only by MarkAckCallbackDone on success, every later DDL on the collection
+	// would block permanently.
+	//
+	// A genuine duplicate request cannot reach here: Server.CreateSnapshot
+	// rejects an existing name twice, the second time while holding the
+	// exclusive snapshot-name resource key.
+	if existing, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
+		mlog.Info(context.TODO(), "snapshot already exists, treating this callback as a replay",
+			mlog.Int64("snapshotID", existing.GetId()))
+		return existing.GetId(), nil
 	}
 
 	// Freeze segment boundaries before anything else. The boundary was cut when
