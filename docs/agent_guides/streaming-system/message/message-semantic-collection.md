@@ -15,7 +15,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | AlterIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
-| CreateSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| CreateSnapshot | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
@@ -38,7 +38,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
-- **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
+- **CreateSnapshot**: Manages collection snapshots. Broadcast to VChannels + CChannel: the shard interceptor fences (flushes and seals) every growing segment of the collection at the message's own position on each VChannel, the same way ManualFlush and SchemaChange do, so the snapshot's boundary is a real cut in the write order rather than a channel checkpoint. Exclusive on VChannel for the same reason -- a concurrent insert could otherwise land on either side of a boundary already declared.
+- **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
@@ -72,15 +73,15 @@ CreateCollection → [CreatePartition | DropPartition]* → DropCollection
 ### Segment Lifecycle
 
 ```
-CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollection | TruncateCollection | FlushAll)
+CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollection | TruncateCollection | FlushAll | CreateSnapshot)
 ```
 
 - **CreateSegment** must precede any Insert referencing that segment.
-- Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll) seals the segment. No Insert may reference it afterward.
+- Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll, CreateSnapshot) seals the segment. No Insert may reference it afterward. Unlike the others, CreateSnapshot's seal does not terminate the segment's future -- Insert may resume on a newly created segment after the snapshot's boundary, the same way ManualFlush allows continued writes on a replacement segment.
 
 ### Exclusive Lock Rule
 
-DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
+DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll, CreateSnapshot) acquire exclusive locks. While held:
 - No DML (Insert/Delete) can append to locked VChannels.
 - In-flight transactions on locked VChannels are failed.
 
