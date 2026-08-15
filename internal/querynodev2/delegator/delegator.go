@@ -686,8 +686,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					return err
 				}
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					log.Debug("delegator hybrid search failed",
-						zap.String("reason", result.GetStatus().GetReason()))
+					log.Debug(groupCtx, "delegator hybrid search failed",
+						mlog.String("reason", result.GetStatus().GetReason()))
 					return merr.Error(result.GetStatus())
 				}
 				results[index] = result

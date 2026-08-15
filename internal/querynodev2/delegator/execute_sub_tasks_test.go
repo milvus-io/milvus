@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -51,7 +51,7 @@ func TestExecuteSubTasksPreservesWorkerStatusError(t *testing.T) {
 			}, nil
 		},
 		"Query",
-		log.Ctx(context.Background()),
+		mlog.With(),
 	)
 
 	require.Error(t, err)
@@ -85,7 +85,7 @@ func TestExecuteSubTasksUsesFirstWorkerErrorAsStatusCode(t *testing.T) {
 			}, nil
 		},
 		"Search",
-		log.Ctx(context.Background()),
+		mlog.With(),
 	)
 
 	require.Error(t, err)
@@ -125,7 +125,7 @@ func TestExecuteSubTasksPrioritizesBackpressureErrorAsStatusCode(t *testing.T) {
 			}, nil
 		},
 		"Search",
-		log.Ctx(context.Background()),
+		mlog.With(),
 	)
 
 	require.Error(t, err)
