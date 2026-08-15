@@ -7226,7 +7226,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 
 	p.StatsTaskPendingLimit = ParamItem{
 		Key:          "dataCoord.statsTaskPendingLimit",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks than this limit",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
