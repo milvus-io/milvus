@@ -3465,6 +3465,55 @@ func TestAcquireCaptureSlot(t *testing.T) {
 	}
 }
 
+// Queueing for a capture slot must not happen with pending already set. Pending
+// blocks every non-L0 compaction on the collection, sort included, and the slot
+// is contended by unrelated collections -- so the wrong order freezes this
+// collection's compaction for as long as someone else's capture runs, which is
+// the head-of-line coupling the per-collection create lock exists to avoid.
+func TestCreateSnapshot_DoesNotHoldPendingWhileQueuedForCaptureSlot(t *testing.T) {
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+	sm := NewSnapshotManager(
+		emptySnapshotTestMeta(), snapshotMetaInstance, nil, nil, nil, nil, nil, nil,
+	)
+
+	// Saturate the slots so the call below has to queue.
+	releases := make([]func(), 0, maxConcurrentSnapshotCaptures)
+	for range maxConcurrentSnapshotCaptures {
+		release, err := sm.acquireCaptureSlot(context.Background())
+		require.NoError(t, err)
+		releases = append(releases, release)
+	}
+
+	created := make(chan struct{})
+	go func() {
+		defer close(created)
+		// nil allocator: this panics once it gets a slot, which is fine -- the
+		// assertion below happens while it is still queued.
+		defer func() { _ = recover() }()
+		_, _ = sm.CreateSnapshot(context.Background(), 100, "queued", "", 0, testCreateSnapshotBoundary())
+	}()
+
+	// Give it time to reach the slot wait.
+	assert.Eventually(t, func() bool {
+		return snapshotMetaInstance.IsCollectionCompactionBlocked(100)
+	}, time.Second, 5*time.Millisecond, "the staging freeze should be established before queueing")
+
+	// Staging is expected (it holds the boundary). Pending is not: it would also
+	// block sort compaction while this call is merely waiting its turn.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlockedIgnoringStaging(100),
+		"pending must not be held while queued for a capture slot")
+
+	for _, release := range releases {
+		release()
+	}
+	<-created
+}
+
 func TestNamespacedSnapshotExportTarget(t *testing.T) {
 	const namespace = "550e8400-e29b-41d4-a716-446655440000"
 	tests := []struct {

@@ -108,6 +108,14 @@ func NewSnapshotBoundary(results map[string]*message.AppendResult) (*SnapshotBou
 // Returns an error rather than letting the adaptor panic on a MessageID it does
 // not recognize: this runs inside the DDL ack callback, where a panic takes
 // DataCoord down with it.
+//
+// The allow-list is exactly what MustGetMQWrapperIDAndWALNameFromMessage
+// handles, so today it can only reject WALNameTest, which is build-tagged out
+// of production binaries. NOTE for whoever adds a fifth WAL: extend the adaptor
+// AND add a matching pre-broadcast check. Failing here is after the append, and
+// an error after the append is retried forever without releasing the
+// collection's DDL resource key -- the silent wedge checkSnapshotSortReachable
+// exists to prevent.
 func snapshotSeekMsgID(messageID message.MessageID) ([]byte, commonpb.WALName, error) {
 	switch messageID.WALName() {
 	case message.WALNameRocksmq, message.WALNameKafka, message.WALNamePulsar, message.WALNameWoodpecker:

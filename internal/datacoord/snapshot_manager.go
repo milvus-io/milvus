@@ -550,16 +550,25 @@ func (sm *snapshotManager) CreateSnapshot(
 	// Unlike staging, pending IS released per attempt. It also blocks sort
 	// compaction, so leaving it set across a retry would forbid exactly the
 	// tasks the next attempt's wait is waiting on.
-	sm.snapshotMeta.SetSnapshotPending(collectionID)
-	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
-
 	// Bound how many collections hold a captured segment list in memory at once.
-	// Taken after the wait, so the long part of a snapshot never occupies a slot.
+	//
+	// Queue for the slot BEFORE taking pending, never after. Pending blocks every
+	// non-L0 compaction on this collection, sort included, and waiting for a slot
+	// is waiting on unrelated collections -- so setting pending first would freeze
+	// this collection's compaction for as long as someone else's capture runs, and
+	// with N collections queueing behind a fixed number of slots that stacks into
+	// exactly the head-of-line coupling the per-collection create lock removed.
+	//
+	// The wait is also outside this, deliberately: it is the long part, and
+	// holding a slot through it would serialize snapshots cluster-wide again.
 	releaseCaptureSlot, err := sm.acquireCaptureSlot(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer releaseCaptureSlot()
+
+	sm.snapshotMeta.SetSnapshotPending(collectionID)
+	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
 
 	// Allocate snapshot ID
 	snapshotID, err := sm.allocator.AllocID(ctx)
@@ -712,16 +721,28 @@ func segmentsNeedingSortNow(ctx context.Context, m *meta, collectionID int64) ([
 
 	needing := make([]int64, 0, len(candidates))
 	for _, info := range candidates {
+		if info.GetState() != commonpb.SegmentState_Flushed {
+			// Not yet flushed, so ask the cheap question only: a growing segment
+			// has no binlogs until it flushes, and its row count is the evidence
+			// it will become one worth waiting on. Deliberately NOT
+			// segmentHasSnapshotData -- that parses the StorageV3 manifest path
+			// and errors on a malformed one, which would abort this whole check
+			// (and so reject the snapshot) over a segment neither
+			// segmentsAwaitingSort nor GenSnapshot would ever have inspected.
+			if info.GetNumOfRows() > 0 || len(info.GetBinlogs()) > 0 {
+				needing = append(needing, info.GetID())
+			}
+			continue
+		}
+		// Flushed: the same emptiness test segmentsAwaitingSort applies, so the
+		// pre-check and the wait agree on which segments count.
 		hasData, err := segmentHasSnapshotData(info)
 		if err != nil {
 			return nil, err
 		}
-		// A growing segment has no binlogs until it flushes, so its row count is
-		// the only evidence it will become a segment worth waiting on.
-		if !hasData && info.GetNumOfRows() == 0 {
-			continue
+		if hasData {
+			needing = append(needing, info.GetID())
 		}
-		needing = append(needing, info.GetID())
 	}
 	return needing, nil
 }
@@ -1414,10 +1435,15 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 
 // maxConcurrentSnapshotCaptures bounds concurrent GenSnapshot -> SaveSnapshot
 // windows. Sized as a safety bound against a bulk snapshot of many collections
-// exhausting memory, not as a throughput knob -- the window holds no long waits
-// and no blocking object reads, so a small number keeps it off the critical
-// path while capping peak footprint at a few collections' worth of cloned
-// segment metadata.
+// exhausting memory, not as a throughput knob: it caps peak footprint at a few
+// collections' worth of cloned segment metadata.
+//
+// The window is short in the normal case -- GenSnapshot does no object I/O,
+// only path computation -- but it is not unconditionally fast: SaveSnapshot
+// writes the manifest set to object storage between two etcd writes, so a
+// degraded backend can hold a slot for as long as those take. Callers therefore
+// queue for a slot before taking any state that blocks other work on their
+// collection.
 const maxConcurrentSnapshotCaptures = 4
 
 // acquireCaptureSlot blocks until a capture slot is free and returns its
