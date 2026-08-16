@@ -575,32 +575,29 @@ func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
 // one task should only run this once
 //
 // The swap is overlap-based on purpose: results are published first, inputs
-// retired immediately after, so a crash leaves both generations live rather
-// than neither. They are still two catalog writes; collapsing them into one
-// ordered catalog.Update (as completeMixCompactionMutation does) would close
-// the remaining gap, but not the much longer invisible-results one before it,
-// so readers must dedup by CompactionFrom either way.
+// retired last, so a crash leaves both generations live rather than neither.
+//
+// Do not move markInputSegmentsDropped earlier to narrow that overlap. It must
+// stay after the completed state is saved: doClean's else branch keys on
+// isInputDropped, and reaching it with the inputs already Dropped runs the
+// v2.4-compat path, which demotes the results to L1 and deletes their partition
+// stats -- discarding the whole clustering run instead of rolling back to the
+// inputs. Readers dedup the overlap by CompactionFrom instead (retrieveSegment,
+// dropSupersededByLineage), which they must do anyway for the far longer
+// invisible-results window before this.
 func (t *clusteringCompactionTask) completeTask() error {
 	var err error
 	// first mark result segments visible
 	if err = t.markResultSegmentsVisible(); err != nil {
 		return err
 	}
-	// Then retire the inputs, with nothing in between: both generations are live
-	// until this lands, so every write placed between the two widens that window
-	// for no reason. Failure is tolerated exactly as before -- the results are
-	// published, the inputs still serve, and doClean retries the drop.
-	if err = t.markInputSegmentsDropped(); err != nil {
-		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, skip it and wait retry")
-	}
 
 	// update current partition stats version
+	// at this point, the segment view includes both the input segments and the result segments.
 	// Persist the stats info and the current-version pointer bump as a single
 	// composite catalog write (info first, version pointer last as the commit
 	// marker), so a crash cannot leave the current version pointing at a stats
-	// set that was never persisted. Ordering against the swap above does not
-	// matter: PruneSegments only ever drops segments named by the loaded stats
-	// snapshot, so a segment it has not heard of is served, never pruned.
+	// set that was never persisted.
 	if err = t.meta.GetPartitionStatsMeta().SavePartitionStatsAndVersion(&datapb.PartitionStatsInfo{
 		CollectionID: t.GetTaskProto().GetCollectionID(),
 		PartitionID:  t.GetTaskProto().GetPartitionID(),
@@ -615,6 +612,11 @@ func (t *clusteringCompactionTask) completeTask() error {
 	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
 		mlog.Warn(context.TODO(), "completeTask update task state to completed failed", mlog.Err(err))
 		return err
+	}
+	// mark input segments as dropped
+	// now, the segment view only includes the result segments.
+	if err = t.markInputSegmentsDropped(); err != nil {
+		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, skip it and wait retry")
 	}
 
 	return nil
