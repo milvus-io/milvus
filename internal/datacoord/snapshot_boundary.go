@@ -43,8 +43,16 @@ import (
 // membership can be decided per segment instead of per row.
 type SnapshotBoundary struct {
 	// SeekPositions is one position per data vchannel, sorted by channel name.
-	// It doubles as the snapshot's restore point: content ends here, replay
-	// resumes here.
+	//
+	// In-process it decides membership: SeekTs gives each segment's channel its
+	// own cut, and the deltalog filter uses the same value.
+	//
+	// It is also persisted as SnapshotInfo.channel_seek_positions, and there it
+	// is provenance only -- nothing reads it back today. Restore re-pins target
+	// checkpoints from collection.StartPositions instead. It is still the only
+	// durable record of where a snapshot cut per channel, since create_ts is a
+	// min across channels by definition, so it is written correctly (a real
+	// MsgID plus its WALName) rather than dropped.
 	SeekPositions []*msgpb.MsgPosition
 	// SnapshotTs is min over SeekPositions. Each vchannel gets its own timetick
 	// from a broadcast, so this is a summary, not a global cross-channel instant.
