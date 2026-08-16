@@ -33,8 +33,7 @@ class TestNprobeValidation(TestcaseBase):
     """
 
     def _vectors(self):
-        return [[random.random() for _ in range(ct.default_dim)]
-                for _ in range(ct.default_nq)]
+        return [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_nprobe_zero_rejected_sealed_with_index(self):
@@ -45,8 +44,8 @@ class TestNprobeValidation(TestcaseBase):
         collection_w.create_index(field, ivf_index)
         collection_w.load()
         collection_w.search(
-            self._vectors(), field, nprobe_zero, ct.default_limit,
-            check_task=CheckTasks.err_res, check_items=err_items)
+            self._vectors(), field, nprobe_zero, ct.default_limit, check_task=CheckTasks.err_res, check_items=err_items
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_nprobe_zero_rejected_growing(self):
@@ -56,8 +55,8 @@ class TestNprobeValidation(TestcaseBase):
         collection_w.insert(cf.gen_default_dataframe_data(nb=ct.default_nb))
         collection_w.load()
         collection_w.search(
-            self._vectors(), field, nprobe_zero, ct.default_limit,
-            check_task=CheckTasks.err_res, check_items=err_items)
+            self._vectors(), field, nprobe_zero, ct.default_limit, check_task=CheckTasks.err_res, check_items=err_items
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_nprobe_valid_accepted(self):
@@ -68,6 +67,10 @@ class TestNprobeValidation(TestcaseBase):
         collection_w.create_index(field, ivf_index)
         collection_w.load()
         collection_w.search(
-            self._vectors(), field, nprobe_valid, ct.default_limit,
+            self._vectors(),
+            field,
+            nprobe_valid,
+            ct.default_limit,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": ct.default_nq, "limit": ct.default_limit})
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
