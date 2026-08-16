@@ -73,9 +73,6 @@ type Entry interface {
 // intentionally omitted until such a caller exists.
 type SegmentEntry struct {
 	Segment *datapb.SegmentInfo
-	// ExpectedSegment, when set, guards the replacement with an equality
-	// predicate on the persisted segment record.
-	ExpectedSegment *datapb.SegmentInfo
 	// AlterEncoding selects the legacy AlterSegments key/value encoding for an
 	// ActionUpdate instead of the record-only SaveDroppedSegmentsInBatch
 	// encoding. It matters only for a Dropped segment: AlterSegments also
@@ -199,12 +196,6 @@ func AddSegment(seg *datapb.SegmentInfo) UpdateAction {
 // AlterSegments GC-compat behavior is required.
 func UpdateSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg}}
-}
-
-// UpdateSegmentCAS updates a segment record only if its persisted value still
-// equals expected.
-func UpdateSegmentCAS(seg, expected *datapb.SegmentInfo) UpdateAction {
-	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg, ExpectedSegment: expected}}
 }
 
 // UpdateSegmentIndex returns an UpdateAction that persists a complete segment

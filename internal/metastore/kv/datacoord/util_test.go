@@ -20,8 +20,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 func TestBuildExternalCollectionRefreshJobKey(t *testing.T) {
@@ -68,28 +66,4 @@ func TestBuildExternalCollectionRefreshKeyConsistency(t *testing.T) {
 	// Different jobIDs should produce different keys
 	key3 := buildExternalCollectionRefreshJobKey(int64(54321))
 	assert.NotEqual(t, key1, key3)
-}
-
-func TestMarshalSegmentInfoDeterministicWithMapFields(t *testing.T) {
-	segment := &datapb.SegmentInfo{
-		ID:           3,
-		CollectionID: 1,
-		PartitionID:  2,
-		TextStatsLogs: map[int64]*datapb.TextIndexStats{
-			101: {FieldID: 101, Files: []string{"b.txt", "a.txt"}},
-			100: {FieldID: 100, Files: []string{"c.txt"}},
-		},
-		JsonKeyStats: map[int64]*datapb.JsonKeyStats{
-			101: {FieldID: 101, Files: []string{"shared_key_index/b"}},
-			100: {FieldID: 100, Files: []string{"shared_key_index/a"}},
-		},
-	}
-
-	encodings := make(map[string]struct{})
-	for range 64 {
-		encoded, err := marshalSegmentInfo(segment)
-		assert.NoError(t, err)
-		encodings[encoded] = struct{}{}
-	}
-	assert.Len(t, encodings, 1)
 }

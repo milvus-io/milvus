@@ -931,9 +931,8 @@ func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) erro
 }
 
 type updateSegmentPack struct {
-	meta             *meta
-	segments         map[int64]*SegmentInfo
-	expectedSegments map[int64]*SegmentInfo
+	meta     *meta
+	segments map[int64]*SegmentInfo
 	// for update etcd binlog paths
 	increments map[int64]metastore.BinlogsIncrement
 	// for update segment metric after alter segments
@@ -948,13 +947,6 @@ func (p *updateSegmentPack) fail(err error) bool {
 		p.err = err
 	}
 	return false
-}
-
-func (p *updateSegmentPack) setExpected(segmentID int64) {
-	if p.expectedSegments == nil {
-		p.expectedSegments = make(map[int64]*SegmentInfo)
-	}
-	p.expectedSegments[segmentID] = p.meta.segments.GetSegment(segmentID).Clone()
 }
 
 func (p *updateSegmentPack) Validate() error {
@@ -1819,7 +1811,6 @@ func UpdateManifestPathForIndex(segmentID int64, manifestPath string) UpdateOper
 		}
 
 		segment.ManifestPath = manifestPath
-		modPack.setExpected(segmentID)
 		return true
 	}
 }
@@ -1846,7 +1837,6 @@ func UpdateManifestPathForGC(segmentID int64, manifestPath string) UpdateOperato
 				segmentID, segment.GetManifestPath(), manifestPath))
 		}
 		segment.ManifestPath = manifestPath
-		modPack.setExpected(segmentID)
 		return true
 	}
 }
@@ -2031,10 +2021,9 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	updatePack := &updateSegmentPack{
-		meta:             m,
-		segments:         make(map[int64]*SegmentInfo),
-		expectedSegments: make(map[int64]*SegmentInfo),
-		increments:       make(map[int64]metastore.BinlogsIncrement),
+		meta:       m,
+		segments:   make(map[int64]*SegmentInfo),
+		increments: make(map[int64]metastore.BinlogsIncrement),
 		metricMutation: &segMetricMutation{
 			stateChange:             make(segmentMetricStateChange),
 			deferSegmentLabelChange: true,
@@ -2078,20 +2067,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
 	increments := lo.Values(updatePack.increments)
 
-	var persistErr error
-	if len(updatePack.expectedSegments) > 0 && len(increments) == 0 {
-		actions := make([]metastore.UpdateAction, 0, len(segments))
-		for _, segment := range segments {
-			if expected := updatePack.expectedSegments[segment.GetID()]; expected != nil {
-				actions = append(actions, metastore.UpdateSegmentCAS(segment, expected.SegmentInfo))
-			} else {
-				actions = append(actions, metastore.UpdateSegment(segment))
-			}
-		}
-		persistErr = m.catalog.Update(ctx, actions...)
-	} else {
-		persistErr = m.catalog.AlterSegments(ctx, segments, increments...)
-	}
+	persistErr := m.catalog.AlterSegments(ctx, segments, increments...)
 	if persistErr != nil {
 		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
 			mlog.Err(persistErr))
@@ -2123,7 +2099,7 @@ func (m *meta) FinishIndexTaskWithManifest(ctx context.Context, taskInfo *worker
 		return merr.WrapErrSegmentNotFound(segmentID)
 	}
 	segUpdated := seg.Clone()
-	pack := &updateSegmentPack{meta: m, segments: map[int64]*SegmentInfo{segmentID: segUpdated}, expectedSegments: make(map[int64]*SegmentInfo), increments: make(map[int64]metastore.BinlogsIncrement), metricMutation: &segMetricMutation{stateChange: make(segmentMetricStateChange), deferSegmentLabelChange: true}}
+	pack := &updateSegmentPack{meta: m, segments: map[int64]*SegmentInfo{segmentID: segUpdated}, increments: make(map[int64]metastore.BinlogsIncrement), metricMutation: &segMetricMutation{stateChange: make(segmentMetricStateChange), deferSegmentLabelChange: true}}
 	if !UpdateManifestPathForIndex(segmentID, manifestPath)(pack) {
 		if pack.err != nil {
 			return pack.err
@@ -2147,7 +2123,7 @@ func (m *meta) FinishIndexTaskWithManifest(ctx context.Context, taskInfo *worker
 	if err != nil {
 		return err
 	}
-	if err := m.catalog.Update(ctx, metastore.UpdateSegmentCAS(segUpdated.SegmentInfo, seg.SegmentInfo), metastore.UpdateSegmentIndex(updatedIdx)); err != nil {
+	if err := m.catalog.Update(ctx, metastore.UpdateSegment(segUpdated.SegmentInfo), metastore.UpdateSegmentIndex(updatedIdx)); err != nil {
 		return err
 	}
 	m.segments.SetSegment(segmentID, segUpdated)

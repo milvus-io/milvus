@@ -247,12 +247,7 @@ func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
 	metautil.ExtractTextLogFilenames(segment.GetTextStatsLogs())
 	metautil.ExtractJSONKeyStatsRelativePaths(segment.GetJsonKeyStats())
 
-	// Segment records are also used as the expected value of etcd CAS
-	// transactions.  A SegmentInfo contains map fields (for example text and
-	// JSON stats), so the default protobuf encoding can produce a different
-	// byte sequence for an otherwise identical value.  Keep the persisted
-	// representation deterministic so a later CAS can compare it reliably.
-	segBytes, err := proto.MarshalOptions{Deterministic: true}.Marshal(segment)
+	segBytes, err := proto.Marshal(segment)
 	if err != nil {
 		return "", merr.WrapErrSerializationFailed(err, "marshal segment: %d", segment.ID)
 	}
