@@ -81,9 +81,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	}); err != nil {
 		// release the scanner to avoid resource leak.
 		if err := scanner.Close(); err != nil {
-			resource.Resource().Logger().Warn(context.TODO(),
-
-				"close scanner failed at create consume server", mlog.Err(err))
+			resource.Resource().Logger().Warn(context.TODO(), "close scanner failed at create consume server", mlog.Err(err))
 		}
 		return nil, err
 	}

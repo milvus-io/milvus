@@ -38,6 +38,7 @@ namespace exec {
 
 void
 PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span("PhyNullExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
                                  static_cast<int>(expr_->column_.data_type_));
@@ -115,7 +116,7 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -129,7 +130,7 @@ PhyNullExpr::DetermineExecPath() {
     }
 
     SegmentExpr::DetermineExecPath();
-    if (exec_path_ == ExprExecPath::ScalarIndex && CanUseNestedIndex()) {
+    if (PinnedIndexIsNested()) {
         exec_path_ = ExprExecPath::RawData;
         pinned_index_.clear();
         num_index_chunk_ = 0;
@@ -188,7 +189,7 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
             break;
         }
         default:
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported null expr type {}",
                       proto::plan::NullExpr_NullOp_Name(expr_->op_));
     }

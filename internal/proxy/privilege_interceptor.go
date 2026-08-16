@@ -12,8 +12,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -23,6 +25,8 @@ import (
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
 
+const RBACRoleContextKey = hook.HookContextKeyType("rbac-role")
+
 var (
 	initOnce                sync.Once
 	initPrivilegeGroupsOnce sync.Once
@@ -30,12 +34,20 @@ var (
 
 var roPrivileges, rwPrivileges, adminPrivileges map[string]struct{}
 
+func SetRBACRolesToContext(ctx context.Context, roles []string) context.Context {
+	rolesCopy := append([]string(nil), roles...)
+	return context.WithValue(ctx, RBACRoleContextKey, rolesCopy)
+}
+
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
 	privilege.InitPrivilegeGroups()
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := privilegeFunc(ctx, req)
 		if err != nil {
+			hookutil.GetExtension().ReportAction(newCtx, req, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
 			return nil, err
 		}
 		return handler(newCtx, req)
@@ -66,10 +78,30 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		return ctx, err
 	}
 	roleNames = append(roleNames, util.RolePublic)
+	ctx = SetRBACRolesToContext(ctx, roleNames)
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	objectPrivilege := privilegeExt.ObjectPrivilege.String()
+	// Authorize against the db the request actually operates on, resolved by
+	// privilege level (mirrors the grant-side validation; see
+	// milvus-io/milvus#50678):
+	//   - Cluster-level privileges (CreateDatabase/ResourceGroup/...) are not
+	//     scoped to a database, so authorize them globally (AnyWord),
+	//     independent of the connection namespace.
+	//   - Database-/Collection-level privileges are scoped to the db the request
+	//     targets: the request-body DbName takes precedence, falling back to the
+	//     connection-context db.
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+	if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
+		dbName = util.AnyWord
+	}
+	// RenameCollection is a database-admin privilege: a same-db rename is
+	// authorized against the target db (database level, handled above), while a
+	// cross-db rename additionally requires a cluster-scoped (global) grant.
+	if r, ok := req.(*milvuspb.RenameCollectionRequest); ok && r.GetDbName() != r.GetNewDBName() {
+		dbName = util.AnyWord
+	}
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
@@ -112,8 +144,6 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 		objectNames = resolvedNames
 	}
-
-	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 
 	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
 		mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),

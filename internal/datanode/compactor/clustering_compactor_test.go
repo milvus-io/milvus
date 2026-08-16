@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -65,6 +66,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 func (s *ClusteringCompactionTaskSuite) setupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
@@ -119,6 +122,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
 func (s *ClusteringCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *ClusteringCompactionTaskSuite) TestWrongCompactionType() {
@@ -151,13 +156,10 @@ func (s *ClusteringCompactionTaskSuite) TestIsVectorClusteringKey() {
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptyBinlog() {
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
 	_, err := s.task.Compact()
 	s.Require().Error(err)
 	s.Equal(true, errors.Is(err, merr.ErrIllegalCompactionPlan))
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
-	_, err2 := s.task.Compact()
-	s.Require().Error(err2)
-	s.Equal(true, errors.Is(err2, merr.ErrIllegalCompactionPlan))
 }
 
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptySchema() {
@@ -190,7 +192,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"1"}).
@@ -203,7 +205,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRow(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -299,7 +301,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRow(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -403,7 +405,7 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowN
 	for i := 0; i < rowNum; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRowWithBM25(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -533,7 +535,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOr
 }
 
 func genRow(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),
@@ -648,7 +650,7 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),

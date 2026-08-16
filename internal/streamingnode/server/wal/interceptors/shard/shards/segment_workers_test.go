@@ -296,31 +296,30 @@ func TestSegmentAllocWorker_InitSegmentConfig(t *testing.T) {
 	assert.Equal(t, firstLimitation, w.limitation)
 }
 
-func TestSegmentAllocWorkerStorageVersionFollowsUseLoonFFI(t *testing.T) {
+func TestSegmentAllocWorkerStorageVersionFollowsRequirements(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
 	param := paramtable.Get()
 	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
 
 	for name, tc := range map[string]struct {
-		useLoonFFI            string
-		useGrowingSourceFlush bool
-		expected              int64
+		useLoonFFI        string
+		requiresStorageV3 bool
+		expected          int64
 	}{
-		"v2_without_growing_source": {useLoonFFI: "false", useGrowingSourceFlush: false, expected: storage.StorageV2},
-		"v2_with_growing_source":    {useLoonFFI: "false", useGrowingSourceFlush: true, expected: storage.StorageV2},
-		"v3_without_growing_source": {useLoonFFI: "true", useGrowingSourceFlush: false, expected: storage.StorageV3},
-		"v3_with_growing_source":    {useLoonFFI: "true", useGrowingSourceFlush: true, expected: storage.StorageV3},
+		"v2_without_requirement": {useLoonFFI: "false", expected: storage.StorageV2},
+		"v3_required_by_schema":  {useLoonFFI: "false", requiresStorageV3: true, expected: storage.StorageV3},
+		"v3_with_ffi":            {useLoonFFI: "true", expected: storage.StorageV3},
 	} {
 		t.Run(name, func(t *testing.T) {
 			param.Save(param.CommonCfg.UseLoonFFI.Key, tc.useLoonFFI)
 			w := &segmentAllocWorker{
-				ctx:                   context.Background(),
-				collectionID:          1,
-				partitionID:           2,
-				vchannel:              "v1",
-				wal:                   mock_wal.NewMockWAL(t),
-				useGrowingSourceFlush: tc.useGrowingSourceFlush,
+				ctx:               context.Background(),
+				collectionID:      1,
+				partitionID:       2,
+				vchannel:          "v1",
+				wal:               mock_wal.NewMockWAL(t),
+				requiresStorageV3: tc.requiresStorageV3,
 			}
 			w.SetLogger(mlog.With())
 

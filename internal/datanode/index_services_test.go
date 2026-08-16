@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -32,10 +33,16 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -70,6 +77,180 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		assert.Fail(t, "timeout task chan")
 	}
+}
+
+type fakeServiceIndex struct{}
+
+func (fakeServiceIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
+func (fakeServiceIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
+func (fakeServiceIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
+func (fakeServiceIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
+func (fakeServiceIndex) Delete() error                                               { return nil }
+func (fakeServiceIndex) CleanLocalData() error                                       { return nil }
+func (fakeServiceIndex) UpLoad() (*cgopb.IndexStats, error) {
+	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{{FileName: "text-index", FileSize: 10}}}, nil
+}
+
+func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
+	paramtable.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := NewDataNode(ctx)
+	defer node.cancel()
+
+	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
+	expected := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     1,
+		EncryptionKey:    "unsafe-key",
+	}
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).To(
+		func(got []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+			require.Equal(t, requestContext, got)
+			require.Equal(t, expected.GetCollectionId(), collectionID)
+			return expected, nil
+		}).Build()
+	defer parseMock.UnPatch()
+
+	var captured *indexcgopb.StoragePluginContext
+	analyzeMock := mockey.Mock(analyzecgowrapper.Analyze).To(
+		func(_ context.Context, _ *clusteringpb.AnalyzeInfo, pluginContext *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
+			captured = pluginContext
+			return nil, nil
+		}).Build()
+	defer analyzeMock.UnPatch()
+
+	status, err := node.createAnalyzeTask(ctx, &workerpb.AnalyzeRequest{
+		ClusterID:     "cluster",
+		TaskID:        100,
+		CollectionID:  expected.GetCollectionId(),
+		PartitionID:   2,
+		FieldID:       101,
+		FieldName:     "vector",
+		FieldType:     schemapb.DataType_FloatVector,
+		Dim:           8,
+		PluginContext: requestContext,
+		StorageConfig: &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	require.NotNil(t, task)
+	require.NoError(t, task.Execute(ctx))
+	require.Equal(t, expected, captured)
+}
+
+func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
+	paramtable.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
+	defer parseMock.UnPatch()
+
+	const taskID = int64(100)
+	status, err := node.createAnalyzeTask(ctx, &workerpb.AnalyzeRequest{
+		ClusterID:    "cluster",
+		TaskID:       taskID,
+		CollectionID: 1,
+	})
+	require.NoError(t, err)
+	taskErr := merr.Error(status)
+	require.Error(t, taskErr)
+	require.Nil(t, node.taskManager.GetAnalyzeTaskInfo("cluster", taskID))
+}
+
+func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
+	paramtable.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := NewDataNode(ctx)
+	defer node.cancel()
+
+	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
+	expected := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     1,
+		EncryptionKey:    "unsafe-key",
+	}
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).To(
+		func(got []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+			require.Equal(t, requestContext, got)
+			require.Equal(t, expected.GetCollectionId(), collectionID)
+			return expected, nil
+		}).Build()
+	defer parseMock.UnPatch()
+
+	var captured *indexcgopb.BuildIndexInfo
+	buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+			captured = info
+			return fakeServiceIndex{}, nil
+		}).Build()
+	defer buildMock.UnPatch()
+
+	const fieldID = int64(101)
+	status, err := node.createStatsTask(ctx, &workerpb.CreateStatsRequest{
+		ClusterID:       "cluster",
+		TaskID:          100,
+		CollectionID:    expected.GetCollectionId(),
+		PartitionID:     2,
+		SegmentID:       3,
+		TargetSegmentID: 4,
+		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		StorageVersion:  storage.StorageV2,
+		PluginContext:   requestContext,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "enable_match", Value: "true"},
+				},
+			},
+		}},
+		InsertLogs: []*datapb.FieldBinlog{{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{LogID: 1}},
+		}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	require.NotNil(t, task)
+	require.NoError(t, task.Execute(ctx))
+	require.NotNil(t, captured)
+	require.Equal(t, expected, captured.GetStoragePluginContext())
+}
+
+func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
+	paramtable.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
+	defer parseMock.UnPatch()
+
+	const taskID = int64(100)
+	status, err := node.createStatsTask(ctx, &workerpb.CreateStatsRequest{
+		ClusterID:    "cluster",
+		TaskID:       taskID,
+		CollectionID: 1,
+	})
+	require.NoError(t, err)
+	taskErr := merr.Error(status)
+	require.Error(t, taskErr)
+	require.Nil(t, node.taskManager.GetStatsTaskInfo("cluster", taskID))
 }
 
 func TestCreateIndexTaskInitializesIndexStorePathVersion(t *testing.T) {

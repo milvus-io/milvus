@@ -66,6 +66,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// legacyLoadScopeIndex is the retired wire value emitted by QueryCoord
+// versions that predate LoadScope_Reopen. Keep the value out of the proto enum
+// so it cannot be reused, while recognizing it here to return a precise
+// mixed-version protocol error.
+const legacyLoadScopeIndex = querypb.LoadScope(2)
+
 type segmentDetacher interface {
 	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
 }
@@ -255,6 +261,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.chunkManager,
 		queryView,
 		node.binlogSaver,
+		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
 	)
 	if err != nil {
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))
@@ -351,6 +358,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	pipeline.Start()
 	// delegator after all steps done
 	delegator.Start()
+	node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
 	log.Info(ctx, "watch dml channel success")
 	return merr.Success(), nil
 }
@@ -422,6 +430,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
+	node.distDeltaTracker.markChannelRemove(req.GetChannelName())
 	log.Info(ctx, "unsubscribed channel")
 
 	return merr.Success(), nil
@@ -498,6 +507,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
+		defer node.markDataDistributionLeaderSegmentLoad(req)
+
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())
 		if !ok {
 			msg := "failed to load segments, delegator not found"
@@ -535,13 +546,26 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	switch req.GetLoadScope() {
 	case querypb.LoadScope_Delta:
+		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		return node.loadDeltaLogs(ctx, req), nil
-	case querypb.LoadScope_Index:
-		return node.loadIndex(ctx, req), nil
 	case querypb.LoadScope_Stats:
+		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Reopen:
+		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		return node.reopenSegments(ctx, req), nil
+	case querypb.LoadScope_Full:
+		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		// Continue with the full segment load below.
+	case legacyLoadScopeIndex:
+		err := merr.WrapErrServiceInternalMsg(
+			"legacy segment index load scope %d is no longer supported; upgrade QueryCoord to use LoadScope_Reopen before routing requests to this QueryNode",
+			req.GetLoadScope())
+		return merr.Status(err), nil
+	default:
+		err := merr.WrapErrServiceInternalMsg(
+			"unsupported segment load scope %d", req.GetLoadScope())
+		return merr.Status(err), nil
 	}
 
 	// Actual load segment
@@ -654,6 +678,8 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	defer node.lifetime.Done()
 
 	if req.GetNeedTransfer() {
+		defer node.distDeltaTracker.markChannelUpsert(req.GetShard())
+
 		shardDelegator, ok := node.delegators.Get(req.GetShard())
 		if !ok {
 			msg := "failed to release segment, delegator not found"
@@ -678,6 +704,9 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	for _, id := range req.GetSegmentIDs() {
 		_, count := node.manager.Segment.Remove(ctx, id, req.GetScope())
 		sealedCount += count
+		if count > 0 {
+			node.distDeltaTracker.markSegmentRemove(id)
+		}
 	}
 	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
 
@@ -701,14 +730,11 @@ func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collection
 	segmentIDs = lo.Uniq(lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
 		return segmentID > 0 && !syncmgr.DefaultGrowingSourceRegistry().IsReleasePrepared(channel, segmentID, 0)
 	}))
-	if len(segmentIDs) == 0 {
-		return false, nil
-	}
 	wal := streaming.WAL()
 	if wal == nil {
 		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
 	}
-	return wal.PrepareReleaseManualFlush(ctx, collectionID, channel, segmentIDs)
+	return wal.Local().PrepareReleaseManualFlushIfLocal(ctx, collectionID, channel, segmentIDs)
 }
 
 func isReleaseManualFlushPrepareUnavailable(err error) bool {
@@ -716,12 +742,15 @@ func isReleaseManualFlushPrepareUnavailable(err error) bool {
 		return false
 	}
 	if errors.Is(err, merr.ErrServiceUnavailable) ||
+		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, handler.ErrClientClosed) ||
+		errors.Is(err, handler.ErrReadOnlyWAL) ||
 		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
 		return true
 	}
-	return streamingstatus.AsStreamingError(err).IsOnShutdown()
+	streamingErr := streamingstatus.AsStreamingError(err)
+	return streamingErr.IsOnShutdown() || streamingErr.IsWrongStreamingNode()
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
@@ -1269,68 +1298,91 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 	defer node.lifetime.Done()
 
+	node.distDeltaTracker.mu.Lock()
 	lastModifyTs := node.getDistributionModifyTS()
-	distributionChange := func() bool {
-		if req.GetLastUpdateTs() == 0 {
-			return true
-		}
-
-		return req.GetLastUpdateTs() < lastModifyTs
-	}
-
-	if !distributionChange() {
-		return &querypb.GetDataDistributionResponse{
+	if !hasDataDistributionChange(req, lastModifyTs) {
+		node.distDeltaTracker.mu.Unlock()
+		resp := &querypb.GetDataDistributionResponse{
 			Status:       merr.Success(),
 			NodeID:       node.GetNodeID(),
 			LastModifyTs: lastModifyTs,
-		}, nil
-	}
-
-	sealedSegments := node.manager.Segment.GetBy(segments.WithType(commonpb.SegmentState_Sealed))
-	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
-	for _, s := range sealedSegments {
-		segmentVersionInfos = append(segmentVersionInfos, &querypb.SegmentVersionInfo{
-			ID:                 s.ID(),
-			Collection:         s.Collection(),
-			Partition:          s.Partition(),
-			Channel:            s.Shard().VirtualName(),
-			Version:            s.Version(),
-			Level:              s.Level(),
-			IsSorted:           s.IsSorted(),
-			LastDeltaTimestamp: s.LastDeltaTimestamp(),
-			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
-				return info.IndexInfo.IndexID, info.IndexInfo
-			}),
-			JsonStatsInfo: s.GetFieldJSONIndexStats(),
-			ManifestPath:  s.LoadInfo().GetManifestPath(),
-			DataVersion:   proto.Int32(s.LoadInfo().GetDataVersion()),
-		})
-	}
-
-	channelVersionInfos := make([]*querypb.ChannelVersionInfo, 0)
-	leaderViews := make([]*querypb.LeaderView, 0)
-
-	node.delegators.Range(func(key string, delegator delegator.ShardDelegator) bool {
-		if !delegator.Serviceable() {
-			return true
 		}
-		channelVersionInfos = append(channelVersionInfos, &querypb.ChannelVersionInfo{
-			Channel:    key,
-			Collection: delegator.Collection(),
-			Version:    delegator.Version(),
-		})
+		return resp, nil
+	}
 
-		sealed, growing := delegator.GetSegmentInfo(false)
-		sealedSegments := make(map[int64]*querypb.SegmentDist)
-		for _, item := range sealed {
-			for _, segment := range item.Segments {
-				sealedSegments[segment.SegmentID] = &querypb.SegmentDist{
-					NodeID:  item.NodeID,
-					Version: segment.Version,
-				}
+	fullReport := !node.distDeltaTracker.canBuildDelta(req)
+	dirtySegments := node.distDeltaTracker.dirtySegments
+	removedSegments := node.distDeltaTracker.removedSegments
+	dirtyChannels := node.distDeltaTracker.dirtyChannels
+	removedChannels := node.distDeltaTracker.removedChannels
+	node.distDeltaTracker.clearDelta()
+	reportDeltaGeneration := node.distDeltaTracker.deltaGeneration
+	// Invalidate the delta base before scanning distribution without the tracker lock.
+	node.distDeltaTracker.lastReportedTs = 0
+	node.distDeltaTracker.mu.Unlock()
+
+	var reportSegmentIDs []int64
+	var removedSegmentIDs []int64
+	totalSegmentCount := node.manager.Segment.CountBy(segments.WithType(commonpb.SegmentState_Sealed))
+	if fullReport {
+		reportSegmentIDs = make([]int64, 0, totalSegmentCount)
+		node.manager.Segment.RangeBy(func(s segments.Segment) bool {
+			reportSegmentIDs = append(reportSegmentIDs, s.ID())
+			return true
+		}, segments.WithType(commonpb.SegmentState_Sealed))
+	} else {
+		reportSegmentIDs = make([]int64, 0, len(dirtySegments))
+		for segmentID := range dirtySegments {
+			if node.manager.Segment.GetSealed(segmentID) != nil {
+				reportSegmentIDs = append(reportSegmentIDs, segmentID)
+			} else {
+				removedSegmentIDs = append(removedSegmentIDs, segmentID)
 			}
 		}
+		for segmentID := range removedSegments {
+			removedSegmentIDs = append(removedSegmentIDs, segmentID)
+		}
+	}
 
+	var reportChannelNames []string
+	var removedChannelNames []string
+	var totalChannelCount int
+	node.delegators.Range(func(channel string, shardDelegator delegator.ShardDelegator) bool {
+		if !shardDelegator.Serviceable() {
+			return true
+		}
+
+		totalChannelCount++
+		if fullReport {
+			reportChannelNames = append(reportChannelNames, channel)
+			return true
+		}
+		if _, ok := dirtyChannels[channel]; ok {
+			reportChannelNames = append(reportChannelNames, channel)
+			delete(dirtyChannels, channel)
+		}
+		return true
+	})
+
+	if !fullReport {
+		for channel := range dirtyChannels {
+			removedChannelNames = append(removedChannelNames, channel)
+		}
+		for channel := range removedChannels {
+			removedChannelNames = append(removedChannelNames, channel)
+		}
+	}
+
+	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(reportSegmentIDs))
+	for _, segmentID := range reportSegmentIDs {
+		s := node.manager.Segment.GetSealed(segmentID)
+		if s == nil {
+			continue
+		}
+		segmentVersionInfos = append(segmentVersionInfos, buildSegmentVersionInfo(s))
+	}
+
+	buildLeaderView := func(key string, delegator delegator.ShardDelegator, sealedSegments map[int64]*querypb.SegmentDist, growing []delegator.SegmentEntry) *querypb.LeaderView {
 		numOfGrowingRows := int64(0)
 		growingSegments := make(map[int64]*msgpb.MsgPosition)
 		for _, entry := range growing {
@@ -1345,7 +1397,11 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}
 
 		queryView := delegator.GetChannelQueryView()
-		leaderViews = append(leaderViews, &querypb.LeaderView{
+		leaderViewStatus := &querypb.LeaderViewStatus{
+			Serviceable:             queryView.Serviceable(),
+			CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
+		}
+		return &querypb.LeaderView{
 			Collection:             delegator.Collection(),
 			Channel:                key,
 			SegmentDist:            sealedSegments,
@@ -1353,28 +1409,56 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			NumOfGrowingRows:       numOfGrowingRows,
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
 			TargetVersion:          queryView.GetVersion(),
-			Status: &querypb.LeaderViewStatus{
-				Serviceable:             queryView.Serviceable(),
-				CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
-			},
-		})
-		return true
-	})
+			Status:                 leaderViewStatus,
+		}
+	}
 
-	return &querypb.GetDataDistributionResponse{
-		Status:          merr.Success(),
-		NodeID:          node.GetNodeID(),
-		Segments:        segmentVersionInfos,
-		Channels:        channelVersionInfos,
-		LeaderViews:     leaderViews,
-		LastModifyTs:    lastModifyTs,
-		MemCapacityInMB: float64(hardware.GetMemoryCount() / 1024 / 1024),
-		CpuNum:          int64(hardware.GetCPUNum()),
-	}, nil
+	channelVersionInfos := make([]*querypb.ChannelVersionInfo, 0, len(reportChannelNames))
+	leaderViews := make([]*querypb.LeaderView, 0, len(reportChannelNames))
+	for _, key := range reportChannelNames {
+		shardDelegator, ok := node.delegators.Get(key)
+		if !ok {
+			continue
+		}
+		channelVersionInfos = append(channelVersionInfos, &querypb.ChannelVersionInfo{
+			Channel:    key,
+			Collection: shardDelegator.Collection(),
+			Version:    shardDelegator.Version(),
+		})
+
+		sealed, growing := shardDelegator.GetSegmentInfo(false)
+		leaderView := buildLeaderView(key, shardDelegator, buildFullSegmentDist(sealed), growing)
+		leaderViews = append(leaderViews, leaderView)
+	}
+
+	node.distDeltaTracker.mu.Lock()
+	// Another report may have reset the marker set while this response was built.
+	if node.distDeltaTracker.deltaGeneration == reportDeltaGeneration {
+		node.distDeltaTracker.lastReportedTs = lastModifyTs
+	}
+	node.distDeltaTracker.mu.Unlock()
+
+	resp := &querypb.GetDataDistributionResponse{
+		Status:              merr.Success(),
+		NodeID:              node.GetNodeID(),
+		Segments:            segmentVersionInfos,
+		Channels:            channelVersionInfos,
+		LeaderViews:         leaderViews,
+		LastModifyTs:        lastModifyTs,
+		MemCapacityInMB:     float64(hardware.GetMemoryCount() / 1024 / 1024),
+		CpuNum:              int64(hardware.GetCPUNum()),
+		IsDelta:             !fullReport,
+		RemovedSegmentIds:   removedSegmentIDs,
+		RemovedChannelNames: removedChannelNames,
+		TotalSegmentCount:   int64(totalSegmentCount),
+		TotalChannelCount:   int64(totalChannelCount),
+	}
+	return resp, nil
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
+	defer node.distDeltaTracker.markChannelUpsert(req.GetChannel())
 
 	log := mlog.With(mlog.Int64("collectionID", req.GetCollectionID()),
 		mlog.String("channel", req.GetChannel()), mlog.Int64("currentNodeID", node.GetNodeID()))
@@ -1635,7 +1719,6 @@ func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb
 	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
 	for i, text := range req.GetPlaceholder() {
 		stream := tokenizer.NewTokenStream(string(text))
-		defer stream.Destroy()
 
 		results[i] = &milvuspb.AnalyzerResult{
 			Tokens: make([]*milvuspb.AnalyzerToken, 0),
@@ -1654,6 +1737,7 @@ func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb
 			}
 			results[i].Tokens = append(results[i].Tokens, token)
 		}
+		stream.Destroy()
 	}
 	return results, nil
 }
@@ -1750,40 +1834,37 @@ func (node *QueryNode) updateDistributionModifyTS() {
 	node.lastModifyTs = time.Now().UnixNano()
 }
 
+func (node *QueryNode) markDataDistributionSegmentLoadInfos(infos []*querypb.SegmentLoadInfo) {
+	segmentIDs := lo.FilterMap(infos, func(info *querypb.SegmentLoadInfo, _ int) (int64, bool) {
+		return info.GetSegmentID(), info.GetLevel() != datapb.SegmentLevel_L0
+	})
+	node.distDeltaTracker.markSegmentUpsert(segmentIDs...)
+}
+
+func (node *QueryNode) markDataDistributionLeaderSegmentLoad(req *querypb.LoadSegmentsRequest) {
+	if req.GetLoadScope() != querypb.LoadScope_Full && req.GetLoadScope() != querypb.LoadScope_Delta {
+		return
+	}
+	for _, info := range req.GetInfos() {
+		if info.GetLevel() == datapb.SegmentLevel_L0 || info.GetInsertChannel() == "" {
+			continue
+		}
+		node.distDeltaTracker.markChannelUpsert(info.GetInsertChannel())
+	}
+}
+
+func (node *QueryNode) markLeaderViewUpdated(channel string) {
+	if channel == "" {
+		return
+	}
+	node.distDeltaTracker.markChannelUpsert(channel)
+	node.updateDistributionModifyTS()
+}
+
 func (node *QueryNode) getDistributionModifyTS() int64 {
 	node.lastModifyLock.RLock()
 	defer node.lastModifyLock.RUnlock()
 	return node.lastModifyTs
-}
-
-func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
-	defer node.updateDistributionModifyTS()
-	if req.GetNeedTransfer() {
-		shardDelegator, ok := node.delegators.Get(req.GetChannel())
-		if !ok {
-			return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel())), nil
-		}
-		req.NeedTransfer = false
-		if err := shardDelegator.DropIndex(ctx, req); err != nil {
-			return merr.Status(err), nil
-		}
-	}
-	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()))
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	if len(segments) == 0 {
-		return merr.Success(), nil
-	}
-	defer node.manager.Segment.Unpin(segments)
-
-	segment := segments[0]
-	indexIDs := req.GetIndexIDs()
-	for _, indexID := range indexIDs {
-		segment.DropIndex(ctx, indexID)
-	}
-
-	return merr.Success(), nil
 }
 
 func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
@@ -1837,7 +1918,7 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 	}
 	defer node.lifetime.Done()
 
-	err := fileresource.Sync(req.GetVersion(), req.GetResources())
+	err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

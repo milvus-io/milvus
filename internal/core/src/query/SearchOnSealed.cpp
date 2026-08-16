@@ -11,7 +11,6 @@
 
 #include <folly/ExceptionWrapper.h>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -51,7 +50,7 @@ namespace milvus::query {
 
 void
 SearchOnSealedIndex(const Schema& schema,
-                    const segcore::SealedIndexingRecord& record,
+                    const segcore::SealedIndexingEntry& entry,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,
@@ -60,7 +59,6 @@ SearchOnSealedIndex(const Schema& schema,
                     milvus::OpContext* op_context,
                     SearchResult& search_result) {
     auto topK = search_info.topk_;
-    auto round_decimal = search_info.round_decimal_;
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
@@ -68,13 +66,10 @@ SearchOnSealedIndex(const Schema& schema,
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
 
-    AssertInfo(record.is_ready(field_id), "[SearchOnSealed]Record isn't ready");
-    // Keep the field_indexing smart pointer, until all reference by raw dropped.
-    auto field_indexing = record.get_field_indexing(field_id);
-    AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
+    AssertInfo(entry.metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info,"
                "field index: {}, search info: {}",
-               field_indexing->metric_type_,
+               entry.metric_type_,
                search_info.metric_type_);
 
     knowhere::DataSetPtr dataset;
@@ -91,8 +86,7 @@ SearchOnSealedIndex(const Schema& schema,
     }
 
     dataset->SetIsSparse(is_sparse);
-    auto accessor =
-        SemiInlineGet(field_indexing->indexing_->PinCells(op_context, {0}));
+    auto accessor = SemiInlineGet(entry.indexing_->PinCells(op_context, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
@@ -124,7 +118,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
-            *vec_index, dataset, search_info, search_bitset);
+            *vec_index, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(
             search_result, offset_mapping, search_info.array_offsets_.get());
@@ -137,24 +131,19 @@ SearchOnSealedIndex(const Schema& schema,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      *vec_index);
+                                                      *vec_index,
+                                                      op_context);
     if (!use_iterator) {
         vec_index->Query(
             dataset, search_info, search_bitset, op_context, search_result);
-        float* distances = search_result.distances_.data();
-        auto total_num = num_queries * topK;
-        if (round_decimal != -1) {
-            const float multiplier = pow(10.0, round_decimal);
-            for (int i = 0; i < total_num; i++) {
-                distances[i] =
-                    std::round(distances[i] * multiplier) / multiplier;
-            }
-        }
     }
     FinalizeVectorSearchOffsets(
         search_result,
         offset_mapping,
         use_iterator ? nullptr : search_info.array_offsets_.get());
+    if (use_iterator) {
+        search_result.resource_pins_.emplace_back(std::move(accessor));
+    }
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
 }
@@ -190,7 +179,13 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
-    if (column->IsNullable()) {
+    // Nullable plain-vector chunks compact away NULL rows and therefore need
+    // physical/logical row mapping. VECTOR_ARRAY raw chunks keep one list
+    // offset per logical row; NULL and empty rows are represented by
+    // zero-length lists, so row mapping must not be built or applied here.
+    const bool needs_offset_mapping =
+        column->IsNullable() && data_type != DataType::VECTOR_ARRAY;
+    if (needs_offset_mapping) {
         column->BuildValidRowIds(op_context);
     }
 
@@ -206,7 +201,7 @@ SearchOnSealedColumn(const Schema& schema,
     TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     const auto has_offset_mapping =
-        offset_mapping.IsEnabled() && !is_element_level_search;
+        needs_offset_mapping && offset_mapping.IsEnabled();
     if (has_offset_mapping) {
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
@@ -292,6 +287,10 @@ SearchOnSealedColumn(const Schema& schema,
 
             offsets_pw = column->VectorArrayOffsets(op_context, i);
             raw_dataset.raw_data_offsets = offsets_pw.get();
+            if (raw_dataset.raw_data_offsets[chunk_size] == 0) {
+                offset += chunk_size;
+                continue;
+            }
         }
 
         if (use_vector_iterator) {

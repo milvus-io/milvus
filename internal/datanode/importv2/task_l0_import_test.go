@@ -94,14 +94,14 @@ func (s *L0ImportSuite) SetupTest() {
 	s.NoError(err)
 
 	cm := mocks.NewChunkManager(s.T())
-	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{blob.Value}, nil)
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{blob.Value}, nil).Maybe()
 	cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, s string, b bool, walkFunc storage.ChunkObjectWalkFunc) error {
 			for _, file := range []string{"a/b/c/"} {
 				walkFunc(&storage.ChunkObjectInfo{FilePath: file})
 			}
 			return nil
-		})
+		}).Maybe()
 	s.cm = cm
 }
 
@@ -192,6 +192,50 @@ func (s *L0ImportSuite) TestL0Import() {
 	deltaLog := actual.GetBinlogs()[0]
 	s.Equal(int64(s.delCnt), deltaLog.GetEntriesNum())
 	// s.Equal(s.deleteData.Size(), deltaLog.GetMemorySize())
+}
+
+func (s *L0ImportSuite) TestL0ImportForcesStorageV2ForSyncTask() {
+	var task *L0ImportTask
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, syncTask syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			segment, ok := task.metaCaches[s.channel].GetSegmentByID(s.segmentID)
+			s.True(ok)
+			s.EqualValues(storage.StorageV2, segment.GetStorageVersion())
+			s.Empty(segment.ManifestPath())
+
+			future := conc.Go(func() (struct{}, error) {
+				return struct{}{}, nil
+			})
+			return future, nil
+		})
+
+	req := &datapb.ImportRequest{
+		JobID:          1,
+		TaskID:         2,
+		CollectionID:   s.collectionID,
+		PartitionIDs:   []int64{s.partitionID},
+		Vchannels:      []string{s.channel},
+		Schema:         s.schema,
+		StorageVersion: storage.StorageV3,
+		UseLoonFfi:     true,
+		RequestSegments: []*datapb.ImportRequestSegment{
+			{
+				SegmentID:   s.segmentID,
+				PartitionID: s.partitionID,
+				Vchannel:    s.channel,
+			},
+		},
+		IDRange: &datapb.IDRange{
+			Begin: 0,
+			End:   int64(s.delCnt),
+		},
+	}
+	task = NewL0ImportTask(req, s.manager, s.syncMgr, s.cm).(*L0ImportTask)
+
+	futures, syncTasks, err := task.syncDelete([]*storage.DeleteData{s.deleteData})
+	s.NoError(err)
+	s.Len(futures, 1)
+	s.Len(syncTasks, 1)
 }
 
 func TestL0Import(t *testing.T) {

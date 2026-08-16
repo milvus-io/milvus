@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -50,8 +51,8 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 	futures = append(futures, conc.Go(func() (struct{}, error) {
 		s.logger.Info(ctx, "start recovery balancer...")
 		// Create a provider that reads channel names from configuration
-		// and polls for dynamic changes.
-		provider := util.NewConfigChannelProvider()
+		// and collection metadata recovered by RootCoord.
+		provider := util.NewConfigChannelProviderWithPChannelStatsManager(channel.StaticPChannelStatsManager)
 		balancer, err := balancer.RecoverBalancer(ctx, provider)
 		if err != nil {
 			provider.Close()

@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -77,6 +80,7 @@ type fakeBinlogRecordWriter struct {
 	manifest         string
 	expirQuantiles   []int64
 	rowNum           int64
+	statsBlobSize    int64
 	schema           *schemapb.CollectionSchema
 	writtenTimestamp []int64
 }
@@ -97,6 +101,7 @@ func (w *fakeBinlogRecordWriter) GetLogs() (map[storage.FieldID]*datapb.FieldBin
 	return w.fieldBinlogs, w.statsLog, w.bm25StatsLog, w.manifest, w.expirQuantiles
 }
 func (w *fakeBinlogRecordWriter) GetRowNum() int64                   { return w.rowNum }
+func (w *fakeBinlogRecordWriter) GetStatsBlobSize() int64            { return w.statsBlobSize }
 func (w *fakeBinlogRecordWriter) FlushChunk() error                  { return nil }
 func (w *fakeBinlogRecordWriter) GetBufferUncompressed() uint64      { return 0 }
 func (w *fakeBinlogRecordWriter) Schema() *schemapb.CollectionSchema { return w.schema }
@@ -274,6 +279,23 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMa
 		}
 	}
 	s.True(found, "MinHash output field should be materialized into insert logs")
+
+	// The in-place receiver reads neither of these; they were echoes of the
+	// plan, whose arrays are empty for a recovered StorageV3 segment.
+	s.Empty(segment.GetDeltalogs())
+	s.Empty(segment.GetField2StatslogPaths())
+
+	// Stats is an INCREMENT: it describes only the columns this run wrote, so
+	// it carries no delete or timestamp aggregates for DataCoord to adopt.
+	stats := segment.GetStats()
+	s.Require().NotNil(stats)
+	s.Greater(stats.GetInsertBinlogSize(), int64(0))
+	s.EqualValues(1, stats.GetInsertBinlogCount())
+	s.EqualValues(0, stats.GetDeleteNumRows())
+	s.EqualValues(0, stats.GetDeltaBinlogSize())
+	s.EqualValues(0, stats.GetTimestampFrom())
+	s.EqualValues(0, stats.GetTimestampTo())
+	s.Contains(stats.GetNullCounts(), minHashOutputFieldID)
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
@@ -424,7 +446,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithFie
 	for i := 0; i < 3; i++ {
 		value := map[int64]interface{}{
 			common.RowIDField:     segID + int64(i),
-			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			100:                   segID + int64(i),
 			101:                   "test string " + string(rune('0'+i)),
 		}
@@ -433,7 +455,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithFie
 		}
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(segID + int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     value,
 		}
 		err = multiSegWriter.WriteValue(&v)
@@ -472,6 +494,130 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionSu
 				"V3 schema bump insert binlog (fieldID=%d) must have non-zero LogID", materializedOutputFieldID)
 		}
 	}
+}
+
+// buildTextLOBTask builds a minimal schema-bump task whose schema optionally has a
+// DataType_Text field (the LOB-carrying input of a BM25 function). Only plan +
+// compactionParams are needed to exercise the LOB wiring (the cgo manifest helpers
+// are mocked in the tests below), so no chunk manager is required.
+func (s *BumpSchemaVersionCompactionTaskSuite) buildTextLOBTask(withTextField bool) *bumpSchemaVersionCompactionTask {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}
+	schema := &schemapb.CollectionSchema{Name: "text_lob_bump", Fields: fields}
+	if withTextField {
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			&schemapb.FieldSchema{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		)
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name: "bm25", Id: 100, Type: schemapb.FunctionType_BM25,
+			InputFieldNames: []string{"text"}, InputFieldIds: []int64{101},
+			OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{102},
+		}}
+	}
+	plan := &datapb.CompactionPlan{
+		PlanID:    999,
+		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
+		Schema:    schema,
+		TotalRows: 3,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			CollectionID: 1, PartitionID: 1, SegmentID: 100,
+			StorageVersion: storage.StorageV3, Manifest: "manifest",
+		}},
+	}
+	params := compaction.GenParams()
+	params.StorageVersion = storage.StorageV3
+	return &bumpSchemaVersionCompactionTask{
+		ctx:              context.Background(),
+		plan:             plan,
+		compactionParams: params,
+	}
+}
+
+// TestInitLOBCompactionContextTextFieldReuseAll: a schema-bump on a segment with a
+// TEXT field forces REUSE_ALL for that field (never REWRITE_ALL), so its existing
+// LOB data is carried by reference.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextTextFieldReuseAll() {
+	task := s.buildTextLOBTask(true)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 3, ValidRows: 3}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Require().NotNil(task.lobContext)
+	s.True(task.lobContext.HasReuseAllFields(), "TEXT field must be forced REUSE_ALL for schema bump")
+	s.True(task.lobContext.IsReuseAll(101))
+}
+
+// TestInitLOBCompactionContextInlineTextReuseAll: even with NO LOB files (inline
+// TEXT < threshold), the forced strategy still produces a REUSE_ALL decision, so
+// the writer is told WithTextRefsAsBinary (HasReuseAllFields true) and the inline
+// bytes are preserved.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextInlineTextReuseAll() {
+	task := s.buildTextLOBTask(true)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{}, nil, // no LOB files -> inline TEXT
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Require().NotNil(task.lobContext)
+	s.True(task.lobContext.HasReuseAllFields(), "inline TEXT must still force REUSE_ALL so WithTextRefsAsBinary is applied")
+}
+
+// TestInitLOBCompactionContextNoTextFieldNoop: schemas without a TEXT field skip
+// the LOB path entirely (lobContext stays nil).
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextNoTextFieldNoop() {
+	task := s.buildTextLOBTask(false)
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Nil(task.lobContext, "no TEXT field -> lobContext stays nil (no-op)")
+}
+
+// TestApplyLOBCompactionMergesRefsIntoManifest: the output manifest is updated with
+// the merged LOB references (REUSE_ALL).
+func (s *BumpSchemaVersionCompactionTaskSuite) TestApplyLOBCompactionMergesRefsIntoManifest() {
+	task := s.buildTextLOBTask(true)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 3, ValidRows: 3}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+	s.Require().NoError(task.initLOBCompactionContext(context.Background()))
+	s.Require().True(task.lobContext.HasReuseAllFields())
+
+	// Capture the chained manifest value inside the closure at call time rather than
+	// storing the argument map and reading it back after applyLOBCompaction returns:
+	// holding the map reference and indexing it later trips the runtime "concurrent
+	// map read and map write" detector under -race.
+	var gotChainedManifest string
+	applyPatch := mockey.Mock(compaction.ApplyLobCompactionToManifests).To(
+		func(_ *compaction.LOBCompactionContext, outputManifests map[int64]string, _ *indexpb.StorageConfig) (map[int64]string, error) {
+			gotChainedManifest = outputManifests[200]
+			return map[int64]string{200: "merged-manifest"}, nil
+		}).Build()
+	defer applyPatch.UnPatch()
+
+	out := &datapb.CompactionSegment{SegmentID: 200, Manifest: "orig-manifest"}
+	err := task.applyLOBCompaction(context.Background(), out)
+	s.NoError(err)
+	s.Equal("merged-manifest", out.GetManifest(), "output manifest must be updated with merged LOB refs")
+	s.Equal("orig-manifest", gotChainedManifest, "merge must chain on the segment's current manifest")
+}
+
+// TestApplyLOBCompactionNilContextNoop: no LOB context (e.g. no TEXT fields) -> the
+// output manifest is left unchanged.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestApplyLOBCompactionNilContextNoop() {
+	task := s.buildTextLOBTask(true) // no init -> lobContext nil
+	out := &datapb.CompactionSegment{SegmentID: 200, Manifest: "orig-manifest"}
+	err := task.applyLOBCompaction(context.Background(), out)
+	s.NoError(err)
+	s.Equal("orig-manifest", out.GetManifest())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteDropsExpirQuantilesWhenTTLFieldRemoved() {
@@ -576,6 +722,41 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteAddsWriterStatsToM
 	s.ElementsMatch([]string{"bloom_filter.100", "bm25.102"}, statKeys)
 }
 
+// V3 writers leave statsLog/bm25StatsLog nil because stats are embedded
+// in the manifest, not in FieldBinlog arrays. The result Statistics must
+// still report a non-zero StatsBinlogSize sourced from the writer's
+// tracked counter (GetStatsBlobSize), not from the absent arrays.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteCarriesV3StatsBlobSize() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	newSegmentID := s.task.plan.GetPreAllocatedSegmentIDs().GetBegin()
+	manifestPath := packed.MarshalManifestPath(path.Join(s.task.compactionParams.StorageConfig.GetRootPath(), common.SegmentInsertLogPath, metautil.JoinIDPath(1, 1, newSegmentID)), 1)
+	// V3 simulation: no statsLog / bm25StatsLog FieldBinlogs, only the
+	// writer-tracked counter has the cumulative blob size.
+	writer := &fakeBinlogRecordWriter{
+		fieldBinlogs: map[storage.FieldID]*datapb.FieldBinlog{
+			100: {FieldID: 100, ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{LogID: 1, EntriesNum: 3, MemorySize: 1024}}},
+		},
+		statsLog:      nil,
+		bm25StatsLog:  nil,
+		statsBlobSize: 4096,
+		manifest:      manifestPath,
+		schema:        s.task.plan.GetSchema(),
+	}
+
+	newWriterPatch := mockey.Mock(storage.NewBinlogRecordWriter).Return(writer, nil).Build()
+	defer newWriterPatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.Require().NotNil(segment.GetStats())
+	s.EqualValues(4096, segment.GetStats().GetStatsBinlogSize(),
+		"V3 stats blob size must come from writer.GetStatsBlobSize, not the nil statslog arrays")
+	s.EqualValues(1024, segment.GetStats().GetInsertBinlogSize())
+}
+
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsWriterStatsWithoutManifest() {
 	s.prepareBumpSchemaVersionCompactionWithDroppedField()
 	s.task.currentTime = getMilvusBirthday().Add(time.Hour)
@@ -595,13 +776,29 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsWriterStats
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats() {
 	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     1,
+		EncryptionKey:    "unsafe-key",
+	}
+	s.task.plan.PluginContext = requestContext
 	for _, field := range s.task.plan.GetSchema().GetFields() {
 		if field.GetName() == "text" {
 			field.TypeParams = append(field.GetTypeParams(), &commonpb.KeyValuePair{Key: "enable_match", Value: "true"})
 		}
 	}
+	parseContext := func(got []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+		s.Equal(requestContext, got)
+		s.EqualValues(1, collectionID)
+		return pluginContext, nil
+	}
+	parsePatch := mockey.Mock(hookutil.GetCPluginContext).To(parseContext).Build()
+	defer parsePatch.UnPatch()
 
-	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(context.Context, *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	var captured *indexcgopb.BuildIndexInfo
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+		captured = info
 		return fakeTextIndex{}, nil
 	}).Build()
 	defer createIndexPatch.UnPatch()
@@ -619,15 +816,118 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 	s.NotNil(result)
 
 	segment := result.GetSegments()[0]
+	s.Require().NotNil(captured)
+	s.Equal(pluginContext, captured.GetStoragePluginContext())
 	s.Contains(segment.GetTextStatsLogs(), int64(101))
 	s.EqualValues(42, segment.GetTextStatsLogs()[101].GetLogSize())
+	files := segment.GetTextStatsLogs()[101].GetFiles()
+	s.Require().NotEmpty(files)
+	for _, file := range files {
+		s.Equal(1, strings.Count(file, "_stats/text_index.101"))
+	}
 	s.Contains(segment.GetManifest(), "with-text-stats")
+}
+
+// TestFullRewriteFillsMissingNullableTextAsBinary is the real-cgo regression for the
+// datanode crash-loop reported on PR #51125: adding a nullable TEXT field and then
+// dropping any field routes to runFullSchemaRewrite, where the new TEXT column is
+// absent from the source segment. The packed writer types TEXT columns as binary
+// (WithTextRefsAsBinary), so the materializer must backfill the missing TEXT column
+// as a binary null array; a utf8 fill makes array.NewRecord panic and crash-loops the
+// datanode. Unlike the mocked-writer tests, this drives the actual packed writer so
+// the fill type is exercised end to end.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteFillsMissingNullableTextAsBinary() {
+	const newTextFieldID = int64(104)
+	// Target schema gains a nullable TEXT field absent from the source segment.
+	// enable_match is intentionally omitted so createTextIndex skips it and the test
+	// exercises only the record-write path where the panic occurred.
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newTextFieldID,
+		Name:     "note",
+		DataType: schemapb.DataType_Text,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "65535"},
+		},
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+
+	// Source segment carries a dropped field (103) -> droppedFieldIDs>0 -> full rewrite.
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+
+	// The backfilled TEXT column must be materialized into the rewritten segment (as a
+	// binary null column), either as a top-level field or a column-group child.
+	found := false
+	for _, fb := range segment.GetInsertLogs() {
+		if fb.GetFieldID() == newTextFieldID {
+			found = true
+			break
+		}
+		for _, cf := range fb.GetChildFields() {
+			if cf == newTextFieldID {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	s.True(found, "missing nullable TEXT field must be backfilled into the rewritten segment")
+}
+
+// TestFullRewriteMergesLOBRefsBeforeBuildingTextIndex guards the ordering fixed for
+// liliu-z's review. createTextIndex reads the TEXT column through the output segment's
+// manifest, so applyLOBCompaction -- which merges the carried source LOB file references
+// into that manifest -- must run BEFORE createTextIndex. Otherwise the text-match index
+// for an out-of-line (>=64KB) TEXT field is built against a manifest that does not yet
+// list the LOB files, silently missing that data. Mirrors sort/mix. We stamp the manifest
+// on LOB apply and assert createTextIndex observes the stamped (LOB-merged) manifest; the
+// old order (createTextIndex first) fails this assertion.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMergesLOBRefsBeforeBuildingTextIndex() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	const lobStamp = "-lob-merged"
+	applyPatch := mockey.Mock((*bumpSchemaVersionCompactionTask).applyLOBCompaction).
+		To(func(_ *bumpSchemaVersionCompactionTask, _ context.Context, seg *datapb.CompactionSegment) error {
+			seg.Manifest = seg.GetManifest() + lobStamp
+			return nil
+		}).Build()
+	defer applyPatch.UnPatch()
+
+	var manifestAtTextIndex string
+	textIndexPatch := mockey.Mock(createTextIndex).
+		To(func(_ context.Context, _ storage.ChunkManager, _ *datapb.CompactionPlan, _ compaction.Params,
+			_ int64, _ int64, _ int64, _ int64, _ int64, seg *datapb.CompactionSegment,
+		) (map[int64]*datapb.TextIndexStats, error) {
+			manifestAtTextIndex = seg.GetManifest()
+			return map[int64]*datapb.TextIndexStats{}, nil
+		}).Build()
+	defer textIndexPatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Contains(manifestAtTextIndex, lobStamp,
+		"applyLOBCompaction must run before createTextIndex so the text-match index is built "+
+			"against a manifest that already references the carried LOB files")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsDeletedAndExpiredRows() {
 	currentTime := getMilvusBirthday().Add(time.Hour)
-	insertTs := tsoutil.ComposeTSByTime(currentTime, 0)
-	oldTs := tsoutil.ComposeTSByTime(currentTime.Add(-2*time.Minute), 0)
+	insertTs := tsoutil.ComposeTSByTime(currentTime)
+	oldTs := tsoutil.ComposeTSByTime(currentTime.Add(-2 * time.Minute))
 	expiredByTTLField := currentTime.Add(-time.Minute).UnixMicro()
 	keptTTLField := currentTime.Add(time.Hour).UnixMicro()
 	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
@@ -645,7 +945,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 		},
 		len: 5,
 	}
-	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{int64(2): deleteTs}, int64(time.Minute), currentTime, 0)
 
 	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true, nil)
@@ -986,125 +1286,51 @@ func TestBumpSchemaVersionCompactionTaskBasic(t *testing.T) {
 	assert.Equal(t, int64(1), task.GetSlotUsage())
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogs() {
+// TestBuildNewInsertLogsV3ReturnsOnlyNewGroups pins that the result carries
+// only what this run wrote. The plan's FieldBinlogs are irrelevant — for a
+// StorageV3 segment recovered after a DataCoord restart they are empty. The
+// returned groups are what the receiver merges onto SegmentInfo.Binlogs, and
+// that merge is what makes a materialized function-output field eligible for
+// index creation (see completeBumpSchemaVersionCompactionMutation in
+// internal/datacoord/meta.go); it must not be dropped.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildNewInsertLogsV3ReturnsOnlyNewGroups() {
 	s.setupTest()
 
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{LogPath: "original/100", EntriesNum: 1000},
-				},
-			},
-		},
-	}
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {
-			FieldID: 102,
-			Binlogs: []*datapb.Binlog{
-				{LogPath: "new/102", EntriesNum: 1000, MemorySize: 500},
-			},
-		},
-	}
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Equal(2, len(mergedInsert))
-	s.Equal(int64(100), mergedInsert[0].GetFieldID())
-	s.Equal(int64(102), mergedInsert[1].GetFieldID())
-}
-
-// TestFinalizeMergedLogsCrashReplay verifies that retrying finalizeMergedLogs replaces rewritten output logs without duplicates.
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsCrashReplay() {
-	s.setupTest()
-
-	// Segment state after first successful run: field 102 already present in etcd.
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100", EntriesNum: 1000}}},
-			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "first-run/102", EntriesNum: 1000, LogID: 99}}},
-		},
-	}
-	// Second run allocates a new logID for the same output field.
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "second-run/102", EntriesNum: 1000, LogID: 100}}},
-	}
-
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Require().Equal(2, len(mergedInsert))
-	var fieldIDs []int64
-	for _, fb := range mergedInsert {
-		fieldIDs = append(fieldIDs, fb.GetFieldID())
-	}
-	s.ElementsMatch([]int64{100, 102}, fieldIDs)
-	for _, fb := range mergedInsert {
-		if fb.GetFieldID() == 102 {
-			s.Equal("second-run/102", fb.GetBinlogs()[0].GetLogPath())
-		}
-	}
-}
-
-// TestFinalizeMergedLogsV3CrashReplay verifies V3 column-group replacement through ChildFields.
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsV3CrashReplay() {
-	s.setupTest()
-
-	// V3: column group 102 already present in segment after first run.
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100"}}},
-			{FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "first-run/cg102"}}},
-		},
-	}
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "second-run/cg102"}}},
-	}
-
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Require().Equal(2, len(mergedInsert))
-	for _, fb := range mergedInsert {
-		if fb.GetFieldID() == 102 {
-			s.Equal("second-run/cg102", fb.GetBinlogs()[0].GetLogPath())
-		}
-	}
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
-	s.setupTest()
-
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100", EntriesNum: 1000}}},
-		},
-	}
 	writerResult := &bumpSchemaVersionWriterResult{
-		columnGroups: []storagecommon.ColumnGroup{
-			{GroupID: 102, Fields: []int64{102}, Format: "vortex"},
-		},
+		columnGroups: []storagecommon.ColumnGroup{{GroupID: 102, Fields: []int64{102}}},
 	}
 
-	mergedInsert, err := s.task.buildMergedLogsV3(segment, writerResult, map[int64]int{102: 512}, 1000)
+	newInsert, err := s.task.buildNewInsertLogsV3(writerResult, map[int64]int{102: 512}, 1000)
 	s.NoError(err)
 
-	// Original + new
-	s.Equal(2, len(mergedInsert))
-	s.Equal(int64(100), mergedInsert[0].GetFieldID())
-	s.Equal(int64(102), mergedInsert[1].GetFieldID())
-	s.Equal("vortex", mergedInsert[1].GetFormat())
-	s.Equal(int64(512), mergedInsert[1].GetBinlogs()[0].GetMemorySize())
-	s.Equal(int64(1000), mergedInsert[1].GetBinlogs()[0].GetEntriesNum())
-	// V3 binlog presence marker must carry a non-zero LogID so buildBinlogKvs validation
-	// passes (requires LogID!=0 AND LogPath=="" for V3 segments).
-	s.NotZero(mergedInsert[1].GetBinlogs()[0].GetLogID(),
-		"V3 schema bump binlog presence marker must have non-zero LogID")
+	s.Require().Len(newInsert, 1)
+	s.EqualValues(102, newInsert[0].GetFieldID())
+	s.EqualValues(512, newInsert[0].GetBinlogs()[0].GetMemorySize())
+	s.EqualValues(1000, newInsert[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+// TestMaterializationStatsDeltaIgnoresPlanArrays is the regression test for
+// issue #51729: the increment must be identical whether or not the plan
+// carries the input segment's FieldBinlog arrays. After #50410 a recovered
+// StorageV3 segment ships empty arrays, and the old absolute-Stats
+// implementation silently undercounted the whole segment.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationStatsDeltaIgnoresPlanArrays() {
+	s.setupTest()
+
+	columnGroups := []storagecommon.ColumnGroup{{GroupID: 102, Fields: []int64{102}}}
+	memorySizes := map[int64]int{102: 4096}
+	nullCounts := map[int64]int64{102: 0}
+
+	// The builder takes no plan input at all, which is the property under test:
+	// there is no argument through which an empty or populated plan array could
+	// change the answer.
+	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, 256)
+
+	s.EqualValues(4096, got.GetInsertBinlogSize())
+	s.EqualValues(1, got.GetInsertBinlogCount())
+	s.EqualValues(256, got.GetStatsBinlogSize())
+	s.EqualValues(0, got.GetDeleteNumRows())
+	s.EqualValues(0, got.GetDeltaBinlogSize())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSelectsAllOutputsOnPartialState() {
@@ -1142,33 +1368,6 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializerExistingFi
 
 	s.NotContains(materializerFields, int64(102))
 	s.NotContains(materializerFields, int64(103))
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsReplacesExistingOutputFieldLogs() {
-	s.setupTest()
-
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100"}}},
-			{FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "old/cg102"}}},
-		},
-	}
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "new/cg102"}}},
-		103: {FieldID: 103, ChildFields: []int64{103}, Binlogs: []*datapb.Binlog{{LogPath: "new/cg103"}}},
-	}
-
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Require().Len(mergedInsert, 3)
-	s.Equal(int64(100), mergedInsert[0].GetFieldID())
-	s.Equal("original/100", mergedInsert[0].GetBinlogs()[0].GetLogPath())
-	s.Equal(int64(102), mergedInsert[1].GetFieldID())
-	s.Equal("new/cg102", mergedInsert[1].GetBinlogs()[0].GetLogPath())
-	s.Equal(int64(103), mergedInsert[2].GetFieldID())
-	s.Equal("new/cg103", mergedInsert[2].GetBinlogs()[0].GetLogPath())
 }
 
 // Existing BM25 fixtures expose one output; these tests need a partial multi-output state.
@@ -1210,4 +1409,71 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCompleteAndStop() {
 func (s *BumpSchemaVersionCompactionTaskSuite) TestGetStorageConfig() {
 	s.setupTest()
 	s.NotNil(s.task.GetStorageConfig())
+}
+
+// TestMaterializationRejectsDroppedFields pins the add-only invariant the
+// stats increment depends on. Dropped fields must route to
+// runFullSchemaRewrite, which ships an absolute Stats; reaching
+// materialization with drops would produce an increment that over-estimates
+// the segment, because the removed columns' bytes are never subtracted.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationRejectsDroppedFields() {
+	s.setupTest()
+
+	_, err := s.task.runMissingFunctionMaterialization(
+		context.Background(),
+		nil,
+		[]int64{101},
+		map[int64]struct{}{},
+	)
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaMalformedMultiAnalyzerParamsIsDataIntegrityError() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "multi_analyzer_params", Value: "{bad"},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	_, _, err := s.task.missingFunctionInputSchema([]*schemapb.FunctionSchema{functionSchema})
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "failed to parse multi_analyzer_params for function BM25")
+	s.ErrorContains(err, "invalid character")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByFieldWrongTypeIsDataIntegrityError() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	// DDL only admits a VarChar by_field; a resolved by_field of another type
+	// is persisted-schema corruption, classified the same as the other branches.
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "multi_analyzer_params", Value: `{"by_field":"lang"}`},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			{FieldID: 103, Name: "lang", DataType: schemapb.DataType_Int64},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	_, _, err := s.task.missingFunctionInputSchema([]*schemapb.FunctionSchema{functionSchema})
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "references by_field lang of type")
+	s.ErrorContains(err, "only VarChar is allowed")
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	tikverr "github.com/tikv/client-go/v2/error"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -89,6 +90,9 @@ func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx
 		if err == nil {
 			return nil
 		}
+		if tikverr.IsErrorUndetermined(err) {
+			return err
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -97,9 +101,7 @@ func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(nextInterval):
-			kv.Logger().Warn(ctx,
-
-				"failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
+			kv.Logger().Warn(ctx, "failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
 		}
 	}
 }

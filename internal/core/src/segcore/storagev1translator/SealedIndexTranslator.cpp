@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <limits>
+#include <optional>
 #include <utility>
 
 #include "common/EasyAssert.h"
@@ -15,11 +16,25 @@
 #include "index/Utils.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
+
+namespace {
+
+int64_t
+PolicyBytes(size_t bytes) {
+    return static_cast<int64_t>(std::min(
+        bytes, static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+}
+
+}  // namespace
 
 SealedIndexTranslator::SealedIndexTranslator(
     milvus::index::CreateIndexInfo index_info,
@@ -74,40 +89,69 @@ SealedIndexTranslator::SealedIndexTranslator(
           // currently only vector index is possible to support lazy load
           !(IsVectorDataType(load_index_info->field_type) &&
             knowhere::IndexFactory::Instance().FeatureCheck(
-                index_info_.index_type, knowhere::feature::LAZY_LOAD))) {
-    load_resource_request_ = EstimateLoadResource();
+                index_info_.index_type, knowhere::feature::LAZY_LOAD)),
+          std::nullopt,
+          milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
+    std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
+    bool use_shared_memory_overhead_group = false;
+    load_resource_request_ = EstimateLoadResource(
+        &stream_load_info, &use_shared_memory_overhead_group);
 
     auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
-        auto upper_bound = milvus::cachinglayer::ResourceUsage{
-            static_cast<int64_t>(
-                milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
-                    .CapacityBytes()),
-            std::numeric_limits<int64_t>::max()};
-        meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            upper_bound, "ScalarIndexV3TransientMemoryBudget"};
+        AssertInfo(stream_load_info.has_value(),
+                   "missing stream load info for packed scalar V3 index");
+        if (use_shared_memory_overhead_group) {
+            auto max_task_overhead =
+                stream_load_info->encrypted
+                    ? stream_load_info->max_task_transient_bytes
+                    : milvus::storage::SaturatingMultiply(
+                          milvus::storage::MaxEntryStreamTaskBytes(),
+                          milvus::storage::kFileStreamBufferMultiplier);
+            auto memory_group =
+                milvus::storage::LoadMemoryOverheadController::GetInstance()
+                    .GetOrCreate(milvus::ThreadPools::GetLoadExecutorWorkers());
+            meta_.loading_overhead_config =
+                milvus::cachinglayer::LoadingOverheadConfig{
+                    milvus::cachinglayer::LoadingOverheadGroupBinding{
+                        std::move(memory_group),
+                        PolicyBytes(max_task_overhead)},
+                    // FIXME: Bind scalar V3 file overhead to the executor-backed
+                    // file group after every file-backed load path writes through
+                    // positioned tasks on the HIGH/LOW load executors. Some paths
+                    // still use FileWriter or its independent worker pool, so
+                    // binding them now would under-reserve concurrent disk
+                    // overhead.
+                    std::nullopt};
+        }
     }
 }
 
 LoadResourceRequest
-SealedIndexTranslator::EstimateLoadResource() const {
+SealedIndexTranslator::EstimateLoadResource(
+    std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info,
+    bool* use_shared_memory_overhead_group) const {
+    auto estimated =
+        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            index_load_info_.field_type,
+            index_load_info_.element_type,
+            index_load_info_.index_engine_version,
+            index_load_info_.index_size,
+            index_load_info_.index_params,
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_load_info_.dim,
+            index_load_info_.index_files,
+            file_manager_context_,
+            stream_load_info,
+            use_shared_memory_overhead_group);
     if (index_load_info_.load_resource_request.has_value()) {
         return *index_load_info_.load_resource_request;
     }
-    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        index_load_info_.field_type,
-        index_load_info_.element_type,
-        index_load_info_.index_engine_version,
-        index_load_info_.index_size,
-        index_load_info_.index_params,
-        index_load_info_.enable_mmap,
-        index_load_info_.num_rows,
-        index_load_info_.dim,
-        index_load_info_.index_files,
-        file_manager_context_);
+    return estimated;
 }
 
 size_t
@@ -125,6 +169,9 @@ std::pair<milvus::cachinglayer::ResourceUsage,
 SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     // this is an estimation, error could be up to 20%.
+    // Preserve the historical 2x disk safety margin for temporary file growth
+    // during writes. final_disk_cost is already counted as loaded resource, so
+    // the file overhead is the remainder of 2 * max_disk_cost.
     return {milvus::cachinglayer::ResourceUsage(
                 load_resource_request_.final_memory_cost,
                 load_resource_request_.final_disk_cost),
@@ -181,7 +228,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         config_[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
         LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
-        index->LoadUnified(config_);
+        index->LoadUnified(config_, ctx);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
         index->Load(ctx_, config_);

@@ -48,6 +48,10 @@ func TestSelectOpTestSuite(t *testing.T) {
 }
 
 func (s *SelectOpTestSuite) createThreeColumnDF() *DataFrame {
+	return s.createTestDF(false)
+}
+
+func (s *SelectOpTestSuite) createTestDF(withSystemColumns bool) *DataFrame {
 	builder := NewDataFrameBuilder()
 	builder.SetChunkSizes([]int64{3})
 
@@ -73,6 +77,15 @@ func (s *SelectOpTestSuite) createThreeColumnDF() *DataFrame {
 	err = builder.AddColumnFromChunks("name", []arrow.Array{nameChunk})
 	s.Require().NoError(err)
 
+	if withSystemColumns {
+		segOffsetBuilder := array.NewInt64Builder(s.pool)
+		segOffsetBuilder.AppendValues([]int64{10, 20, 30}, nil)
+		segOffsetChunk := segOffsetBuilder.NewArray()
+		segOffsetBuilder.Release()
+		err = builder.AddColumnFromChunks(types.SegOffsetFieldName, []arrow.Array{segOffsetChunk})
+		s.Require().NoError(err)
+	}
+
 	return builder.Build()
 }
 
@@ -90,6 +103,22 @@ func (s *SelectOpTestSuite) TestSelectSubset() {
 	s.NotNil(result.Column(types.IDFieldName))
 	s.NotNil(result.Column(types.ScoreFieldName))
 	s.Nil(result.Column("name"))
+}
+
+func (s *SelectOpTestSuite) TestSelectKeepsSystemColumns() {
+	df := s.createTestDF(true)
+	defer df.Release()
+
+	op := NewSelectOp([]string{"name"})
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	result, err := op.Execute(ctx, df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	s.NotNil(result.Column("name"))
+	s.NotNil(result.Column(types.IDFieldName))
+	s.NotNil(result.Column(types.ScoreFieldName))
+	s.NotNil(result.Column(types.SegOffsetFieldName))
 }
 
 func (s *SelectOpTestSuite) TestSelectColumnNotFound() {

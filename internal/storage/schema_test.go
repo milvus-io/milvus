@@ -21,10 +21,12 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestConvertArrowSchema(t *testing.T) {
@@ -75,6 +77,80 @@ func TestConvertArrowSchema(t *testing.T) {
 			assert.Equal(t, "128", dimVal)
 		}
 	}
+}
+
+func TestSchemaForManifestRead_MilvusTableUsesSourceColumns(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 99, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "target_pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+		},
+	}
+
+	resolver := typeutil.NewStorageColumnResolver(schema)
+	assert.True(t, resolver.IsMilvusTable())
+
+	fields := resolver.ManifestStoredFields()
+	require.Len(t, fields, 1)
+	assert.Equal(t, "pk", schema.GetFields()[1].GetExternalField())
+	assert.Equal(t, int64(100), fields[0].GetFieldID())
+
+	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(schema, true, resolver.ManifestStoredColumnName)
+	assert.NoError(t, err)
+	assert.Equal(t, "100", arrowSchema.Field(0).Name)
+}
+
+func TestSchemaForManifestRead_MilvusTableSourceSchemaUsesFieldID(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	resolver := typeutil.NewStorageColumnResolver(schema)
+	fields := resolver.ManifestStoredFields()
+	assert.Empty(t, schema.GetFields()[0].GetExternalField())
+	assert.Equal(t, int64(100), fields[0].GetFieldID())
+
+	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(schema, true, resolver.ManifestStoredColumnName)
+	assert.NoError(t, err)
+	assert.Equal(t, "100", arrowSchema.Field(0).Name)
+}
+
+func TestSchemaForManifestRead_NonMilvusTableKeepsExternalField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "target_pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+		},
+	}
+
+	resolver := typeutil.NewStorageColumnResolver(schema)
+	assert.False(t, resolver.IsMilvusTable())
+
+	fields := resolver.ManifestStoredFields()
+	require.Len(t, fields, 1)
+	assert.Equal(t, schema.GetFields()[0], fields[0])
+
+	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(schema, true, resolver.ManifestStoredColumnName)
+	assert.NoError(t, err)
+	assert.Equal(t, "pk", arrowSchema.Field(0).Name)
+}
+
+func TestStorageColumnResolverManifestStoredColumnName(t *testing.T) {
+	resolver := typeutil.NewStorageColumnResolver(&schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"milvus-table"}`,
+	})
+
+	columnName, ok := resolver.ManifestStoredColumnName(&schemapb.FieldSchema{FieldID: 100, Name: "pk"})
+	assert.True(t, ok)
+	assert.Equal(t, "100", columnName)
+
+	columnName, ok = resolver.ManifestStoredColumnName(&schemapb.FieldSchema{FieldID: 101, Name: common.VirtualPKFieldName})
+	assert.False(t, ok)
+	assert.Empty(t, columnName)
 }
 
 func TestConvertArrowSchemaWithoutDim(t *testing.T) {

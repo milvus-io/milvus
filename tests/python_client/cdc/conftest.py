@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -328,35 +330,157 @@ def switchover_helper(request, upstream_client, downstream_client):
 
 @pytest.fixture(scope="session")
 def kubectl_helper(milvus_ns):
-    """Helpers for pod-kill failover scenarios."""
+    """Helpers for container-kill failover scenarios."""
     import subprocess as _sp
     import time as _time
 
-    def delete_pods(instance_label):
+    def get_pods(instance_label):
         cmd = [
             "kubectl",
-            "delete",
+            "get",
             "pods",
             "-l",
             f"app.kubernetes.io/instance={instance_label}",
             "-n",
             milvus_ns,
-            "--grace-period=0",
-            "--force",
+            "-o",
+            "json",
         ]
         result = _sp.run(cmd, capture_output=True, text=True, check=False)
-        logger.info(
-            f"[KUBECTL] delete pods {instance_label}: rc={result.returncode}, "
-            f"stdout={result.stdout!r}, stderr={result.stderr!r}"
-        )
-        return result
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"failed to list pods for {instance_label}: stdout={result.stdout!r}, stderr={result.stderr!r}"
+            )
+        pods = json.loads(result.stdout).get("items", [])
+        if not pods:
+            raise RuntimeError(f"no pods matched instance {instance_label}")
+        return pods
+
+    def snapshot_containers(pods):
+        snapshot = {}
+        for pod in pods:
+            metadata = pod["metadata"]
+            pod_name = metadata["name"]
+            statuses = {status["name"]: status for status in pod.get("status", {}).get("containerStatuses", [])}
+            containers = {}
+            for container in pod.get("spec", {}).get("containers", []):
+                container_name = container["name"]
+                containers[container_name] = statuses.get(container_name, {}).get("restartCount", -1)
+            snapshot[pod_name] = {
+                "uid": metadata["uid"],
+                "containers": containers,
+            }
+        return snapshot
+
+    def kill_containers(instance_label, timeout=120):
+        """Kill every matching container without deleting its Pod object."""
+        baseline = snapshot_containers(get_pods(instance_label))
+        missing_status = [
+            f"{pod_name}/{container_name}"
+            for pod_name, pod in baseline.items()
+            for container_name, restart_count in pod["containers"].items()
+            if restart_count < 0
+        ]
+        if missing_status:
+            raise RuntimeError(f"containers have no initial status: {missing_status}")
+
+        pods_by_containers = {}
+        for pod_name, pod in baseline.items():
+            container_names = tuple(sorted(pod["containers"]))
+            pods_by_containers.setdefault(container_names, []).append(pod_name)
+
+        safe_instance = re.sub(r"[^a-z0-9-]", "-", instance_label.lower()).strip("-")[:20]
+        run_id = str(_time.time_ns())[-10:]
+        chaos_names = []
+        try:
+            for index, (container_names, pod_names) in enumerate(pods_by_containers.items(), start=1):
+                chaos_name = f"cdc-ck-{safe_instance}-{run_id}-{index}"
+                chaos = {
+                    "apiVersion": "chaos-mesh.org/v1alpha1",
+                    "kind": "PodChaos",
+                    "metadata": {"name": chaos_name, "namespace": milvus_ns},
+                    "spec": {
+                        "selector": {"pods": {milvus_ns: sorted(pod_names)}},
+                        "mode": "all",
+                        "action": "container-kill",
+                        "containerNames": list(container_names),
+                    },
+                }
+                result = _sp.run(
+                    ["kubectl", "create", "-f", "-"],
+                    input=json.dumps(chaos),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                logger.info(
+                    f"[CONTAINER_KILL] create {chaos_name}: rc={result.returncode}, "
+                    f"pods={sorted(pod_names)}, containers={list(container_names)}, "
+                    f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"failed to create PodChaos {chaos_name}: stdout={result.stdout!r}, stderr={result.stderr!r}"
+                    )
+                chaos_names.append(chaos_name)
+
+            deadline = _time.time() + timeout
+            pending = []
+            while _time.time() < deadline:
+                current = snapshot_containers(get_pods(instance_label))
+                pending = []
+                for pod_name, original in baseline.items():
+                    observed = current.get(pod_name)
+                    if observed is None:
+                        raise RuntimeError(
+                            f"Pod {pod_name} disappeared during container-kill; the fault must preserve Pod objects"
+                        )
+                    if observed["uid"] != original["uid"]:
+                        raise RuntimeError(
+                            f"Pod {pod_name} was recreated during container-kill: "
+                            f"old UID={original['uid']}, new UID={observed['uid']}"
+                        )
+                    for container_name, restart_count in original["containers"].items():
+                        observed_count = observed["containers"].get(container_name, -1)
+                        if observed_count <= restart_count:
+                            pending.append(f"{pod_name}/{container_name}({restart_count}->{observed_count})")
+                if not pending:
+                    logger.info(
+                        f"[CONTAINER_KILL] all containers restarted for {instance_label}; "
+                        f"Pod UIDs unchanged: {sorted(baseline)}"
+                    )
+                    return baseline
+                _time.sleep(1)
+
+            raise TimeoutError(
+                f"container-kill was not observed for {instance_label} within {timeout}s; pending={pending}"
+            )
+        finally:
+            for chaos_name in chaos_names:
+                result = _sp.run(
+                    [
+                        "kubectl",
+                        "delete",
+                        "podchaos",
+                        chaos_name,
+                        "-n",
+                        milvus_ns,
+                        "--ignore-not-found",
+                        "--wait=false",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                logger.info(f"[CONTAINER_KILL] delete {chaos_name}: rc={result.returncode}")
 
     def wait_for_pods_ready(instance_label, timeout=300):
         """Wait for pods matching the label to be Ready.
 
-        Two phases because right after `kubectl delete pods`, the operator
-        hasn't recreated pods yet — `kubectl wait` would error with "no
-        matching resources found". So:
+        Keep the existence poll so this helper also handles an unexpected Pod
+        recreation without letting `kubectl wait` fail with "no matching
+        resources found". The expected container-kill path preserves Pod UIDs.
+        So:
           1. Poll until at least one pod matches.
           2. Then `kubectl wait` for Ready on the remaining time budget.
         """
@@ -408,7 +532,7 @@ def kubectl_helper(milvus_ns):
     class KubectlHelper:
         pass
 
-    KubectlHelper.delete_pods = staticmethod(delete_pods)
+    KubectlHelper.kill_containers = staticmethod(kill_containers)
     KubectlHelper.wait_for_pods_ready = staticmethod(wait_for_pods_ready)
 
     return KubectlHelper()

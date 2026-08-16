@@ -1,7 +1,7 @@
 # Go MilvusClient
 
 [![license](https://img.shields.io/hexpm/l/plug.svg?color=green)](https://github.com/milvus-io/milvus/blob/master/LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/github.com/milvus-io/milvus/client/v2.svg)](https://pkg.go.dev/github.com/milvus-io/milvus/client/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/milvus-io/milvus/client/v3.svg)](https://pkg.go.dev/github.com/milvus-io/milvus/client/v3)
 
 Go MilvusClient for [Milvus](https://github.com/milvus-io/milvus). To contribute code to this project, please read our [contribution guidelines](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) first.
 
@@ -17,13 +17,13 @@ Go 1.24.12 or higher
 1. Use `go get` to install the latest version of the Milvus Go SDK and dependencies:
 
    ```shell
-   go get -u github.com/milvus-io/milvus/client/v2
+   go get -u github.com/milvus-io/milvus/client/v3
    ```
 
 2. Include the Go MilvusClient in your application:
 
    ```go
-    import "github.com/milvus-io/milvus/client/v2/milvusclient"
+    import "github.com/milvus-io/milvus/client/v3/milvusclient"
 
     //...other snippet ...
     ctx, cancel := context.WithCancel(context.Background())
@@ -43,7 +43,7 @@ Go 1.24.12 or higher
 
 ### API Documentation
 
-Refer to [https://milvus.io/api-reference/go/v2.5.x/About.md](https://milvus.io/api-reference/go/v2.5.x/About.md) for the Go SDK API documentation.
+Refer to [https://milvus.io/api-reference/go/v3.0.x/About.md](https://milvus.io/api-reference/go/v3.0.x/About.md) for the Go SDK API documentation.
 
 ## Code format
 

@@ -122,11 +122,13 @@ func (suite *PipelineTestSuite) TestBasic() {
 			}
 		})
 
-	suite.delegator.EXPECT().ProcessDelete(mock.Anything, mock.Anything).Run(
-		func(deleteData []*delegator.DeleteData, ts uint64) {
-			for _, data := range deleteData {
-				for _, pk := range data.PrimaryKeys {
-					suite.True(lo.Contains(suite.deletePKs, pk.GetValue().(int64)))
+	suite.delegator.EXPECT().ProcessDeleteBatches(mock.Anything).Run(
+		func(batches []delegator.DeleteBatch) {
+			for _, batch := range batches {
+				for _, data := range batch.Data {
+					for _, pk := range data.PrimaryKeys {
+						suite.True(lo.Contains(suite.deletePKs, pk.GetValue().(int64)))
+					}
 				}
 			}
 		})

@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "folly/CancellationToken.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
@@ -42,13 +43,34 @@ struct Entry {
     std::vector<uint8_t> data;
 };
 
+struct EntryStreamLoadInfo {
+    // Exact encrypted-stream task bounds derived from persisted V3 directory
+    // slice metadata. Plaintext files leave both byte counts at zero.
+    bool encrypted{false};
+    size_t total_transient_bytes{0};
+    size_t max_task_transient_bytes{0};
+};
+
 class IndexEntryReader {
  public:
+    static EntryStreamLoadInfo
+    InspectStreamLoadInfo(std::shared_ptr<milvus::InputStream> input,
+                          int64_t file_size,
+                          folly::CancellationToken cancellation_token =
+                              folly::CancellationToken());
+
     static std::unique_ptr<IndexEntryReader>
     Open(std::shared_ptr<milvus::InputStream> input,
          int64_t file_size,
          int64_t collection_id = 0,
-         ThreadPoolPriority priority = ThreadPoolPriority::HIGH);
+         ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
+         folly::CancellationToken cancellation_token =
+             folly::CancellationToken());
+
+    const EntryStreamLoadInfo&
+    GetStreamLoadInfo() const {
+        return stream_load_info_;
+    }
 
     std::vector<std::string>
     GetEntryNames() const;
@@ -150,6 +172,8 @@ class IndexEntryReader {
     ReadFooterAndDirectory();
     void
     ValidateMagic();
+    void
+    CheckCancelled(const std::string& operation) const;
 
     Entry
     ReadPlainEntry(const EntryMeta& meta);
@@ -206,6 +230,12 @@ class IndexEntryReader {
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
+    static size_t
+    DownloadRangeCount(uint64_t size);
+
+    static size_t
+    DownloadTaskCount(const EntryMeta& meta);
+
     // Verify CRC and close file descriptor
     void
     FinalizeEntryDownload(EntryDownloadState& state);
@@ -221,6 +251,9 @@ class IndexEntryReader {
                                    EntryStreamDownloadState& state,
                                    std::vector<std::future<void>>& futures);
 
+    static size_t
+    StreamDownloadTaskCount(const EntryMeta& meta);
+
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
@@ -228,6 +261,7 @@ class IndexEntryReader {
     int64_t file_size_ = 0;
     int64_t collection_id_ = 0;
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
+    folly::CancellationToken cancellation_token_;
 
     bool is_encrypted_ = false;
     std::string edek_;
@@ -237,6 +271,7 @@ class IndexEntryReader {
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
     std::unordered_map<std::string, EntryMeta> entry_index_;
+    EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;

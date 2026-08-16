@@ -57,7 +57,12 @@ struct Plan {
     SchemaPtr schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
+    // Requested output fields, kept in request order for result materialization.
+    // access_entries_ also includes them for external manifest checks.
     std::vector<FieldId> target_entries_;
+    // Fields referenced by search execution or output. For external
+    // collections this drives manifest-column checks, not data readiness.
+    std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
     void
     check_identical(Plan& other);
@@ -122,7 +127,12 @@ struct RetrievePlan {
  public:
     SchemaPtr schema_;
     std::unique_ptr<RetrievePlanNode> plan_node_;
+    // Requested output fields, kept in request order for retrieve results.
+    // access_entries_ also includes them for external manifest checks.
     std::vector<FieldId> field_ids_;
+    // Fields referenced by retrieve execution or output. For external
+    // collections this drives manifest-column checks, not data readiness.
+    std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
 };
 

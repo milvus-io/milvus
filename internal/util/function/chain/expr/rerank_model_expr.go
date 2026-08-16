@@ -24,10 +24,15 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+const RerankModelFuncName = "rerank_model"
 
 // RerankModelExpr implements FunctionExpr for model-based reranking.
 // It takes a text column as input, calls an external rerank service per-chunk (per-NQ),
@@ -47,16 +52,59 @@ type RerankModelExpr struct {
 // NewRerankModelExpr creates a new RerankModelExpr with the given provider and queries.
 func NewRerankModelExpr(provider rerank.ModelProvider, queries []string) (*RerankModelExpr, error) {
 	if provider == nil {
-		return nil, merr.WrapErrServiceInternal("model: provider is nil")
+		return nil, merr.WrapErrServiceInternal("rerank_model: provider is nil")
 	}
 	if len(queries) == 0 {
-		return nil, merr.WrapErrParameterMissingMsg("model: queries must not be empty")
+		return nil, merr.WrapErrParameterMissingMsg("rerank_model: queries must not be empty")
 	}
 	return &RerankModelExpr{
-		BaseExpr: *NewBaseExpr("model", []string{types.StageL2Rerank}),
+		BaseExpr: *NewBaseExpr(RerankModelFuncName, []string{types.StageL2Rerank}),
 		provider: provider,
 		queries:  queries,
 	}, nil
+}
+
+func NewRerankModelExprFromParams(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+	reader := types.NewParamReader(RerankModelFuncName, cfg.Params)
+
+	queries, err := reader.StringSlice("queries", true)
+	if err != nil {
+		return nil, err
+	}
+
+	extraInfo := ctx.ModelExtraInfo
+	if extraInfo == nil {
+		extraInfo = &models.ModelExtraInfo{}
+	}
+
+	providerParams, err := modelProviderParams(cfg.Params)
+	if err != nil {
+		return nil, err
+	}
+	provider, err := rerank.NewModelProvider(providerParams, extraInfo)
+	if err != nil {
+		return nil, err
+	}
+	return NewRerankModelExpr(provider, queries)
+}
+
+func modelProviderParams(params map[string]*schemapb.FunctionParamValue) ([]*commonpb.KeyValuePair, error) {
+	reader := types.NewParamReader(RerankModelFuncName, params)
+	result := make([]*commonpb.KeyValuePair, 0, len(params))
+	for key, value := range params {
+		// queries is consumed by RerankModelExpr. Legacy model providers ignore
+		// unknown params, but queries is a typed array and cannot be represented
+		// as a scalar KeyValuePair.
+		if key == "queries" {
+			continue
+		}
+		strValue, err := reader.ParamValueToString(key, value)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, &commonpb.KeyValuePair{Key: key, Value: strValue})
+	}
+	return result, nil
 }
 
 // OutputDataTypes returns the data types of output columns.
@@ -68,14 +116,14 @@ func (m *RerankModelExpr) OutputDataTypes() []arrow.DataType {
 // Execute calls the external rerank service for each chunk (NQ) and returns model scores.
 func (m *RerankModelExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if len(inputs) != 1 {
-		return nil, merr.WrapErrServiceInternalMsg("model: expected 1 input column (text), got %d", len(inputs))
+		return nil, merr.WrapErrServiceInternalMsg("rerank_model: expected 1 input column (text), got %d", len(inputs))
 	}
 
 	textCol := inputs[0]
 	numChunks := len(textCol.Chunks())
 
 	if len(m.queries) != numChunks {
-		return nil, merr.WrapErrServiceInternalMsg("model: queries count (%d) != nq count (%d)", len(m.queries), numChunks)
+		return nil, merr.WrapErrParameterInvalidMsg("rerank_model: queries count (%d) != nq count (%d)", len(m.queries), numChunks)
 	}
 
 	scoreChunks := make([]arrow.Array, numChunks)
@@ -106,7 +154,7 @@ func (m *RerankModelExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunke
 func (m *RerankModelExpr) processChunk(ctx *types.FuncContext, chunk arrow.Array, query string) (arrow.Array, error) {
 	stringArr, ok := chunk.(*array.String)
 	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("model: input column must be String/VarChar, got %T", chunk)
+		return nil, merr.WrapErrServiceInternalMsg("rerank_model: input column must be String/VarChar, got %T", chunk)
 	}
 
 	n := stringArr.Len()
@@ -158,10 +206,14 @@ func (m *RerankModelExpr) rerankBatch(ctx context.Context, query string, texts [
 			return nil, err
 		}
 		if len(batchScores) != end-i {
-			return nil, merr.WrapErrServiceInternalMsg("model: rerank service returned %d scores for %d docs", len(batchScores), end-i)
+			return nil, merr.WrapErrServiceInternalMsg("rerank_model: rerank service returned %d scores for %d docs", len(batchScores), end-i)
 		}
 		scores = append(scores, batchScores...)
 	}
 
 	return scores, nil
+}
+
+func init() {
+	types.MustRegisterFunction(RerankModelFuncName, NewRerankModelExprFromParams)
 }

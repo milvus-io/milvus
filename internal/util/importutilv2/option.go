@@ -84,7 +84,7 @@ func GetTimeoutTs(options Options) (uint64, error) {
 		if err != nil {
 			return 0, merr.Wrap(err, "parse timeout failed")
 		}
-		curTs := tsoutil.GetCurrentTime()
+		curTs := tsoutil.ComposeTSByTime(time.Now())
 		timeoutTs = tsoutil.AddPhysicalDurationOnTs(curTs, dur)
 	}
 	return timeoutTs, nil

@@ -19,6 +19,7 @@
 #include <arrow/array/array_primitive.h>
 #include <arrow/c/bridge.h>
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -29,6 +30,7 @@
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "futures/Executor.h"
 #include "futures/Future.h"
 #include "pb/plan.pb.h"
@@ -139,6 +141,39 @@ ComputeScorerScoresOnPreparedChunks(
     float* const* output_score_chunks,
     bool* const* output_has_score_chunks,
     const folly::CancellationToken& cancel_token = folly::CancellationToken()) {
+    // Observe a pre-cancelled request before doing anything at all --
+    // including the all-empty fast path below, which the per-chunk loop's
+    // cancellation check used to cover before the fast path existed.
+    milvus::futures::throwIfCancelled(cancel_token);
+
+    // Nothing to score: skip the whole setup. Bailing out here matters for a
+    // non-native filter (text match, GIS) -- otherwise it would scan the whole
+    // segment to build a bitset no chunk ever consumes.
+    auto has_offsets = std::any_of(
+        scorer_offset_chunks.begin(),
+        scorer_offset_chunks.end(),
+        [](const auto& scorer_offsets) { return !scorer_offsets.empty(); });
+    if (!has_offsets) {
+        return;
+    }
+
+    // Preflight before the potentially expensive whole-segment filter
+    // evaluation below (ComputeNonNativeFilterBitset): catch a null
+    // per-chunk output pointer before doing any work rather than midway
+    // through the chunk loop.
+    for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
+         ++chunk_idx) {
+        if (scorer_offset_chunks[chunk_idx].empty()) {
+            continue;
+        }
+        AssertInfo(output_score_chunks[chunk_idx] != nullptr,
+                   "output score chunk {} is null",
+                   chunk_idx);
+        AssertInfo(output_has_score_chunks[chunk_idx] != nullptr,
+                   "output has score chunk {} is null",
+                   chunk_idx);
+    }
+
     auto active_count = segment->get_active_count(timestamp);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID,
@@ -159,6 +194,16 @@ ComputeScorerScoresOnPreparedChunks(
     query_context->set_op_context(&op_context);
     auto exec_context = milvus::exec::ExecContext(query_context.get());
 
+    // A filter that cannot consume offset input (text match, GIS) is
+    // evaluated over the whole segment; do that once here instead of once
+    // per offset chunk inside ComputeScorerScores.
+    // The compiled filter is reused across chunks too: deciding native vs
+    // non-native already builds it, and a native filter would otherwise be
+    // recompiled (and its scalar indexes re-pinned) once per chunk.
+    std::unique_ptr<milvus::exec::ExprSet> filter_expr_set;
+    auto filter_bitset = milvus::rescores::ComputeNonNativeFilterBitset(
+        &exec_context, scorer, &filter_expr_set);
+
     for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
          ++chunk_idx) {
         milvus::futures::throwIfCancelled(cancel_token);
@@ -166,13 +211,7 @@ ComputeScorerScoresOnPreparedChunks(
         if (scorer_offsets.empty()) {
             continue;
         }
-        AssertInfo(output_score_chunks[chunk_idx] != nullptr,
-                   "output score chunk {} is null",
-                   chunk_idx);
-        AssertInfo(output_has_score_chunks[chunk_idx] != nullptr,
-                   "output has score chunk {} is null",
-                   chunk_idx);
-
+        // Output pointers were validated by the preflight above.
         milvus::rescores::ComputeScorerScores(
             &exec_context,
             &op_context,
@@ -180,7 +219,9 @@ ComputeScorerScoresOnPreparedChunks(
             scorer,
             scorer_offsets,
             output_score_chunks[chunk_idx],
-            output_has_score_chunks[chunk_idx]);
+            output_has_score_chunks[chunk_idx],
+            filter_bitset.has_value() ? &filter_bitset.value() : nullptr,
+            filter_expr_set.get());
     }
 }
 

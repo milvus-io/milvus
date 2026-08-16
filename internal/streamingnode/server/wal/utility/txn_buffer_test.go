@@ -21,7 +21,7 @@ var idAllocator = typeutil.NewIDAllocator()
 func TestTxnBuffer(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
-	baseTso := tsoutil.GetCurrentTime()
+	baseTso := tsoutil.ComposeTSByTime(time.Now())
 
 	msgs := b.HandleImmutableMessages([]message.ImmutableMessage{
 		newInsertMessage(t, nil, baseTso),
@@ -175,7 +175,7 @@ func newAlterReplicateConfigMessage(t *testing.T, forcePromote bool, ignore bool
 func TestRollbackAllUncommittedTxn(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
-	baseTso := tsoutil.GetCurrentTime()
+	baseTso := tsoutil.ComposeTSByTime(time.Now())
 
 	// Create uncommitted transactions
 	txnCtx1 := &message.TxnContext{
@@ -226,7 +226,7 @@ func TestRollbackAllUncommittedTxn_Empty(t *testing.T) {
 func TestForcePromoteRollsBackUncommittedTxn(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
-	baseTso := tsoutil.GetCurrentTime()
+	baseTso := tsoutil.ComposeTSByTime(time.Now())
 
 	// Create uncommitted transaction
 	txnCtx := &message.TxnContext{
@@ -262,7 +262,7 @@ func TestForcePromoteRollsBackUncommittedTxn(t *testing.T) {
 func TestForcePromoteIgnored_DoesNotRollback(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
-	baseTso := tsoutil.GetCurrentTime()
+	baseTso := tsoutil.ComposeTSByTime(time.Now())
 
 	// Create uncommitted transaction
 	txnCtx := &message.TxnContext{
@@ -298,7 +298,7 @@ func TestForcePromoteIgnored_DoesNotRollback(t *testing.T) {
 func TestNonForcePromoteAlterReplicateConfig_DoesNotRollback(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
-	baseTso := tsoutil.GetCurrentTime()
+	baseTso := tsoutil.ComposeTSByTime(time.Now())
 
 	// Create uncommitted transaction
 	txnCtx := &message.TxnContext{

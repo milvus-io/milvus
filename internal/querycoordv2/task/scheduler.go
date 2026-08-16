@@ -50,7 +50,6 @@ const (
 	TaskTypeMove
 	TaskTypeUpdate
 	TaskTypeStatsUpdate
-	TaskTypeDropIndex
 )
 
 var TaskTypeName = map[Type]string{
@@ -83,14 +82,6 @@ func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
 }
 
 func NewReplicaLeaderIndex(task *LeaderTask) replicaSegmentIndex {
-	return replicaSegmentIndex{
-		ReplicaID: task.ReplicaID(),
-		SegmentID: task.SegmentID(),
-		IsGrowing: false,
-	}
-}
-
-func NewReplicaDropIndex(task *DropIndexTask) replicaSegmentIndex {
 	return replicaSegmentIndex{
 		ReplicaID: task.ReplicaID(),
 		SegmentID: task.SegmentID(),
@@ -267,6 +258,8 @@ type segmentDeltaRecord struct {
 	collectionID int64
 	nodeID       int64
 	segmentID    int64
+	channelName  string
+	scope        querypb.DataScope
 	actionType   ActionType
 	delta        int
 }
@@ -350,6 +343,8 @@ func (delta *SegmentTaskDelta) Add(task *SegmentTask) {
 			collectionID: task.CollectionID(),
 			nodeID:       segmentAction.Node(),
 			segmentID:    segmentAction.GetSegmentID(),
+			channelName:  segmentAction.GetShard(),
+			scope:        segmentAction.GetScope(),
 			actionType:   segmentAction.Type(),
 			delta:        segmentAction.WorkLoadEffect(),
 		})
@@ -407,17 +402,12 @@ func (record segmentDeltaRecord) isSegmentDistMatched(distMgr *meta.Distribution
 		return false
 	}
 
-	segments := distMgr.SegmentDistManager.GetByFilter(
-		meta.WithNodeID(record.nodeID),
-		meta.WithSegmentID(record.segmentID),
-	)
-	segmentInDist := len(segments) > 0
-
+	inDist := segmentInDist(distMgr, record.nodeID, record.channelName, record.segmentID, record.scope)
 	switch record.actionType {
 	case ActionTypeGrow:
-		return segmentInDist
+		return inDist
 	case ActionTypeReduce:
-		return !segmentInDist
+		return !inDist
 	default:
 		// Only grow/reduce actions affect segment presence; other segment
 		// actions have zero workload effect and are treated as reflected.
@@ -854,23 +844,6 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
-	case *DropIndexTask:
-		index := NewReplicaDropIndex(task)
-		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
-					mlog.Int64("oldID", old.ID()),
-					mlog.String("oldPriority", old.Priority().String()),
-					mlog.Int64("newID", task.ID()),
-					mlog.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
-		}
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
 	}
@@ -1053,6 +1026,7 @@ func (scheduler *taskScheduler) GetTasksJSON() string {
 // 3. execute the current action of task
 func (scheduler *taskScheduler) schedule(node int64) {
 	if scheduler.tasks.Len() == 0 {
+		scheduler.updateTaskMetrics()
 		return
 	}
 

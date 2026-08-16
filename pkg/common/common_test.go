@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestIsSystemField(t *testing.T) {
@@ -186,6 +187,7 @@ func TestNamespaceMode(t *testing.T) {
 			}
 			err := ValidateNamespaceMode(kvs...)
 			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Contains(t, err.Error(), "valid values")
 		}
 	})
@@ -197,6 +199,7 @@ func TestNamespaceMode(t *testing.T) {
 			}
 			err := ValidateNamespaceMode(kvs...)
 			assert.Error(t, err, "value %q should be rejected", val)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Contains(t, err.Error(), "valid values")
 		}
 	})
@@ -208,6 +211,7 @@ func TestNamespaceMode(t *testing.T) {
 			}
 			err := ValidateNamespaceMode(kvs...)
 			assert.Error(t, err, "key %q should be rejected", key)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Contains(t, err.Error(), "did you mean")
 		}
 	})

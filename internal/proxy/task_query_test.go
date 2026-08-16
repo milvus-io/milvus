@@ -44,6 +44,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestQueryTaskAppliesFixedSnapshotTimestamp(t *testing.T) {
+	const snapshotTS = uint64(100)
+	task := &queryTask{
+		RetrieveRequest:        &internalpb.RetrieveRequest{MvccTimestamp: 200},
+		fixedSnapshotTimestamp: snapshotTS,
+	}
+
+	guaranteeTS := task.applyFixedSnapshotTimestamp(300)
+	require.Equal(t, snapshotTS, guaranteeTS)
+	require.Equal(t, snapshotTS, task.GetMvccTimestamp())
+}
+
 func TestQueryTask_all(t *testing.T) {
 	var (
 		err error
@@ -67,7 +79,7 @@ func TestQueryTask_all(t *testing.T) {
 	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]shardclient.NodeInfo{
 		{NodeID: 1, Address: "mock_qn", Serviceable: true},
 	}, nil).Maybe()
-	mgr.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	mgr.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
 	lb := shardclient.NewLBPolicyImpl(mgr)
 
 	err = InitMetaCache(ctx, qc)
@@ -1690,7 +1702,7 @@ func Test_createCntPlan(t *testing.T) {
 func Test_queryTask_createPlan(t *testing.T) {
 	collSchema := newTestSchema()
 	t.Run("query without expression", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"Int64"},
@@ -1702,7 +1714,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid expression", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 
 		tsk := &queryTask{
 			schema: schema,
@@ -1716,7 +1728,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid output fields", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 
 		tsk := &queryTask{
 			schema: schema,
@@ -1774,8 +1786,8 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
 
 		skip := qt.CanSkipAllocTimestamp()
@@ -1783,16 +1795,16 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
 		skip = qt.CanSkipAllocTimestamp()
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Strong,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
 		skip = qt.CanSkipAllocTimestamp()
 		assert.False(t, skip)
@@ -1801,8 +1813,8 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 	t.Run("request consistency level", func(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
 
 		qt := &queryTask{
@@ -1873,8 +1885,8 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, errors.New("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+				CollID:           collID,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil)
 
 		skip = qt.CanSkipAllocTimestamp()

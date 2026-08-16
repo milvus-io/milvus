@@ -104,12 +104,12 @@ func getTaskSlotUsage(task Compactor) int64 {
 
 func (e *executor) Enqueue(task Compactor) (bool, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	planID := task.GetPlanID()
 
 	// Check for duplicate task
 	if _, exists := e.tasks[planID]; exists {
+		e.mu.Unlock()
 		mlog.Warn(context.TODO(), "duplicated compaction task",
 			mlog.Int64("planID", planID),
 			mlog.String("channel", task.GetChannelName()))
@@ -123,6 +123,7 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 		state:     datapb.CompactionTaskState_executing,
 		result:    nil,
 	}
+	e.mu.Unlock()
 
 	e.taskCh <- task
 	return true, nil
@@ -138,11 +139,8 @@ func (e *executor) Slots() int64 {
 // completeTask updates task state to completed and adjusts slot usage
 func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	if task, exists := e.tasks[planID]; exists {
-		task.compactor.Complete()
-
 		// Update state based on result
 		if result != nil {
 			task.state = datapb.CompactionTaskState_completed
@@ -151,18 +149,24 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 			task.state = datapb.CompactionTaskState_failed
 		}
 
-		// Publish filesystem metrics after compaction task completion
-		storageConfig := task.compactor.GetStorageConfig()
-		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
-			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", mlog.Err(err))
-		}
-
 		// Adjust slot usage
 		e.usingSlots -= getTaskSlotUsage(task.compactor)
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
 		}
+		e.mu.Unlock()
+
+		task.compactor.Complete()
+
+		// Publish filesystem metrics after compaction task completion
+		storageConfig := task.compactor.GetStorageConfig()
+		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
+			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", mlog.Err(err))
+		}
+		return
 	}
+
+	e.mu.Unlock()
 }
 
 func (e *executor) RemoveTask(planID int64) {

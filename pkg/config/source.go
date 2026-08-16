@@ -52,6 +52,11 @@ type EtcdInfo struct {
 	CaCertFile string
 	MinVersion string
 
+	// DialTimeout for establishing the initial connection to etcd, read from the
+	// local file/env config source (which is already loaded before the etcd
+	// source is created). A non-positive value keeps the etcd client default.
+	DialTimeout time.Duration
+
 	// Pull Configuration interval, unit is second
 	RefreshInterval time.Duration
 }

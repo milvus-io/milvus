@@ -288,7 +288,7 @@ func NewPackedRecordBatchWriter(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, writerFormat, schemaBasedFormats)
 }
 
 func NewPartialPackedRecordBatchWriter(
@@ -302,7 +302,19 @@ func NewPartialPackedRecordBatchWriter(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
+}
+
+func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg(
+				"TEXT field %d requires TEXT-aware writer or text refs as binary preserve-ref path",
+				field.GetFieldID(),
+			)
+		}
+	}
+	return nil
 }
 
 func newPackedRecordBatchWriter(
@@ -314,6 +326,7 @@ func newPackedRecordBatchWriter(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	validatePK bool,
+	textRefsAsBinary bool,
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
@@ -323,11 +336,19 @@ func newPackedRecordBatchWriter(
 			return nil, err
 		}
 	}
+	if !textRefsAsBinary {
+		if err := validatePackedRecordBatchWriterSchema(schema); err != nil {
+			return nil, err
+		}
+	}
 
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
+	}
+	if textRefsAsBinary {
+		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
 	}
 
 	if len(schemaBasedFormats) > 0 && len(schemaBasedFormats) != len(columnGroups) {

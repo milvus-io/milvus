@@ -392,6 +392,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
@@ -409,7 +410,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
 		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
-		loadingTimeoutMs, warmupLoadingTimeoutMs, prefetchPoolThreads)
+		loadingTimeoutMs, warmupLoadingTimeoutMs, rejectRemoteVectorOutput, prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
@@ -453,11 +454,13 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
 		warmupLoadingTimeoutMs,
 		storageUsageTrackingEnabled,
+		rejectRemoteVectorOutput,
 		scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -498,6 +501,72 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+// maxStorageReaderThreadPoolSize bounds common.storage.readerThreadPoolSize.
+// The value is operational sanity far above any useful pool (reads are
+// network-bound); its real job is to reject values that would wrap when
+// narrowed to int32 (e.g. 4294967296 -> 0, silently disabling the pool).
+const maxStorageReaderThreadPoolSize = 1024
+
+// maxIndexBuildReadWindowBytes mirrors the limit enforced by
+// InitIndexBuildReadWindow in storage_c.cpp (milvus-storage validates
+// reader.record_batch_max_size in [1, 4GB]). It is duplicated here so both
+// values can be checked before either one is applied; the C side stays
+// authoritative for callers that bypass this function.
+const maxIndexBuildReadWindowBytes = 4 << 30
+
+// loonReaderConfigMu serializes InitLoonReaderConfig. Config-event handlers
+// run inline on the updating goroutine and the dispatcher gives no ordering
+// guarantee across concurrent updates, so two writers (say 16 then 8) could
+// otherwise read the paramtable in one order and reach
+// C.InitLoonReaderThreadPool in the reverse one, leaving the pool at 16 while
+// the paramtable reports 8 — and the resize is not idempotent, so nothing
+// later repairs it. The lock covers read-then-apply rather than just the
+// apply, so whichever caller acquires it last also reads the newest values
+// and installs them last.
+var loonReaderConfigMu sync.Mutex
+
+// InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
+// settings: the global reader thread pool size (chunk/file-level read
+// fan-out) and the index-build read window (how many bytes one prefetch
+// round may span, which bounds how many row groups download in parallel per
+// round). Both default to 0 = pre-existing sequential behavior.
+//
+// Both values are validated before either is applied. Resizing the global
+// reader pool is not revertible through config (it cannot be destroyed at
+// runtime), so applying it and only then rejecting the window would leave a
+// hot-reload half-applied with nothing but a generic failure log to show it.
+func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
+	loonReaderConfigMu.Lock()
+	defer loonReaderConfigMu.Unlock()
+
+	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
+			maxStorageReaderThreadPoolSize, poolSize)
+	}
+	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
+	if window < 0 || window > maxIndexBuildReadWindowBytes {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
+			maxIndexBuildReadWindowBytes, window)
+	}
+	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
+	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
+		return err
+	}
+	status = C.InitIndexBuildReadWindow(C.int64_t(window))
+	return HandleCStatus(&status, "InitIndexBuildReadWindow failed")
+}
+
+// EffectiveLoonReaderThreadPoolSize returns the pool size actually in effect,
+// which differs from the configured value when the pool already exists: it
+// cannot be destroyed at runtime, so lowering the setting to 0 does not take
+// effect until restart.
+func EffectiveLoonReaderThreadPoolSize() int32 {
+	return int32(C.GetLoonReaderThreadPoolSize())
+}
+
 func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	arrowReaderConfig := C.CArrowReaderConfig{
 		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
@@ -520,12 +589,8 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.StreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			ratio, err := strconv.ParseFloat(newValue, 64)
-			if err != nil {
-				return err
-			}
-			UpdateStreamBudgetRatio(ratio)
+		paramtable.Get().CommonCfg.LoadTransientBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			UpdateLoadTransientBudgetBytes(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
 			return nil
 		})
 
@@ -603,6 +668,15 @@ func SetupCoreConfigChangelCallback() {
 				return err
 			}
 			UpdateDefaultOptimizeExprEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnableDriverPrefetch.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultDriverPrefetchEnable(enable)
 			return nil
 		})
 
@@ -696,6 +770,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.StorageUsageTrackingEnabled.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredRejectRemoteVectorOutput.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
@@ -745,6 +820,12 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 func InitGeometryCache(params *paramtable.ComponentParam) error {
 	enableGeometryCache := C.bool(params.QueryNodeCfg.EnableGeometryCache.GetAsBool())
 	C.SegcoreSetEnableGeometryCache(enableGeometryCache)
+	return nil
+}
+
+func InitGISSplitFusion(params *paramtable.ComponentParam) error {
+	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
+	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
 	return nil
 }
 

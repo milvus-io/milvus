@@ -173,7 +173,7 @@ func (suite *RetrieveSuite) SetupTest() {
 
 	insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, suite.growing.ID(), msgLength)
 	suite.Require().NoError(err)
-	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+	insertRecord, _, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
 	err = suite.growing.Insert(suite.ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	suite.Require().NoError(err)
@@ -366,7 +366,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilterDoesNotPruneGrowing() {
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
-		insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+		insertRecord, _, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 		suite.Require().NoError(err)
 		err = seg.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 		suite.Require().NoError(err)
@@ -455,7 +455,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilterDoesNotPruneGrowing() {
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
-		insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+		insertRecord, _, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 		suite.Require().NoError(err)
 		err = seg.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 		suite.Require().NoError(err)

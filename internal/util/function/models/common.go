@@ -140,6 +140,14 @@ const (
 	GeminiAKEnvStr string = "MILVUS_GEMINI_API_KEY"
 )
 
+// Hugging Face
+
+const (
+	HuggingFaceAKEnvStr           string = "MILVUS_HUGGINGFACE_API_KEY"
+	HuggingFaceProviderParamKey   string = "hf_provider"
+	HuggingFacePromptNameParamKey string = "prompt_name"
+)
+
 // TEI and vllm
 
 const (

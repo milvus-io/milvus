@@ -19,6 +19,7 @@ package pkoracle
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ Candidate = (*ExternalSegmentCandidate)(nil)
@@ -46,10 +47,9 @@ func NewExternalSegmentCandidate(segmentID int64, partitionID int64, segType com
 }
 
 // extractSegmentIDFromVirtualPK extracts the truncated segment ID from a virtual PK.
-// Virtual PK format: (truncated_segmentID << 32) | offset.
-// Uses unsigned right shift to avoid sign-extension for large segment IDs.
+// Delegates to typeutil, the single source of truth for the virtual PK layout.
 func extractSegmentIDFromVirtualPK(virtualPK int64) int64 {
-	return int64(uint64(virtualPK) >> 32)
+	return typeutil.ExtractSegmentIDFromVirtualPK(virtualPK)
 }
 
 // MayPkExist checks if the primary key could exist in this segment.

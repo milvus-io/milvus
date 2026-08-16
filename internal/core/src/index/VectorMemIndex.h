@@ -123,7 +123,8 @@ class VectorMemIndex : public VectorIndex {
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
-                    const BitsetView& bitset) const override;
+                    const BitsetView& bitset,
+                    milvus::OpContext* op_context = nullptr) const override;
 
     knowhere::expected<knowhere::DataSetPtr>
     CalcDistByIDs(const knowhere::DataSetPtr query_dataset,

@@ -145,6 +145,27 @@ func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
 	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
 }
 
+// isReplicatingClusterNow reports whether this cluster is currently part of a CDC
+// replication topology. A non-nil error means the status could not be determined (e.g. a
+// transient balancer error, or OnShutdownError while streamingcoord is stopping before
+// datacoord); the caller must treat that as indeterminate rather than "not replicating",
+// because at GC time a false "not replicating" would irreversibly drop a replicating job
+// without releasing the peer. A nil assignment is an unambiguous "not replicating".
+func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	assignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		return false, err
+	}
+	if assignment == nil {
+		return false, nil
+	}
+	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
@@ -224,13 +245,30 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		mlog.Warn(ctx, "CommitImport: job not found, skipping", mlog.FieldJobID(jobID))
-		return nil
+		mlog.Info(ctx, "CommitImport: job not found, retry later", mlog.FieldJobID(jobID))
+		return merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", jobID)
 	}
-	if job.GetState() != internalpb.ImportJobState_Uncommitted {
-		mlog.Info(ctx, "CommitImport: job not in Uncommitted state, no-op",
+	switch job.GetState() {
+	case internalpb.ImportJobState_Uncommitted:
+		// proceed
+	case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
+		mlog.Info(ctx, "CommitImport: job already committing or completed, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
+	case internalpb.ImportJobState_Failed:
+		// Divergence signal: the source committed but this replica already failed, so
+		// this replica will NOT make the data visible. Left as a no-op here; surfaced
+		// at WARN for alerting.
+		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits — potential primary/standby divergence",
+			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
+		return nil
+	default:
+		// CommitImport may be replicated before the local import task reaches
+		// Uncommitted. Returning an error keeps the broadcast task alive so the
+		// callback can retry after the import task finishes writing local meta.
+		mlog.Info(ctx, "CommitImport: job is not ready, retry later",
+			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
+		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
 	if err := c.importMeta.UpdateJob(ctx, jobID,
@@ -247,7 +285,8 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
-// It transitions the import job to Failed state.
+// It transitions the import job to Failed state and records that the failure
+// was user-initiated so AbortImport retries can be idempotent.
 // Concurrency safety is guaranteed by the broadcaster framework's resource key lock
 // (exclusive collection-level lock), so no CAS is needed here.
 // Segment cleanup is handled by the import inspector (processFailed), not here.
@@ -270,5 +309,8 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return nil
 	}
 
-	return c.importMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Failed))
+	return c.importMeta.UpdateJob(ctx, jobID,
+		UpdateJobState(internalpb.ImportJobState_Failed),
+		UpdateJobReason(importJobReasonAbortedByUser),
+	)
 }

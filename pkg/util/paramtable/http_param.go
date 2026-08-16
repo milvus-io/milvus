@@ -21,6 +21,9 @@ type httpConfig struct {
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
+	CompatibilityMode     ParamItem `refreshable:"true"`
+	MaxExprParamsDepth    ParamItem `refreshable:"true"`
+	NativeJSONResponse    ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
@@ -71,6 +74,45 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AcceptTypeAllowInt64.Init(base.mgr)
+
+	p.CompatibilityMode = ParamItem{
+		Key:          "proxy.http.compatibilityMode",
+		DefaultValue: "false",
+		Version:      "2.7.0",
+		Doc: `high-level restful api, restore the value handling of releases that predate the REST insert
+validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
+stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
+through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
+for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.CompatibilityMode.Init(base.mgr)
+	p.MaxExprParamsDepth = ParamItem{
+		Key:          "proxy.http.maxExprParamsDepth",
+		DefaultValue: "100",
+		Version:      "2.7.0",
+		Doc: `high-level restful api, the deepest nesting an expression template parameter may use. Converting a
+parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
+bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
+itself is the risk the setting exists to remove; values below 1 are read as 1.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxExprParamsDepth.Init(base.mgr)
+	p.NativeJSONResponse = ParamItem{
+		Key:          "proxy.http.nativeJSONResponse",
+		DefaultValue: "false",
+		Version:      "2.7.0",
+		Doc: `high-level restful api, return a JSON field as the document it holds rather than as a string.
+A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
+Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
+hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
+form and a warning is logged, so a caller always sees one shape or the other and never a mixture.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.NativeJSONResponse.Init(base.mgr)
 
 	p.EnablePprof = ParamItem{
 		Key:          "proxy.http.enablePprof",

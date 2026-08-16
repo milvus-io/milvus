@@ -1839,7 +1839,7 @@ func TestGetCompactionState(t *testing.T) {
 func TestManualCompaction(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
-	t.Run("test manual compaction successfully", func(t *testing.T) {
+	t.Run("target size zero routes to ordinary manual compaction", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
@@ -1849,7 +1849,12 @@ func TestManualCompaction(t *testing.T) {
 		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
-		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.MatchedBy(func(signal *compactionSignal) bool {
+			return signal.collectionID == 1 && signal.isForce
+		})).Return(1, nil).Once()
+
+		mockTriggerManager := NewMockTriggerManager(t)
+		svr.compactionTriggerManager = mockTriggerManager
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1857,9 +1862,11 @@ func TestManualCompaction(t *testing.T) {
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
+			TargetSize:   0,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockTriggerManager.AssertNotCalled(t, "ManualTrigger", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
@@ -1872,7 +1879,9 @@ func TestManualCompaction(t *testing.T) {
 		})
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
-		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.MatchedBy(func(req *milvuspb.ManualCompactionRequest) bool {
+			return req.GetCollectionID() == 1 && req.GetL0Compaction()
+		})).Return(1, nil)
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1884,6 +1893,103 @@ func TestManualCompaction(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("test manual rewrite target returns durable target id when guard enabled", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
+		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
+
+		catalog, records, _, _ := newCompactionTargetTestCatalog(t)
+		targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+		require.NoError(t, err)
+
+		handler := NewNMockHandler(t)
+		handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
+		inspector := NewMockCompactionInspector(t)
+		versionManager := NewMockVersionManager(t)
+		versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+
+		svr := &Server{allocator: alloc}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{compactionTargetMeta: targetMeta}
+		svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+
+		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
+			CollectionID: 1,
+			SegmentIds:   []int64{10, 20},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		require.Equal(t, int64(100), resp.GetCompactionID())
+		require.Zero(t, resp.GetCompactionPlanCount())
+
+		record := records[100]
+		require.NotNil(t, record)
+		require.Equal(t, datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
+		require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
+		require.Equal(t, int32(0), record.GetTailLimit())
+		require.Equal(t, uint64(200), record.GetActivatedAtTS())
+		require.Equal(t, uint64(200), record.GetExpectedTS())
+		require.Equal(t, int64(1), record.GetCollectionID())
+		segmentIDs, ok := compactionTargetSegmentIDs(record)
+		require.True(t, ok)
+		require.Equal(t, []int64{10, 20}, segmentIDs)
+	})
+
+	t.Run("test manual rewrite target rejects unsupported filters", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+		for _, test := range []struct {
+			name    string
+			request *milvuspb.ManualCompactionRequest
+		}{
+			{
+				name: "partition",
+				request: &milvuspb.ManualCompactionRequest{
+					CollectionID: 1,
+					PartitionId:  2,
+				},
+			},
+			{
+				name: "channel",
+				request: &milvuspb.ManualCompactionRequest{
+					CollectionID: 1,
+					Channel:      "ch-1",
+				},
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				alloc := allocator.NewMockAllocator(t)
+
+				catalog, records, _, _ := newCompactionTargetTestCatalog(t)
+				targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+				require.NoError(t, err)
+
+				handler := NewNMockHandler(t)
+				handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
+				inspector := NewMockCompactionInspector(t)
+				versionManager := NewMockVersionManager(t)
+				versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+
+				svr := &Server{allocator: alloc}
+				svr.stateCode.Store(commonpb.StateCode_Healthy)
+				svr.meta = &meta{compactionTargetMeta: targetMeta}
+				svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+
+				resp, err := svr.ManualCompaction(context.Background(), test.request)
+
+				require.NoError(t, err)
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				require.Zero(t, resp.GetCompactionID())
+				require.Empty(t, records)
+			})
+		}
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
@@ -2540,9 +2646,12 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 	paramtable.Get().Save(Params.DataCoordCfg.BindIndexNodeMode.Key, "true")
 	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeID.Key, "10001")
 	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeAddress.Key, "localhost:10001")
+	// the collection-rooted layout is opt-in; this test covers the QueryNode-session half of the gate
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.BindIndexNodeMode.Key)
 	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeID.Key)
 	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeAddress.Key)
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
 
 	mockSession := sessionutil.NewMockSession(t)
 	mockSession.EXPECT().
@@ -2602,7 +2711,7 @@ func Test_CheckHealth(t *testing.T) {
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
 					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 				},
@@ -2624,15 +2733,15 @@ func Test_CheckHealth(t *testing.T) {
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
 					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 					"invalid-vchannel-name": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 				},

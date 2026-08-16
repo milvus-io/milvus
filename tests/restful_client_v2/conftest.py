@@ -39,12 +39,12 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def endpoint(request):
     return request.config.getoption("--endpoint")
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def token(request):
     return request.config.getoption("--token")
 

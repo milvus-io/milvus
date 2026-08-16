@@ -79,12 +79,12 @@ func (r *FunctionRegistry) Get(name string) (FunctionFactory, bool) {
 }
 
 // Create creates a FunctionExpr using the factory registered with the given name.
-func (r *FunctionRegistry) Create(name string, params map[string]interface{}) (FunctionExpr, error) {
-	factory, ok := r.Get(name)
+func (r *FunctionRegistry) Create(ctx FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error) {
+	factory, ok := r.Get(cfg.Name)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("unknown function: %s", name)
+		return nil, merr.WrapErrParameterInvalidMsg("unknown function: %s", cfg.Name)
 	}
-	return factory(params)
+	return factory(ctx, cfg)
 }
 
 // Has returns true if a function with the given name is registered.
@@ -131,8 +131,8 @@ func GetFunctionFactory(name string) (FunctionFactory, bool) {
 }
 
 // CreateFunction creates a FunctionExpr using the global registry.
-func CreateFunction(name string, params map[string]interface{}) (FunctionExpr, error) {
-	return globalRegistry.Create(name, params)
+func CreateFunction(ctx FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error) {
+	return globalRegistry.Create(ctx, cfg)
 }
 
 // HasFunction returns true if a function with the given name is registered in the global registry.

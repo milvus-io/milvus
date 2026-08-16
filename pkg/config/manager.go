@@ -502,24 +502,45 @@ func (m *Manager) GetEtcdSource() (*EtcdSource, bool) {
 	return etcdSourceImpl, true
 }
 
-func (m *Manager) ProcessImmutableConfigs() error {
+// ProcessImmutableConfigs persists immutable configs into etcd (create-if-absent).
+// renderers optionally converts a placeholder raw value (e.g. mq.type's literal
+// "default") into the concrete value to persist, keyed by config key. A renderer
+// runs only when the key is not yet persisted in etcd; an existing etcd value is
+// never overwritten or re-rendered.
+func (m *Manager) ProcessImmutableConfigs(renderers map[string]func(raw string) string) error {
 	etcdSourceImpl, ok := m.GetEtcdSource()
 	if !ok {
 		mlog.Info(context.TODO(), "etcd source not enable,skip processing immutable configs")
 		return nil
 	}
 
+	normalizedRenderers := make(map[string]func(string) string, len(renderers))
+	for key, render := range renderers {
+		normalizedRenderers[formatKey(key)] = render
+	}
+
 	var saveErrors []error
 	var savedConfigs []string
 	m.immutableKeys.Range(func(key string) bool {
+		render, hasRenderer := normalizedRenderers[key]
 		confgSourceName, configValue, getConfigErr := m.GetConfig(key)
 		if getConfigErr != nil {
-			mlog.Warn(context.TODO(), "failed to get config", mlog.String("key", key), mlog.Err(getConfigErr))
-			return true
+			if !hasRenderer {
+				mlog.Warn(context.TODO(), "failed to get config", mlog.String("key", key), mlog.Err(getConfigErr))
+				return true
+			}
+			// the key exists in no source: the renderer alone decides the value to pin
+			confgSourceName, configValue = "", ""
 		}
 
 		_, getFromEtcdErr := etcdSourceImpl.GetConfigurationByKey(key)
 		if errors.Is(getFromEtcdErr, ErrKeyNotFound) {
+			if hasRenderer {
+				rendered := render(configValue)
+				mlog.Info(context.TODO(), "rendered immutable config value before persisting",
+					mlog.String("key", key), mlog.String("rawValue", configValue), mlog.String("renderedValue", rendered))
+				configValue = rendered
+			}
 			mlog.Info(context.TODO(), "immutable config not exist in etcd, saving to persistent storage",
 				mlog.String("fromSource", confgSourceName), mlog.String("key", key), mlog.String("value", configValue))
 			if err := m.SaveConfigToEtcd(etcdSourceImpl, key, configValue); err != nil {

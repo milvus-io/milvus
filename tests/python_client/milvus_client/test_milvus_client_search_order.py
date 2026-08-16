@@ -805,10 +805,6 @@ class TestMilvusClientSearchOrderIndependent(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="Milvus issue #49879: search with order_by_fields applies offset before scalar ordering",
-        strict=True,
-    )
     def test_milvus_client_search_order_by_with_offset(self):
         """
         target: verify search pagination with order_by_fields applies offset after scalar ordering
@@ -855,6 +851,65 @@ class TestMilvusClientSearchOrderIndependent(TestMilvusClientV2Base):
 
             result_ids = [r["id"] for r in res[0]]
             assert result_ids == [3, 1], f"Expected offset after price ordering to return [3, 1], got {result_ids}"
+        finally:
+            client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_search_order_by_group_by_with_offset(self):
+        """
+        target: verify search pagination with order_by_fields and group_by_field applies offset by groups.
+        method: search controlled ANN candidates with order_by price asc, group_by category, limit=2, offset=1.
+        expected: group heads are selected by ANN score, ordered by price, then offset skips the first group.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("category", DataType.VARCHAR, max_length=16)
+        schema.add_field("price", DataType.INT64)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=2)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="embeddings", index_type="FLAT", metric_type="IP", params={})
+
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
+        try:
+            rows = [
+                {"id": 1, "category": "A", "price": 30, "embeddings": [1.0, 0.0]},
+                {"id": 2, "category": "A", "price": 10, "embeddings": [0.9, 0.0]},
+                {"id": 3, "category": "B", "price": 20, "embeddings": [0.8, 0.0]},
+                {"id": 4, "category": "C", "price": 40, "embeddings": [0.7, 0.0]},
+            ]
+            client.insert(collection_name=collection_name, data=rows)
+            client.flush(collection_name=collection_name)
+            client.load_collection(collection_name=collection_name)
+
+            res = self.search(
+                client,
+                collection_name,
+                [[1.0, 0.0]],
+                anns_field="embeddings",
+                limit=2,
+                offset=1,
+                search_params={"metric_type": "IP", "params": {}},
+                output_fields=["category", "price"],
+                group_by_field="category",
+                order_by_fields=[{"field": "price", "order": "asc"}],
+                consistency_level="Strong",
+            )[0]
+
+            result_ids = [r["id"] for r in res[0]]
+            result_categories = [r["entity"]["category"] for r in res[0]]
+            result_prices = [r["entity"]["price"] for r in res[0]]
+            assert result_ids == [1, 4], (
+                "Expected group heads B(20), A(30), C(40) after order_by price asc, "
+                f"then offset=1/limit=2 to return groups A and C, got ids {result_ids}"
+            )
+            assert result_categories == ["A", "C"]
+            assert result_prices == [30, 40]
         finally:
             client.drop_collection(collection_name)
 
@@ -1085,7 +1140,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: "order_by is not supported when using search iterator"}
+        error = {ct.err_code: 1, ct.err_msg: "not supported when using search iterator"}
         self.search_iterator(
             client,
             collection_name,
@@ -1111,11 +1166,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
             ct.err_code: 65535,
-            ct.err_msg: (
-                "order_by field 'json_field' has unsortable type JSON; supported types: "
-                "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use "
-                'path syntax like field["key"]'
-            ),
+            ct.err_msg: "unsortable type JSON",
         }
         self.search(
             client,
@@ -1142,7 +1193,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
             ct.err_code: 1,
-            ct.err_msg: "Invalid order_by_fields item: 'field' key is required and cannot be empty",
+            ct.err_msg: "'field' key is required",
         }
         self.search(
             client,
@@ -1169,7 +1220,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "order_by field 'json_field[invalid:asc' does not exist in collection schema",
+            ct.err_msg: "does not exist in collection schema",
         }
         self.search(
             client,

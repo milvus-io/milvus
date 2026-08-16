@@ -60,20 +60,23 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
 	wb.mut.Lock()
-	defer wb.mut.Unlock()
 
 	for _, inData := range insertData {
-		if wb.useGrowingSourceFlush {
+		if wb.allowGrowingSourceFlush {
 			targetOffset := wb.growingSourceTargetOffset(inData.segmentID, inData.rowNum)
 			decision := wb.decideGrowingFlushSource(inData.segmentID, targetOffset, endPos)
 			if decision.sourceType == metacache.FlushSourceGrowing {
-				wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset)
+				if err := wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset); err != nil {
+					wb.mut.Unlock()
+					return err
+				}
 				continue
 			}
 		}
 
 		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
 		if err != nil {
+			wb.mut.Unlock()
 			return err
 		}
 	}
@@ -94,13 +97,26 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			delete(wb.l0Segments, partition)
 		}
 	}
+	syncTasks := wb.getSyncTasksLocked(context.Background(), segmentsSync)
+	wb.mut.Unlock()
+
+	if len(syncTasks) > 0 {
+		wb.submitSyncTasks(context.Background(), syncTasks)
+	}
 
 	return nil
 }
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
 func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
-	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos, schemaVersion)
+	if err := wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:   inData.partitionID,
+		SegmentID:     inData.segmentID,
+		StartPos:      startPos,
+		SchemaVersion: schemaVersion,
+	}); err != nil {
+		return err
+	}
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)

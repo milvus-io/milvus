@@ -63,6 +63,7 @@ struct LoadIndexInfo {
     int64_t dim;
     std::string
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
+    std::string shard;
     std::optional<LoadResourceRequest> load_resource_request;
 
     // Default constructor
@@ -99,6 +100,7 @@ struct LoadIndexInfo {
           num_rows(other.num_rows),
           dim(other.dim),
           warmup_policy(other.warmup_policy),
+          shard(other.shard),
           load_resource_request(other.load_resource_request) {
     }
 
@@ -129,6 +131,7 @@ struct LoadIndexInfo {
             num_rows = other.num_rows;
             dim = other.dim;
             warmup_policy = other.warmup_policy;
+            shard = other.shard;
             load_resource_request = other.load_resource_request;
         }
         return *this;

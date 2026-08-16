@@ -151,11 +151,12 @@ func (s *ChainTestSuite) TestSelectOp() {
 	s.Require().NoError(err)
 	defer result.Release()
 
-	// Verify only selected columns exist
+	// Verify selected non-system columns exist and unselected non-system columns are removed.
+	// System columns are preserved by SelectOp because downstream reduce paths may need them.
 	s.True(result.HasColumn(types.IDFieldName))
+	s.True(result.HasColumn(types.ScoreFieldName))
 	s.True(result.HasColumn("age"))
 	s.False(result.HasColumn("name"))
-	s.False(result.HasColumn(types.ScoreFieldName))
 
 	// Verify data integrity
 	s.Equal(df.NumRows(), result.NumRows())
@@ -259,7 +260,7 @@ func (s *ChainTestSuite) TestSortOp_Ascending() {
 
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort("age", false). // ascending
+		Sort("age", false, types.IDFieldName). // ascending
 		Execute(df)
 	s.Require().NoError(err)
 	defer result.Release()
@@ -288,7 +289,7 @@ func (s *ChainTestSuite) TestSortOp_Descending() {
 
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort("age", true). // descending
+		Sort("age", true, types.IDFieldName). // descending
 		Execute(df)
 	s.Require().NoError(err)
 	defer result.Release()
@@ -309,7 +310,7 @@ func (s *ChainTestSuite) TestSortOp_NonExistentColumn() {
 
 	_, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort("nonexistent", false).
+		Sort("nonexistent", false, types.IDFieldName).
 		Execute(df)
 	s.Error(err)
 }
@@ -478,7 +479,7 @@ func (s *ChainTestSuite) TestChainedOperations() {
 		SetStage(types.StageL2Rerank).
 		Filter(&MockFilterFunction{threshold: 0.3}, []string{types.ScoreFieldName}).
 		Select(types.IDFieldName, types.ScoreFieldName, "age").
-		Sort(types.ScoreFieldName, true). // descending
+		Sort(types.ScoreFieldName, true, types.IDFieldName). // descending
 		Limit(3).
 		Execute(df)
 	s.Require().NoError(err)
@@ -535,7 +536,7 @@ func (s *ChainTestSuite) TestMemoryLeak_SortOperation() {
 
 		result, err := NewFuncChainWithAllocator(s.pool).
 			SetStage(types.StageL2Rerank).
-			Sort("age", true).
+			Sort("age", true, types.IDFieldName).
 			Execute(df)
 		s.Require().NoError(err)
 
@@ -706,7 +707,7 @@ func (s *ChainTestSuite) TestMemoryLeak_SortOpError_NonExistentColumn() {
 
 		_, err := NewFuncChainWithAllocator(s.pool).
 			SetStage(types.StageL2Rerank).
-			Sort("non_existent_column", true).
+			Sort("non_existent_column", true, types.IDFieldName).
 			Execute(df)
 		s.Require().Error(err)
 
@@ -843,11 +844,11 @@ func (s *ChainTestSuite) TestOperatorStrings() {
 	s.Contains(selectOp.String(), "Select")
 
 	// SortOp
-	sortOpAsc := NewSortOp("col", false)
-	s.Equal("Sort(col ASC)", sortOpAsc.String())
+	sortOpAsc := newSortOp("col", false, types.IDFieldName)
+	s.Equal("Sort(col ASC, $id ASC)", sortOpAsc.String())
 
-	sortOpDesc := NewSortOp("col", true)
-	s.Equal("Sort(col DESC)", sortOpDesc.String())
+	sortOpDesc := newSortOp("col", true, types.IDFieldName)
+	s.Equal("Sort(col DESC, $id ASC)", sortOpDesc.String())
 
 	// LimitOp
 	limitOp := NewLimitOp(10, 0)
@@ -927,7 +928,7 @@ func (s *ChainTestSuite) TestValidate_ValidChain() {
 	fc := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
 		Select(types.IDFieldName, "age").
-		Sort("age", false).
+		Sort("age", false, types.IDFieldName).
 		Limit(10)
 
 	err := fc.Validate()
@@ -1194,7 +1195,7 @@ func (s *ChainTestSuite) TestExecuteWithContext_Cancellation() {
 	_, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
 		Select(types.IDFieldName, "age").
-		Sort("age", false).
+		Sort("age", false, types.IDFieldName).
 		Limit(10).
 		ExecuteWithContext(goCtx, df)
 
@@ -1211,7 +1212,7 @@ func (s *ChainTestSuite) TestExecuteWithContext_Success() {
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
 		Select(types.IDFieldName, "age").
-		Sort("age", false).
+		Sort("age", false, types.IDFieldName).
 		Limit(2).
 		ExecuteWithContext(goCtx, df)
 
@@ -1230,7 +1231,7 @@ func (s *ChainTestSuite) TestFunctionRegistry() {
 	s.NotNil(registry)
 
 	// Test Register and Has
-	factory := func(params map[string]interface{}) (types.FunctionExpr, error) {
+	factory := func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return &MockAddColumnFunction{value: 1}, nil
 	}
 	err := registry.Register("test_func", factory)
@@ -1262,11 +1263,11 @@ func (s *ChainTestSuite) TestFunctionRegistry() {
 	s.False(ok)
 
 	// Test Create
-	expr, err := registry.Create("test_func", nil)
+	expr, err := registry.Create(types.FunctionBuildContext{}, types.FunctionConfig{Name: "test_func"})
 	s.NoError(err)
 	s.NotNil(expr)
 
-	_, err = registry.Create("nonexistent", nil)
+	_, err = registry.Create(types.FunctionBuildContext{}, types.FunctionConfig{Name: "nonexistent"})
 	s.Error(err)
 
 	// Test Names
@@ -1284,7 +1285,7 @@ func (s *ChainTestSuite) TestGlobalFunctionRegistry() {
 	funcName := "test_global_func_" + s.T().Name()
 
 	// Register a test function first
-	err := types.RegisterFunction(funcName, func(params map[string]interface{}) (types.FunctionExpr, error) {
+	err := types.RegisterFunction(funcName, func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return &MockAddColumnFunction{value: 42}, nil
 	})
 	s.NoError(err)
@@ -1306,15 +1307,15 @@ func (s *ChainTestSuite) TestGlobalFunctionRegistry() {
 	s.False(ok)
 
 	// Test CreateFunction
-	expr, err := types.CreateFunction(funcName, nil)
+	expr, err := types.CreateFunction(types.FunctionBuildContext{}, types.FunctionConfig{Name: funcName})
 	s.NoError(err)
 	s.NotNil(expr)
 
-	_, err = types.CreateFunction("nonexistent", nil)
+	_, err = types.CreateFunction(types.FunctionBuildContext{}, types.FunctionConfig{Name: "nonexistent"})
 	s.Error(err)
 
 	// Test duplicate registration returns error
-	err = types.RegisterFunction(funcName, func(params map[string]interface{}) (types.FunctionExpr, error) {
+	err = types.RegisterFunction(funcName, func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return nil, nil
 	})
 	s.Error(err)
@@ -1322,7 +1323,7 @@ func (s *ChainTestSuite) TestGlobalFunctionRegistry() {
 
 	// Test MustRegisterFunction panics on duplicate
 	s.Panics(func() {
-		types.MustRegisterFunction(funcName, func(params map[string]interface{}) (types.FunctionExpr, error) {
+		types.MustRegisterFunction(funcName, func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 			return nil, nil
 		})
 	})
@@ -1354,9 +1355,13 @@ func (s *ChainTestSuite) TestOperatorInputsOutputs() {
 	s.Equal([]string{"a", "b", "c"}, selectOp.Outputs())
 
 	// SortOp
-	sortOp := NewSortOp("sort_col", true)
-	s.Equal([]string{"sort_col"}, sortOp.Inputs())
+	sortOp := newSortOp("sort_col", true, types.IDFieldName)
+	s.Equal([]string{"sort_col", types.IDFieldName}, sortOp.Inputs())
 	s.Empty(sortOp.Outputs())
+
+	sortOpWithTieBreak := newSortOp("sort_col", true, "tie_col")
+	s.Equal([]string{"sort_col", "tie_col"}, sortOpWithTieBreak.Inputs())
+	s.Empty(sortOpWithTieBreak.Outputs())
 
 	// LimitOp
 	limitOp := NewLimitOp(10, 5)
@@ -1546,7 +1551,7 @@ func (s *ChainTestSuite) TestSortOp_FloatColumn() {
 	// Sort by score descending
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort(types.ScoreFieldName, true).
+		Sort(types.ScoreFieldName, true, types.IDFieldName).
 		Execute(df)
 	s.Require().NoError(err)
 	defer result.Release()
@@ -1592,7 +1597,7 @@ func (s *ChainTestSuite) TestSortOp_StringColumn() {
 	// Sort by name ascending
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort("name", false).
+		Sort("name", false, types.IDFieldName).
 		Execute(df)
 	s.Require().NoError(err)
 	defer result.Release()
@@ -1653,7 +1658,7 @@ func (s *ChainTestSuite) TestSortOp_AllColumnsReordered() {
 	// Sort by age ascending
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort("age", false).
+		Sort("age", false, types.IDFieldName).
 		Execute(df)
 	s.Require().NoError(err)
 	defer result.Release()
@@ -1740,7 +1745,7 @@ func (s *ChainTestSuite) TestSortOp_MultipleChunksAllColumnsReordered() {
 	// Sort by value ascending
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Sort("value", false).
+		Sort("value", false, types.IDFieldName).
 		Execute(df)
 	s.Require().NoError(err)
 	defer result.Release()
@@ -1790,7 +1795,7 @@ func (s *ChainTestSuite) TestFuncChain_StringWithOperators() {
 		SetName("test-chain").
 		Select("a", "b").
 		Filter(&MockFilterFunction{threshold: 0.5}, []string{"score"}).
-		Sort("s", true).
+		Sort("s", true, types.IDFieldName).
 		Limit(10)
 
 	str := fc.String()

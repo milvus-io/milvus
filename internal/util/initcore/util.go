@@ -51,8 +51,8 @@ func UpdateIndexSliceSize(size int) {
 	C.SetIndexSliceSize(C.int64_t(size))
 }
 
-func UpdateStreamBudgetRatio(ratio float64) {
-	C.SetStreamBudgetRatio(C.double(ratio))
+func UpdateLoadTransientBudgetBytes(bytes int64) {
+	C.SetLoadTransientBudgetBytes(C.int64_t(bytes))
 }
 
 func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
@@ -81,6 +81,10 @@ func UpdateDefaultDeleteDumpBatchSize(size int) {
 
 func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
+}
+
+func UpdateDefaultDriverPrefetchEnable(enable bool) {
+	C.SetDefaultDriverPrefetchEnable(C.bool(enable))
 }
 
 func UpdateDefaultJSONKeyStatsEnable(enable bool) {
@@ -183,6 +187,66 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, handler))
 	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
 		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, handler))
+}
+
+// RegisterLoonReaderConfigWatchers wires hot-reload of the milvus-storage
+// reader thread pool size and the index-build read window. `source` is
+// included in the log entry for the same reason as in
+// RegisterArrowIOThreadPoolWatchers. Note the thread pool cannot be
+// destroyed once created — updating the size to 0 leaves the current pool
+// unchanged.
+func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {
+	handler := func(evt *config.Event) {
+		if !evt.HasUpdated {
+			return
+		}
+		// InitLoonReaderConfig range-checks both values before applying
+		// either, so an out-of-range update leaves the running settings
+		// untouched rather than resizing the (non-destroyable) reader pool
+		// and only then failing on the window. It also serializes
+		// read-then-apply internally, so concurrent updates cannot land in
+		// the reverse order of the config writes; the logging below reads
+		// the paramtable again outside that critical section, so under
+		// concurrent updates the logged values may lag the applied ones.
+		if err := InitLoonReaderConfig(pt); err != nil {
+			mlog.Warn(context.TODO(),
+				"failed to reconfigure loon reader params, previous settings stay in effect",
+				mlog.String("source", source),
+				mlog.Int64("readerThreadPoolSize", pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()),
+				mlog.Int64("indexBuildReadWindowBytes", pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()),
+				mlog.Err(err))
+			return
+		}
+		// Report the effective pool size, not the requested one: non-zero
+		// values resize the pool either way, but 0 cannot destroy it, so
+		// rolling back to 0 leaves the existing pool serving reads. Note a
+		// reader latches the parallelism it saw at open only as an on/off
+		// gate; a reader opened with parallelism > 1 follows the pool's
+		// current size on every later round, so resizes also affect
+		// already-open readers.
+		// GetParallelism() reports 1 when the pool does not exist, so
+		// requested == 0 with effective == 1 is the pool being absent (or
+		// sized 1) - not a failure to destroy it. Only warn when a real
+		// pool survives a disable request.
+		requested := pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+		effective := int64(EffectiveLoonReaderThreadPoolSize())
+		if requested == 0 && effective > 1 {
+			mlog.Warn(context.TODO(),
+				"loon reader thread pool size not fully applied; the pool cannot be destroyed at runtime, restart to disable it",
+				mlog.String("source", source),
+				mlog.Int64("requested", requested),
+				mlog.Int64("effective", effective))
+		}
+		mlog.Info(context.TODO(), "loon reader params reconfigured",
+			mlog.String("source", source),
+			mlog.Int64("readerThreadPoolSizeRequested", requested),
+			mlog.Int64("readerThreadPoolSizeEffective", effective),
+			mlog.Int64("indexBuildReadWindowBytes", pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()))
+	}
+	pt.Watch(pt.CommonCfg.StorageReaderThreadPoolSize.Key,
+		config.NewHandler(pt.CommonCfg.StorageReaderThreadPoolSize.Key, handler))
+	pt.Watch(pt.CommonCfg.IndexBuildReadWindowBytes.Key,
+		config.NewHandler(pt.CommonCfg.IndexBuildReadWindowBytes.Key, handler))
 }
 
 func UpdateStorageV2CellTargetSizeBytes(bytes int64) {

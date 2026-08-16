@@ -48,6 +48,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
@@ -71,6 +72,13 @@ SetIdxToOffset(std::vector<int32_t>& idx_to_offsets,
                               idx_to_offsets.size()));
     }
     idx_to_offsets[row_id] = unique_idx;
+}
+
+bool
+IsArrayField(const storage::FileManagerContext& file_manager_context) {
+    return file_manager_context.Valid() &&
+           file_manager_context.fieldDataMeta.field_schema.data_type() ==
+               proto::schema::DataType::Array;
 }
 
 }  // namespace
@@ -141,7 +149,8 @@ StringIndexSort::StringIndexSort(
     bool is_nested_index)
     : StringIndex(ASCENDING_SORT),
       is_built_(false),
-      is_nested_index_(is_nested_index) {
+      is_nested_index_(is_nested_index),
+      is_array_field_(IsArrayField(file_manager_context)) {
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
         this->file_manager_ =
@@ -220,10 +229,13 @@ StringIndexSort::BuildWithFieldData(
     if (is_nested_index_) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
-            auto array_column = static_cast<const Array*>(data->Data());
             for (int64_t i = 0; i < n; i++) {
                 if (data->is_valid(i)) {
-                    total_num_rows_ += array_column[i].length();
+                    // RawValue maps logical->physical so compact nullable array
+                    // FieldData is read correctly (Data()[i] would overrun).
+                    total_num_rows_ +=
+                        reinterpret_cast<const Array*>(data->RawValue(i))
+                            ->length();
                 }
             }
         }
@@ -387,8 +399,10 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
     // Deserialize is_nested_index (optional for backward compatibility)
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
+        bool loaded_is_nested_index = false;
         milvus::fastmem::FastMemcpy(
-            &is_nested_index_, is_nested_data->data.get(), sizeof(bool));
+            &loaded_is_nested_index, is_nested_data->data.get(), sizeof(bool));
+        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
     auto version_data = binary_set.GetByName("version");
@@ -606,7 +620,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               SERIALIZATION_VERSION));
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -838,13 +852,14 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
     size_t element_id = 0;
     for (const auto& field_data : field_datas) {
         auto n = field_data->get_num_rows();
-        auto array_column = static_cast<const Array*>(field_data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (!field_data->is_valid(i)) {
                 continue;
             }
-            for (int64_t j = 0; j < array_column[i].length(); j++) {
-                auto value = array_column[i].get_data<std::string>(j);
+            auto* array =
+                reinterpret_cast<const Array*>(field_data->RawValue(i));
+            for (int64_t j = 0; j < array->length(); j++) {
+                auto value = array->get_data<std::string>(j);
                 map[value].push_back(static_cast<int32_t>(element_id));
                 valid_bitset.set(element_id);
                 element_id++;

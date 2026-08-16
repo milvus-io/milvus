@@ -4,6 +4,7 @@ package cgo
 #cgo pkg-config: milvus_core
 
 #include "futures/future_c.h"
+#include "segcore/segcore_init_c.h"
 */
 import "C"
 
@@ -23,14 +24,14 @@ func initExecutor() {
 
 	// Initialize search executor pool.
 	searchPoolSize := int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat() * pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
-	C.executor_set_search_thread_num(C.int(searchPoolSize))
+	setSearchThreadNum(searchPoolSize)
 
 	resetSearchThreadNum := func(evt *config.Event) {
 		if evt.HasUpdated {
 			pt := paramtable.Get()
 			newSize := int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat() * pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
 			mlog.Info(context.TODO(), "reset cgo search thread num", mlog.Int("thread_num", newSize))
-			C.executor_set_search_thread_num(C.int(newSize))
+			setSearchThreadNum(newSize)
 		}
 	}
 	pt.Watch(pt.QueryNodeCfg.MaxReadConcurrency.Key, config.NewHandler("cgo.search."+pt.QueryNodeCfg.MaxReadConcurrency.Key, resetSearchThreadNum))
@@ -49,4 +50,12 @@ func initExecutor() {
 		}
 	}
 	pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("cgo.load."+pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, resetLoadThreadNum))
+}
+
+func setSearchThreadNum(size int) {
+	if size <= 0 {
+		size = 1
+	}
+	C.executor_set_search_thread_num(C.int(size))
+	C.SegcoreSetPrefetchThreadPoolNum(C.uint32_t(size))
 }

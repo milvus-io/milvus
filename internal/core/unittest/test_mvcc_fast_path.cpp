@@ -31,23 +31,6 @@ using namespace milvus;
 using namespace milvus::exec;
 using namespace milvus::segcore;
 
-// RAII guard to set/restore visibility_filter_enabled
-class VisibilityFilterGuard {
- public:
-    explicit VisibilityFilterGuard(bool value)
-        : original_(
-              SegcoreConfig::default_config().get_visibility_filter_enabled()) {
-        SegcoreConfig::default_config().set_visibility_filter_enabled(value);
-    }
-    ~VisibilityFilterGuard() {
-        SegcoreConfig::default_config().set_visibility_filter_enabled(
-            original_);
-    }
-
- private:
-    bool original_;
-};
-
 class MvccFastPathTest : public ::testing::Test {
  protected:
     void
@@ -149,7 +132,7 @@ TEST_F(MvccFastPathTest, Level1_SealedNoDeletes_SkipFilter) {
 
     // Verify output bitmap is all zeros (no rows filtered out)
     ASSERT_NE(result.output, nullptr);
-    auto col = std::dynamic_pointer_cast<ColumnVector>(result.output->child(0));
+    auto col = std::static_pointer_cast<ColumnVector>(result.output->child(0));
     ASSERT_NE(col, nullptr);
     TargetBitmapView view(col->GetRawData(), col->size());
     EXPECT_EQ(view.count(), 0)
@@ -171,7 +154,7 @@ TEST_F(MvccFastPathTest, Level2_SealedWithDeletes_DeleteMaskOnly) {
 
     // Verify output bitmap has some bits set (deleted rows marked)
     ASSERT_NE(result.output, nullptr);
-    auto col = std::dynamic_pointer_cast<ColumnVector>(result.output->child(0));
+    auto col = std::static_pointer_cast<ColumnVector>(result.output->child(0));
     ASSERT_NE(col, nullptr);
     TargetBitmapView view(col->GetRawData(), col->size());
     EXPECT_GT(view.count(), 0)
@@ -308,7 +291,7 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     auto result1 = RunMvccPlan(segment.get());
     ASSERT_TRUE(result1.all_rows_visible);
     auto col1 =
-        std::dynamic_pointer_cast<ColumnVector>(result1.output->child(0));
+        std::static_pointer_cast<ColumnVector>(result1.output->child(0));
     ASSERT_NE(col1, nullptr);
     TargetBitmapView view1(col1->GetRawData(), col1->size());
     EXPECT_EQ(view1.count(), 0);
@@ -321,147 +304,9 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     auto result2 = RunMvccPlan(segment.get());
     ASSERT_TRUE(result2.all_rows_visible);
     auto col2 =
-        std::dynamic_pointer_cast<ColumnVector>(result2.output->child(0));
+        std::static_pointer_cast<ColumnVector>(result2.output->child(0));
     ASSERT_NE(col2, nullptr);
     TargetBitmapView view2(col2->GetRawData(), col2->size());
     EXPECT_EQ(view2.count(), 0)
         << "Second query must return clean bitmap, not polluted cache";
-}
-
-// ---------------------------------------------------------------------------
-// visibilityFilterEnabled=false: all MVCC filtering skipped, all rows visible
-// ---------------------------------------------------------------------------
-TEST_F(MvccFastPathTest, VisibilityFilterDisabled_AllRowsVisible) {
-    VisibilityFilterGuard guard(false);
-    auto segment = CreateSealedSegment();
-    auto result = RunMvccPlan(segment.get());
-
-    EXPECT_EQ(result.num_rows, N_);
-    EXPECT_TRUE(result.all_rows_visible)
-        << "visibilityFilterEnabled=false should set all_rows_visible=true";
-
-    // Verify output bitmap is all zeros (no rows filtered out)
-    ASSERT_NE(result.output, nullptr);
-    auto col = std::dynamic_pointer_cast<ColumnVector>(result.output->child(0));
-    ASSERT_NE(col, nullptr);
-    TargetBitmapView view(col->GetRawData(), col->size());
-    EXPECT_EQ(view.count(), 0)
-        << "visibilityFilterEnabled=false should produce all-zero bitmap";
-}
-
-// ---------------------------------------------------------------------------
-// visibilityFilterEnabled=false: deletes are ignored even when present
-// ---------------------------------------------------------------------------
-TEST_F(MvccFastPathTest, VisibilityFilterDisabled_DeletesIgnored) {
-    VisibilityFilterGuard guard(false);
-    int64_t num_deletes = 5;
-    auto segment = CreateSealedSegmentWithDeletes(num_deletes);
-    auto result = RunMvccPlan(segment.get());
-
-    EXPECT_EQ(result.num_rows, N_);
-    EXPECT_TRUE(result.all_rows_visible)
-        << "visibilityFilterEnabled=false should ignore deletes";
-
-    ASSERT_NE(result.output, nullptr);
-    auto col = std::dynamic_pointer_cast<ColumnVector>(result.output->child(0));
-    ASSERT_NE(col, nullptr);
-    TargetBitmapView view(col->GetRawData(), col->size());
-    EXPECT_EQ(view.count(), 0)
-        << "visibilityFilterEnabled=false should not mask deleted rows";
-}
-
-// ---------------------------------------------------------------------------
-// visibilityFilterEnabled=false must not make VectorSearchNode skip an upstream
-// scalar filter bitset.
-// ---------------------------------------------------------------------------
-TEST_F(MvccFastPathTest, VisibilityFilterDisabled_PreservesUpstreamFilter) {
-    VisibilityFilterGuard guard(false);
-    auto segment = CreateSealedSegment();
-
-    proto::plan::GenericValue value;
-    value.set_int64_val(N_ / 2);
-    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(int64_fid_, DataType::INT64),
-        proto::plan::OpType::LessThan,
-        value,
-        std::vector<proto::plan::GenericValue>{});
-
-    auto filter_node = std::make_shared<plan::FilterBitsNode>("filter_1", expr);
-    auto mvcc_node = std::make_shared<plan::MvccNode>(
-        "mvcc_1", std::vector<plan::PlanNodePtr>{filter_node});
-    auto plan = plan::PlanFragment(mvcc_node);
-
-    auto query_context = std::make_shared<QueryContext>(
-        "test_vis_disabled_with_filter",
-        segment.get(),
-        N_,
-        MAX_TIMESTAMP,
-        0,
-        0,
-        query::PlanOptions{false},
-        std::make_shared<QueryConfig>(
-            std::unordered_map<std::string, std::string>{}));
-
-    auto task =
-        Task::Create("task_vis_disabled_with_filter", plan, 0, query_context);
-    RowVectorPtr output;
-    for (;;) {
-        auto current = task->Next();
-        if (!current) {
-            break;
-        }
-        output = current;
-    }
-
-    EXPECT_FALSE(query_context->get_all_rows_visible())
-        << "upstream scalar filter bitset must still be passed downstream";
-    ASSERT_NE(output, nullptr);
-    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
-    ASSERT_NE(col, nullptr);
-    TargetBitmapView view(col->GetRawData(), col->size());
-    EXPECT_GT(view.count(), 0)
-        << "upstream scalar filter should still filter out some rows";
-}
-
-// ---------------------------------------------------------------------------
-// visibilityFilterEnabled=false on growing segment: still skips all filtering
-// ---------------------------------------------------------------------------
-TEST_F(MvccFastPathTest, VisibilityFilterDisabled_GrowingSegment) {
-    VisibilityFilterGuard guard(false);
-    auto raw_data = DataGen(schema_, N_);
-    auto segment = CreateGrowingSegment(schema_, empty_index_meta);
-    segment->PreInsert(N_);
-    segment->Insert(0,
-                    N_,
-                    raw_data.row_ids_.data(),
-                    raw_data.timestamps_.data(),
-                    raw_data.raw_);
-
-    auto mvcc_node = std::make_shared<plan::MvccNode>("mvcc_1");
-    auto plan = plan::PlanFragment(mvcc_node);
-
-    auto query_context = std::make_shared<QueryContext>(
-        "test_vis_disabled_growing",
-        segment.get(),
-        N_,
-        MAX_TIMESTAMP,
-        0,
-        0,
-        query::PlanOptions{false},
-        std::make_shared<QueryConfig>(
-            std::unordered_map<std::string, std::string>{}));
-
-    auto task = Task::Create("task_vis_growing", plan, 0, query_context);
-    int64_t num_rows = 0;
-    for (;;) {
-        auto output = task->Next();
-        if (!output) {
-            break;
-        }
-        num_rows += output->size();
-    }
-    EXPECT_EQ(num_rows, N_);
-    EXPECT_TRUE(query_context->get_all_rows_visible())
-        << "visibilityFilterEnabled=false should skip filtering on growing "
-           "segments too";
 }

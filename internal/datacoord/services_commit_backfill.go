@@ -155,6 +155,7 @@ func broadcastBackfillBatch(
 			Items: items,
 		}).
 		WithBroadcast(channels).
+		WithUnreplicable().
 		MustBuildBroadcast(),
 	)
 	return err

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 
@@ -33,6 +34,50 @@ import (
 func init() {
 	paramtable.Init()
 }
+
+type versionAwareSchedulerCluster struct {
+	session.Cluster
+	slots map[int64]*session.WorkerSlots
+}
+
+func (c *versionAwareSchedulerCluster) QuerySlot() map[int64]*session.WorkerSlots {
+	return c.slots
+}
+
+type versionAwareSchedulerTask struct {
+	id             int64
+	slot           int64
+	minimumVersion semver.Version
+	state          atomic.Int32
+	nodeID         atomic.Int64
+}
+
+func newVersionAwareSchedulerTask(id int64, minimumVersion semver.Version) *versionAwareSchedulerTask {
+	task := &versionAwareSchedulerTask{id: id, slot: 1, minimumVersion: minimumVersion}
+	task.state.Store(int32(taskcommon.Init))
+	task.nodeID.Store(NullNodeID)
+	return task
+}
+
+func (t *versionAwareSchedulerTask) GetTaskID() int64             { return t.id }
+func (t *versionAwareSchedulerTask) GetTaskType() taskcommon.Type { return taskcommon.CopySegment }
+func (t *versionAwareSchedulerTask) GetTaskState() taskcommon.State {
+	return taskcommon.State(t.state.Load())
+}
+func (t *versionAwareSchedulerTask) GetTaskSlot() int64                         { return t.slot }
+func (t *versionAwareSchedulerTask) SetTaskTime(taskcommon.TimeType, time.Time) {}
+func (t *versionAwareSchedulerTask) GetTaskTime(taskcommon.TimeType) time.Time  { return time.Time{} }
+func (t *versionAwareSchedulerTask) GetTaskVersion() int64                      { return 0 }
+func (t *versionAwareSchedulerTask) MinimumWorkerVersion() semver.Version {
+	return t.minimumVersion
+}
+
+func (t *versionAwareSchedulerTask) CreateTaskOnWorker(nodeID int64, _ session.Cluster) {
+	t.nodeID.Store(nodeID)
+	t.state.Store(int32(taskcommon.InProgress))
+}
+func (t *versionAwareSchedulerTask) QueryTaskOnWorker(session.Cluster) {}
+func (t *versionAwareSchedulerTask) DropTaskOnWorker(session.Cluster)  {}
 
 func TestGlobalScheduler_Enqueue(t *testing.T) {
 	cluster := session.NewMockCluster(t)
@@ -89,48 +134,168 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 func TestGlobalScheduler_pickNode(t *testing.T) {
 	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
 
-	nodeID := scheduler.pickNode(map[int64]*session.WorkerSlots{
-		1: {
-			NodeID:         1,
-			AvailableSlots: 30,
-		},
-		2: {
-			NodeID:         2,
-			AvailableSlots: 30,
-		},
-	}, 1)
-	assert.True(t, nodeID == int64(1) || nodeID == int64(2)) // random
+	// Tie: either node may be returned, but the most-available is always picked.
+	tie := newNodeSlotHeap(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 30},
+		2: {NodeID: 2, AvailableSlots: 30},
+	})
+	nodeID := scheduler.pickNode(tie, 1)
+	assert.True(t, nodeID == int64(1) || nodeID == int64(2))
 
-	slotsNoEnough := map[int64]*session.WorkerSlots{
+	// Least-loaded selection: node 2 has more available slots, so it wins even
+	// though node 1 also fits and might be iterated first in the map.
+	leastLoaded := newNodeSlotHeap(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 20},
+		2: {NodeID: 2, AvailableSlots: 80},
+	})
+	assert.Equal(t, int64(2), scheduler.pickNode(leastLoaded, 10))
+
+	// Route by the QuerySlot map key instead of relying on WorkerSlots.NodeID.
+	keyOnly := map[int64]*session.WorkerSlots{
+		10: {AvailableSlots: 20},
+		20: {AvailableSlots: 80},
+	}
+	assert.Equal(t, int64(20), scheduler.pickNode(newNodeSlotHeap(keyOnly), 10))
+	assert.Equal(t, int64(70), keyOnly[20].AvailableSlots)
+
+	// Fallback: no node can fully satisfy the request, pick the most-available
+	// node and drain its slots to 0.
+	noEnough := map[int64]*session.WorkerSlots{
 		1: {NodeID: 1, AvailableSlots: 20},
 		2: {NodeID: 2, AvailableSlots: 30},
 	}
-	nodeID = scheduler.pickNode(slotsNoEnough, 100)
-	assert.Equal(t, int64(2), nodeID) // fallback: pick node with max slots when none >= taskSlot
-	assert.Equal(t, int64(0), slotsNoEnough[2].AvailableSlots)
+	noEnoughHeap := newNodeSlotHeap(noEnough)
+	assert.Equal(t, int64(2), scheduler.pickNode(noEnoughHeap, 100))
+	assert.Equal(t, int64(0), noEnough[2].AvailableSlots)
 
-	slots := map[int64]*session.WorkerSlots{
+	// Single node: slots decrement across successive picks, then fall back.
+	single := map[int64]*session.WorkerSlots{
 		1: {NodeID: 1, AvailableSlots: 100},
 	}
-	assert.Equal(t, int64(1), scheduler.pickNode(slots, 10))
-	assert.Equal(t, int64(90), slots[1].AvailableSlots)
-	assert.Equal(t, int64(1), scheduler.pickNode(slots, 10))
-	assert.Equal(t, int64(80), slots[1].AvailableSlots)
-	nodeID = scheduler.pickNode(slots, 100) // 80 < 100, use fallback
-	assert.Equal(t, int64(1), nodeID)
-	assert.Equal(t, int64(0), slots[1].AvailableSlots)
+	singleHeap := newNodeSlotHeap(single)
+	assert.Equal(t, int64(1), scheduler.pickNode(singleHeap, 10))
+	assert.Equal(t, int64(90), single[1].AvailableSlots)
+	assert.Equal(t, int64(1), scheduler.pickNode(singleHeap, 10))
+	assert.Equal(t, int64(80), single[1].AvailableSlots)
+	assert.Equal(t, int64(1), scheduler.pickNode(singleHeap, 100)) // 80 < 100, fallback
+	assert.Equal(t, int64(0), single[1].AvailableSlots)
 
-	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
-		1: {
-			NodeID:         1,
-			AvailableSlots: 0,
+	// No available slots at all.
+	empty := newNodeSlotHeap(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 0},
+		2: {NodeID: 2, AvailableSlots: 0},
+	})
+	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(empty, 1))
+
+	// Zero-slot cleanup work should still be dispatched even when every node is
+	// exhausted, and it should not consume any slots.
+	zeroSlot := map[int64]*session.WorkerSlots{
+		10: {AvailableSlots: 0},
+		20: {AvailableSlots: 0},
+	}
+	zeroSlotHeap := newNodeSlotHeap(zeroSlot)
+	nodeID = scheduler.pickNode(zeroSlotHeap, 0)
+	assert.True(t, nodeID == int64(10) || nodeID == int64(20))
+	assert.Equal(t, int64(0), zeroSlot[10].AvailableSlots)
+	assert.Equal(t, int64(0), zeroSlot[20].AvailableSlots)
+	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(zeroSlotHeap, 1))
+
+	// Empty cluster.
+	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(newNodeSlotHeap(nil), 1))
+}
+
+func TestGlobalScheduler_pickNodeWithMinimumVersion(t *testing.T) {
+	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+	minimumVersion := semver.MustParse("3.0.1")
+	nodes := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100, Version: "3.0.0"},
+		2: {NodeID: 2, AvailableSlots: 20, Version: "3.0.1"},
+	}
+	slotHeap := newNodeSlotHeap(nodes)
+
+	assert.Equal(t, int64(2), scheduler.pickNodeWithMinimumVersion(slotHeap, 10, minimumVersion))
+	assert.Equal(t, int64(10), nodes[2].AvailableSlots)
+	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 10))
+	assert.Equal(t, int64(90), nodes[1].AvailableSlots)
+}
+
+func TestWorkerSupportsMinimumVersion(t *testing.T) {
+	minimumVersion := semver.MustParse("3.0.1")
+	assert.False(t, workerSupportsMinimumVersion("", minimumVersion))
+	assert.False(t, workerSupportsMinimumVersion("3.0.0", minimumVersion))
+	assert.True(t, workerSupportsMinimumVersion("3.0.1-rc.1", minimumVersion))
+	assert.True(t, workerSupportsMinimumVersion("v3.0.2", minimumVersion))
+	assert.True(t, workerSupportsMinimumVersion("master-20260810-deadbeef", minimumVersion))
+	assert.True(t, workerSupportsMinimumVersion("", semver.Version{}))
+}
+
+func TestGlobalScheduler_IncompatibleTaskDoesNotBlockOrdinaryTask(t *testing.T) {
+	cluster := &versionAwareSchedulerCluster{
+		slots: map[int64]*session.WorkerSlots{
+			1: {NodeID: 1, AvailableSlots: 10, Version: "3.0.0"},
 		},
-		2: {
-			NodeID:         2,
-			AvailableSlots: 0,
-		},
-	}, 1)
-	assert.Equal(t, int64(NullNodeID), nodeID) // no available slots
+	}
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	externalTask := newVersionAwareSchedulerTask(1, semver.MustParse("3.0.1"))
+	ordinaryTask := newVersionAwareSchedulerTask(2, semver.Version{})
+
+	scheduler.Enqueue(externalTask)
+	scheduler.Enqueue(ordinaryTask)
+	scheduler.schedule()
+
+	assert.Equal(t, int64(NullNodeID), externalTask.nodeID.Load())
+	assert.NotNil(t, scheduler.pendingTasks.Get(externalTask.GetTaskID()))
+	assert.Equal(t, int64(1), ordinaryTask.nodeID.Load())
+	assert.True(t, scheduler.runningTasks.Contain(ordinaryTask.GetTaskID()))
+}
+
+// TestGlobalScheduler_pickNode_Balancing verifies that successive picks spread
+// tasks evenly across nodes (water-filling) instead of packing one node first.
+func TestGlobalScheduler_pickNode_Balancing(t *testing.T) {
+	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+
+	nodes := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+		2: {NodeID: 2, AvailableSlots: 100},
+		3: {NodeID: 3, AvailableSlots: 100},
+	}
+	slotHeap := newNodeSlotHeap(nodes)
+
+	assigned := map[int64]int{}
+	// Each task needs 10 slots; 30 tasks should be spread 10 per node.
+	for i := 0; i < 30; i++ {
+		nodeID := scheduler.pickNode(slotHeap, 10)
+		assert.NotEqual(t, int64(NullNodeID), nodeID)
+		assigned[nodeID]++
+	}
+
+	for nodeID, ws := range nodes {
+		assert.Equal(t, 10, assigned[nodeID], "node %d should receive an even share", nodeID)
+		assert.Equal(t, int64(0), ws.AvailableSlots, "node %d should be fully drained", nodeID)
+	}
+
+	// All nodes are now empty: further picks return NullNodeID.
+	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(slotHeap, 1))
+}
+
+func TestGlobalScheduler_pickNode_MixedTaskSizes(t *testing.T) {
+	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+
+	nodes := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+		2: {NodeID: 2, AvailableSlots: 80},
+		3: {NodeID: 3, AvailableSlots: 60},
+	}
+	slotHeap := newNodeSlotHeap(nodes)
+
+	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 30))
+	assert.Equal(t, int64(2), scheduler.pickNode(slotHeap, 70))
+	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 50))
+	assert.Equal(t, int64(3), scheduler.pickNode(slotHeap, 90))
+
+	assert.Equal(t, int64(20), nodes[1].AvailableSlots)
+	assert.Equal(t, int64(10), nodes[2].AvailableSlots)
+	assert.Equal(t, int64(0), nodes[3].AvailableSlots)
 }
 
 func TestGlobalScheduler_TestSchedule(t *testing.T) {
@@ -226,6 +391,34 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		}, 10*time.Second, 10*time.Millisecond)
 	})
 
+	t.Run("zero slot task dispatched when nodes exhausted", func(t *testing.T) {
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			10: {AvailableSlots: 0},
+			20: {AvailableSlots: 0},
+		}).Once()
+
+		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(1).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+		task.EXPECT().GetTaskSlot().Return(int64(0)).Once()
+
+		var dispatched atomic.Bool
+		task.EXPECT().CreateTaskOnWorker(mock.MatchedBy(func(nodeID int64) bool {
+			return nodeID == 10 || nodeID == 20
+		}), mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+			dispatched.Store(true)
+		}).Once()
+
+		scheduler.Enqueue(task)
+		scheduler.schedule()
+
+		assert.True(t, dispatched.Load())
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		scheduler := NewGlobalTaskScheduler(context.TODO(), newCluster())
 		scheduler.Start()
@@ -267,4 +460,125 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 				s.runningTasks.Len() == 0 && len(s.pendingTasks.TaskIDs()) == 0
 		}, 10*time.Second, 10*time.Millisecond)
 	})
+}
+
+func TestGlobalScheduler_RecordTaskFailureBackoff(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffMaxInterval.Key, "4")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffMaxInterval.Key)
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(7).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+
+	// exponential: 1s, 2s, 4s, then capped at the 4s max
+	start := time.Now()
+	scheduler.recordTaskFailure(task)
+	bo, ok := scheduler.backoffs.Get(7)
+	assert.True(t, ok)
+	assert.Equal(t, 1, bo.failures)
+	assert.InDelta(t, 1.0, bo.notBefore.Sub(start).Seconds(), 0.5)
+	assert.True(t, scheduler.taskInBackoff(task))
+
+	scheduler.recordTaskFailure(task)
+	scheduler.recordTaskFailure(task)
+	scheduler.recordTaskFailure(task)
+	bo, _ = scheduler.backoffs.Get(7)
+	assert.Equal(t, 4, bo.failures)
+	assert.InDelta(t, 4.0, time.Until(bo.notBefore).Seconds(), 0.5)
+
+	// clearing the entry ends the backoff
+	scheduler.backoffs.Remove(7)
+	assert.False(t, scheduler.taskInBackoff(task))
+
+	// interval 0 disables the mechanism entirely
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "0")
+	scheduler.recordTaskFailure(task)
+	assert.False(t, scheduler.taskInBackoff(task))
+}
+
+func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+	}).Maybe()
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(1).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	// CreateTaskOnWorker never flips the state away from Init: every dispatch fails
+	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+	var createCalls atomic.Int32
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		createCalls.Add(1)
+	}).Maybe()
+
+	scheduler.Enqueue(task)
+
+	// the first dispatch happens promptly
+	assert.Eventually(t, func() bool { return createCalls.Load() == 1 }, 2*time.Second, 10*time.Millisecond)
+	// during the 1s backoff the ~100ms scheduling tick must NOT re-dispatch
+	// (without backoff this would already be ~5 more dispatches)
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, int32(1), createCalls.Load())
+	// after the backoff elapses it is dispatched again
+	assert.Eventually(t, func() bool { return createCalls.Load() >= 2 }, 3*time.Second, 10*time.Millisecond)
+}
+
+// TestGlobalScheduler_TerminalTaskClearsBackoff guards against a backoff-entry
+// leak: when CreateTaskOnWorker drives a task straight to a terminal state it
+// never enters runningTasks, so check()'s cleanup never runs. schedule() must
+// drop the backoff entry itself, otherwise it lives until datacoord restarts.
+func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+	}).Maybe()
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(9).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+
+	// CreateTaskOnWorker drives the task straight to a terminal state (e.g. its
+	// segment was compacted away), so it never reaches InProgress/runningTasks.
+	var created atomic.Bool
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		if created.Load() {
+			return taskcommon.None
+		}
+		return taskcommon.Init
+	}).Maybe()
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		created.Store(true)
+	}).Maybe()
+
+	// Seed a stale backoff entry from earlier dispatch failures whose delay has
+	// already elapsed, so the task is eligible for dispatch this round.
+	scheduler.backoffs.Insert(9, &taskBackoff{failures: 3, notBefore: time.Now().Add(-time.Second)})
+	scheduler.pendingTasks.Push(task)
+
+	scheduler.schedule()
+
+	_, ok := scheduler.backoffs.Get(9)
+	assert.False(t, ok, "backoff entry must be removed once the task reaches a terminal state")
+	assert.Equal(t, 0, scheduler.runningTasks.Len())
+	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
 }

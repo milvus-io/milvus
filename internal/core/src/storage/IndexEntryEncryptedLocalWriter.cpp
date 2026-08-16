@@ -17,12 +17,15 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 
 #include <fcntl.h>
+#include <folly/ScopeGuard.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
 #include <utility>
 #include <vector>
+
+#include "storage/Util.h"
 
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -59,6 +62,8 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
 
     auto [encryptor, edek] =
         cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
+    AssertInfo(encryptor != nullptr, "cipher plugin returned a null encryptor");
+    encryptor_ = std::move(encryptor);
     edek_ = std::move(edek);
 
     auto uuid = boost::uuids::random_generator()();
@@ -128,6 +133,11 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
     size_t remaining = size;
     uint32_t crc = 0;
 
+    // Encryption tasks capture `this`; on error the caller destroys the
+    // writer, so finish them before unwinding (see #46958).
+    auto drain_on_unwind =
+        folly::makeGuard([&pending]() { DrainFutures(pending); });
+
     while (remaining > 0 || !pending.empty()) {
         // Fill the sliding window: read one slice from fd and submit encryption
         while (pending.size() < W && remaining > 0) {
@@ -136,9 +146,7 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
             crc = Crc32cUpdate(
                 crc, reinterpret_cast<const uint8_t*>(slice_data.data()), len);
             pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
-                auto [enc, unused_edek] =
-                    cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
-                return enc->Encrypt(s);
+                return encryptor_->Encrypt(s);
             }));
             remaining -= len;
         }
@@ -171,6 +179,11 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
     size_t read_offset = 0;
     uint32_t crc = 0;
 
+    // Encryption tasks capture `this`; on error the caller destroys the
+    // writer, so finish them before unwinding (see #46958).
+    auto drain_on_unwind =
+        folly::makeGuard([&pending]() { DrainFutures(pending); });
+
     while (remaining > 0 || !pending.empty()) {
         while (pending.size() < W && remaining > 0) {
             size_t len = std::min(remaining, slice_size_);
@@ -178,9 +191,7 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
             auto slice_data = std::string(
                 reinterpret_cast<const char*>(data + read_offset), len);
             pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
-                auto [enc, unused_edek] =
-                    cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
-                return enc->Encrypt(s);
+                return encryptor_->Encrypt(s);
             }));
             read_offset += len;
             remaining -= len;

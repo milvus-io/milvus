@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionInfo() {
@@ -768,6 +769,37 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionWithUserSpecifiedReplic
 
 		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
+	}
+}
+
+func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionForceOverrideUserSpecifiedReplicaMode() {
+	ctx := context.Background()
+	suite.expectGetRecoverInfoForAllCollections()
+
+	paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+	paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, meta.DefaultResourceGroupName)
+	paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, "true")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key)
+
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+
+		req := &querypb.LoadCollectionRequest{
+			CollectionID:   collection,
+			ReplicaNumber:  2,
+			ResourceGroups: []string{meta.DefaultResourceGroupName},
+		}
+		resp, err := suite.server.LoadCollection(ctx, req)
+		suite.Require().NoError(merr.CheckRPCCall(resp, err))
+
+		loadedCollection := suite.meta.GetCollection(ctx, collection)
+		suite.Require().NotNil(loadedCollection)
+		suite.False(loadedCollection.GetUserSpecifiedReplicaMode())
+		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
 	}
 }
 

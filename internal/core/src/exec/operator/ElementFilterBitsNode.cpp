@@ -90,8 +90,8 @@ PhyElementFilterBitsNode::GetOutput() {
 
     // Step 1: Get array offsets
     auto segment = query_context_->get_segment();
-    auto& field_meta =
-        segment->get_schema().GetFirstArrayFieldInStruct(struct_name_);
+    auto schema = segment->get_schema_snapshot();
+    auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
     auto array_offsets = segment->GetArrayOffsets(field_id);
     if (array_offsets == nullptr) {
@@ -177,6 +177,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
     if (doc_hit_ratio < DOC_HIT_RATIO_THRESHOLD_LOW) {
         offset_mode = true;
     } else if (doc_hit_ratio < DOC_HIT_RATIO_THRESHOLD_HIGH) {
+        element_exprs_->WaitPrefetch();
         offset_mode = !std::all_of(
             element_exprs_->exprs().begin(),
             element_exprs_->exprs().end(),
@@ -215,11 +216,11 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
 
         auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
         if (!col_vec) {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "ElementFilterBitsNode result should be ColumnVector");
         }
         if (!col_vec->IsBitmap()) {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "ElementFilterBitsNode result should be bitmap");
         }
 
@@ -270,11 +271,11 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
             if (!col_vec) {
                 ThrowInfo(
-                    ExprInvalid,
+                    UnexpectedError,
                     "ElementFilterBitsNode result should be ColumnVector");
             }
             if (!col_vec->IsBitmap()) {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "ElementFilterBitsNode result should be bitmap");
             }
 

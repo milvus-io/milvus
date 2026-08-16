@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -94,6 +95,48 @@ func TestSecondaryReplicateManager(t *testing.T) {
 	testSwitchReplicateMode(t, rm, "test1", "test2")
 	testMessageOnPrimary(t, rm)
 	testMessageOnSecondary(t, rm)
+}
+
+func TestReplicateManager_UnreplicableMessage(t *testing.T) {
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID:       walimplstest.NewTestMessageID(1),
+				TimeTick:        1,
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  1,
+				},
+			},
+			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+
+	msg := newCreateSnapshotMutableMessage()
+	g, err := rm.BeginReplicateMessage(context.Background(), msg)
+	assert.ErrorIs(t, err, ErrNotHandledByReplicateManager)
+	assert.Nil(t, g)
+
+	msg = newCreateSnapshotMutableMessage().WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID:              "test2",
+		MessageID:              walimplstest.NewTestMessageID(2),
+		LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:               2,
+		VChannel:               "test2-rootcoord-dml_0",
+	})
+	g, err = rm.BeginReplicateMessage(context.Background(), msg)
+	assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
+	assert.Nil(t, g)
 }
 
 func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
@@ -338,6 +381,109 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
+func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *testing.T) {
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	recovered := newReplicateTxnMessage("test1", "test2", 2)
+	for _, msg := range []message.MutableMessage{recovered[0], recovered[2]} {
+		immutableMsg := msg.WithTimeTick(3).IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		txnBuffer.HandleImmutableMessages([]message.ImmutableMessage{immutableMsg}, msg.TimeTick())
+	}
+
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  1,
+				},
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+			},
+			TxnBuffer: txnBuffer,
+		},
+	})
+	require.NoError(t, err)
+
+	firstReplay := newReplicateTxnMessage("test1", "test2", 2)
+	for _, msg := range firstReplay {
+		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
+			require.NoError(t, appendErr)
+			acker.Ack(status.NewTransactionExpired("recovered transaction"))
+			continue
+		}
+		require.Nil(t, acker)
+		require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+	}
+	checkpoint, err := rm.GetReplicateCheckpoint()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, checkpoint.TimeTick)
+
+	accepted := make([]message.MessageType, 0, 3)
+	for _, msg := range newReplicateTxnMessage("test1", "test2", 2) {
+		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		if acker == nil {
+			require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+			continue
+		}
+		require.NoError(t, appendErr)
+		accepted = append(accepted, msg.MessageType())
+		acker.Ack(nil)
+	}
+	require.Equal(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeCreateDatabase,
+		message.MessageTypeCommitTxn,
+	}, accepted)
+	checkpoint, err = rm.GetReplicateCheckpoint()
+	require.NoError(t, err)
+	require.EqualValues(t, 2, checkpoint.TimeTick)
+}
+
+func TestSecondaryReplicateManagerIgnoreStaleTxnBody(t *testing.T) {
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  100,
+				},
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+			},
+			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		},
+	})
+	assert.NoError(t, err)
+
+	beginCurrentTxn := newReplicateTxnMessageWithTxnID("test1", "test2", 200, 2)[0]
+	g, err := rm.BeginReplicateMessage(context.Background(), beginCurrentTxn)
+	assert.NoError(t, err)
+	assert.NotNil(t, g)
+	g.Ack(nil)
+
+	staleTxnBody := newReplicateTxnMessageWithTxnID("test1", "test2", 100, 1)[2]
+	g, err = rm.BeginReplicateMessage(context.Background(), staleTxnBody)
+	assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
+	assert.Nil(t, g)
+}
+
 func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterID, secondaryClusterID string) {
 	ctx := context.Background()
 
@@ -566,6 +712,15 @@ func testMessageOnSecondary(t *testing.T, rm ReplicatesManager) {
 	assert.Nil(t, g)
 }
 
+func newCreateSnapshotMutableMessage() message.MutableMessage {
+	return message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithVChannel("test1-rootcoord-dml_0").
+		WithUnreplicable().
+		MustBuildMutable()
+}
+
 // newReplicateConfiguration creates a valid replicate configuration for testing
 func newReplicateConfiguration(primaryClusterID string, secondaryClusterID ...string) *commonpb.ReplicateConfiguration {
 	clusters := []*commonpb.MilvusCluster{
@@ -676,7 +831,15 @@ func newImmutableTxnMessage(clusterID string, timetick ...uint64) []message.Immu
 }
 
 func newReplicateTxnMessage(clusterID string, sourceClusterID string, timetick ...uint64) []message.MutableMessage {
-	immutables := newImmutableTxnMessage(sourceClusterID, timetick...)
+	tt := uint64(1)
+	if len(timetick) > 0 {
+		tt = timetick[0]
+	}
+	return newReplicateTxnMessageWithTxnID(clusterID, sourceClusterID, tt, 1)
+}
+
+func newReplicateTxnMessageWithTxnID(clusterID string, sourceClusterID string, timetick uint64, txnID message.TxnID) []message.MutableMessage {
+	immutables := newImmutableTxnMessageWithTxnID(sourceClusterID, timetick, txnID)
 	replicateMsgs := []message.MutableMessage{}
 	for _, immutable := range immutables {
 		replicateMsg := message.MustNewReplicateMessage(
@@ -691,4 +854,41 @@ func newReplicateTxnMessage(clusterID string, sourceClusterID string, timetick .
 		replicateMsgs = append(replicateMsgs, replicateMsg)
 	}
 	return replicateMsgs
+}
+
+func newImmutableTxnMessageWithTxnID(clusterID string, timetick uint64, txnID message.TxnID) []message.ImmutableMessage {
+	txnCtx := message.TxnContext{
+		TxnID:     txnID,
+		Keepalive: message.TxnKeepaliveInfinite,
+	}
+	immutables := []message.ImmutableMessage{
+		message.NewBeginTxnMessageBuilderV2().
+			WithHeader(&message.BeginTxnMessageHeader{}).
+			WithBody(&message.BeginTxnMessageBody{}).
+			WithVChannel(clusterID + "-rootcoord-dml_0").
+			MustBuildMutable().
+			WithTxnContext(txnCtx).
+			WithTimeTick(timetick).
+			WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1)),
+		message.NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&message.CreateDatabaseMessageHeader{}).
+			WithBody(&message.CreateDatabaseMessageBody{}).
+			WithVChannel(clusterID + "-rootcoord-dml_0").
+			MustBuildMutable().
+			WithTxnContext(txnCtx).
+			WithTimeTick(timetick).
+			WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1)),
+		message.NewCommitTxnMessageBuilderV2().
+			WithHeader(&message.CommitTxnMessageHeader{}).
+			WithBody(&message.CommitTxnMessageBody{}).
+			WithVChannel(clusterID + "-rootcoord-dml_0").
+			MustBuildMutable().
+			WithTxnContext(txnCtx).
+			WithTimeTick(timetick).
+			WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1)),
+	}
+	return immutables
 }

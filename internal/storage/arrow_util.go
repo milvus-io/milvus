@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -43,8 +44,27 @@ func isNullableDenseVectorArrowType(dataType schemapb.DataType) bool {
 	}
 }
 
-func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
+type appendValueDefault struct {
+	value       *schemapb.ValueField
+	geometryWKB []byte
+}
+
+func newAppendValueDefault(field *schemapb.FieldSchema) (appendValueDefault, error) {
+	defaultValue := field.GetDefaultValue()
+	ret := appendValueDefault{value: defaultValue}
+	if defaultValue != nil && field.GetDataType() == schemapb.DataType_Geometry {
+		val, err := common.ConvertWKTToWKB(defaultValue.GetStringData())
+		if err != nil {
+			return ret, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", field.GetName())
+		}
+		ret.geometryWKB = val
+	}
+	return ret, nil
+}
+
+func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemapb.FieldSchema, appendDefault appendValueDefault) (uint64, error) {
 	// a could never be nil here
+	defaultValue := appendDefault.value
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
@@ -189,6 +209,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		if ba.IsNull(idx) {
 			// could be internal $meta json
 			if defaultValue != nil {
+				if field.GetDataType() == schemapb.DataType_Geometry {
+					b.Append(appendDefault.geometryWKB)
+					return uint64(len(appendDefault.geometryWKB)), nil
+				}
 				val := defaultValue.GetBytesData()
 				b.Append(val)
 				return uint64(len(val)), nil
@@ -267,7 +291,9 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 		elementType = schema.GetElementType()
 	}
 	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)
-	if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
+	if schema.GetDataType() == schemapb.DataType_Text {
+		arrowType = arrow.BinaryTypes.Binary
+	} else if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
 		arrowType = arrow.BinaryTypes.Binary
 	}
 	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
@@ -325,6 +351,15 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
 				nil)
+		case schemapb.DataType_Geometry:
+			bd := builder.(*array.BinaryBuilder)
+			defaultValue, err := common.ConvertWKTToWKB(schema.GetDefaultValue().GetStringData())
+			if err != nil {
+				return nil, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", schema.GetName())
+			}
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) []byte { return defaultValue }),
+				nil)
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())
 		}
@@ -343,17 +378,37 @@ type RecordBuilder struct {
 	fields      []*schemapb.FieldSchema
 	arrowFields []arrow.Field
 	builders    []array.Builder
+	defaults    []appendValueDefault
 
 	nRows int
 	size  uint64
 }
 
+func (b *RecordBuilder) prepareAppendDefaults() error {
+	if b.defaults != nil {
+		return nil
+	}
+	defaults := make([]appendValueDefault, len(b.fields))
+	for i, field := range b.fields {
+		appendDefault, err := newAppendValueDefault(field)
+		if err != nil {
+			return err
+		}
+		defaults[i] = appendDefault
+	}
+	b.defaults = defaults
+	return nil
+}
+
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	if err := b.prepareAppendDefaults(); err != nil {
+		return err
+	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
 			col := rec.Column(f.FieldID)
-			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
+			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
 			if err != nil {
 				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}
@@ -392,6 +447,11 @@ func (b *RecordBuilder) Build() Record {
 	}
 
 	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(b.nRows)), field2Col)
+	// NewRecord retained every column; drop the builder-side creator refs so the
+	// record is the sole owner and columns can actually reach refcount zero.
+	for _, arr := range arrays {
+		arr.Release()
+	}
 	b.nRows = 0
 	b.size = 0
 	return rec

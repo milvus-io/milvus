@@ -30,6 +30,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Utils.h"
 #include "log/Log.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
@@ -39,6 +40,7 @@
 #include "prometheus/histogram.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/ThreadPools.h"
@@ -87,6 +89,23 @@ AssertEmptyCProto(const CProto* proto) {
     AssertInfo(proto != nullptr, "null CProto output");
     AssertInfo(proto->proto_blob == nullptr && proto->proto_size == 0,
                "CProto output must be empty before FillOutputFieldsOrdered");
+}
+
+void
+AssertSearchResultReadLease(const SearchResult* result) {
+    AssertInfo(result != nullptr, "null search result");
+    if (result->segment_ == nullptr) {
+        return;
+    }
+
+    auto segment =
+        static_cast<const milvus::segcore::SegmentInterface*>(result->segment_);
+    if (segment->type() == SegmentType::Sealed) {
+        AssertInfo(
+            result->read_lease_ != nullptr && result->read_lease_->valid(),
+            "sealed search result for segment {} has no read lease",
+            segment->get_segment_id());
+    }
 }
 
 constexpr const char* kMilvusFieldIDMetadataKey = "milvus.field_id";
@@ -315,19 +334,19 @@ BuildFixedWidthArray(const DataContainer& data,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
-    const bool has_valid_data = field_data.valid_data_size() > 0;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
+    const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
-        AssertInfo(
-            static_cast<size_t>(field_data.valid_data_size()) == total_valid,
-            "valid_data length {} does not match expected row count {}",
-            field_data.valid_data_size(),
-            total_valid);
+        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
+                   "valid_data length {} does not match expected row count {}",
+                   valid_data.size(),
+                   total_valid);
     }
 
     BuilderType builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
     for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !field_data.valid_data(i)) {
+        if (has_valid_data && !valid_data[i]) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
         }
@@ -348,19 +367,19 @@ BuildVarLenArray(const DataContainer& data,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
-    const bool has_valid_data = field_data.valid_data_size() > 0;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
+    const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
-        AssertInfo(
-            static_cast<size_t>(field_data.valid_data_size()) == total_valid,
-            "valid_data length {} does not match expected row count {}",
-            field_data.valid_data_size(),
-            total_valid);
+        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
+                   "valid_data length {} does not match expected row count {}",
+                   valid_data.size(),
+                   total_valid);
     }
 
     BuilderType builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
     for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !field_data.valid_data(i)) {
+        if (has_valid_data && !valid_data[i]) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
         }
@@ -820,6 +839,8 @@ ExportSearchResultAsArrowRecordBatch(CSearchResult c_search_result,
                    "ArrowSchema output must be empty before export");
         AssertInfo(out_array->release == nullptr,
                    "ArrowArray output must be empty before export");
+        AssertSearchResultReadLease(
+            static_cast<SearchResult*>(c_search_result));
         auto cancel_token = folly::CancellationToken();
         if (cancellation_source != nullptr) {
             auto source =
@@ -876,6 +897,11 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
         AssertEmptyCProto(out_result);
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
         milvus::OpContext op_ctx(cancel_token);
+
+        for (int64_t i = 0; i < num_search_results; ++i) {
+            AssertSearchResultReadLease(
+                static_cast<SearchResult*>(search_results[i]));
+        }
 
         if (plan->target_entries_.empty()) {
             return milvus::SuccessCStatus();
@@ -948,6 +974,16 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 milvus::ThreadPoolPriority::MIDDLE);
             std::vector<std::future<void>> futures;
             futures.reserve(seg_results.size());
+            auto futures_guard = folly::makeGuard([&futures]() {
+                for (auto& f : futures) {
+                    if (f.valid()) {
+                        try {
+                            f.get();
+                        } catch (...) {
+                        }
+                    }
+                }
+            });
             for (auto& [seg_idx, seg_res] : seg_results) {
                 auto sr = static_cast<SearchResult*>(search_results[seg_idx]);
                 auto segment =
@@ -960,16 +996,6 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                             plan, seg_res_ptr->temp_result, &op_ctx);
                     }));
             }
-            auto futures_guard = folly::makeGuard([&futures]() {
-                for (auto& f : futures) {
-                    if (f.valid()) {
-                        try {
-                            f.get();
-                        } catch (...) {
-                        }
-                    }
-                }
-            });
             for (auto& future : futures) {
                 future.get();
             }
@@ -1019,14 +1045,16 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                     continue;
                 }
                 auto& field_data = it->second;
-                if (field_data->valid_data_size() == 0) {
+                const auto& valid_data =
+                    milvus::GetFieldDataRowValidData(*field_data);
+                if (valid_data.empty()) {
                     continue;
                 }
                 int64_t valid_idx = 0;
                 for (size_t i = 0; i < seg_res.result_positions.size(); i++) {
                     auto pos = seg_res.result_positions[i];
                     result_pairs[pos].setValidDataOffset(field_id, valid_idx);
-                    if (field_data->valid_data(i)) {
+                    if (valid_data[i]) {
                         valid_idx++;
                     }
                 }
@@ -1131,8 +1159,10 @@ PrepareSearchResultsForExportImpl(
             AssertInfo(c_search_results[i] != nullptr,
                        "null search result at index {}",
                        i);
-            search_results.push_back(
-                static_cast<milvus::SearchResult*>(c_search_results[i]));
+            auto result =
+                static_cast<milvus::SearchResult*>(c_search_results[i]);
+            AssertSearchResultReadLease(result);
+            search_results.push_back(result);
         }
 
         milvus::OpContext op_ctx(cancel_token);

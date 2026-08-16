@@ -26,6 +26,7 @@ import (
 
 type Params struct {
 	StorageVersion            int64                  `json:"storage_version,omitempty"`
+	StorageFormat             string                 `json:"storage_format,omitempty"`
 	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
 	UseMergeSort              bool                   `json:"use_merge_sort,omitempty"`
 	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
@@ -46,6 +47,7 @@ func GenParams() Params {
 	}
 	return Params{
 		StorageVersion:            storageVersion,
+		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
@@ -58,6 +60,13 @@ func GenParams() Params {
 		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
 		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}
+}
+
+func (p Params) GetStorageFormat() string {
+	if p.StorageFormat != "" {
+		return p.StorageFormat
+	}
+	return paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 }
 
 func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {
@@ -93,6 +102,9 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    paramtable.Get().LocalStorageCfg.Path.GetValue(),
 			StorageType: paramtable.Get().CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
@@ -110,6 +122,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			UseVirtualHost:    paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),

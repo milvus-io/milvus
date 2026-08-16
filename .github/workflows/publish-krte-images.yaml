@@ -39,7 +39,7 @@ jobs:
         working-directory: build/docker/krte
         run: |
           export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
-          docker build --build-arg IMAGE_ARG="milvusdb/krte:$TAG" --build-arg GO_VERSION=1.26.4 -t "milvusdb/krte:$TAG" .
+          docker build --build-arg IMAGE_ARG="milvusdb/krte:$TAG" --build-arg GO_VERSION=1.26.5 -t "milvusdb/krte:$TAG" .
       - name: Docker Push
         if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' )&& github.repository == 'milvus-io/milvus'
         continue-on-error: true

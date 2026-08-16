@@ -32,6 +32,7 @@ NEVER answer based on documentation alone or code alone. NEVER skip Step 2 — t
 
 ### Subsystems Reference
 
+- [**Observability**](docs/agent_guides/observability/README.md): Logging, metrics, tracing, and observability debug workflows.
 - [**Streaming System**](docs/agent_guides/streaming-system/streaming-system.md): Write path, WAL, DDL/DCL execution, replication && CDC.
 
 ## Testing
@@ -44,6 +45,18 @@ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/proxy/... -r
 ```
 
 Per-module shortcuts: `make test-querycoord`, `make test-proxy`, etc.
+
+## Verification gate (MANDATORY before claiming "done" or pushing for review)
+
+The reading procedure above tells you how to *enter* the code. This tells you how to *prove a change works*. A change is NOT verified by "it compiles + unit tests pass + success-path e2e is green." When the goal of a change is a **behavior** (retry / classification / routing / error-code propagation / fallback / cache invalidation / concurrency), execute these IN ORDER. Skipping them is the most expensive failure mode — it ships changes that are self-consistent but miss their purpose.
+
+**G1 — Verify the data, not just your transform.** If your change adds a function/layer that maps or preserves a value X (an error code, a Status, a category, a flag), you only verified *your function*. Now verify its INPUT. Audit **every** place that constructs, throws, or rewrites X across the **whole repo** — not only the lines you edited. grep the escape hatches: `throw`, `.ToString()`/stringify, blanket fallbacks (catch-all → `Invalid` / `IOError` / `UnexpectedError`). A value destroyed or mis-set upstream makes your boundary logic dead code. Audit at the SOURCE of X, never only at the boundary that consumes it.
+
+**G2 — Trace each real failure mode end-to-end.** Success-path e2e — even thousands of cases — does NOT exercise the failure modes a behavioral change exists for (S3 throttle, corrupt file, OOM, cancel, timeout, not-ready). For EACH one: either trace it by hand from origin → consumer, or fault-inject it, and confirm it lands in the intended bucket. "All green" on the happy path is not evidence the change works; it is only evidence you did not break the happy path.
+
+**G3 — Do not over-claim.** Commit messages and PR body may assert ONLY benefits verified end-to-end via G1+G2. A benefit that depends on un-audited upstream or an un-triggered failure mode must be written as "follow-up" or "preserves codes for observability; retry wiring unverified" — never as achieved. A reviewer will verify your claim against the running system; over-claiming wastes their round.
+
+**G4 — Adversarial self-review before human review.** Before pushing, do one pass asking: which failure mode have I NOT traced to its bucket? which upstream construction site of X have I NOT read? what would an adversarial reviewer grep for? Fix the gaps, or list them explicitly in the PR.
 
 ## Run Milvus Locally
 
@@ -72,6 +85,7 @@ Input-vs-System) and [error_handling_casebook.md](docs/dev/error_handling_casebo
 3. Before marking anything InputError: grep `retry.Do` consumers. Before converting an `errors.New` sentinel to merr: grep `errors.Is` guards.
 4. Pick codes from the existing family ranges in `pkg/util/merr/errors.go` (scan first; see the partition table in [error_sentinel_convention.md](docs/dev/error_sentinel_convention.md)); never hand-pick 20xx segcore codes.
 5. Touched a wire projection, oldCode mapping, or metric label? Run the merr guard tests AND a full `make test-go` — contract changes break packages you didn't touch.
+6. **C++ side (segcore / milvus-storage / cgo boundary) — the rules above are Go/merr; the same discipline applies in C++, and the verification gate (G1) is non-negotiable here.** The final class is decided at the `ThrowInfo` / `AssertInfo` / `SegcoreError` / arrow-`Status` / `LOON_*` **construction sites**, NOT at the cgo boundary translator. A boundary helper (`KnowhereStatusToErrorCode` / `ArrowStatusToErrorCode` / `LoonResultToErrorCode`) is correct ONLY if its inputs carry the right category — so audit upstream, not the helper. When a code must survive to the cgo boundary, grep every construction/throw/rewrite site and confirm none collapse it: `FailureCStatus` needs a real `SegcoreError` (an `ExecOperatorException` or `throw std::runtime_error(status.ToString())` destroys the code), and an upstream `IOError`-rewritten-as-`Invalid` (or catch-all → `IOError`) silently inverts transient vs permanent. Apply the blame test (rule 1) at EVERY such site, not only the ones you edit.
 
 ## PR and Commit Conventions
 

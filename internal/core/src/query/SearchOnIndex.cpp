@@ -49,8 +49,34 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
     const auto has_offset_mapping = offset_mapping.IsEnabled();
+    const auto active_count = search_conf.active_count_;
+
+    // A growing interim index can advance after the plan freezes its visible
+    // logical prefix.  Knowhere treats an empty bitset as IDSelectorAll, so an
+    // empty/no-filter fast path must still carry an explicit prefix length or
+    // rows appended after active_count can occupy the ANN top-k before Reduce
+    // gets a chance to validate their offsets.
+    //
+    // Keep the bound in the index's physical space for nullable vectors.  The
+    // pinned bitmap is shared by Query, iterator and iterator-v2 paths below;
+    // Knowhere filters every id >= bitmap.size(), which also covers rows added
+    // after this bitmap is constructed.
+    int64_t physical_active_count = active_count;
+    if (active_count >= 0 && has_offset_mapping) {
+        physical_active_count = offset_mapping.ValidCountBelow(active_count);
+    }
+    if (active_count >= 0 && physical_active_count == 0) {
+        FillEmptySearchResult(search_result, num_queries, search_conf.topk_);
+        return;
+    }
+
+    auto pin_visible_prefix = [&](int64_t count) {
+        TargetBitmap visible_prefix(count, false);
+        search_bitset = search_result.PinBitset(std::move(visible_prefix));
+    };
+
     if (has_offset_mapping) {
-        if (offset_mapping.GetValidCount() == 0) {
+        if (active_count < 0 && offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             FillEmptySearchResult(
                 search_result, num_queries, search_conf.topk_);
@@ -64,10 +90,39 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
                     search_result, num_queries, search_conf.topk_);
                 return;
             }
-            search_bitset =
-                status == OffsetMapping::BitsetTransformStatus::NoFilter
-                    ? BitsetView{}
-                    : search_result.PinBitset(std::move(transformed_bitset));
+            if (status == OffsetMapping::BitsetTransformStatus::NoFilter) {
+                if (active_count >= 0) {
+                    pin_visible_prefix(physical_active_count);
+                } else {
+                    search_bitset = BitsetView{};
+                }
+            } else {
+                if (active_count >= 0) {
+                    transformed_bitset.resize(physical_active_count);
+                }
+                search_bitset =
+                    search_result.PinBitset(std::move(transformed_bitset));
+            }
+        } else if (active_count >= 0) {
+            pin_visible_prefix(physical_active_count);
+        }
+    } else if (active_count >= 0 && bitset.empty()) {
+        pin_visible_prefix(physical_active_count);
+    } else if (active_count >= 0) {
+        // The plan layer sizes the filter bitmap to the same frozen
+        // active_count it stamps into SearchInfo (both come from one
+        // QueryContext), and Knowhere filters every id >= bitset.size(), so
+        // the incoming bitset normally already carries the bound.
+        //
+        // A caller without a plan node can still hand in a longer bitset --
+        // FloatSegmentIndexSearch resolves active_count_ from the segment for
+        // those. Narrow the view rather than rejecting the search: scanning
+        // past the frozen bound is the failure this function exists to
+        // prevent, and the subview aliases the caller's buffer, so this costs
+        // nothing. A shorter bitset already bounds the scan more tightly than
+        // active_count and is left alone.
+        if (static_cast<int64_t>(bitset.size()) > active_count) {
+            search_bitset = bitset.subview(0, active_count);
         }
     }
 
@@ -76,13 +131,14 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      indexing)) {
+                                                      indexing,
+                                                      op_context)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter =
-            CachedSearchIterator(indexing, dataset, search_conf, search_bitset);
+        auto iter = CachedSearchIterator(
+            indexing, dataset, search_conf, search_bitset, op_context);
         iter.NextBatch(search_conf, search_result);
         if (has_offset_mapping) {
             offset_mapping.TransformOffsets(search_result.seg_offsets_);

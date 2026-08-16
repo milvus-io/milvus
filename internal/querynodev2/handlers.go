@@ -85,19 +85,22 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			}
 			if len(segmentInfo.GetBinlogs()) > 0 || segmentInfo.GetManifestPath() != "" {
 				growingSegments = append(growingSegments, &querypb.SegmentLoadInfo{
-					SegmentID:      segmentInfo.ID,
-					Level:          segmentInfo.GetLevel(),
-					PartitionID:    segmentInfo.PartitionID,
-					CollectionID:   segmentInfo.CollectionID,
-					BinlogPaths:    segmentInfo.Binlogs,
-					NumOfRows:      segmentInfo.NumOfRows,
-					Statslogs:      segmentInfo.Statslogs,
-					Deltalogs:      segmentInfo.Deltalogs,
-					Bm25Logs:       segmentInfo.Bm25Statslogs,
-					InsertChannel:  segmentInfo.InsertChannel,
-					StartPosition:  segmentInfo.GetStartPosition(),
-					StorageVersion: segmentInfo.GetStorageVersion(),
-					ManifestPath:   segmentInfo.GetManifestPath(),
+					SegmentID:        segmentInfo.ID,
+					Level:            segmentInfo.GetLevel(),
+					PartitionID:      segmentInfo.PartitionID,
+					CollectionID:     segmentInfo.CollectionID,
+					BinlogPaths:      segmentInfo.Binlogs,
+					NumOfRows:        segmentInfo.NumOfRows,
+					Statslogs:        segmentInfo.Statslogs,
+					Deltalogs:        segmentInfo.Deltalogs,
+					Bm25Logs:         segmentInfo.Bm25Statslogs,
+					TextStatsLogs:    segmentInfo.GetTextStatsLogs(),
+					JsonKeyStatsLogs: segmentInfo.GetJsonKeyStats(),
+					InsertChannel:    segmentInfo.InsertChannel,
+					StartPosition:    segmentInfo.GetStartPosition(),
+					StorageVersion:   segmentInfo.GetStorageVersion(),
+					ManifestPath:     segmentInfo.GetManifestPath(),
+					Stats:            segmentInfo.GetStats(),
 				})
 			} else {
 				mlog.Info(ctx, "skip segment which has no binlog and no manifest path",
@@ -139,39 +142,6 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 	}
 
 	return merr.Success()
-}
-
-func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {
-	log := mlog.With(
-		mlog.FieldCollectionID(req.GetCollectionID()),
-		mlog.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
-	)
-
-	status := merr.Success()
-	log.Info(ctx, "start to load index")
-
-	for _, info := range req.GetInfos() {
-		log := mlog.With(mlog.FieldSegmentID(info.GetSegmentID()))
-		segment := node.manager.Segment.GetSealed(info.GetSegmentID())
-		if segment == nil {
-			log.Warn(ctx, "segment not found for load index operation")
-			continue
-		}
-		localSegment, ok := segment.(*segments.LocalSegment)
-		if !ok {
-			log.Warn(ctx, "segment not local for load index opeartion")
-			continue
-		}
-
-		err := node.loader.LoadIndex(ctx, localSegment, info, req.Version)
-		if err != nil {
-			log.Warn(ctx, "failed to load index", mlog.Err(err))
-			status = merr.Status(err)
-			break
-		}
-	}
-
-	return status
 }
 
 func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {

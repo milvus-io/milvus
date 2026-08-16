@@ -428,6 +428,9 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
 		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
 
+		// Mock force override config disabled by default.
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+
 		// Mock UpdateLoadConfig to capture the call
 		var updateLoadConfigCalled bool
 		var capturedCollectionIDs []int64
@@ -461,6 +464,143 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		watcher.Trigger()
 		time.Sleep(1 * time.Second)
 		watcher.Close()
+	})
+}
+
+func TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
+			},
+		}
+		mockCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1002,
+				UserSpecifiedReplicaMode: true,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+			switch collectionID {
+			case 1001:
+				return mockCollection1
+			case 1002:
+				return mockCollection2
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
+
+		var capturedCollectionIDs []int64
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			capturedCollectionIDs = collectionIDs
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:         testServer,
+			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh: make(chan struct{}, 10),
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.Equal(t, []int64{1001, 1002}, capturedCollectionIDs, "Force override should include user-specified replica mode collections")
+	})
+}
+
+func TestApplyLoadConfigChangesSkipsReleasedCollection(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesSkipsReleasedCollection", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+			if collectionID == 1001 {
+				return mockCollection
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+
+		var capturedCollectionIDs []int64
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			capturedCollectionIDs = collectionIDs
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:         testServer,
+			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh: make(chan struct{}, 10),
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.Equal(t, []int64{1001}, capturedCollectionIDs)
+	})
+}
+
+func TestApplyLoadConfigChangesWhenForceOverrideConfigChanges(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesWhenForceOverrideConfigChanges", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1002,
+				UserSpecifiedReplicaMode: true,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).Return(mockCollection).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
+
+		var updateLoadConfigCalled bool
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			updateLoadConfigCalled = true
+			assert.Equal(t, []int64{1002}, collectionIDs)
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:                                    testServer,
+			notifier:                             syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh:                            make(chan struct{}, 10),
+			previousReplicaNum:                   2,
+			previousRGs:                          []string{"default", "rg1"},
+			previousForceOverrideUserReplicaMode: false,
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.True(t, updateLoadConfigCalled, "force override config change should trigger load config update even when replica/RG config is unchanged")
 	})
 }
 
@@ -1116,6 +1256,59 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 
 		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
 		assert.ErrorContains(t, err, "not serviceable")
+	})
+
+	t.Run("leader reported non-serviceable returns error even when data ready", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: false},
+				Segments: map[int64]*querypb.SegmentDist{42: {NodeID: 10}},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "reported not serviceable")
+	})
+
+	t.Run("nil leader status returns error even when data ready", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Segments: map[int64]*querypb.SegmentDist{42: {NodeID: 10}},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "reported not serviceable")
 	})
 
 	t.Run("all serviceable returns nil", func(t *testing.T) {

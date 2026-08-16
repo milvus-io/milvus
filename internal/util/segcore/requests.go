@@ -45,6 +45,7 @@ type LoadFieldDataRequest struct {
 	RowCount       int64
 	StorageVersion int64
 	LoadPriority   commonpb.LoadPriority
+	Shard          string
 }
 
 type LoadFieldDataInfo struct {
@@ -64,6 +65,11 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 			C.DeleteLoadFieldDataInfo(cLoadFieldDataInfo)
 		}
 	}()
+	if req.Shard != "" {
+		cShard := C.CString(req.Shard)
+		defer C.free(unsafe.Pointer(cShard))
+		C.SetLoadFieldDataInfoShard(cLoadFieldDataInfo, cShard)
+	}
 	rowCount := C.int64_t(req.RowCount)
 
 	for _, field := range req.Fields {

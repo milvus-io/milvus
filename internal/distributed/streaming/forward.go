@@ -209,9 +209,7 @@ func (fs *forwardServiceImpl) initLegacyProxy() {
 	})
 	fs.legacyProxy = lazygrpc.WithServiceCreator(conn, milvuspb.NewMilvusServiceClient)
 	fs.rb = rb
-	fs.Logger().Info(context.TODO(),
-
-		"streaming service is not ready, legacy proxy is initiated to forward request", mlog.Int("proxyPort", port))
+	fs.Logger().Info(context.TODO(), "streaming service is not ready, legacy proxy is initiated to forward request", mlog.Int("proxyPort", port))
 }
 
 // getDialOptions returns the dial options for the legacy proxy.
@@ -255,9 +253,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 // markForwardDisabled marks the forward disabled.
 func (fs *forwardServiceImpl) markForwardDisabled() {
 	fs.isForwardDisabled = true
-	fs.Logger().Info(context.TODO(),
-
-		"streaming service is ready, forward is disabled")
+	fs.Logger().Info(context.TODO(), "streaming service is ready, forward is disabled")
 	if fs.legacyProxy != nil {
 		legacyProxy := fs.legacyProxy
 		fs.legacyProxy = nil
@@ -265,13 +261,9 @@ func (fs *forwardServiceImpl) markForwardDisabled() {
 		fs.rb = nil
 		go func() {
 			legacyProxy.Close()
-			fs.Logger().Info(context.TODO(),
-
-				"legacy proxy closed")
+			fs.Logger().Info(context.TODO(), "legacy proxy closed")
 			rb.Close()
-			fs.Logger().Info(context.TODO(),
-
-				"resolver builder closed")
+			fs.Logger().Info(context.TODO(), "resolver builder closed")
 		}()
 	}
 }

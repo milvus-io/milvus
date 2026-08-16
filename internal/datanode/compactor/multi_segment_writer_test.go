@@ -91,6 +91,10 @@ func (w closeErrBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
+func (w closeErrBinlogRecordWriter) GetStatsBlobSize() int64 {
+	return 0
+}
+
 func (w closeErrBinlogRecordWriter) Close() error {
 	return nil
 }
@@ -145,6 +149,7 @@ func (s *MultiSegmentWriterSuite) SetupSuite() {
 
 func (s *MultiSegmentWriterSuite) SetupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -170,6 +175,7 @@ func (s *MultiSegmentWriterSuite) SetupTest() {
 
 func (s *MultiSegmentWriterSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 
 // genSimpleSchema generates a simple collection schema for testing
@@ -223,7 +229,7 @@ func (s *MultiSegmentWriterSuite) genSimpleSchema() *schemapb.CollectionSchema {
 
 // genTestValue generates a test storage.Value for the given ID
 func (s *MultiSegmentWriterSuite) genTestValue(id int64) *storage.Value {
-	ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+	ts := tsoutil.ComposeTSByTime(time.Now())
 	return &storage.Value{
 		PK:        storage.NewInt64PrimaryKey(id),
 		Timestamp: int64(ts),

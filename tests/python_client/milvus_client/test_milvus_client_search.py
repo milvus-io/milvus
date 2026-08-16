@@ -2059,8 +2059,8 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=vectors, anns_field=ct.default_float_vec_field_name,
                     search_params=search_params, limit=100,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
-                                 "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
+                    check_items={"err_code": 2000,
+                                 "err_msg": "ef(10) should be larger than k(100)"})
 
 
 class TestMilvusClientSearchValid(TestMilvusClientV2Base):
@@ -7522,7 +7522,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "huggingface", "", None, 123])
+    @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "", None, 123])
     def test_milvus_client_search_with_model_rerank_invalid_provider(self, setup_collection, invalid_provider,
                                                                      tei_reranker_endpoint):
         """

@@ -73,15 +73,11 @@ func (b *broadcasterScheduler) execute() {
 	if workers < 1 {
 		workers = 1
 	}
-	b.Logger().Info(context.TODO(),
-
-		"broadcaster start to execute", mlog.Int("workerNum", workers))
+	b.Logger().Info(context.TODO(), "broadcaster start to execute", mlog.Int("workerNum", workers))
 
 	defer func() {
 		b.backgroundTaskNotifier.Finish(struct{}{})
-		b.Logger().Info(context.TODO(),
-
-			"broadcaster execute exit")
+		b.Logger().Info(context.TODO(), "broadcaster execute exit")
 	}()
 
 	// Start n workers to handle the broadcast task.
@@ -113,9 +109,7 @@ func (b *broadcasterScheduler) dispatch() {
 		if b.backoffs.Len() > 0 {
 			var nextInterval time.Duration
 			nextBackOff, nextInterval = b.backoffs.Peek().NextTimer()
-			b.Logger().Info(context.TODO(),
-
-				"backoff task", mlog.Duration("nextInterval", nextInterval))
+			b.Logger().Info(context.TODO(), "backoff task", mlog.Duration("nextInterval", nextInterval))
 		}
 
 		select {

@@ -83,11 +83,12 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	// pretend-finished code is C++ ClusterSkip 2033. Keep generic so a failed
 	// build retries instead of being reported as JobStateFinished.
 	2002: {sentinel: ErrSegcore},
-	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true}, // FollyOtherException (folly async failure; retry/reroute)
-	2038: {sentinel: ErrSegcoreFollyCancel},                          // FollyCancel (cancellation; not a pretend-finished signal — sentinel identity preserved, scheduler retries)
-	2039: {sentinel: ErrSegcoreOutOfRange},                           // OutOfRange (internal bounds bug, not a signal)
-	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},      // GcpNativeError (object storage; transient)
-	2099: {sentinel: KnowhereError},                                  // KnowhereError
+	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true},      // FollyOtherException (folly async failure; retry/reroute)
+	2038: {sentinel: ErrSegcoreFollyCancel},                               // FollyCancel (cancellation; not a pretend-finished signal — sentinel identity preserved, scheduler retries)
+	2039: {sentinel: ErrSegcoreOutOfRange},                                // OutOfRange (internal bounds bug, not a signal)
+	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},           // GcpNativeError (object storage; transient)
+	2046: {sentinel: ErrCollectionSchemaVersionNotReady, retriable: true}, // CollectionSchemaVersionNotReady (stale QueryNode schema snapshot; retry with fresh schema)
+	2099: {sentinel: KnowhereError},                                       // KnowhereError
 
 	// Wrapper-path special cases (preserve existing errors.Is behavior that
 	// datanode/index/scheduler.go relies on):
@@ -116,6 +117,7 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2034: {sentinel: ErrSegcore, retriable: true}, // MemAllocateFailed: OOM
 	2036: {sentinel: ErrSegcore, retriable: true}, // MmapError
 	2043: {sentinel: ErrSegcore, retriable: true}, // InsufficientResource
+	2045: {sentinel: ErrSegcore, retriable: true}, // StorageTransientError: retryable storage/network failure
 
 	// Permanent system errors registered explicitly so a future reader does not
 	// mistake them for "unclassified" and flip them to retriable. They map to the
@@ -124,6 +126,7 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2004: {sentinel: ErrSegcore}, // IndexBuildError: build failed (bad data / permanent)
 	2016: {sentinel: ErrSegcore}, // BucketInvalid: misconfigured bucket (same on every replica)
 	2017: {sentinel: ErrSegcore}, // ObjectNotExist: object missing in shared storage (reroute won't help)
+	2044: {sentinel: ErrSegcore}, // StorageError: permanent storage failure
 
 	// Previously-unclassified C++ codes registered explicitly (review §2): an
 	// unknown code still falls back to non-retriable ErrSegcore, but registering

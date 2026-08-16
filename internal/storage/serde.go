@@ -112,6 +112,8 @@ type serdeEntry struct {
 	serialize func(b array.Builder, v any, elementType schemapb.DataType) error
 }
 
+type TextLobRef []byte
+
 var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	m := make(map[schemapb.DataType]serdeEntry)
 	m[schemapb.DataType_Bool] = serdeEntry{
@@ -373,7 +375,52 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_VarChar] = stringEntry
 	m[schemapb.DataType_String] = stringEntry
-	m[schemapb.DataType_Text] = stringEntry
+	m[schemapb.DataType_Text] = serdeEntry{
+		arrowType: stringEntry.arrowType,
+		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, error) {
+			if a.IsNull(i) {
+				return nil, nil
+			}
+			if arr, ok := a.(*array.String); ok && i < arr.Len() {
+				value := arr.Value(i)
+				if shouldCopy {
+					return strings.Clone(value), nil
+				}
+				return value, nil
+			}
+			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
+				value := arr.Value(i)
+				if shouldCopy {
+					value = append([]byte(nil), value...)
+				}
+				return TextLobRef(value), nil
+			}
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.String or *array.Binary, got %T", a)
+		},
+		serialize: func(b array.Builder, v any, elementType schemapb.DataType) error {
+			if v == nil {
+				b.AppendNull()
+				return nil
+			}
+			if builder, ok := b.(*array.StringBuilder); ok {
+				if v, ok := v.(string); ok {
+					builder.Append(v)
+					return nil
+				}
+				return merr.WrapErrServiceInternalMsg("expected string value, got %T", v)
+			}
+			if builder, ok := b.(*array.BinaryBuilder); ok {
+				switch v := v.(type) {
+				case TextLobRef:
+					builder.Append([]byte(v))
+					return nil
+				default:
+					return merr.WrapErrServiceInternalMsg("expected TEXT LOB reference value, got %T", v)
+				}
+			}
+			return merr.WrapErrServiceInternalMsg("expected *array.StringBuilder or *array.BinaryBuilder, got %T", b)
+		},
+	}
 
 	// We're not using the deserialized data in go, so we can skip the heavy pb serde.
 	// If there is need in the future, just assign it to m[schemapb.DataType_Array]

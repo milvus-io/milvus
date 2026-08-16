@@ -48,9 +48,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 	}
 	txnManager.notifyRecoverDone()
 	txnManager.SetLogger(resource.Resource().Logger().With(mlog.FieldComponent("txn-manager")))
-	txnManager.Logger().Info(context.TODO(),
-
-		"txn manager recovered with txn", mlog.Int64s("txnIDs", sessionIDs))
+	txnManager.Logger().Info(context.TODO(), "txn manager recovered with txn", mlog.Int64s("txnIDs", sessionIDs))
 	return txnManager
 }
 
@@ -142,9 +140,7 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 		}
 	}
 	if len(ids) > 0 {
-		m.Logger().Info(context.TODO(),
-
-			"transaction interrupted", mlog.FieldVChannel(vchannel), mlog.Int64s("txnIDs", ids))
+		m.Logger().Info(context.TODO(), "transaction interrupted", mlog.FieldVChannel(vchannel), mlog.Int64s("txnIDs", ids))
 	}
 	m.notifyRecoverDone()
 }
@@ -197,15 +193,11 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 	defer m.mu.Unlock()
 
 	if len(m.sessions) == 0 {
-		m.Logger().Info(context.TODO(),
-
-			"No in-flight transactions to rollback")
+		m.Logger().Info(context.TODO(), "No in-flight transactions to rollback")
 		return
 	}
 
-	m.Logger().Info(context.TODO(),
-
-		"Rolling back all in-flight transactions", mlog.Int("sessionCount", len(m.sessions)))
+	m.Logger().Info(context.TODO(), "Rolling back all in-flight transactions", mlog.Int("sessionCount", len(m.sessions)))
 
 	ids := make([]int64, 0, len(m.sessions))
 	for txnID, session := range m.sessions {
@@ -215,10 +207,7 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 		delete(m.recoveredSessions, txnID)
 	}
 
-	m.Logger().Info(context.TODO(),
-
-		"Rolled back in-flight transactions",
-		mlog.Int64s("txnIDs", ids))
+	m.Logger().Info(context.TODO(), "Rolled back in-flight transactions", mlog.Int64s("txnIDs", ids))
 
 	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
 	if len(m.sessions) == 0 && m.closed != nil {
@@ -239,9 +228,7 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 			m.closed.Close()
 		}
 	}
-	m.Logger().Info(ctx,
-
-		"graceful close txn manager", mlog.Int("activeTxnCount", len(m.sessions)))
+	m.Logger().Info(ctx, "graceful close txn manager", mlog.Int("activeTxnCount", len(m.sessions)))
 	m.mu.Unlock()
 
 	select {

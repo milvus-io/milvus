@@ -106,15 +106,31 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	return kvs, nil
 }
 
+// isV3Segment reports whether a segment is V3 (manifest-backed). Used as
+// the gate for skipping per-FieldBinlog KV writes and binlog-array-based
+// row-count recomputation: V3 segments resolve paths via the LOON manifest
+// and aggregate metrics via SegmentInfo.Stats, so the per-FieldBinlog KVs
+// are pure write-amplification and the array-iterating ReCalcRowCount
+// would zero out NumOfRows on a freshly-loaded V3 segment whose arrays
+// were never persisted.
+func isV3Segment(segment *datapb.SegmentInfo) bool {
+	return segment.GetManifestPath() != ""
+}
+
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
 	noBinlogsSegment, binlogs, deltalogs, statslogs, bm25logs := CloneSegmentWithExcludeBinlogs(segment)
-	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
-	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
-	// save binlogs separately
-	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
-	if err != nil {
-		return nil, err
+	kvs := make(map[string]string)
+	if !isV3Segment(segment) {
+		// Row-count reconciliation is a V2 concern — V3 segments carry
+		// the truth on SegmentInfo.NumOfRows, and their arrays may
+		// legitimately be empty.
+		segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
+		binlogKvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
+		if err != nil {
+			return nil, err
+		}
+		kvs = binlogKvs
 	}
 
 	// save segment info
@@ -261,6 +277,19 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }
 
+func buildCompactionTargetKV(record *datapb.CompactionTarget) (string, string, error) {
+	valueBytes, err := proto.Marshal(record)
+	if err != nil {
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal CompactionTarget: %d/%d", record.GetTargetID(), record.GetCollectionID())
+	}
+	key := buildCompactionTargetPath(record.GetTargetID())
+	return key, string(valueBytes), nil
+}
+
+func buildCompactionTargetPath(targetID int64) string {
+	return fmt.Sprintf("%s/%d", CompactionTargetPrefix, targetID)
+}
+
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {
@@ -381,4 +410,8 @@ func buildExternalCollectionRefreshTaskKey(taskID int64) string {
 
 func buildSnapshotKey(collectionID int64, snapshotID int64) string {
 	return fmt.Sprintf("%s/%d/%d", SnapshotPrefix, collectionID, snapshotID)
+}
+
+func buildExportSnapshotJobKey(jobID int64) string {
+	return fmt.Sprintf("%s/%d", ExportSnapshotJobPrefix, jobID)
 }

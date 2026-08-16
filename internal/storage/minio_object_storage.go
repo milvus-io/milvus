@@ -29,6 +29,8 @@ import (
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
+const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
+
 type MinioObjectStorage struct {
 	*minio.Client
 }
@@ -76,8 +78,17 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 }
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
-	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minio.PutObjectOptions{})
+	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minioObjectStorage.putObjectOptions())
 	return mapObjectStorageError(objectName, err)
+}
+
+func (minioObjectStorage *MinioObjectStorage) putObjectOptions() minio.PutObjectOptions {
+	if !paramtable.Get().MinioCfg.DisableAWSChunkedEncoding.GetAsBool() {
+		return minio.PutObjectOptions{}
+	}
+	return minio.PutObjectOptions{
+		DisableContentSha256: true,
+	}
 }
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
@@ -112,15 +123,25 @@ func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, 
 	return mapObjectStorageError(objectName, err)
 }
 
-func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
 	srcOpts := minio.CopySrcOptions{
-		Bucket: bucketName,
+		Bucket: srcBucket,
 		Object: srcObjectName,
 	}
 	dstOpts := minio.CopyDestOptions{
-		Bucket: bucketName,
+		Bucket: dstBucket,
 		Object: dstObjectName,
 	}
-	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
+	srcInfo, err := minioObjectStorage.Client.StatObject(ctx, srcBucket, srcObjectName, minio.StatObjectOptions{})
+	if err != nil {
+		return mapObjectStorageError(srcObjectName, err)
+	}
+	if srcInfo.Size <= minioSingleCopyObjectMaxSize {
+		_, err = minioObjectStorage.CopyObject(ctx, dstOpts, srcOpts)
+		return mapObjectStorageError(srcObjectName, err)
+	}
+	// MinIO's single CopyObject path is capped at 5GiB. ComposeObject still runs
+	// provider-side and avoids streaming snapshot data through Milvus.
+	_, err = minioObjectStorage.ComposeObject(ctx, dstOpts, srcOpts)
 	return mapObjectStorageError(srcObjectName, err)
 }

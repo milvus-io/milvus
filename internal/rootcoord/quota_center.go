@@ -1669,7 +1669,7 @@ func (q *QuotaCenter) toRatesRequest() *proxypb.SetRatesRequest {
 		Children: dbLimiters,
 	}
 
-	timestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
+	timestamp := tsoutil.ComposeTSByTime(time.Now())
 	return &proxypb.SetRatesRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgID(int64(timestamp)),

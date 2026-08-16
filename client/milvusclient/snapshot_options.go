@@ -17,6 +17,8 @@
 package milvusclient
 
 import (
+	"time"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
@@ -204,6 +206,132 @@ func NewRestoreSnapshotOption(name string, collectionName string, targetCollecti
 		collectionName:       collectionName,
 		targetCollectionName: targetCollectionName,
 	}
+}
+
+type RestoreExternalSnapshotOption interface {
+	Request() *milvuspb.RestoreExternalSnapshotRequest
+	RequestTimeout() time.Duration
+}
+
+type restoreExternalSnapshotOption struct {
+	dbName               string
+	targetCollectionName string
+	snapshotMetadataURI  string
+	externalSpec         string
+	requestTimeout       time.Duration
+}
+
+func (opt *restoreExternalSnapshotOption) Request() *milvuspb.RestoreExternalSnapshotRequest {
+	return &milvuspb.RestoreExternalSnapshotRequest{
+		Base:                 &commonpb.MsgBase{},
+		DbName:               opt.dbName,
+		TargetCollectionName: opt.targetCollectionName,
+		SnapshotMetadataUri:  opt.snapshotMetadataURI,
+		ExternalSpec:         opt.externalSpec,
+	}
+}
+
+func (opt *restoreExternalSnapshotOption) WithDbName(dbName string) *restoreExternalSnapshotOption {
+	opt.dbName = dbName
+	return opt
+}
+
+func (opt *restoreExternalSnapshotOption) WithExternalSpec(externalSpec string) *restoreExternalSnapshotOption {
+	opt.externalSpec = externalSpec
+	return opt
+}
+
+func (opt *restoreExternalSnapshotOption) WithRequestTimeout(timeout time.Duration) *restoreExternalSnapshotOption {
+	opt.requestTimeout = timeout
+	return opt
+}
+
+func (opt *restoreExternalSnapshotOption) RequestTimeout() time.Duration {
+	if opt.requestTimeout <= 0 {
+		return 120 * time.Second
+	}
+	return opt.requestTimeout
+}
+
+func NewRestoreExternalSnapshotOption(targetCollectionName string, snapshotMetadataURI string) *restoreExternalSnapshotOption {
+	return &restoreExternalSnapshotOption{
+		targetCollectionName: targetCollectionName,
+		snapshotMetadataURI:  snapshotMetadataURI,
+	}
+}
+
+type ExportSnapshotOption interface {
+	Request() *milvuspb.ExportSnapshotRequest
+	RequestTimeout() time.Duration
+}
+
+type exportSnapshotOption struct {
+	name           string
+	dbName         string
+	collectionName string
+	targetS3Path   string
+	externalSpec   string
+	requestTimeout time.Duration
+}
+
+func (opt *exportSnapshotOption) Request() *milvuspb.ExportSnapshotRequest {
+	return &milvuspb.ExportSnapshotRequest{
+		Base:           &commonpb.MsgBase{},
+		Name:           opt.name,
+		DbName:         opt.dbName,
+		CollectionName: opt.collectionName,
+		TargetS3Path:   opt.targetS3Path,
+		ExternalSpec:   opt.externalSpec,
+	}
+}
+
+func (opt *exportSnapshotOption) WithDbName(dbName string) *exportSnapshotOption {
+	opt.dbName = dbName
+	return opt
+}
+
+func (opt *exportSnapshotOption) WithExternalSpec(externalSpec string) *exportSnapshotOption {
+	opt.externalSpec = externalSpec
+	return opt
+}
+
+func (opt *exportSnapshotOption) WithRequestTimeout(timeout time.Duration) *exportSnapshotOption {
+	opt.requestTimeout = timeout
+	return opt
+}
+
+func (opt *exportSnapshotOption) RequestTimeout() time.Duration {
+	if opt.requestTimeout <= 0 {
+		return 120 * time.Second
+	}
+	return opt.requestTimeout
+}
+
+func NewExportSnapshotOption(name string, collectionName string, targetS3Path string) *exportSnapshotOption {
+	return &exportSnapshotOption{
+		name:           name,
+		collectionName: collectionName,
+		targetS3Path:   targetS3Path,
+	}
+}
+
+type GetExportSnapshotStateOption interface {
+	Request() *milvuspb.GetExportSnapshotStateRequest
+}
+
+type getExportSnapshotStateOption struct {
+	jobID int64
+}
+
+func (opt *getExportSnapshotStateOption) Request() *milvuspb.GetExportSnapshotStateRequest {
+	return &milvuspb.GetExportSnapshotStateRequest{
+		Base:  &commonpb.MsgBase{},
+		JobId: opt.jobID,
+	}
+}
+
+func NewGetExportSnapshotStateOption(jobID int64) *getExportSnapshotStateOption {
+	return &getExportSnapshotStateOption{jobID: jobID}
 }
 
 // GetRestoreSnapshotStateOption interface for getting restore snapshot state options

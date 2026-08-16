@@ -50,6 +50,9 @@ GetFieldID(CSearchPlan plan, int64_t* field_id);
 const char*
 GetMetricType(CSearchPlan plan);
 
+bool
+HasTargetEntries(CSearchPlan plan);
+
 void
 SetMetricType(CSearchPlan plan, const char* metric_type);
 

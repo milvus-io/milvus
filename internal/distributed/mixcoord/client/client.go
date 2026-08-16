@@ -2144,6 +2144,28 @@ func (c *Client) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	})
 }
 
+func (c *Client) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.ExportSnapshotResponse, error) {
+		return client.ExportSnapshot(ctx, req)
+	})
+}
+
+func (c *Client) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetExportSnapshotStateResponse, error) {
+		return client.GetExportSnapshotState(ctx, req)
+	})
+}
+
 func (c *Client) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

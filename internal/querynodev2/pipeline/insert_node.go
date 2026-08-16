@@ -17,7 +17,6 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -42,16 +41,33 @@ type insertNode struct {
 	manager      *DataManager
 	delegator    delegator.ShardDelegator
 
-	functionRunners        map[int32][]function.FunctionRunner
-	functionOutputFieldIDs map[int32][]int64
+	functionStore *function.FunctionRunnerLocalStore
 }
 
-func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
-	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
+func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, schema *schemapb.CollectionSchema) {
+	ctx := msg.TraceCtx()
+	insertRecord, skippedFields, err := storage.TransferInsertMsgToInsertRecord(schema, msg)
 	if err != nil {
 		err = merr.Wrap(err, "failed to get primary keys")
-		mlog.Error(context.TODO(), err.Error(), mlog.Int64("collectionID", iNode.collectionID), mlog.String("channel", iNode.channel))
+		mlog.Error(ctx, err.Error(), mlog.Int64("collectionID", iNode.collectionID), mlog.String("channel", iNode.channel))
 		panic(err)
+	}
+	if len(skippedFields) > 0 {
+		// Attributing the skip to dropped fields is safe because the WAL adaptor emits
+		// every V1/V2 message as its own pack, msgdispatcher never merges packs, and the
+		// DML micro-batcher only merges delete-only packs. An Insert message therefore
+		// never shares a pipeline batch with another MsgPack. If that pack-granularity
+		// invariant is ever relaxed, filtering against the current schema could silently
+		// drop fields that exist in a newer schema.
+		mlog.Warn(ctx, "skip insert payload fields absent from current schema, fields are dropped since the message was written",
+			mlog.FieldCollectionID(iNode.collectionID),
+			mlog.FieldSegmentID(msg.SegmentID),
+			mlog.String("channel", iNode.channel),
+			mlog.Int32("schemaVersion", schema.GetVersion()),
+			mlog.Int64s("skippedFieldIDs", skippedFields))
+		metrics.QueryNodeSkippedInsertFieldCount.
+			WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(iNode.collectionID)).
+			Add(float64(len(skippedFields)))
 	}
 	iData, ok := insertDatas[msg.SegmentID]
 	if !ok {
@@ -67,27 +83,27 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to merge field data", mlog.String("channel", iNode.channel), mlog.Err(err))
+			mlog.Error(ctx, "failed to merge field data", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
-	if err := iNode.appendBM25Stats(iData, msg, collection.Schema()); err != nil {
-		mlog.Error(context.TODO(), "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
+	if err := iNode.appendBM25Stats(iData, msg, schema); err != nil {
+		mlog.Error(ctx, "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 		panic(err)
 	}
 
-	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
+	pks, err := segments.GetPrimaryKeys(msg, schema)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to get primary keys from insert message", mlog.Err(err))
+		mlog.Error(ctx, "failed to get primary keys from insert message", mlog.Err(err))
 		panic(err)
 	}
 
 	iData.PrimaryKeys = append(iData.PrimaryKeys, pks...)
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
-	mlog.Debug(context.TODO(), "pipeline fetch insert msg",
+	mlog.Debug(ctx, "pipeline fetch insert msg",
 		mlog.Int64("collectionID", iNode.collectionID),
 		mlog.Int64("segmentID", msg.SegmentID),
 		mlog.Int("insertRowNum", len(pks)),
@@ -95,56 +111,8 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		mlog.Uint64("timestampMax", msg.EndTimestamp))
 }
 
-// fillEmbeddingData is only used to handle old insert messages that were not embedded before WAL append.
-func (iNode *insertNode) fillEmbeddingData(schema *schemapb.CollectionSchema, msg *InsertMsg) error {
-	if !function.HasEmbeddingFunctions(schema) {
-		return nil
-	}
-	schemaVersion := schema.GetVersion()
-	_, ok, err := function.TryMaterialize(iNode.collectionID, schemaVersion, msg.InsertRequest)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-
-	runners, ok := iNode.functionRunners[schemaVersion]
-	if !ok {
-		runners, err = function.BuildEmbeddingRunners(schema)
-		if err != nil {
-			return err
-		}
-		iNode.functionRunners[schemaVersion] = runners
-	}
-	_, err = function.FillFunctionFields(runners, msg.InsertRequest)
-	return err
-}
-
-func (iNode *insertNode) getEmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
-	schemaVersion := schema.GetVersion()
-	if outputFieldIDs, ok := iNode.functionOutputFieldIDs[schemaVersion]; ok {
-		return outputFieldIDs, nil
-	}
-
-	if !function.HasEmbeddingFunctions(schema) {
-		iNode.functionOutputFieldIDs[schemaVersion] = nil
-		return nil, nil
-	}
-	outputFieldIDs, err := function.EmbeddingOutputFieldIDs(schema)
-	if err != nil {
-		return nil, err
-	}
-	iNode.functionOutputFieldIDs[schemaVersion] = outputFieldIDs
-	return outputFieldIDs, nil
-}
-
 func (iNode *insertNode) Close() {
-	for _, runners := range iNode.functionRunners {
-		function.CloseRunners(runners)
-	}
-	iNode.functionRunners = make(map[int32][]function.FunctionRunner)
-	iNode.functionOutputFieldIDs = make(map[int32][]int64)
+	iNode.functionStore.Close()
 }
 
 // Insert task
@@ -156,31 +124,33 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		sort.Slice(nodeMsg.insertMsgs, func(i, j int) bool {
 			return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
 		})
+		ctx := nodeMsg.insertMsgs[0].TraceCtx()
 
 		collection := iNode.manager.Collection.Get(iNode.collectionID)
 		if collection == nil {
-			mlog.Error(context.TODO(), "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
+			mlog.Error(ctx, "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
-		schema := collection.Schema()
-		functionOutputFieldIDs, err := iNode.getEmbeddingOutputFieldIDs(schema)
-		if err != nil {
-			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
-			panic(err)
-		}
-
-		insertDatas := make(map[UniqueID]*delegator.InsertData)
-		for _, msg := range nodeMsg.insertMsgs {
-			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
-				if err := iNode.fillEmbeddingData(schema, msg); err != nil {
-					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
-					panic(err)
-				}
+		collection.WithInsertSchemaTransition(func(schema *schemapb.CollectionSchema) {
+			functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
+			if err != nil {
+				mlog.Error(ctx, "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
+				panic(err)
 			}
-			iNode.addInsertData(insertDatas, msg, collection)
-		}
 
-		iNode.delegator.ProcessInsert(insertDatas)
+			insertDatas := make(map[UniqueID]*delegator.InsertData)
+			for _, msg := range nodeMsg.insertMsgs {
+				if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
+					if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
+						mlog.Error(msg.TraceCtx(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
+						panic(err)
+					}
+				}
+				iNode.addInsertData(insertDatas, msg, schema)
+			}
+
+			iNode.delegator.ProcessInsert(insertDatas)
+		})
 	}
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Inc()
 
@@ -201,15 +171,14 @@ func newInsertNode(
 	maxQueueLength int32,
 ) (*insertNode, error) {
 	iNode := &insertNode{
-		BaseNode:               base.NewBaseNode(fmt.Sprintf("InsertNode-%s", channel), maxQueueLength),
-		collectionID:           collectionID,
-		channel:                channel,
-		manager:                manager,
-		delegator:              delegator,
-		functionRunners:        make(map[int32][]function.FunctionRunner),
-		functionOutputFieldIDs: make(map[int32][]int64),
+		BaseNode:      base.NewBaseNode(fmt.Sprintf("InsertNode-%s", channel), maxQueueLength),
+		collectionID:  collectionID,
+		channel:       channel,
+		manager:       manager,
+		delegator:     delegator,
+		functionStore: function.NewFunctionRunnerLocalStore(),
 	}
-	if _, err := iNode.getEmbeddingOutputFieldIDs(schema); err != nil {
+	if _, err := iNode.functionStore.OutputFieldIDs(schema); err != nil {
 		return nil, err
 	}
 	return iNode, nil

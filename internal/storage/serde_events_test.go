@@ -19,6 +19,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math/rand"
@@ -142,7 +143,6 @@ func TestBinlogStreamWriter(t *testing.T) {
 		ok := rr.Next()
 		assert.True(t, ok)
 		rec := rr.Record()
-		defer rec.Release()
 		assert.Equal(t, int64(size), rec.NumRows())
 		ok = rr.Next()
 		assert.False(t, ok)
@@ -514,6 +514,57 @@ func TestManifestReaderExternalContext(t *testing.T) {
 	require.Equal(t, []string{"text_col", "101"}, reader.neededColumns)
 }
 
+func TestDeltalogReaderExternalContext(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
+	externalReader := packed.ExternalReaderContext{
+		CollectionID: 19530,
+		Source:       "s3://bucket/source",
+		Spec:         `{"format":"milvus-table"}`,
+	}
+	sourcePath := "s3://bucket/source/_delta/1"
+
+	var capturedPaths []string
+	var capturedBufferSize int64
+	var capturedStorageConfig *indexpb.StorageConfig
+	var capturedPluginContext *indexcgopb.StoragePluginContext
+	var capturedExternalReader packed.ExternalReaderContext
+	mock := mockey.Mock(packed.NewPackedReaderWithExtfs).To(
+		func(paths []string,
+			arrowSchema *arrow.Schema,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			ext packed.ExternalReaderContext,
+		) (*packed.PackedReader, error) {
+			require.NotNil(t, arrowSchema)
+			capturedPaths = append([]string(nil), paths...)
+			capturedBufferSize = bufferSize
+			capturedStorageConfig = cfg
+			capturedPluginContext = pluginContext
+			capturedExternalReader = ext
+			return &packed.PackedReader{}, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	reader, err := NewDeltalogReader(
+		schemapb.DataType_Int64,
+		[]string{sourcePath},
+		WithVersion(StorageV3),
+		WithStorageConfig(storageConfig),
+		WithBufferSize(4096),
+		WithExternalReaderContext(externalReader),
+	)
+	require.NoError(t, err)
+	record, err := reader.Next()
+	require.Nil(t, record)
+	require.ErrorIs(t, err, io.EOF)
+	require.Equal(t, []string{sourcePath}, capturedPaths)
+	require.Equal(t, int64(4096), capturedBufferSize)
+	require.Same(t, storageConfig, capturedStorageConfig)
+	require.Nil(t, capturedPluginContext)
+	require.Equal(t, externalReader, capturedExternalReader)
+}
+
 func TestManifestReaderExternalContextErrors(t *testing.T) {
 	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
 	badSchema := &schemapb.CollectionSchema{
@@ -677,7 +728,9 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	require.NotNil(t, capturedPluginContext)
 	require.Equal(t, int64(7), capturedPluginContext.GetEncryptionZoneId())
 	require.Equal(t, int64(2), capturedPluginContext.GetCollectionId())
-	require.Equal(t, "unsafe-key", capturedPluginContext.GetEncryptionKey())
+	// the plugin context contract carries the key base64-encoded, matching
+	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
+	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {
@@ -873,6 +926,88 @@ func TestValueSerializerNullableDenseVectorUsesBinaryArrow(t *testing.T) {
 			assert.Equal(t, tc.row2, roundTrip[2].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID])
 		})
 	}
+}
+
+func TestValueDeserializerSerializerTextLobRefUsesBinaryArrow(t *testing.T) {
+	const (
+		pkFieldID   FieldID = 100
+		textFieldID FieldID = 101
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "text_lob_ref",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: textFieldID, Name: "content", DataType: schemapb.DataType_Text},
+		},
+	}
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "row_id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "Timestamp", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "content", Type: arrow.BinaryTypes.Binary},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(11)
+	builder.Field(1).(*array.Int64Builder).Append(101)
+	builder.Field(2).(*array.Int64Builder).Append(1)
+	builder.Field(3).(*array.BinaryBuilder).Append([]byte("lob-ref"))
+
+	record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{
+		common.RowIDField:     0,
+		common.TimeStampField: 1,
+		pkFieldID:             2,
+		textFieldID:           3,
+	})
+	defer record.Release()
+
+	values := make([]*Value, record.Len())
+	err := ValueDeserializerWithSchema(record, values, schema, true)
+	require.NoError(t, err)
+	textValue := values[0].Value.(map[FieldID]interface{})[textFieldID]
+	require.IsType(t, TextLobRef{}, textValue)
+	require.Equal(t, TextLobRef("lob-ref"), textValue)
+
+	rewrittenRecord, err := ValueSerializer(values, schema)
+	require.NoError(t, err)
+	defer rewrittenRecord.Release()
+	textColumn := rewrittenRecord.Column(textFieldID)
+	require.IsType(t, &array.Binary{}, textColumn)
+	require.Equal(t, []byte("lob-ref"), textColumn.(*array.Binary).Value(0))
+}
+
+func TestValueSerializerTextRejectsRawBytes(t *testing.T) {
+	const (
+		pkFieldID   FieldID = 100
+		textFieldID FieldID = 101
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "text_raw_bytes",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: textFieldID, Name: "content", DataType: schemapb.DataType_Text},
+		},
+	}
+	values := []*Value{
+		{
+			PK:        NewInt64PrimaryKey(1),
+			Timestamp: 101,
+			Value: map[FieldID]interface{}{
+				common.RowIDField:     int64(11),
+				common.TimeStampField: int64(101),
+				pkFieldID:             int64(1),
+				textFieldID:           []byte("raw-text-bytes"),
+			},
+		},
+	}
+
+	_, err := ValueSerializer(values, schema)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expected string value")
 }
 
 type nullableDenseVectorSerdeCase struct {

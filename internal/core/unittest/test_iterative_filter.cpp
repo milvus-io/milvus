@@ -29,6 +29,7 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/operator/Utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
@@ -430,5 +431,50 @@ TEST(IterativeFilter, GrowingIndex) {
             plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
+    }
+}
+
+// Directly exercises the shared top-k insertion helper across multiple query
+// windows. The per-query window starts at base_idx = nq_index * unity_topk;
+// an out-of-order insertion (a better distance arriving after worse ones) must
+// shift the entries already in that window. The pre-fix math guarded/sized the
+// shift with the relative count instead of the absolute window end, so the
+// shift was skipped for every query beyond the first (nq_index >= 1),
+// corrupting their results. nq_index == 0 stayed correct, which is why the
+// nq == 1 unit tests above never caught it.
+TEST(IterativeFilterInsert, MultiQueryWindowOrdering) {
+    const int64_t unity_topk = 4;
+    const int64_t nq = 2;
+    const bool large_is_better = false;  // L2: smaller distance ranks first
+
+    SearchResult sr;
+    sr.distances_.assign(nq * unity_topk, 0.0f);
+    sr.seg_offsets_.assign(nq * unity_topk, -1);
+
+    // Insert stream (distance, seg_offset): 1/100, 3/300, 2/200, 4/400.
+    // The 2/200 arrives after 3/300, so it must be shifted into the middle.
+    const std::vector<std::pair<float, int64_t>> stream = {
+        {1.0f, 100}, {3.0f, 300}, {2.0f, 200}, {4.0f, 400}};
+    const std::vector<int64_t> expected_offsets = {100, 200, 300, 400};
+
+    for (int64_t q = 0; q < nq; ++q) {
+        int64_t count = 0;
+        for (const auto& [dist, off] : stream) {
+            milvus::exec::topk_binsert(sr,
+                                       q * unity_topk,
+                                       count,
+                                       large_is_better,
+                                       dist,
+                                       off,
+                                       std::nullopt);
+        }
+        ASSERT_EQ(count, unity_topk);
+        for (int64_t k = 0; k < unity_topk; ++k) {
+            ASSERT_EQ(sr.seg_offsets_[q * unity_topk + k], expected_offsets[k])
+                << "nq_index=" << q << " k=" << k;
+            ASSERT_FLOAT_EQ(sr.distances_[q * unity_topk + k],
+                            static_cast<float>(k + 1))
+                << "nq_index=" << q << " k=" << k;
+        }
     }
 }

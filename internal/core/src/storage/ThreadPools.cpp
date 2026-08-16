@@ -23,13 +23,42 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
 
 namespace milvus {
 
+namespace {
+
+bool
+UpdateLoadOverheadControllers(int64_t executor_workers) {
+    // All current Group bindings provide max_runtime_unit, so both policy
+    // updates should succeed. If that invariant is violated and only one
+    // update succeeds, ResizeThreadPool's ordering keeps admission
+    // fail-conservative: expansion stops before resizing, while shrinking
+    // updates the policies after resizing.
+    auto memory_updated = storage::LoadMemoryOverheadController::GetInstance()
+                              .UpdateExecutorWorkers(executor_workers);
+    auto file_updated = storage::LoadFileOverheadController::GetInstance()
+                            .UpdateExecutorWorkers(executor_workers);
+    if (memory_updated != file_updated) {
+        LOG_ERROR(
+            "Load overhead controllers were updated partially, "
+            "memory_updated:{}, file_updated:{}, executor_workers:{}",
+            memory_updated,
+            file_updated,
+            executor_workers);
+    }
+    return memory_updated && file_updated;
+}
+
+}  // namespace
+
 std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
 std::shared_mutex ThreadPools::mutex_;
+std::mutex ThreadPools::resize_mutex_;
+std::atomic<int64_t> ThreadPools::load_executor_workers_{-1};
 
 void
 ThreadPools::ShutDown() {
@@ -109,19 +138,73 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
 void
 ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
                               float ratio) {
+    std::lock_guard<std::mutex> resize_lock(resize_mutex_);
     int size = static_cast<int>(std::round(milvus::CPU_NUM * ratio));
     if (size < 1) {
         LOG_ERROR("Failed to resize threadPool, size:{}", size);
         return;
     }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    auto iter = thread_pool_map.find(priority);
-    if (iter == thread_pool_map.end()) {
-        LOG_ERROR("Failed to find threadPool, priority:{}", priority);
+    auto is_load_pool = priority == ThreadPoolPriority::HIGH ||
+                        priority == ThreadPoolPriority::LOW;
+    ThreadPool* pool = nullptr;
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        auto iter = thread_pool_map.find(priority);
+        if (iter == thread_pool_map.end()) {
+            LOG_ERROR("Failed to find threadPool, priority:{}", priority);
+            return;
+        }
+        pool = iter->second.get();
+    }
+    size = ClampThreadPoolMaxThreads(size);
+    auto old_size = pool->GetMaxThreadNum();
+    auto old_load_workers =
+        is_load_pool ? GetLoadExecutorWorkers() : int64_t{0};
+    auto new_load_workers =
+        is_load_pool ? old_load_workers - static_cast<int64_t>(old_size) + size
+                     : old_load_workers;
+    if (new_load_workers > old_load_workers &&
+        !UpdateLoadOverheadControllers(new_load_workers)) {
+        LOG_ERROR(
+            "Failed to expand threadPool because the load overhead group "
+            "update failed, priority:{}, size:{}",
+            priority,
+            size);
         return;
     }
-    iter->second->Resize(size);
+
+    pool->Resize(size);
+    if (is_load_pool) {
+        load_executor_workers_.store(new_load_workers);
+    }
+
+    if (is_load_pool && new_load_workers <= old_load_workers &&
+        !UpdateLoadOverheadControllers(new_load_workers)) {
+        LOG_ERROR(
+            "Failed to update load overhead groups after resizing "
+            "threadPool, priority:{}, size:{}",
+            priority,
+            size);
+    }
     LOG_INFO("Resized threadPool priority:{}, size:{}", priority, size);
+}
+
+int64_t
+ThreadPools::GetLoadExecutorWorkers() {
+    auto cached_workers = load_executor_workers_.load();
+    if (cached_workers >= 0) {
+        return cached_workers;
+    }
+
+    auto& high = GetThreadPool(ThreadPoolPriority::HIGH);
+    auto& low = GetThreadPool(ThreadPoolPriority::LOW);
+    auto initial_workers = static_cast<int64_t>(high.GetMaxThreadNum()) +
+                           static_cast<int64_t>(low.GetMaxThreadNum());
+    if (load_executor_workers_.compare_exchange_strong(cached_workers,
+                                                       initial_workers)) {
+        return initial_workers;
+    }
+    return cached_workers;
 }
 
 }  // namespace milvus

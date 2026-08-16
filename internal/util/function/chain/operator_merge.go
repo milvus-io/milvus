@@ -21,7 +21,7 @@ package chain
 import (
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -215,11 +215,11 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 	case MergeStrategyWeighted:
 		return op.mergeWeighted(ctx, inputs)
 	case MergeStrategyMax:
-		return op.mergeScoreCombine(ctx, inputs, maxMergeFunc)
+		return op.mergeNumCombine(ctx, inputs, maxMergeFunc)
 	case MergeStrategySum:
-		return op.mergeScoreCombine(ctx, inputs, sumMergeFunc)
+		return op.mergeNumCombine(ctx, inputs, sumMergeFunc)
 	case MergeStrategyAvg:
-		return op.mergeScoreCombine(ctx, inputs, avgMergeFunc)
+		return op.mergeNumCombine(ctx, inputs, avgMergeFunc)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
 	}
@@ -237,6 +237,10 @@ type scoreCollectFunc func(inputs []*DataFrame, chunkIdx int) (map[any]float32, 
 // The only varying part — how scores are collected per chunk — is injected via collectFn.
 func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*DataFrame, collectFn scoreCollectFunc) (*DataFrame, error) {
 	numChunks := inputs[0].NumChunks()
+
+	// Resolved once for the whole merge: every chunk's $id array must share one
+	// arrow type, otherwise AddColumnFromChunks below cannot chunk them together.
+	idType := resolveIDType(inputs)
 
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
@@ -264,7 +268,7 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 		ids, scores, locs := sortAndExtractResults(idScores, idLocs, op.SortDescending())
 		newChunkSizes[chunkIdx] = int64(len(ids))
 
-		idArr, scoreArr, err := op.buildResultArrays(ctx, ids, scores)
+		idArr, scoreArr, err := op.buildResultArrays(ctx, ids, scores, idType)
 		if err != nil {
 			return nil, err
 		}
@@ -418,8 +422,8 @@ func avgMergeFunc(existing, new float32, count int) (float32, int) {
 	return existing + new, count + 1
 }
 
-// mergeScoreCombine implements max/sum/avg score merge.
-func (op *MergeOp) mergeScoreCombine(ctx *types.FuncContext, inputs []*DataFrame, mergeFunc scoreMergeFunc) (*DataFrame, error) {
+// mergeNumCombine implements max/sum/avg score merge.
+func (op *MergeOp) mergeNumCombine(ctx *types.FuncContext, inputs []*DataFrame, mergeFunc scoreMergeFunc) (*DataFrame, error) {
 	return op.mergeWithScoreCollector(ctx, inputs, func(inputs []*DataFrame, chunkIdx int) (map[any]float32, map[any]idLocation, error) {
 		idScores, idCounts, idLocs, err := op.collectCombinedScores(inputs, chunkIdx, mergeFunc)
 		if err != nil {
@@ -646,36 +650,59 @@ func collectOrderedFieldNames(inputs []*DataFrame) []string {
 // sortAndExtractResults sorts IDs by score and extracts results.
 // When descending is true, larger scores sort first (higher = better match).
 // When descending is false, smaller scores sort first (lower = better match, e.g. L2).
+// scoredID carries the score and location alongside the id so that sorting does
+// not have to look them up. Sorting a slice of these with slices.SortStableFunc
+// also avoids sort.SliceStable's reflect-based swapper.
+type scoredID struct {
+	id    any
+	score float32
+	loc   idLocation
+}
+
 func sortAndExtractResults(idScores map[any]float32, idLocs map[any]idLocation, descending bool) ([]any, []float32, []idLocation) {
-	ids := make([]any, 0, len(idScores))
-	for id := range idScores {
-		ids = append(ids, id)
+	entries := make([]scoredID, 0, len(idScores))
+	for id, score := range idScores {
+		entries = append(entries, scoredID{id: id, score: score, loc: idLocs[id]})
 	}
 
-	sortIDs(ids, idScores, descending)
+	sortScoredIDs(entries, descending)
 
-	scores := make([]float32, len(ids))
-	locs := make([]idLocation, len(ids))
-	for i, id := range ids {
-		scores[i] = idScores[id]
-		locs[i] = idLocs[id]
+	ids := make([]any, len(entries))
+	scores := make([]float32, len(entries))
+	locs := make([]idLocation, len(entries))
+	for i, e := range entries {
+		ids[i] = e.id
+		scores[i] = e.score
+		locs[i] = e.loc
 	}
 
 	return ids, scores, locs
 }
 
-// sortIDs sorts IDs by score with stable tie-breaking by ID.
-func sortIDs(ids []any, idScores map[any]float32, descending bool) {
-	sort.SliceStable(ids, func(i, j int) bool {
-		scoreI := idScores[ids[i]]
-		scoreJ := idScores[ids[j]]
-		if scoreI != scoreJ {
-			if descending {
-				return scoreI > scoreJ
-			}
-			return scoreI < scoreJ
+// lessScoredID is the ordering sortIDs used to express directly, kept as a
+// predicate so the three-way comparator below is equivalent to the previous
+// sort.SliceStable call by construction -- including for scores that compare
+// unequal in both directions, such as NaN.
+func lessScoredID(a, b scoredID, descending bool) bool {
+	if a.score != b.score {
+		if descending {
+			return a.score > b.score
 		}
-		return compareIDs(ids[i], ids[j]) < 0
+		return a.score < b.score
+	}
+	return compareIDs(a.id, b.id) < 0
+}
+
+// sortScoredIDs sorts by score with stable tie-breaking by ID.
+func sortScoredIDs(entries []scoredID, descending bool) {
+	slices.SortStableFunc(entries, func(a, b scoredID) int {
+		if lessScoredID(a, b, descending) {
+			return -1
+		}
+		if lessScoredID(b, a, descending) {
+			return 1
+		}
+		return 0
 	})
 }
 
@@ -709,14 +736,41 @@ func compareIDs(a, b any) int {
 	}
 }
 
+// resolveIDType returns the arrow type of the merged $id column, taken from the
+// first input that actually carries IDs. Zero-row inputs cannot be trusted for
+// this: an empty result carries no ID type of its own and is materialized as an
+// empty Int64 column regardless of the collection's PK type (see importEmptyIDs
+// in converter.go). Falls back to Int64 when every input is empty, which is
+// self-consistent because then every chunk is empty as well.
+func resolveIDType(inputs []*DataFrame) arrow.DataType {
+	for _, df := range inputs {
+		if col := df.Column(types.IDFieldName); col != nil && col.Len() > 0 {
+			return col.DataType()
+		}
+	}
+	return arrow.PrimitiveTypes.Int64
+}
+
 // buildResultArrays builds ID and score arrays from results.
-func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores []float32) (arrow.Array, arrow.Array, error) {
+// idType types the ID array of a zero-hit chunk, which has no IDs to infer it from.
+func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores []float32, idType arrow.DataType) (arrow.Array, arrow.Array, error) {
 	if len(ids) == 0 {
-		// Empty result
-		idBuilder := array.NewInt64Builder(ctx.Pool())
+		// Empty result: type the empty array after the other chunks, otherwise
+		// arrow.NewChunked rejects the column (e.g. "mismatch data type int64 vs utf8").
 		scoreBuilder := array.NewFloat32Builder(ctx.Pool())
-		defer idBuilder.Release()
 		defer scoreBuilder.Release()
+
+		var idBuilder array.Builder
+		switch idType.ID() {
+		case arrow.STRING:
+			idBuilder = array.NewStringBuilder(ctx.Pool())
+		case arrow.INT64:
+			idBuilder = array.NewInt64Builder(ctx.Pool())
+		default:
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: unsupported ID type %s", idType)
+		}
+		defer idBuilder.Release()
+
 		return idBuilder.NewArray(), scoreBuilder.NewArray(), nil
 	}
 

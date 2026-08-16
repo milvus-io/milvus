@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -76,6 +77,15 @@ func IsString(n *planpb.GenericValue) bool {
 		return true
 	}
 	return false
+}
+
+func IsBytes(n *planpb.GenericValue) bool {
+	switch n.GetVal().(type) {
+	case *planpb.GenericValue_BytesVal:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsArray(n *planpb.GenericValue) bool {
@@ -252,6 +262,15 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	// A raw-bytes value has exactly one consumer — the bloom_match filter blob,
+	// which FillBloomMatchExpressionValue validates and embeds without passing
+	// through castValue. Reject it in every typed/JSON comparison context here,
+	// at the proxy, instead of fanning out a GenericValue kBytesVal that
+	// segcore's plan parser cannot evaluate.
+	if IsBytes(value) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"a bytes template value can only be used as the bloom_match filter argument")
+	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
 	}
@@ -298,6 +317,16 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 	if arithOp == planpb.ArithOpType_Div || arithOp == planpb.ArithOpType_Mod {
 		if (IsInteger(operand) && operand.GetInt64Val() == 0) || (IsFloating(operand) && operand.GetFloatVal() == 0) {
 			return nil, merr.WrapErrQueryPlanMsg("division or modulus by zero")
+		}
+	}
+
+	// A negative or too-large shift amount is undefined behavior in the C++
+	// executor, so reject it at plan time (constant-const folding is guarded
+	// separately in ShiftLeft/ShiftRight). Templated operands are validated when
+	// the placeholder value is filled in.
+	if (arithOp == planpb.ArithOpType_Shl || arithOp == planpb.ArithOpType_Shr) && !isTemplateExpr(operandExpr) {
+		if !IsInteger(operand) || operand.GetInt64Val() < 0 || operand.GetInt64Val() >= 64 {
+			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", operand.String())
 		}
 	}
 
@@ -442,6 +471,13 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 
 	if leftColumnInfo == nil || rightColumnInfo == nil {
 		return nil, merr.WrapErrQueryPlanMsg("only comparison between two fields is supported")
+	}
+
+	// CompareExpr only carries field IDs and storage data types. It cannot
+	// represent an element path for an ARRAY-backed column, and the executor
+	// does not support ARRAY as an operand type.
+	if typeutil.IsArrayType(leftColumnInfo.GetDataType()) || typeutil.IsArrayType(rightColumnInfo.GetDataType()) {
+		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison involving ARRAY fields is not supported")
 	}
 
 	// Check if both left and right are non-JSON types
@@ -705,6 +741,11 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
 		}
+	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
+		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
+			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
+		}
 	default:
 	}
 	return nil
@@ -731,6 +772,17 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 		}
 	}
 	return value, nil
+}
+
+func validateBinaryRangeBounds(lower, upper *planpb.GenericValue, lowerInclusive, upperInclusive bool) error {
+	cmp, ok := rewriter.CompareRangeValues(lower, upper)
+	if !ok {
+		return merr.WrapErrQueryPlanMsg("invalid range: bounds are not comparable")
+	}
+	if cmp > 0 || (cmp == 0 && (!lowerInclusive || !upperInclusive)) {
+		return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
+	}
+	return nil
 }
 
 func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {
@@ -825,11 +877,38 @@ func convertHanToASCII(s string) string {
 	var builder strings.Builder
 	builder.Grow(len(s) * 6)
 	skipCur := false
+	// Raw-string context. A raw string (r"..." / R'...') is taken verbatim by the
+	// parser (no Unquote / decodeUnicode pass downstream), so its CJK content must
+	// NOT be rewritten to \uXXXX here — otherwise the escape leaks all the way to
+	// the matcher and `LIKE r"中%"` / `=~ r"中"` silently fail (issue #43864).
+	// Normal strings and bare identifiers keep the Han->\uXXXX rewrite, which the
+	// parser reverses via Unquote (strings) or decodeUnicode (identifiers/keys).
+	var quote rune        // current string delimiter; 0 when outside any string
+	rawString := false    // whether the current string literal is a raw string
+	rawSkip := false      // a backslash inside a raw string escapes the next byte
+	var prev1, prev2 rune // previous two input runes, for raw-prefix detection
 	n := len(s)
 	for i, r := range s {
+		// Inside a raw string: copy verbatim, no Han rewrite, no escape bail.
+		if rawString {
+			builder.WriteRune(r)
+			switch {
+			case rawSkip:
+				rawSkip = false
+			case r == '\\':
+				rawSkip = true // backslash prevents the next byte from closing
+			case r == quote:
+				rawString = false
+				quote = 0
+			}
+			prev2, prev1 = prev1, r
+			continue
+		}
+
 		if skipCur {
 			builder.WriteRune(r)
 			skipCur = false
+			prev2, prev1 = prev1, r
 			continue
 		}
 		if r == '\\' {
@@ -838,6 +917,20 @@ func convertHanToASCII(s string) string {
 			}
 			skipCur = true
 			builder.WriteRune(r)
+			prev2, prev1 = prev1, r
+			continue
+		}
+		if r == '"' || r == '\'' {
+			if quote == 0 {
+				// Opening a string. It is raw iff preceded by an r/R prefix that is
+				// itself at a token boundary (not the tail of an identifier).
+				quote = r
+				rawString = (prev1 == 'r' || prev1 == 'R') && !isIdentContinue(prev2)
+			} else if r == quote {
+				quote = 0 // closing a normal string
+			}
+			builder.WriteRune(r)
+			prev2, prev1 = prev1, r
 			continue
 		}
 
@@ -846,9 +939,20 @@ func convertHanToASCII(s string) string {
 		} else {
 			builder.WriteRune(r)
 		}
+		prev2, prev1 = prev1, r
 	}
 
 	return builder.String()
+}
+
+// isIdentContinue reports whether r can appear inside an identifier token
+// (Identifier: [a-zA-Z_][a-zA-Z0-9_]*). Used to tell an r/R raw-string prefix
+// apart from an r/R that is merely the tail of an identifier (e.g. `myr"x"`).
+func isIdentContinue(r rune) bool {
+	return r == '_' ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9')
 }
 
 func decodeUnicode(input string) string {

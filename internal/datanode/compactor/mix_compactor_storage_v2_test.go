@@ -112,7 +112,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_MixToV2Format() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 
@@ -144,7 +144,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_MixToV2Format() {
 
 	v2Segments := []int64{10, 11}
 	for _, segID := range v2Segments {
-		binlogs, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
+		binlogs, _, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			CollectionID:   1,
@@ -179,7 +179,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV2Format() {
 
 	v2Segments := []int64{10, 11}
 	for _, segID := range v2Segments {
-		binlogs, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
+		binlogs, _, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			CollectionID:   1,
@@ -295,12 +295,13 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
@@ -324,7 +325,7 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 }
 
 func getRowWithoutNil(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:      magic,
 		common.TimeStampField:  int64(ts), // should be int64 here

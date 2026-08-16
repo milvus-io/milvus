@@ -16,7 +16,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"

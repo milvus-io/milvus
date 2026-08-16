@@ -4,46 +4,74 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// HashKey2Partitions hash partition keys to partitions
-func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.GenericValue, partitionNames []string) ([]string, error) {
+type int64PartitionKeyHasher struct{}
+
+func (int64PartitionKeyHasher) Hash(key int64) (uint64, error) {
+	value, err := typeutil.Hash32Int64(key)
+	return uint64(value), err
+}
+
+type stringPartitionKeyHasher struct{}
+
+func (stringPartitionKeyHasher) Hash(key string) (uint64, error) {
+	return uint64(typeutil.HashString2Uint32(key)), nil
+}
+
+func locatePartitionNamesByRoutingTable[K comparable](keys []K, partitionNames []string, hasher common.Hasher[K]) ([]string, error) {
+	members := make([]common.RoutingMember, 0, len(partitionNames))
+	for _, partitionName := range partitionNames {
+		members = append(members, common.RoutingMember(partitionName))
+	}
+	table := common.NewHashRoutingTable[K](members, hasher)
+
 	selectedPartitions := make(map[string]struct{})
-	numPartitions := uint32(len(partitionNames))
-	switch fieldSchema.GetDataType() {
-	case schemapb.DataType_Int64:
-		for _, key := range keys {
-			if int64Val, ok := key.GetVal().(*planpb.GenericValue_Int64Val); ok {
-				value, _ := typeutil.Hash32Int64(int64Val.Int64Val)
-				partitionName := partitionNames[value%numPartitions]
-				selectedPartitions[partitionName] = struct{}{}
-			} else {
-				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
-			}
+	for _, key := range keys {
+		partitionName, err := table.LocateKey(key)
+		if err != nil {
+			return nil, err
 		}
-	case schemapb.DataType_VarChar:
-		for _, key := range keys {
-			if stringVal, ok := key.GetVal().(*planpb.GenericValue_StringVal); ok {
-				value := typeutil.HashString2Uint32(stringVal.StringVal)
-				partitionName := partitionNames[value%numPartitions]
-				selectedPartitions[partitionName] = struct{}{}
-			} else {
-				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
-			}
-		}
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition keys")
+		selectedPartitions[partitionName.String()] = struct{}{}
 	}
 
-	result := make([]string, 0)
+	result := make([]string, 0, len(selectedPartitions))
 	for partitionName := range selectedPartitions {
 		result = append(result, partitionName)
 	}
-
 	return result, nil
+}
+
+// HashKey2Partitions hash partition keys to partitions
+func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.GenericValue, partitionNames []string) ([]string, error) {
+	switch fieldSchema.GetDataType() {
+	case schemapb.DataType_Int64:
+		int64Keys := make([]int64, 0, len(keys))
+		for _, key := range keys {
+			if int64Val, ok := key.GetVal().(*planpb.GenericValue_Int64Val); ok {
+				int64Keys = append(int64Keys, int64Val.Int64Val)
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
+			}
+		}
+		return locatePartitionNamesByRoutingTable(int64Keys, partitionNames, int64PartitionKeyHasher{})
+	case schemapb.DataType_VarChar:
+		stringKeys := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if stringVal, ok := key.GetVal().(*planpb.GenericValue_StringVal); ok {
+				stringKeys = append(stringKeys, stringVal.StringVal)
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
+			}
+		}
+		return locatePartitionNamesByRoutingTable(stringKeys, partitionNames, stringPartitionKeyHasher{})
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition keys")
+	}
 }
 
 // HashMix computes a hash by mixing the upper and lower 64-bit values.

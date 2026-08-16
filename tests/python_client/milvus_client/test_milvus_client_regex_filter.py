@@ -643,7 +643,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
     def test_regex_on_json_nested_path(self):
         """
         target: verify regex and !~ on nested JSON string paths
-        expected: metadata["nested"]["x"] =~ "^abc$" -> [1], !~ "^abc$" -> [2,3,4,5,6,7]
+        expected: metadata["nested"]["x"] =~ "^abc$" -> [1], !~ "^abc$" -> [2,3,4,5,7]
         """
         client, collection_name = self._shared_collection()
 
@@ -653,7 +653,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
 
         res = client.query(collection_name, filter='metadata["nested"]["x"] !~ "^abc$"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
-        assert result == [2, 3, 4, 5, 6, 7], f'nested !~ "^abc$": expected [2,3,4,5,6,7], got {result}'
+        assert result == [2, 3, 4, 5, 7], f'nested !~ "^abc$": expected [2,3,4,5,7], got {result}'
 
         res = client.query(collection_name, filter='metadata["nested"]["missing"] =~ ".*"', output_fields=["id"])
         assert res == [], f"missing nested key: expected [], got {res}"
@@ -805,7 +805,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
     def test_regex_array_element_negation(self):
         """
         target: verify !~ on ARRAY<VARCHAR> element paths
-        expected: tags[0] !~ "^release" -> [3,4,6,7], out-of-range !~ includes all rows
+        expected: tags[0] !~ "^release" -> [3,4,6,7], out-of-range !~ is UNKNOWN and excluded
         """
         client, collection_name = self._shared_collection()
 
@@ -815,7 +815,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
 
         res = client.query(collection_name, filter='tags[10] !~ ".*"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
-        assert result == [1, 2, 3, 4, 5, 6, 7], f"out-of-range !~: expected all rows, got {result}"
+        assert result == [], f"out-of-range !~: expected [], got {result}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_dynamic_json_field_paths(self):
@@ -846,7 +846,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
 
         res = client.query(collection_name, filter='$meta["dyn_text"] !~ "ERROR"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
-        assert result == [2, 3], f"dynamic dyn_text !~ ERROR expected [2,3], got {result}"
+        assert result == [2], f"dynamic dyn_text !~ ERROR expected [2], got {result}"
 
         res = client.query(collection_name, filter='$meta["dyn_num"] =~ "10"', output_fields=["id"])
         assert res == [], f"dynamic non-string regex expected [], got {res}"
@@ -1813,7 +1813,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
             ('email !~ "gmail"', {2, 3, 7}),
             ('email !~ "gmail" or email is null', {2, 3, 4, 7}),
             ('metadata["version"] =~ "^v[0-9]+\\.[0-9]+$"', {1, 2, 3, 5, 7}),
-            ('metadata["nested"]["x"] !~ "^abc$"', {2, 3, 4, 5, 6, 7}),
+            ('metadata["nested"]["x"] !~ "^abc$"', {2, 3, 4, 5, 7}),
         ]:
             res = client.search(
                 collection_name=collection_name,
@@ -2454,6 +2454,57 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
         )
         result = sorted([r["id"] for r in res])
         assert result == [1], f"indexed struct name =~ error.*timeout: expected [1], got {result}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_struct_array_raw_index_reload_consistency(self):
+        """
+        target: regex results remain stable across raw, nested scalar-indexed, and reloaded states
+        expected: MATCH and element_filter PK/offset results are identical before indexing, after indexing, and reload
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_struct_array_regex_collection(client, collection_name, create_scalar_index=False)
+
+        def collect_observations():
+            match_name = client.query(
+                collection_name,
+                filter='MATCH_ANY(events, $[name] =~ "error.*timeout")',
+                output_fields=["id"],
+            )
+            match_status = client.query(
+                collection_name,
+                filter='MATCH_ANY(events, $[status] !~ "ERROR")',
+                output_fields=["id"],
+            )
+            matching_elements = client.query(
+                collection_name,
+                filter='element_filter(events, $[name] =~ "login.*")',
+                output_fields=["id"],
+                limit=100,
+            )
+            return {
+                "match_name": sorted(row["id"] for row in match_name),
+                "match_status": sorted(row["id"] for row in match_status),
+                "elements": sorted((row["id"], row["offset"]) for row in matching_elements),
+            }
+
+        baseline = collect_observations()
+        assert baseline == {
+            "match_name": [1],
+            "match_status": [1, 2, 3],
+            "elements": [(1, 0), (1, 1)],
+        }
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="events[name]", index_type="INVERTED")
+        index_params.add_index(field_name="events[status]", index_type="INVERTED")
+        client.create_index(collection_name, index_params)
+        assert collect_observations() == baseline
+
+        client.release_collection(collection_name)
+        client.load_collection(collection_name)
+        assert collect_observations() == baseline
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_struct_array_hybrid_search(self):

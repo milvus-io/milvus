@@ -62,6 +62,9 @@ CStatus
 FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                     const uint8_t* serialized_load_index_info,
                     const uint64_t len);
+
+void
+SetLoadIndexInfoShard(CLoadIndexInfo c_load_index_info, const char* shard);
 #ifdef __cplusplus
 }
 #endif

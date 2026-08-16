@@ -30,11 +30,8 @@ package metacache
 // phase remains). Growing segments re-derive the value through the regular
 // write-buffer source decision path during WAL replay.
 //
-// Currently consumed only by the TEXT flush owner so that the writeBuffer
-// can route between the live insert payload and an out-of-process growing
-// source provider without keeping its own shadow map. The field is generic
-// so future large-field offload paths (BM25, vector, etc.) can reuse the
-// same machinery.
+// Consumers use it to route writebuffer sync tasks and to refine StreamingNode
+// runtime flush-pressure accounting after the per-segment source is known.
 type FlushSourceMode int32
 
 const (

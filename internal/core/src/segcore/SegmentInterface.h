@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -104,7 +105,8 @@ class SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const = 0;
+           bool enable_expr_cache = false,
+           milvus::tracer::SpanPtr trace_span = nullptr) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -167,6 +169,11 @@ class SegmentInterface {
 
     virtual const Schema&
     get_schema() const = 0;
+
+    virtual SchemaPtr
+    get_schema_snapshot() const {
+        return std::make_shared<Schema>(get_schema());
+    }
 
     virtual int64_t
     get_deleted_count() const = 0;
@@ -353,6 +360,16 @@ class SegmentInternalInterface : public SegmentInterface {
         // do nothing
     }
 
+    // Convenience: prefetch all chunks of a field. Default impl enumerates
+    // [0, num_chunk(field_id)) and forwards to the typed overload.
+    virtual void
+    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
+    virtual void
+    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
     // Apply field nullability to an already-initialized valid_result bitmap.
     // Implementations only clear invalid rows and leave valid rows unchanged.
     virtual void
@@ -383,7 +400,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     chunk_view(milvus::OpContext* op_ctx,
                FieldId field_id,
                int64_t chunk_id,
@@ -407,16 +424,15 @@ class SegmentInternalInterface : public SegmentInterface {
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
-            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+            std::pair<std::vector<ViewType>, ValidityView> content{
                 std::move(res), std::move(valid_data)};
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+            return PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>(
                 std::move(pw), std::move(content));
         }
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     get_batch_views(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id,
@@ -482,7 +498,8 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const override;
+           bool enable_expr_cache = false,
+           milvus::tracer::SpanPtr trace_span = nullptr) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -523,6 +540,13 @@ class SegmentInternalInterface : public SegmentInterface {
         return HasFieldData(field_id) || HasIndex(field_id);
     }
 
+    // Returns whether the segment's loaded manifest contains the storage
+    // column. Non-manifest segment types default to true.
+    virtual bool
+    HasColumnInLoadedManifest(const std::string&) const {
+        return true;
+    }
+
     // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so
     // they are checked via this dedicated API rather than widening HasIndex().
@@ -543,19 +567,25 @@ class SegmentInternalInterface : public SegmentInterface {
     set_field_avg_size(FieldId field_id,
                        int64_t num_rows,
                        int64_t field_size) override;
+
+    void
+    set_field_avg_size(const FieldMeta& field_meta,
+                       int64_t num_rows,
+                       int64_t field_size);
+
     virtual bool
     is_chunked() const {
         return false;
     }
 
-    const SkipIndex&
+    std::shared_ptr<const SkipIndex>
     GetSkipIndex() const;
 
     void
     LoadSkipIndex(FieldId field_id,
                   DataType data_type,
                   std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
+        skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
     void
@@ -563,7 +593,7 @@ class SegmentInternalInterface : public SegmentInterface {
         FieldId field_id,
         DataType data_type,
         std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_.LoadSkipFromStatistics(
+        skip_index_->LoadSkipFromStatistics(
             get_segment_id(), field_id, data_type, statistics);
     }
 
@@ -730,23 +760,21 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
@@ -830,7 +858,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 
@@ -838,7 +866,7 @@ class SegmentInternalInterface : public SegmentInterface {
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
-    SkipIndex skip_index_;
+    std::shared_ptr<SkipIndex> skip_index_ = std::make_shared<SkipIndex>();
 
     // text-indexes used to do match.
     std::unordered_map<

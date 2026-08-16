@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -25,12 +26,15 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -48,6 +52,11 @@ type statsTask struct {
 }
 
 var _ globalTask.Task = (*statsTask)(nil)
+
+var (
+	errStatsResultStale     = errors.New("stale stats result")
+	errStatsResultDiscarded = errors.New("discarded stats result")
+)
 
 func newStatsTask(t *indexpb.StatsTask,
 	taskSlot int64,
@@ -162,6 +171,16 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		return
 	}
 
+	if st.shouldDropExternalJSONStatsTask(segment) {
+		log.Warn(ctx, "external json stats task is no longer buildable, dropping stats task")
+		if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+			log.Warn(ctx, "remove stats task failed, will retry later", mlog.Err(err))
+			return
+		}
+		st.SetState(indexpb.JobState_JobStateNone, "external json stats task is no longer buildable")
+		return
+	}
+
 	if segment.GetNumOfRows() == 0 {
 		if err := st.handleEmptySegment(ctx); err != nil {
 			log.Warn(context.TODO(), "failed to handle empty segment", mlog.Err(err))
@@ -203,6 +222,20 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log.Info(context.TODO(), "stats task update state to InProgress successfully", mlog.Int64("task version", st.GetVersion()))
 }
 
+func (st *statsTask) shouldDropExternalJSONStatsTask(segment *SegmentInfo) bool {
+	if st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob || canBuildExternalJSONKeyIndex(segment) {
+		return false
+	}
+	if st.meta == nil || st.meta.collections == nil {
+		return false
+	}
+	// External-table source data may stay unchanged, so the segment may never
+	// become dropped. Drop unrebuildable reloaded JSON stats tasks immediately
+	// instead of relying on dropped-segment GC to unblock future scheduling.
+	collection := st.meta.GetCollection(segment.GetCollectionID())
+	return collection != nil && collection.IsExternal()
+}
+
 func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 	ctx := context.TODO()
 	log := mlog.With(
@@ -232,7 +265,16 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		// Handle different task states
 		switch state {
 		case indexpb.JobState_JobStateFinished:
-			if err := st.SetJobInfo(ctx, result); err != nil {
+			err := st.SetJobInfo(ctx, result)
+			if errors.Is(err, errStatsResultStale) {
+				st.discardRejectedStatsResult(ctx, cluster, result, "stale stats result discarded")
+				return
+			}
+			if errors.Is(err, errStatsResultDiscarded) {
+				st.discardRejectedStatsResult(ctx, cluster, result, "stats result discarded")
+				return
+			}
+			if err != nil {
 				return
 			}
 			st.UpdateStateWithMeta(state, result.GetFailReason())
@@ -264,6 +306,113 @@ func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 
 	log.Info(context.TODO(), "stats task dropped successfully")
 	return nil
+}
+
+func (st *statsTask) discardRejectedStatsResult(ctx context.Context, cluster session.Cluster, result *workerpb.StatsResult, reason string) {
+	log := mlog.With(
+		mlog.FieldTaskID(st.GetTaskID()),
+		mlog.FieldSegmentID(st.GetSegmentID()),
+		mlog.String("subJobType", st.GetSubJobType().String()),
+	)
+
+	if st.shouldCleanupRejectedStatsResultFiles() {
+		// Do not defer rejected V3 stats cleanup to dropped-segment GC for
+		// external collections. External collection segments are patched only
+		// when the source changes; if the source stays stable, the segment can
+		// remain active forever and stale stats files would never be removed by
+		// dropped-segment GC. Keep this best-effort deletion external-only so
+		// internal collections continue to rely on existing GC ownership rules.
+		st.cleanupRejectedStatsResultFiles(ctx, result)
+	}
+	if err := st.tryDropTaskOnWorker(cluster); err != nil {
+		log.Warn(ctx, "failed to drop rejected stats task on worker", mlog.Err(err))
+	}
+	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		log.Warn(ctx, "failed to drop rejected stats task meta", mlog.Err(err))
+		return
+	}
+	st.SetState(indexpb.JobState_JobStateNone, reason)
+	log.Info(ctx, "discard rejected stats result", mlog.String("reason", reason))
+}
+
+func (st *statsTask) shouldCleanupRejectedStatsResultFiles() bool {
+	if st.meta == nil || st.meta.collections == nil {
+		return false
+	}
+	collection, ok := st.meta.collections.Get(st.GetCollectionID())
+	if !ok {
+		return false
+	}
+	return collection.IsExternal()
+}
+
+func (st *statsTask) cleanupRejectedStatsResultFiles(ctx context.Context, result *workerpb.StatsResult) {
+	if st.meta == nil || st.meta.chunkManager == nil {
+		return
+	}
+
+	files, err := collectRejectedStatsResultFiles(result)
+	if err != nil {
+		mlog.Warn(ctx, "failed to collect rejected stats result files",
+			mlog.FieldTaskID(st.GetTaskID()),
+			mlog.FieldSegmentID(st.GetSegmentID()),
+			mlog.Err(err))
+	}
+	if len(files) == 0 {
+		return
+	}
+	if err := st.meta.chunkManager.MultiRemove(ctx, files); err != nil {
+		mlog.Warn(ctx, "failed to cleanup rejected stats result files",
+			mlog.FieldTaskID(st.GetTaskID()),
+			mlog.FieldSegmentID(st.GetSegmentID()),
+			mlog.Strings("files", files),
+			mlog.Err(err))
+	}
+}
+
+func collectRejectedStatsResultFiles(result *workerpb.StatsResult) ([]string, error) {
+	files := make([]string, 0)
+	seen := make(map[string]struct{})
+	addFile := func(file string) {
+		if file == "" {
+			return
+		}
+		if _, ok := seen[file]; ok {
+			return
+		}
+		seen[file] = struct{}{}
+		files = append(files, file)
+	}
+
+	for _, stats := range result.GetTextStatsLogs() {
+		for _, file := range stats.GetFiles() {
+			addFile(file)
+		}
+	}
+
+	jsonStats := result.GetJsonKeyStatsLogs()
+	if len(jsonStats) == 0 {
+		return files, nil
+	}
+
+	manifest := result.GetBaseManifest()
+	if manifest == "" {
+		manifest = result.GetManifest()
+	}
+	if manifest == "" {
+		return files, merr.WrapErrServiceInternalMsg("manifest is empty for rejected json stats result")
+	}
+	basePath, _, err := packed.UnmarshalManifestPath(manifest)
+	if err != nil {
+		return files, err
+	}
+	for fieldID, stats := range jsonStats {
+		statsBasePath := fmt.Sprintf("%s/_stats/json_stats.%d", basePath, fieldID)
+		for _, file := range metautil.BuildStatsFilePaths(statsBasePath, stats.GetFiles()) {
+			addFile(file)
+		}
+	}
+	return files, nil
 }
 
 func (st *statsTask) DropTaskOnWorker(cluster session.Cluster) {
@@ -358,14 +507,14 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	var err error
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
-		err = st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
+		err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
 		if err != nil {
 			mlog.Warn(ctx, "save text index stats result failed", mlog.FieldTaskID(st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
 			break
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
-		err = st.meta.UpdateSegment(st.GetSegmentID(), SetJSONKeyIndexLogs(result.GetJsonKeyStatsLogs()))
+		err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
 		if err != nil {
 			mlog.Warn(ctx, "save json key index stats result failed", mlog.Int64("taskId", st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
@@ -405,7 +554,9 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	}
 
 	// Update segment manifest version so subsequent stats tasks use the latest version.
-	if manifest := result.GetManifest(); manifest != "" {
+	if manifest := result.GetManifest(); manifest != "" &&
+		st.GetSubJobType() != indexpb.StatsSubJob_TextIndexJob &&
+		st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob {
 		segID := st.GetSegmentID()
 		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
 			segID = st.GetTargetSegmentID()
@@ -425,4 +576,60 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		mlog.Int64("oldSegmentID", st.GetSegmentID()), mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		mlog.String("subJobType", st.GetSubJobType().String()), mlog.String("state", st.GetState().String()))
 	return nil
+}
+
+func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		current := modPack.meta.segments.GetSegment(segmentID)
+		if current == nil || !isSegmentHealthy(current) {
+			mlog.Warn(ctx, "discard stats result for missing or unhealthy segment",
+				mlog.FieldTaskID(taskID),
+				mlog.FieldSegmentID(segmentID),
+				mlog.Bool("segmentMissing", current == nil))
+			return modPack.fail(errStatsResultDiscarded)
+		}
+		if result.GetBaseManifest() != "" && current.GetManifestPath() != result.GetBaseManifest() {
+			mlog.Info(ctx, "discard stale stats result",
+				mlog.FieldTaskID(taskID),
+				mlog.FieldSegmentID(segmentID),
+				mlog.String("baseManifest", result.GetBaseManifest()),
+				mlog.String("currentManifest", current.GetManifestPath()),
+				mlog.String("resultManifest", result.GetManifest()))
+			return modPack.fail(errStatsResultStale)
+		}
+
+		hasTextStats := len(result.GetTextStatsLogs()) > 0
+		hasJSONStats := len(result.GetJsonKeyStatsLogs()) > 0
+		manifestChanged := result.GetManifest() != "" && current.GetManifestPath() != result.GetManifest()
+		if !hasTextStats && !hasJSONStats && !manifestChanged {
+			return false
+		}
+
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			return modPack.fail(errStatsResultDiscarded)
+		}
+
+		if hasTextStats {
+			if segment.TextStatsLogs == nil {
+				segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+			}
+			for fieldID, logs := range result.GetTextStatsLogs() {
+				segment.TextStatsLogs[fieldID] = logs
+			}
+		}
+
+		if hasJSONStats {
+			if segment.JsonKeyStats == nil {
+				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
+			for fieldID, logs := range result.GetJsonKeyStatsLogs() {
+				segment.JsonKeyStats[fieldID] = logs
+			}
+		}
+		if result.GetManifest() != "" && segment.GetManifestPath() != result.GetManifest() {
+			segment.ManifestPath = result.GetManifest()
+		}
+		return true
+	}
 }

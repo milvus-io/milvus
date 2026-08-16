@@ -49,16 +49,16 @@ class VecIndexConfig {
     GetBuildThreshold() const noexcept;
 
     knowhere::IndexType
-    GetIndexType() noexcept;
+    GetIndexType() const noexcept;
 
     knowhere::MetricType
-    GetMetricType() noexcept;
+    GetMetricType() const noexcept;
 
     knowhere::Json
-    GetBuildBaseParams(DataType data_type);
+    GetBuildBaseParams(DataType data_type) const;
 
     SearchInfo
-    GetSearchConf(const SearchInfo& searchInfo);
+    GetSearchConf(const SearchInfo& searchInfo) const;
 
  private:
     const SegcoreConfig& config_;

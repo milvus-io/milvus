@@ -40,6 +40,7 @@
 #include "common/type_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
@@ -896,4 +897,82 @@ TEST(GroupBY, GrowingIndex) {
             ASSERT_EQ(group_size, map_pair.second);
         }
     }
+}
+
+// Group-by on an INDEX-ONLY nullable scalar field: the field's raw data is
+// excluded from the load and only a scalar index is loaded, so
+// SealedDataGetter takes the from_data_ == false (Reverse_Lookup) branch --
+// the exact branch this PR fixes. A NULL group value previously threw
+// AssertInfo("field data not found"); it must now form a distinct null group.
+TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 64;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto i64_null_fid =
+        schema->AddDebugField("int64_null", DataType::INT64, true);
+    schema->set_primary_field_id(str_fid);
+    size_t N = 100;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, 1, false, false);
+    // Exclude the group-by field's raw data so that, once its scalar index is
+    // loaded below, the field is index-only (HasFieldData() == false) and the
+    // getter must resolve group values via Reverse_Lookup().
+    auto segment = CreateSealedWithFieldDataLoaded(
+        schema, raw_data, false, {i64_null_fid.get()});
+
+    // vector index for search
+    auto vector_data = raw_data.get_col<float>(vec_fid);
+    auto indexing = GenVecIndexing(
+        N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo vec_info;
+    vec_info.field_id = vec_fid.get();
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
+    segment->LoadIndex(vec_info);
+
+    // scalar index on the (data-excluded) nullable group-by field -> index-only
+    auto null_col = raw_data.get_col<int64_t>(i64_null_fid);
+    auto null_valid = raw_data.get_col_valid(i64_null_fid);
+    auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(N, null_col.data(), null_valid.data());
+    LoadIndexInfo scalar_info;
+    scalar_info.field_id = i64_null_fid.get();
+    scalar_info.field_type = DataType::INT64;
+    scalar_info.index_params = GenIndexParams(scalar_index.get());
+    scalar_info.cache_index =
+        CreateTestCacheIndex("test", std::move(scalar_index));
+    segment->LoadIndex(scalar_info);
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseGroupBySearch(
+        "", "fakevec", 20, "L2", "{\"ef\": 10}", i64_null_fid.get(), 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // Pre-fix: throws AssertInfo("field data not found") on a NULL group value.
+    // Post-fix: NULL forms a distinct null group (nullopt) instead.
+    std::unique_ptr<SearchResult> search_result;
+    ASSERT_NO_THROW({
+        search_result =
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    });
+    ASSERT_NE(search_result, nullptr);
+    auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
+    ASSERT_FALSE(group_by_values.empty());
+    // A distinct NULL group must be present (nullopt), not dropped/crashed.
+    bool has_null_group = std::any_of(
+        group_by_values.begin(), group_by_values.end(), [](const auto& v) {
+            return !v.has_value();
+        });
+    ASSERT_TRUE(has_null_group);
 }

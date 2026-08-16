@@ -21,7 +21,20 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		if err := FillExpressionValue(e.BinaryExpr.GetLeft(), templateValues); err != nil {
 			return err
 		}
-		return FillExpressionValue(e.BinaryExpr.GetRight(), templateValues)
+		if err := FillExpressionValue(e.BinaryExpr.GetRight(), templateValues); err != nil {
+			return err
+		}
+		switch e.BinaryExpr.GetOp() {
+		case planpb.BinaryExpr_LogicalOr:
+			if hasBoolValue(e.BinaryExpr.GetLeft(), true) || hasBoolValue(e.BinaryExpr.GetRight(), true) {
+				*expr = *alwaysTrueExpr()
+			}
+		case planpb.BinaryExpr_LogicalAnd:
+			if hasBoolValue(e.BinaryExpr.GetLeft(), false) || hasBoolValue(e.BinaryExpr.GetRight(), false) {
+				*expr = *alwaysFalseExpr()
+			}
+		}
+		return nil
 	case *planpb.Expr_UnaryRangeExpr:
 		return FillUnaryRangeExpressionValue(e.UnaryRangeExpr, templateValues)
 	case *planpb.Expr_BinaryRangeExpr:
@@ -47,9 +60,24 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
 		}
 		return nil
+	case *planpb.Expr_MatchExpr:
+		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
+	case *planpb.Expr_CallExpr:
+		// Only a deferred bloom_match call carries IsTemplate today; once the
+		// template value is known, its client-built blob is validated and the
+		// call is materialized into a BloomFilterExpr here.
+		if e.CallExpr.GetFunctionName() == BloomMatchFunctionName {
+			return FillBloomMatchExpressionValue(expr, e.CallExpr, templateValues)
+		}
+		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	default:
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	}
+}
+
+func hasBoolValue(expr *planpb.Expr, target bool) bool {
+	value := expr.GetValueExpr().GetValue()
+	return IsBool(value) && value.GetBoolVal() == target
 }
 
 func FillTermExpressionValue(expr *planpb.TermExpr, templateValues map[string]*planpb.GenericValue) error {
@@ -189,6 +217,7 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.LowerValue = castedLowerValue
+		lowerValue = castedLowerValue
 	}
 
 	upperValue := expr.GetUpperValue()
@@ -203,37 +232,10 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.UpperValue = castedUpperValue
+		upperValue = castedUpperValue
 	}
 
-	// For JSON type, normalize numeric types to ensure both bounds have the same type.
-	// If one is float and the other is int, convert the int to float.
-	// This prevents type mismatch assertions in C++ expression execution.
-	if typeutil.IsJSONType(dataType) {
-		lowerVal := expr.GetLowerValue()
-		upperVal := expr.GetUpperValue()
-		lowerIsFloat := IsFloating(lowerVal)
-		upperIsFloat := IsFloating(upperVal)
-		lowerIsInt := IsInteger(lowerVal)
-		upperIsInt := IsInteger(upperVal)
-
-		if lowerIsFloat && upperIsInt {
-			expr.UpperValue = NewFloat(float64(upperVal.GetInt64Val()))
-		} else if lowerIsInt && upperIsFloat {
-			expr.LowerValue = NewFloat(float64(lowerVal.GetInt64Val()))
-		}
-	}
-
-	if !expr.GetLowerInclusive() || !expr.GetUpperInclusive() {
-		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-		}
-	} else {
-		if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-		}
-	}
-
-	return nil
+	return validateBinaryRangeBounds(lowerValue, upperValue, expr.GetLowerInclusive(), expr.GetUpperInclusive())
 }
 
 func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRangeExpr, templateValues map[string]*planpb.GenericValue) error {
@@ -282,6 +284,16 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			if (IsInteger(castedOperand) && castedOperand.GetInt64Val() == 0) ||
 				(IsFloating(castedOperand) && castedOperand.GetFloatVal() == 0) {
 				return merr.WrapErrQueryPlanMsg("division or modulus by zero")
+			}
+		}
+
+		// Validate the shift amount for shift operations. A templated amount
+		// skips the plan-time [0, 64) guard in combineBinaryArithExpr (its value
+		// is unknown at parse time), so it must be re-checked here once filled.
+		// A negative or >= 64 amount is undefined behavior in the C++ executor.
+		if expr.ArithOp == planpb.ArithOpType_Shl || expr.ArithOp == planpb.ArithOpType_Shr {
+			if !IsInteger(castedOperand) || castedOperand.GetInt64Val() < 0 || castedOperand.GetInt64Val() >= 64 {
+				return merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", castedOperand.String())
 			}
 		}
 
@@ -334,5 +346,43 @@ func FillJSONContainsExpressionValue(expr *planpb.JSONContainsExpr, templateValu
 			expr.Elements = append(expr.Elements, castedValue)
 		}
 	}
+	expr.ElementsSameType = jsonContainsElementsSameType(expr.GetElements())
 	return nil
+}
+
+func jsonContainsElementsSameType(elements []*planpb.GenericValue) bool {
+	if len(elements) == 0 {
+		return true
+	}
+
+	elementType := genericValueDataType(elements[0])
+	if elementType == schemapb.DataType_None {
+		return false
+	}
+	for _, element := range elements[1:] {
+		if genericValueDataType(element) != elementType {
+			return false
+		}
+	}
+	return true
+}
+
+func genericValueDataType(value *planpb.GenericValue) schemapb.DataType {
+	if value == nil {
+		return schemapb.DataType_None
+	}
+	switch value.GetVal().(type) {
+	case *planpb.GenericValue_BoolVal:
+		return schemapb.DataType_Bool
+	case *planpb.GenericValue_Int64Val:
+		return schemapb.DataType_Int64
+	case *planpb.GenericValue_FloatVal:
+		return schemapb.DataType_Double
+	case *planpb.GenericValue_StringVal:
+		return schemapb.DataType_VarChar
+	case *planpb.GenericValue_ArrayVal:
+		return schemapb.DataType_Array
+	default:
+		return schemapb.DataType_None
+	}
 }

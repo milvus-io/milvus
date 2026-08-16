@@ -195,7 +195,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     // shared across queries, this cache must be guarded — data race otherwise.
     mutable std::unordered_map<
         int64_t,
-        PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>>
+        PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>>
         str_pw_map;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
@@ -203,7 +203,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     // Shares the same single-thread contract as str_pw_map above.
     mutable std::unordered_map<
         int64_t,
-        PinWrapper<std::pair<std::vector<milvus::Json>, FixedVector<bool>>>>
+        PinWrapper<std::pair<std::vector<milvus::Json>, ValidityView>>>
         json_pw_map;
 
  public:
@@ -247,7 +247,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 }
                 auto& pw = str_pw_map[chunk_id];
                 auto& [str_chunk_view, valid_data] = pw.get();
-                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                if (valid_data && !valid_data[inner_offset]) {
                     return std::nullopt;
                 }
                 std::string_view str_val_view = str_chunk_view[inner_offset];
@@ -260,7 +260,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 }
                 auto& pw = json_pw_map[chunk_id];
                 auto& [json_chunk_view, valid_data] = pw.get();
-                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                if (valid_data && !valid_data[inner_offset]) {
                     return std::nullopt;
                 }
                 auto& json_val = json_chunk_view[inner_offset];
@@ -275,14 +275,13 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 auto pw = segment_.chunk_data<InnerRawType>(
                     op_ctx_, field_id_, chunk_id);
                 auto& span = pw.get();
-                if (span.valid_data() && !span.valid_data()[inner_offset]) {
+                if (!span.is_valid(inner_offset)) {
                     return std::nullopt;
                 }
                 auto raw = span.operator[](inner_offset);
                 return raw;
             }
         } else {
-            // null is not supported for indexed fields
             AssertInfo(index_ptr_.get() != nullptr,
                        "indexed field {} has no valid index pointer",
                        field_id_.get());
@@ -294,7 +293,13 @@ class SealedDataGetter : public DataGetter<OutputType> {
                        "ScalarIndex<OutputType>",
                        field_id_.get());
             auto raw = chunk_index->Reverse_Lookup(idx);
-            AssertInfo(raw.has_value(), "field data not found");
+            // A null row has no value in the index (Reverse_Lookup ==
+            // nullopt). Return nullopt so it forms a distinct null group,
+            // consistent with the from-data getter branches above — instead
+            // of asserting and failing the whole group-by query.
+            if (!raw.has_value()) {
+                return std::nullopt;
+            }
             return raw.value();
         }
     }

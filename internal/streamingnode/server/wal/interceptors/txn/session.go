@@ -164,6 +164,19 @@ func (s *TxnSession) CommitDone() {
 	s.cleanup()
 }
 
+// RejectCommit marks the transaction as rollbacked after commit admission rejects it.
+func (s *TxnSession) RejectCommit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.state != message.TxnStateOnCommit {
+		// unreachable code here.
+		panic("invalid state for commit rejection")
+	}
+	s.state = message.TxnStateRollbacked
+	s.cleanup()
+}
+
 // RequestRollback rolls back the transaction.
 func (s *TxnSession) RequestRollback(ctx context.Context, timetick uint64) error {
 	waitCh, err := s.getDoneChan(timetick, message.TxnStateOnRollback)

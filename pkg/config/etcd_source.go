@@ -60,7 +60,8 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 		etcdInfo.CertFile,
 		etcdInfo.KeyFile,
 		etcdInfo.CaCertFile,
-		etcdInfo.MinVersion)
+		etcdInfo.MinVersion,
+		etcd.WithDialTimeout(etcdInfo.DialTimeout))
 	if err != nil {
 		return nil, err
 	}

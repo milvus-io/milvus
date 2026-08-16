@@ -62,13 +62,9 @@ func (s *tombstoneSweeperImpl) AddTombstone(tombstone Tombstone) {
 func (s *tombstoneSweeperImpl) background() {
 	defer func() {
 		s.notifier.Finish(struct{}{})
-		s.Logger().Info(context.TODO(),
-
-			"tombstone sweeper background exit")
+		s.Logger().Info(context.TODO(), "tombstone sweeper background exit")
 	}()
-	s.Logger().Info(context.TODO(),
-
-		"tombstone sweeper background start", mlog.Duration("interval", s.interval))
+	s.Logger().Info(context.TODO(), "tombstone sweeper background start", mlog.Duration("interval", s.interval))
 
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -78,9 +74,7 @@ func (s *tombstoneSweeperImpl) background() {
 		case tombstone := <-s.incoming:
 			if _, ok := s.tombstones[tombstone.ID()]; !ok {
 				s.tombstones[tombstone.ID()] = tombstone
-				s.Logger().Info(context.TODO(),
-
-					"tombstone added", mlog.String("tombstone", tombstone.ID()))
+				s.Logger().Info(context.TODO(), "tombstone added", mlog.String("tombstone", tombstone.ID()))
 			}
 		case <-ticker.C:
 			s.triggerGCTombstone(s.notifier.Context())
@@ -103,24 +97,18 @@ func (s *tombstoneSweeperImpl) triggerGCTombstone(ctx context.Context) {
 		tombstoneID := tombstone.ID()
 		confirmed, err := tombstone.ConfirmCanBeRemoved(ctx)
 		if err != nil {
-			s.Logger().Warn(ctx,
-
-				"fail to confirm if tombstone can be removed", mlog.String("tombstone", tombstoneID), mlog.Err(err))
+			s.Logger().Warn(ctx, "fail to confirm if tombstone can be removed", mlog.String("tombstone", tombstoneID), mlog.Err(err))
 			continue
 		}
 		if !confirmed {
 			continue
 		}
 		if err := tombstone.Remove(ctx); err != nil {
-			s.Logger().Warn(ctx,
-
-				"fail to remove tombstone", mlog.String("tombstone", tombstoneID), mlog.Err(err))
+			s.Logger().Warn(ctx, "fail to remove tombstone", mlog.String("tombstone", tombstoneID), mlog.Err(err))
 			continue
 		}
 		delete(s.tombstones, tombstoneID)
-		s.Logger().Info(ctx,
-
-			"tombstone removed", mlog.String("tombstone", tombstoneID))
+		s.Logger().Info(ctx, "tombstone removed", mlog.String("tombstone", tombstoneID))
 	}
 }
 

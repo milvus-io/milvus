@@ -298,8 +298,8 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerHookInterceptor(),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
+			proxy.UnaryServerHookInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
@@ -682,6 +682,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, request *internalpb.G
 // InvalidateCollectionMetaCache notifies Proxy to clear all the meta cache of specific collection.
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
+}
+
+func (s *Server) SyncFileResource(ctx context.Context, request *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.SyncFileResource(ctx, request)
 }
 
 // CreateCollection notifies Proxy to create a collection
@@ -1304,6 +1308,18 @@ func (s *Server) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshotsR
 
 func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
 	return s.proxy.RestoreSnapshot(ctx, req)
+}
+
+func (s *Server) RestoreExternalSnapshot(ctx context.Context, req *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error) {
+	return s.proxy.RestoreExternalSnapshot(ctx, req)
+}
+
+func (s *Server) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
+	return s.proxy.ExportSnapshot(ctx, req)
+}
+
+func (s *Server) GetExportSnapshotState(ctx context.Context, req *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	return s.proxy.GetExportSnapshotState(ctx, req)
 }
 
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.GetRestoreSnapshotStateRequest) (*milvuspb.GetRestoreSnapshotStateResponse, error) {

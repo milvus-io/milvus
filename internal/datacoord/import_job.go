@@ -63,6 +63,8 @@ func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 
 type UpdateJobAction func(job ImportJob)
 
+const importJobReasonAbortedByUser = "aborted by user"
+
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
 		job.(*importJob).State = state
@@ -72,7 +74,7 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 			// set cleanup ts
 			dur := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
-			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
+			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime)
 			job.(*importJob).CleanupTs = cleanupTs
 			mlog.Info(context.TODO(), "set import job cleanup ts", mlog.FieldJobID(job.GetJobID()),
 				mlog.Time("cleanupTime", cleanupTime), mlog.Uint64("cleanupTs", cleanupTs))

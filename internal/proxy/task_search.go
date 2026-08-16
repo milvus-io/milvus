@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -125,6 +124,8 @@ type searchTask struct {
 
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
+
+	chMgr channelsMgr
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -150,7 +151,7 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 	}
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
@@ -188,13 +189,20 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
 		return err2
 	}
-	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
-	t.partitionKeyIsolation = collectionInfo.partitionKeyIsolation
+	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
+	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "is partition key mode failed", mlog.Err(err))
 		return err
+	}
+	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
+	if err != nil {
+		return err
+	}
+	if namespaceAsPartition {
+		t.request.PartitionNames = partitionNames
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
@@ -212,15 +220,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
-	if err != nil {
-		return err
-	}
 
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
-		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.Any("schema", t.schema))
+		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
 	}
 	if len(aggs) > 0 {
@@ -258,6 +262,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
 	t.traceEnabled = strings.EqualFold(traceVal, "true")
+	timezone, err := resolveTimezone(ctx, t.request.GetSearchParams(), collectionInfo)
+	if err != nil {
+		return err
+	}
+	t.resolvedTimezoneStr = timezone
 	// initSearchAggregation must run before init{,Advanced}SearchRequest so
 	// that t.SearchRequest.GroupByFieldIds and t.aggCtx are populated before
 	// queryInfo is built and captured — otherwise queryInfo.GroupByFieldIds
@@ -282,7 +291,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
@@ -301,8 +310,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
+	if collectionInfo.UpdateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.UpdateTimestamp
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
@@ -317,7 +326,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.IsIterator = t.isIterator
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
-		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline)
 	}
 
 	// Set username of this search request for feature like task scheduling.
@@ -325,28 +334,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	if collectionInfo.collectionTTL != 0 {
+	if collectionInfo.CollectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
-		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
+		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
-
-	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
-	if exist {
-		if !timestamptz.IsTimezoneValid(timezone) {
-			log.Info(ctx, "get invalid timezone from request", mlog.String("timezone", timezone))
-			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
-		}
-		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
-	} else {
-		timezone = getColTimezone(collectionInfo)
-		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", timezone))
-	}
-	t.resolvedTimezoneStr = timezone
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
@@ -494,6 +490,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
+	var bloomFilterPlanSize int64
+	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
+		return err
+	}
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	} else {
@@ -552,6 +552,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
+		}
+		if queryInfo.GetSearchIteratorV2Info() != nil {
+			return merr.WrapErrParameterInvalid("", "",
+				"search iterator v2 is not supported for hybrid search")
 		}
 
 		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
@@ -678,9 +682,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
 		}
-		plan.Namespace = t.request.Namespace
+		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
+		internalSubReq.SerializedExprPlan, bloomFilterPlanSize, err = marshalPlanWithBloomFilterSizeLimit(plan, bloomFilterPlanSize)
 		if err != nil {
 			return err
 		}
@@ -692,7 +696,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.queryInfos[index] = queryInfo
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			mlog.Stringer("plan", plan)) // may be very large if large term passed.
+			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if large term passed; bloom blobs elided.
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
@@ -836,7 +840,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 			return err
 		}
 	}
-	return h.initHighlightQueries(t)
+	return h.initHighlightQueries(t, analyzerName)
 }
 
 func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
@@ -878,13 +882,37 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	t.SearchType = searchType
 
-	if t.request.FunctionScore != nil {
+	if err := validateFunctionChainSearchRequest(t.request, false); err != nil {
+		return err
+	}
+	var querynodeFunctionChains []*schemapb.FunctionChain
+	if len(t.request.GetFunctionChains()) > 0 {
+		l2Chains, qnChains, err := splitFunctionChainsByStage(t.request.GetFunctionChains())
+		if err != nil {
+			return err
+		}
+		if len(l2Chains) > 0 {
+			meta, err := newFunctionChainRerankMeta(l2Chains, t.schema)
+			if err != nil {
+				return err
+			}
+			t.rerankMeta = meta
+		}
+		querynodeFunctionChains = qnChains
+	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
-	// order_by and function_score cannot be used together
-	if len(t.orderByFields) > 0 && t.rerankMeta != nil {
-		return merr.WrapErrParameterInvalidMsg("order_by and function_score cannot be used together: they specify conflicting sort criteria")
+	// Search iterator v2 uses the final result score as the ANN continuation
+	// bound. Function rerank rewrites that score, so the next iterator request
+	// would interpret a rerank score in the ANN metric domain.
+	if queryInfo.GetSearchIteratorV2Info() != nil && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator v2")
+	}
+
+	// order_by and function rerank cannot be used together
+	if len(t.orderByFields) > 0 && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("order_by and function rerank cannot be used together: they specify conflicting sort criteria")
 	}
 
 	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
@@ -982,7 +1010,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		}
 	}
-	plan.Namespace = t.request.Namespace
+	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	plan.QuerynodeFunctionChains = querynodeFunctionChains
 
 	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
 	// segcore sees the derived topK / groupSize and plural GroupByFieldIds.
@@ -1003,7 +1032,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		queryInfo.StrictGroupSize = true
 	}
 
-	t.SerializedExprPlan, err = proto.Marshal(plan)
+	t.SerializedExprPlan, _, err = marshalPlanWithBloomFilterSizeLimit(plan, 0)
 	if err != nil {
 		return err
 	}
@@ -1086,7 +1115,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-		mlog.Stringer("plan", plan)) // may be very large if large term passed.
+		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if large term passed; bloom blobs elided.
 
 	return nil
 }
@@ -1094,7 +1123,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
 	return t.schema != nil &&
 		t.schema.CollectionSchema != nil &&
-		common.IsNamespaceModePartition(t.schema.GetProperties()...)
+		namespacePartitionModeEnabled(t.schema.CollectionSchema)
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
@@ -1138,13 +1167,13 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
 	searchType := internalpb.SearchType_DEFAULT
-	// if function score is not nil, set searchType to DEFAULT, optimizations will be disabled in queryhook
-	if t.request.GetFunctionScore() == nil {
+	// if function rerank is set, keep searchType DEFAULT; optimizations will be disabled in queryhook
+	if !hasFunctionRerank(t.request) {
 		searchType = searchInfo.DetermineSearchType(hasFilter)
 	}
 
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
+	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
 			mlog.String("dsl", dsl), // may be very large if large term passed.
@@ -1160,6 +1189,23 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
+	if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.request.GetDbName(), t.collectionName, t.request.Namespace)
+		if err != nil {
+			mlog.Warn(t.ctx, "failed to assign namespace partition key", mlog.Err(err))
+			return nil, err
+		}
+		if len(hashedPartitionNames) > 0 {
+			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+			if err2 != nil {
+				mlog.Warn(t.ctx, "failed to get namespace partition ids", mlog.Err(err2))
+				return nil, err2
+			}
+			return PartitionIDs, nil
+		}
+		return nil, nil
+	}
+
 	expr, err := exprutil.ParseExprFromPlan(plan)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to parse expr", mlog.Err(err))
@@ -1193,6 +1239,36 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		if err != nil {
+			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
+			return err
+		}
+		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+				Db:              t.request.GetDbName(),
+				CollectionName:  t.collectionName,
+				CollectionID:    t.CollectionID,
+				Channel:         channelName,
+				Nq:              t.Nq,
+				Exec:            t.searchShard,
+				PreferredNodeID: preferredNodeFromConcurrentMap(t.queryChannelsNode, channelName),
+			}); err != nil {
+				log.Warn(ctx, "search execute failed", mlog.Err(err))
+				return errors.Wrap(err, "failed to search")
+			}
+
+			log.Debug(ctx, "Search Execute done.",
+				mlog.Int64("collection", t.GetCollectionID()),
+				mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+			return nil
+		}
+	}
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,
@@ -1441,12 +1517,12 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if err != nil {
 		log.Warn(ctx, "QueryNode search return error", mlog.Err(err))
 		// globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
-		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn(ctx, "QueryNode is not shardLeader")
-		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {

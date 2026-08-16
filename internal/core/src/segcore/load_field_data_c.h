@@ -37,6 +37,10 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
                     int64_t field_id,
                     int64_t row_count);
 
+void
+SetLoadFieldDataInfoShard(CLoadFieldDataInfo c_load_field_data_info,
+                          const char* shard);
+
 CStatus
 SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
                             int64_t field_id,

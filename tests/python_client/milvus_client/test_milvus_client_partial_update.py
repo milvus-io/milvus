@@ -1,13 +1,17 @@
-import pytest
-import numpy as np
+import random
 
+import numpy as np
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
-from pymilvus import FunctionType, Function
+from pymilvus import DataType, Function, FunctionType
+from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.client.field_ops import FieldOp
+from sklearn import preprocessing
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_insert"
 epsilon = ct.epsilon
@@ -18,10 +22,10 @@ default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
+default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
@@ -39,7 +43,7 @@ PU_DEFAULT_DIM = 4
 
 
 class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
-    """ Test case of partial update interface """
+    """Test case of partial update interface"""
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -59,7 +63,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
     def test_milvus_client_partial_update(self):
         """
         target: test basic function of partial update
-        method: 
+        method:
                 1. create collection
                 2. insert a full row of data using partial update
                 3. partial update data
@@ -76,30 +80,37 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_string_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # Step 2: insert full rows of data using partial update
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, rows, partial_update=True)
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         # Step 3: partial update data
-        new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                            desired_field_names=[default_primary_key_field_name,
-                                                                 default_string_field_name])
+        new_row = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            desired_field_names=[default_primary_key_field_name, default_string_field_name],
+        )
         self.upsert(client, collection_name, new_row, partial_update=True)
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_string_field_name],
-                            check_items={exp_res: new_row,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_string_field_name],
+            check_items={exp_res: new_row, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
@@ -123,16 +134,16 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         for i in range(len(schema.fields)):
             field_name = schema.fields[i].name
             if field_name == "json_field":
-                index_params.add_index(field_name, index_type="AUTOINDEX",
-                                       params={"json_cast_type": "json"})
+                index_params.add_index(field_name, index_type="AUTOINDEX", params={"json_cast_type": "json"})
             elif field_name == text_sparse_emb_field_name:
                 index_params.add_index(field_name, index_type="AUTOINDEX", metric_type="BM25")
             else:
                 index_params.add_index(field_name, index_type="AUTOINDEX")
 
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert data
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -144,10 +155,12 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                 primary_key_field_name = field.name
                 break
 
-        vector_field_type = [DataType.FLOAT16_VECTOR,
-                             DataType.BFLOAT16_VECTOR,
-                             DataType.INT8_VECTOR,
-                             DataType.FLOAT_VECTOR]
+        vector_field_type = [
+            DataType.FLOAT16_VECTOR,
+            DataType.BFLOAT16_VECTOR,
+            DataType.INT8_VECTOR,
+            DataType.FLOAT_VECTOR,
+        ]
         # fields to be updated (exclude function output fields like BM25 and MinHash)
         function_output_fields = [text_sparse_emb_field_name] + cf.get_minhash_vec_field_name_list(schema)
         update_fields_name = []
@@ -163,37 +176,403 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                     vector_update.append(field)
 
         # PU scalar fields and vector fields together
-        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                             desired_field_names=update_fields_name)
+        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, desired_field_names=update_fields_name)
         self.upsert(client, collection_name, new_rows, partial_update=True)
         # expected scalar result
-        expected = [{field: new_rows[i][field] for field in scalar_update_name}
-                    for i in range(default_nb)]
+        expected = [{field: new_rows[i][field] for field in scalar_update_name} for i in range(default_nb)]
 
         expected = cf.convert_timestamptz(expected, ct.default_timestamptz_field_name, "UTC")
-        result = self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=scalar_update_name,
-                            check_items={exp_res: expected,
-                                         "with_vec": True,
-                                         "pk_name": primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{primary_key_field_name} >= 0",
+            check_task=CheckTasks.check_query_results,
+            output_fields=scalar_update_name,
+            check_items={exp_res: expected, "with_vec": True, "pk_name": primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         # expected vector result
         for field in vector_update:
-            expected = [{primary_key_field_name: data[primary_key_field_name],
-                         field.name: data[field.name]} for data in new_rows]
-            result = self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
-                                check_task=CheckTasks.check_query_results,
-                                output_fields=[field.name],
-                                check_items={exp_res: expected,
-                                             "with_vec": True,
-                                             "vector_type": field.dtype,
-                                             "vector_field": field.name,
-                                             "pk_name": primary_key_field_name})[0]
+            expected = [
+                {primary_key_field_name: data[primary_key_field_name], field.name: data[field.name]}
+                for data in new_rows
+            ]
+            result = self.query(
+                client,
+                collection_name,
+                filter=f"{primary_key_field_name} >= 0",
+                check_task=CheckTasks.check_query_results,
+                output_fields=[field.name],
+                check_items={
+                    exp_res: expected,
+                    "with_vec": True,
+                    "vector_type": field.dtype,
+                    "vector_field": field.name,
+                    "pk_name": primary_key_field_name,
+                },
+            )[0]
             assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
+
+    @staticmethod
+    def _make_struct_array_partial_update_vector(seed, dim):
+        return [float((seed + offset) % 97) / 97.0 for offset in range(dim)]
+
+    @classmethod
+    def _make_struct_array_partial_update_events(cls, row_id, state, dim):
+        offset = 100000 if state == "updated" else 0
+        return [
+            {
+                "embedding": cls._make_struct_array_partial_update_vector(row_id * 17 + elem_idx + offset, dim),
+                "score": row_id * 10 + elem_idx + offset,
+                "tag": f"{state}_{row_id}_{elem_idx}",
+            }
+            for elem_idx in range(2)
+        ]
+
+    @classmethod
+    def _make_struct_array_partial_update_rows(cls, start, count, dim):
+        return [
+            {
+                "id": row_id,
+                "vector": cls._make_struct_array_partial_update_vector(row_id, dim),
+                "payload": f"payload_{row_id}",
+                "events": cls._make_struct_array_partial_update_events(row_id, "initial", dim),
+            }
+            for row_id in range(start, start + count)
+        ]
+
+    @staticmethod
+    def _assert_struct_array_partial_update_events_equal(actual, expected):
+        assert len(actual) == len(expected)
+        for actual_event, expected_event in zip(actual, expected):
+            assert actual_event["score"] == expected_event["score"]
+            assert actual_event["tag"] == expected_event["tag"]
+            assert np.allclose(actual_event["embedding"], expected_event["embedding"])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("embedding_index_type", ["HNSW", "DISKANN"])
+    def test_milvus_client_partial_update_struct_array_sealed_growing(self, embedding_index_type):
+        """
+        target: test partial update with a StructArray field
+        method:
+            1. create collection with a StructArray field that has scalar and vector sub-fields
+            2. create HNSW or DISKANN index for the StructArray embedding-list field
+            3. insert more than 3000 rows, flush the first part and keep the second part growing
+            4. partial update only the StructArray field for all rows
+            5. query and search sealed and growing sample rows
+        expected: StructArray values are updated, searchable, and omitted fields are preserved
+        """
+        client = self._client()
+        dim = default_dim
+        sealed_nb = default_nb
+        total_nb = default_nb_medium
+        growing_nb = total_nb - sealed_nb
+        collection_name = cf.gen_unique_str(f"{prefix}_pu_struct_{embedding_index_type.lower()}")
+        embedding_metric_type = "MAX_SIM_COSINE"
+        embedding_index_configs = {
+            "HNSW": {
+                "build_params": {"M": 16, "efConstruction": 96},
+                "search_params": {"ef": 64, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
+            },
+            "DISKANN": {
+                "build_params": {},
+                "search_params": {"search_list": 30, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
+            },
+        }
+        embedding_index_config = embedding_index_configs[embedding_index_type]
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("payload", DataType.VARCHAR, max_length=128)
+
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("score", DataType.INT64)
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=128)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="L2")
+        index_params.add_index(
+            field_name="events[embedding]",
+            index_type=embedding_index_type,
+            metric_type=embedding_metric_type,
+            params=embedding_index_config["build_params"],
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            consistency_level="Strong",
+            index_params=index_params,
+        )
+
+        self.insert(client, collection_name, self._make_struct_array_partial_update_rows(0, sealed_nb, dim))
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        self.insert(client, collection_name, self._make_struct_array_partial_update_rows(sealed_nb, growing_nb, dim))
+
+        partial_rows = [
+            {
+                "id": row_id,
+                "events": self._make_struct_array_partial_update_events(row_id, "updated", dim),
+            }
+            for row_id in range(total_nb)
+        ]
+        self.upsert(client, collection_name, partial_rows, partial_update=True)
+
+        sample_ids = [0, sealed_nb - 1, sealed_nb, total_nb - 1]
+        results = self.query(
+            client,
+            collection_name,
+            filter=f"id in {sample_ids}",
+            output_fields=["id", "payload", "events"],
+            limit=len(sample_ids),
+        )[0]
+        result_by_id = {row["id"]: row for row in results}
+        assert sorted(result_by_id) == sample_ids
+        for row_id in sample_ids:
+            assert result_by_id[row_id]["payload"] == f"payload_{row_id}"
+            self._assert_struct_array_partial_update_events_equal(
+                result_by_id[row_id]["events"],
+                self._make_struct_array_partial_update_events(row_id, "updated", dim),
+            )
+
+        for row_id in [sample_ids[0], sample_ids[-1]]:
+            expected_events = self._make_struct_array_partial_update_events(row_id, "updated", dim)
+            search_results = self.search(
+                client,
+                collection_name,
+                data=[EmbeddingList([event["embedding"] for event in expected_events])],
+                anns_field="events[embedding]",
+                search_params={
+                    "metric_type": embedding_metric_type,
+                    "params": embedding_index_config["search_params"],
+                },
+                filter=f"id == {row_id}",
+                output_fields=["id", "payload", "events"],
+                limit=1,
+            )[0]
+            assert len(search_results) == 1
+            assert len(search_results[0]) == 1
+            assert search_results[0][0]["id"] == row_id
+            assert search_results[0][0]["payload"] == f"payload_{row_id}"
+            self._assert_struct_array_partial_update_events_equal(search_results[0][0]["events"], expected_events)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_partial_update_struct_array_state_transitions(self):
+        """
+        target: verify whole-Struct partial updates preserve null, empty, and element offset semantics
+        method: transition sealed rows through null, empty, and different non-empty lengths while omitting
+            ordinary fields, then compare nested-index query and element search before/after compact and reload
+        expected: the whole Struct is replaced, omitted ordinary fields are preserved, and stale elements disappear
+        """
+        client = self._client()
+        dim = 8
+        collection_name = cf.gen_unique_str(f"{prefix}_pu_struct_states")
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("payload", DataType.VARCHAR, max_length=64)
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("score", DataType.INT64)
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=64)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+            nullable=True,
+        )
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
+        index_params.add_index(
+            "events[embedding]", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64}
+        )
+        index_params.add_index("events[tag]", index_type="BITMAP")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        def vector(axis):
+            value = [0.0] * dim
+            value[axis % dim] = 1.0
+            return value
+
+        def events(row_id, count, state):
+            return [
+                {
+                    "embedding": vector(row_id + offset),
+                    "score": row_id * 100 + offset,
+                    "tag": f"{state}_{row_id}_{offset}",
+                }
+                for offset in range(count)
+            ]
+
+        expected = {
+            0: {"id": 0, "vector": vector(0), "payload": "payload_0", "events": None},
+            1: {"id": 1, "vector": vector(1), "payload": "payload_1", "events": []},
+            2: {"id": 2, "vector": vector(2), "payload": "payload_2", "events": events(2, 1, "initial")},
+            3: {"id": 3, "vector": vector(3), "payload": "payload_3", "events": events(3, 2, "initial")},
+        }
+        self.insert(client, collection_name, list(expected.values()))
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        first_transition = {
+            0: [],
+            1: events(1, 1, "first"),
+            2: None,
+            3: events(3, 3, "first"),
+        }
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": row_id, "events": value} for row_id, value in first_transition.items()],
+            partial_update=True,
+        )
+        for row_id, value in first_transition.items():
+            expected[row_id]["events"] = value
+        self.flush(client, collection_name)
+
+        second_transition = {
+            0: events(0, 2, "final"),
+            1: None,
+            2: [],
+            3: events(3, 1, "final"),
+        }
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": row_id, "events": value} for row_id, value in second_transition.items()],
+            partial_update=True,
+        )
+        for row_id, value in second_transition.items():
+            expected[row_id]["events"] = value
+        self.flush(client, collection_name)
+
+        def collect_observations():
+            rows = self.query(
+                client,
+                collection_name,
+                filter="id >= 0",
+                output_fields=["id", "vector", "payload", "events"],
+                limit=len(expected),
+            )[0]
+            rows_by_id = {row["id"]: row for row in rows}
+            assert set(rows_by_id) == set(expected)
+            for row_id, expected_row in expected.items():
+                assert rows_by_id[row_id]["payload"] == expected_row["payload"]
+                assert np.allclose(rows_by_id[row_id]["vector"], expected_row["vector"])
+                self._assert_struct_array_partial_update_events_equal(
+                    rows_by_id[row_id]["events"] or [], expected_row["events"] or []
+                )
+                assert (rows_by_id[row_id]["events"] is None) == (expected_row["events"] is None)
+
+            indexed_rows = self.query(
+                client,
+                collection_name,
+                filter='array_contains(events[tag], "final_0_1")',
+                output_fields=["id"],
+                limit=len(expected),
+            )[0]
+            element_hits = self.search(
+                client,
+                collection_name,
+                data=[vector(0)],
+                anns_field="events[embedding]",
+                search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+                filter="element_filter(events, $[score] >= 0)",
+                output_fields=["id"],
+                limit=3,
+            )[0][0]
+            return {
+                "projection": sorted(
+                    (row_id, rows_by_id[row_id]["payload"], rows_by_id[row_id]["events"]) for row_id in rows_by_id
+                ),
+                "indexed_ids": sorted(row["id"] for row in indexed_rows),
+                "element_keys": sorted((hit["id"], hit["offset"]) for hit in element_hits),
+            }
+
+        baseline = collect_observations()
+        assert baseline["indexed_ids"] == [0]
+        assert baseline["element_keys"] == [(0, 0), (0, 1), (3, 0)]
+
+        compact_id = self.compact(client, collection_name)[0]
+        assert compact_id > 0
+        assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        assert collect_observations() == baseline
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "field_name",
+        ["events", "events[tag]"],
+        ids=["struct-parent", "struct-subfield"],
+    )
+    def test_milvus_client_partial_update_struct_array_field_ops_rejected(self, field_name):
+        """
+        target: verify Array partial-update operators cannot mutate Struct parents or Struct sub-fields
+        method: apply ARRAY_APPEND to a whole Struct field and to one child field
+        expected: both requests are rejected and the original Struct remains unchanged
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_pu_struct_op")
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=32)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+            nullable=True,
+        )
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
+        original = {"id": 0, "vector": [1.0, 0.0, 0.0, 0.0], "events": [{"tag": "original"}]}
+        self.insert(client, collection_name, [original])
+        self.load_collection(client, collection_name)
+
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f'op ARRAY_APPEND is not supported for struct field "{field_name}"',
+        }
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": 0, "events": [{"tag": "new"}]}],
+            field_ops={field_name: FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        rows = self.query(client, collection_name, filter="id == 0", output_fields=["events"])[0]
+        assert rows[0]["events"] == original["events"]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partial_update_all_field_types_one_by_one(self):
@@ -217,16 +596,16 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             field_name = schema.fields[i].name
             # print(f"field_name: {field_name}")
             if field_name == "json_field":
-                index_params.add_index(field_name, index_type="AUTOINDEX",
-                                       params={"json_cast_type": "json"})
+                index_params.add_index(field_name, index_type="AUTOINDEX", params={"json_cast_type": "json"})
             elif field_name == "text_sparse_emb":
                 index_params.add_index(field_name, index_type="AUTOINDEX", metric_type="BM25")
             else:
                 index_params.add_index(field_name, index_type="AUTOINDEX")
 
         # Create collection
-        client.create_collection(collection_name, default_dim, consistency_level="Strong", schema=schema,
-                                 index_params=index_params)
+        client.create_collection(
+            collection_name, default_dim, consistency_level="Strong", schema=schema, index_params=index_params
+        )
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -245,22 +624,29 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             if field.name in [primary_key_field_name] + function_output_fields:
                 continue
             log.info(f"try to partial update field: {field.name}")
-            new_rows = cf.gen_row_data_by_schema(nb=nb, schema=schema,
-                                                 desired_field_names=[primary_key_field_name, field.name])
+            new_rows = cf.gen_row_data_by_schema(
+                nb=nb, schema=schema, desired_field_names=[primary_key_field_name, field.name]
+            )
             self.upsert(client, collection_name, new_rows, partial_update=True)
             if i % 3 == 0:
                 self.flush(client, collection_name)
             # 4. query output all fields and assert all the field values
             if field.dtype == DataType.TIMESTAMPTZ:
                 new_rows = cf.convert_timestamptz(new_rows, field.name, "UTC")
-            self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
-                       output_fields=[primary_key_field_name, field.name],
-                       check_task=CheckTasks.check_query_results,
-                       check_items={exp_res: new_rows,
-                                    "with_vec": True,
-                                    "vector_type": field.dtype,
-                                    "vector_field": field.name,
-                                    "pk_name": default_primary_key_field_name})
+            self.query(
+                client,
+                collection_name,
+                filter=f"{primary_key_field_name} >= 0",
+                output_fields=[primary_key_field_name, field.name],
+                check_task=CheckTasks.check_query_results,
+                check_items={
+                    exp_res: new_rows,
+                    "with_vec": True,
+                    "vector_type": field.dtype,
+                    "vector_field": field.name,
+                    "pk_name": default_primary_key_field_name,
+                },
+            )
             i += 1
 
         log.info("Partial update test for all field types passed successfully")
@@ -304,22 +690,22 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                 "vector": preprocessing.normalize([np.array([random.random() for j in range(dim)])])[0].tolist(),
                 "name": "Product A",
                 "price": 100.0,
-                "category": "Electronics"
+                "category": "Electronics",
             },
             {
                 "id": 2,
                 "vector": preprocessing.normalize([np.array([random.random() for j in range(dim)])])[0].tolist(),
                 "name": "Product B",
                 "price": None,  # Null price
-                "category": "Home"
+                "category": "Home",
             },
             {
                 "id": 3,
                 "vector": preprocessing.normalize([np.array([random.random() for j in range(dim)])])[0].tolist(),
                 "name": "Product C",
                 "price": None,  # Null price
-                "category": "Books"
-            }
+                "category": "Books",
+            },
         ]
 
         self.upsert(client, collection_name, initial_data, partial_update=False)
@@ -329,16 +715,16 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         results = self.query(client, collection_name, filter="id > 0", output_fields=["*"])[0]
         assert len(results) == 3
 
-        initial_data_map = {data['id']: data for data in results}
-        assert initial_data_map[1]['name'] == "Product A"
-        assert initial_data_map[1]['price'] == 100.0
-        assert initial_data_map[1]['category'] == "Electronics"
-        assert initial_data_map[2]['name'] == "Product B"
-        assert initial_data_map[2]['price'] is None
-        assert initial_data_map[2]['category'] == "Home"
-        assert initial_data_map[3]['name'] == "Product C"
-        assert initial_data_map[3]['price'] is None
-        assert initial_data_map[3]['category'] == "Books"
+        initial_data_map = {data["id"]: data for data in results}
+        assert initial_data_map[1]["name"] == "Product A"
+        assert initial_data_map[1]["price"] == 100.0
+        assert initial_data_map[1]["category"] == "Electronics"
+        assert initial_data_map[2]["name"] == "Product B"
+        assert initial_data_map[2]["price"] is None
+        assert initial_data_map[2]["category"] == "Home"
+        assert initial_data_map[3]["name"] == "Product C"
+        assert initial_data_map[3]["price"] is None
+        assert initial_data_map[3]["category"] == "Books"
 
         log.info("Initial data verification passed")
 
@@ -350,22 +736,22 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                 "vector": preprocessing.normalize([np.array([random.random() for j in range(dim)])])[0].tolist(),
                 "name": "Product A-Update",
                 "price": 111.1,
-                "category": "Electronics-Update"
+                "category": "Electronics-Update",
             },
             {
                 "id": 2,
                 "vector": preprocessing.normalize([np.array([random.random() for j in range(dim)])])[0].tolist(),
                 "name": "Product B-Update",
                 "price": 222.2,
-                "category": "Home-Update"
+                "category": "Home-Update",
             },
             {
                 "id": 3,
                 "vector": preprocessing.normalize([np.array([random.random() for j in range(dim)])])[0].tolist(),
                 "name": "Product C-Update",
                 "price": None,  # Still null
-                "category": "Books-Update"
-            }
+                "category": "Books-Update",
+            },
         ]
 
         self.upsert(client, collection_name, first_update_data, partial_update=True)
@@ -374,40 +760,35 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         results = self.query(client, collection_name, filter="id > 0", output_fields=["*"])[0]
         assert len(results) == 3
 
-        first_update_map = {data['id']: data for data in results}
-        assert first_update_map[1]['name'] == "Product A-Update"
-        assert abs(first_update_map[1]['price'] - 111.1) < 0.001
-        assert first_update_map[1]['category'] == "Electronics-Update"
-        assert first_update_map[2]['name'] == "Product B-Update"
-        assert abs(first_update_map[2]['price'] - 222.2) < 0.001
-        assert first_update_map[2]['category'] == "Home-Update"
-        assert first_update_map[3]['name'] == "Product C-Update"
-        assert first_update_map[3]['price'] is None
-        assert first_update_map[3]['category'] == "Books-Update"
+        first_update_map = {data["id"]: data for data in results}
+        assert first_update_map[1]["name"] == "Product A-Update"
+        assert abs(first_update_map[1]["price"] - 111.1) < 0.001
+        assert first_update_map[1]["category"] == "Electronics-Update"
+        assert first_update_map[2]["name"] == "Product B-Update"
+        assert abs(first_update_map[2]["price"] - 222.2) < 0.001
+        assert first_update_map[2]["category"] == "Home-Update"
+        assert first_update_map[3]["name"] == "Product C-Update"
+        assert first_update_map[3]["price"] is None
+        assert first_update_map[3]["category"] == "Books-Update"
 
         log.info("First partial update verification passed")
 
         # Second partial update - update only specific fields
         log.info("Second partial update - updating specific fields...")
         second_update_data = [
-            {
-                "id": 1,
-                "name": "Product A-Update-Again",
-                "price": 1111.1,
-                "category": "Electronics-Update-Again"
-            },
+            {"id": 1, "name": "Product A-Update-Again", "price": 1111.1, "category": "Electronics-Update-Again"},
             {
                 "id": 2,
                 "name": "Product B-Update-Again",
                 "price": None,  # Set back to null
-                "category": "Home-Update-Again"
+                "category": "Home-Update-Again",
             },
             {
                 "id": 3,
                 "name": "Product C-Update-Again",
                 "price": 3333.3,  # Set price from null to value
-                "category": "Books-Update-Again"
-            }
+                "category": "Books-Update-Again",
+            },
         ]
 
         self.upsert(client, collection_name, second_update_data, partial_update=True)
@@ -416,93 +797,31 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         results = self.query(client, collection_name, filter="id > 0", output_fields=["*"])[0]
         assert len(results) == 3
 
-        second_update_map = {data['id']: data for data in results}
+        second_update_map = {data["id"]: data for data in results}
 
         # Verify ID 1: all fields updated
-        assert second_update_map[1]['name'] == "Product A-Update-Again"
-        assert abs(second_update_map[1]['price'] - 1111.1) < 0.001
-        assert second_update_map[1]['category'] == "Electronics-Update-Again"
+        assert second_update_map[1]["name"] == "Product A-Update-Again"
+        assert abs(second_update_map[1]["price"] - 1111.1) < 0.001
+        assert second_update_map[1]["category"] == "Electronics-Update-Again"
 
         # Verify ID 2: all fields updated, price set to null
-        assert second_update_map[2]['name'] == "Product B-Update-Again"
-        assert second_update_map[2]['price'] is None
-        assert second_update_map[2]['category'] == "Home-Update-Again"
+        assert second_update_map[2]["name"] == "Product B-Update-Again"
+        assert second_update_map[2]["price"] is None
+        assert second_update_map[2]["category"] == "Home-Update-Again"
 
         # Verify ID 3: all fields updated, price set from null to value
-        assert second_update_map[3]['name'] == "Product C-Update-Again"
-        assert abs(second_update_map[3]['price'] - 3333.3) < 0.001
-        assert second_update_map[3]['category'] == "Books-Update-Again"
+        assert second_update_map[3]["name"] == "Product C-Update-Again"
+        assert abs(second_update_map[3]["price"] - 3333.3) < 0.001
+        assert second_update_map[3]["category"] == "Books-Update-Again"
 
         # Verify vector fields were preserved from first update (not updated in second update)
         # Note: Vector comparison might be complex, so we just verify they exist
-        assert 'vector' in second_update_map[1]
-        assert 'vector' in second_update_map[2]
-        assert 'vector' in second_update_map[3]
+        assert "vector" in second_update_map[1]
+        assert "vector" in second_update_map[2]
+        assert "vector" in second_update_map[3]
 
         log.info("Second partial update verification passed")
         log.info("Simple partial update demo test completed successfully")
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_partial_update_null_to_null(self):
-        """
-        Target: test PU can successfully update a null to null
-        Method:
-            1. Create a collection, enable nullable fields
-            2. Insert default_nb rows to the collection
-            3. Partial Update the nullable field with null
-            4. Query the collection to check the value of nullable field
-        Expected: query should have correct value and number of entities
-        """
-        # step 1: create collection with nullable fields
-        client = self._client()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(default_int32_field_name, DataType.INT32, nullable=True)
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
-
-        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
-
-        # step 2: insert default_nb rows to the collection
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
-        self.upsert(client, collection_name, rows, partial_update=True)
-
-        # step 3: Partial Update the nullable field with null
-        new_row = cf.gen_row_data_by_schema(
-            nb=default_nb,
-            schema=schema,
-            desired_field_names=[default_primary_key_field_name, default_int32_field_name],
-            start=0
-        )
-
-        # Set the nullable field to None
-        for data in new_row:
-            data[default_int32_field_name] = None
-
-        self.upsert(client, collection_name, new_row, partial_update=True)
-
-        # step 4: Query the collection to check the value of nullable field
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
-        assert len(result) == default_nb
-
-        # Verify that all nullable fields are indeed null
-        for data in result:
-            assert data[
-                       default_int32_field_name] is None, f"Expected null value for {default_int32_field_name}, got {data[default_int32_field_name]}"
-
-        log.info("Partial update null to null test completed successfully")
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_partial_update_new_field_with_dynamic_field(self):
@@ -522,8 +841,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: partial upsert new field
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -531,12 +851,14 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         new_rows = [{default_primary_key_field_name: i, default_int32_field_name: 99} for i in range(default_nb)]
         self.upsert(client, collection_name, new_rows, partial_update=True)
 
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   output_fields=[default_int32_field_name],
-                   check_items={exp_res: new_rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})[0]
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
 
         self.drop_collection(client, collection_name)
 
@@ -561,8 +883,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert data into a partition
         num_of_partitions = 10
@@ -579,8 +902,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         gap = default_nb // num_of_partitions  # 200
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         for i, partition in enumerate(partition_names):
-            self.upsert(client, collection_name, rows[i * gap:i * gap + gap], partition_name=partition,
-                        partial_update=True)
+            self.upsert(
+                client, collection_name, rows[i * gap : i * gap + gap], partition_name=partition, partial_update=True
+            )
 
         # step 4: partial update data in the partition
         # i*200+i = 0, 201, 402, 603, ..., 1809
@@ -588,14 +912,15 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         for i, partition_name in enumerate(partition_names):
             new_row = [{default_primary_key_field_name: i * gap + i, default_int32_field_name: new_value}]
             self.upsert(client, collection_name, new_row, partition_name=partition_name, partial_update=True)
-            self.query(client, collection_name,
-                       check_task=CheckTasks.check_query_results,
-                       partition_names=[partition_name],
-                       ids=[i * gap + i],
-                       output_fields=[default_int32_field_name],
-                       check_items={exp_res: new_row,
-                                    "with_vec": True,
-                                    "pk_name": default_primary_key_field_name})
+            self.query(
+                client,
+                collection_name,
+                check_task=CheckTasks.check_query_results,
+                partition_names=[partition_name],
+                ids=[i * gap + i],
+                output_fields=[default_int32_field_name],
+                check_items={exp_res: new_row, "with_vec": True, "pk_name": default_primary_key_field_name},
+            )
 
         result = self.query(client, collection_name, filter=default_search_exp)[0]
         assert len(result) == default_nb
@@ -630,8 +955,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert data into partitions
         num_of_partitions = 2
@@ -650,17 +976,22 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         for partition_name in partition_names:
             self.upsert(client, collection_name, new_rows, partition_name=partition_name, partial_update=True)
-            result = self.query(client, collection_name,
-                                check_task=CheckTasks.check_query_results,
-                                partition_names=[partition_name],
-                                filter=f"{default_primary_key_field_name} >= {extra_nb}",
-                                check_items={exp_res: new_rows,
-                                             "with_vec": True,
-                                             "pk_name": default_primary_key_field_name})[0]
+            result = self.query(
+                client,
+                collection_name,
+                check_task=CheckTasks.check_query_results,
+                partition_names=[partition_name],
+                filter=f"{default_primary_key_field_name} >= {extra_nb}",
+                check_items={exp_res: new_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+            )[0]
             assert len(result) == default_nb
 
-            result = self.delete(client, collection_name, partition_names=[partition_name],
-                                 filter=f"{default_primary_key_field_name} >= 0")[0]
+            result = self.delete(
+                client,
+                collection_name,
+                partition_names=[partition_name],
+                filter=f"{default_primary_key_field_name} >= 0",
+            )[0]
             if partition_name == partition_names[0]:
                 assert result["delete_count"] == default_nb + extra_nb
             else:
@@ -690,8 +1021,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
 
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -700,15 +1032,19 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         # step 3: Delete the rows
         delete_result = self.delete(client, collection_name, filter=default_search_exp)[0]
-        query_result = self.query(client, collection_name, filter=default_search_exp,
-                                  check_task=CheckTasks.check_nothing)[0]
+        query_result = self.query(
+            client, collection_name, filter=default_search_exp, check_task=CheckTasks.check_nothing
+        )[0]
 
         # step 4: Upsert the rows
         self.upsert(client, collection_name, new_rows, partial_update=True)
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: new_rows,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: new_rows, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert delete_result["delete_count"] == default_nb
         assert len(query_result) == 0
@@ -738,8 +1074,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -747,22 +1084,26 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
 
         # step 3: Delete the rows and flush
-        delete_result = self.delete(client, collection_name,
-                                    filter=f"{default_primary_key_field_name} < {default_nb // 2}")[0]
+        delete_result = self.delete(
+            client, collection_name, filter=f"{default_primary_key_field_name} < {default_nb // 2}"
+        )[0]
         self.flush(client, collection_name)
-        query_result = self.query(client, collection_name, filter=default_search_exp,
-                                  check_task=CheckTasks.check_nothing)[0]
+        query_result = self.query(
+            client, collection_name, filter=default_search_exp, check_task=CheckTasks.check_nothing
+        )[0]
 
         # step 4: Upsert the rows and flush
         self.upsert(client, collection_name, new_rows, partial_update=True)
         self.flush(client, collection_name)
 
         # step 5: query the rows
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: new_rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: new_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert delete_result["delete_count"] == default_nb // 2
         assert len(query_result) == default_nb // 2
@@ -791,30 +1132,34 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        partial_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                                 desired_field_names=[default_primary_key_field_name,
-                                                                      default_int32_field_name])
+        partial_rows = cf.gen_row_data_by_schema(
+            nb=default_nb, schema=schema, desired_field_names=[default_primary_key_field_name, default_int32_field_name]
+        )
         self.insert(client, collection_name, rows)
 
         # step 3: partial update rows then delete 1/2 rows and upsert new rows, flush
         self.upsert(client, collection_name, partial_rows, partial_update=True)
-        delete_result = self.delete(client, collection_name,
-                                    filter=f"{default_primary_key_field_name} < {default_nb // 2}")[0]
+        delete_result = self.delete(
+            client, collection_name, filter=f"{default_primary_key_field_name} < {default_nb // 2}"
+        )[0]
         self.upsert(client, collection_name, new_rows, partial_update=True)
         self.flush(client, collection_name)
 
         # step 4: Query the rows
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: new_rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: new_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert delete_result["delete_count"] == default_nb // 2
         assert len(result) == default_nb
@@ -845,14 +1190,15 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        partial_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                                 desired_field_names=[default_primary_key_field_name,
-                                                                      default_int32_field_name])
+        partial_rows = cf.gen_row_data_by_schema(
+            nb=default_nb, schema=schema, desired_field_names=[default_primary_key_field_name, default_int32_field_name]
+        )
         new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
 
@@ -861,19 +1207,22 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # step 4: Delete the rows
-        delete_result = self.delete(client, collection_name,
-                                    filter=f"{default_primary_key_field_name} < {default_nb // 2}")[0]
+        delete_result = self.delete(
+            client, collection_name, filter=f"{default_primary_key_field_name} < {default_nb // 2}"
+        )[0]
         self.upsert(client, collection_name, new_rows, partial_update=True)
 
         # step 5: Flush the collection
         self.flush(client, collection_name)
 
         # step 6: Query the rows
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: new_rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: new_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert upsert_result["upsert_count"] == default_nb
         assert delete_result["delete_count"] == default_nb // 2
@@ -908,8 +1257,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # Step 2: insert a row while assigning a value to nullable field
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
@@ -924,24 +1274,34 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         int32_rows = []
         for i, row in enumerate(rows):
             if i % 2 == 0:
-                int32_rows.append({default_primary_key_field_name: row[default_primary_key_field_name],
-                                   default_int32_field_name: new_value})
+                int32_rows.append(
+                    {
+                        default_primary_key_field_name: row[default_primary_key_field_name],
+                        default_int32_field_name: new_value,
+                    }
+                )
                 rows[i][default_int32_field_name] = new_value
             else:
                 new_vector = [random.random() for _ in range(default_dim)]
-                vector_rows.append({default_primary_key_field_name: row[default_primary_key_field_name],
-                                    default_vector_field_name: new_vector})
+                vector_rows.append(
+                    {
+                        default_primary_key_field_name: row[default_primary_key_field_name],
+                        default_vector_field_name: new_vector,
+                    }
+                )
                 rows[i][default_vector_field_name] = new_vector
                 rows[i][default_int32_field_name] = None
 
         self.upsert(client, collection_name, int32_rows, partial_update=True)
         self.upsert(client, collection_name, vector_rows, partial_update=True)
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_vector_field_name, default_int32_field_name],
-                            check_items={exp_res: rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_vector_field_name, default_int32_field_name],
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
@@ -967,25 +1327,30 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
         self.upsert(client, collection_name, rows, partial_update=True)
 
         # step 2: Partial update nullable field
         new_value = np.int32(99)
-        new_rows = [{default_primary_key_field_name: row[default_primary_key_field_name],
-                     default_int32_field_name: new_value} for row in rows]
+        new_rows = [
+            {default_primary_key_field_name: row[default_primary_key_field_name], default_int32_field_name: new_value}
+            for row in rows
+        ]
         self.upsert(client, collection_name, new_rows, partial_update=True)
 
         # step 3: Query null field
         # self.load_collection(client, collection_name)
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
@@ -1011,24 +1376,26 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
         self.upsert(client, collection_name, rows, partial_update=True)
 
         # step 2: Partial update nullable field
         new_value = 99
-        new_row = [{default_primary_key_field_name: i,
-                    default_int32_field_name: new_value} for i in range(default_nb)]
+        new_row = [{default_primary_key_field_name: i, default_int32_field_name: new_value} for i in range(default_nb)]
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # step 3: Query null field
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_row, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
@@ -1054,24 +1421,26 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, rows, partial_update=True)
 
         # step 2: Partial update nullable field
         new_value = None
-        new_row = [{default_primary_key_field_name: i,
-                    default_int32_field_name: new_value} for i in range(default_nb)]
+        new_row = [{default_primary_key_field_name: i, default_int32_field_name: new_value} for i in range(default_nb)]
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # step 3: Query null field
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_row, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
@@ -1098,8 +1467,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert default_nb rows to the collection
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
@@ -1107,17 +1477,18 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         # step 3: Partial Update the nullable field with null
         new_value = None
-        new_row = [{default_primary_key_field_name: i,
-                    default_int32_field_name: new_value} for i in range(default_nb)]
+        new_row = [{default_primary_key_field_name: i, default_int32_field_name: new_value} for i in range(default_nb)]
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # step 4: Query the collection to check the value of nullable field
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_row, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert len(result) == default_nb
 
@@ -1145,8 +1516,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert default_nb rows to the collection
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
@@ -1154,18 +1526,21 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         # step 3: Partial Update the nullable field with various value
         new_value = 99
-        new_row = [{default_primary_key_field_name: i,
-                    default_int32_field_name: new_value if i % 2 == 0 else None}
-                   for i in range(default_nb)]
+        new_row = [
+            {default_primary_key_field_name: i, default_int32_field_name: new_value if i % 2 == 0 else None}
+            for i in range(default_nb)
+        ]
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # step 4: Query the collection to check the value of nullable field
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_row, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert len(result) == default_nb
 
@@ -1194,51 +1569,64 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: partial upsert data with nullable field
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
         self.upsert(client, collection_name, rows, partial_update=True)
-        result = self.query(client, collection_name, filter=f"{default_int32_field_name} IS NULL",
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_vector_field_name],
-                            check_items={exp_res: rows,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_int32_field_name} IS NULL",
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_vector_field_name],
+            check_items={exp_res: rows, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         # update first half of the dataset with nullable field value
         new_value = np.int32(99)
-        new_row = [{default_primary_key_field_name: i,
-                    default_int32_field_name: new_value} for i in range(default_nb // 2)]
+        new_row = [
+            {default_primary_key_field_name: i, default_int32_field_name: new_value} for i in range(default_nb // 2)
+        ]
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # step 3: Query the collection with filter by nullable field
-        result = self.query(client, collection_name, filter=f"{default_int32_field_name} IS NOT NULL",
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_int32_field_name} IS NOT NULL",
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_row, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb // 2
         # query with == filter
-        result = self.query(client, collection_name, filter=f"{default_int32_field_name} == {new_value}",
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: new_row,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_int32_field_name} == {new_value}",
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: new_row, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb // 2
 
         # step 4: partial update nullable field back to null
-        null_row = [{default_primary_key_field_name: i,
-                     default_int32_field_name: None} for i in range(default_nb)]
+        null_row = [{default_primary_key_field_name: i, default_int32_field_name: None} for i in range(default_nb)]
         self.upsert(client, collection_name, null_row, partial_update=True)
 
         # step 5: Query the collection with filter by nullable field
-        result = self.query(client, collection_name, filter=f"{default_int32_field_name} IS NULL",
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: null_row,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_int32_field_name} IS NULL",
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: null_row, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
@@ -1265,8 +1653,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -1274,18 +1663,19 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         # step 3: Upsert a single row with existing pk=0 and update the same field
         updated_value = 99999
-        new_row = {default_primary_key_field_name: 0,
-                   default_int32_field_name: updated_value}
+        new_row = {default_primary_key_field_name: 0, default_int32_field_name: updated_value}
         self.upsert(client, collection_name, [new_row], partial_update=True)
 
         # step 4: Query the row to verify the update
-        expected_row = {default_primary_key_field_name: 0,
-                        default_int32_field_name: updated_value}
-        result = self.query(client, collection_name, filter=f"{default_primary_key_field_name} == 0",
-                            check_task=CheckTasks.check_query_results,
-                            output_fields=[default_int32_field_name],
-                            check_items={exp_res: [expected_row],
-                                         "pk_name": default_primary_key_field_name})[0]
+        expected_row = {default_primary_key_field_name: 0, default_int32_field_name: updated_value}
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} == 0",
+            check_task=CheckTasks.check_query_results,
+            output_fields=[default_int32_field_name],
+            check_items={exp_res: [expected_row], "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == 1
 
         self.drop_collection(client, collection_name)
@@ -1311,8 +1701,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows with duplicate pk
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_string_field_name])
@@ -1323,25 +1714,33 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         # verify the duplicate pk is inserted and can be queried
         for row in dup_rows:
             row[default_int32_field_name] = None
-        res = self.query(client, collection_name, filter=default_search_exp,
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: dup_rows,
-                                      "pk_name": default_primary_key_field_name})[0]
+        res = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: dup_rows, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(res) == default_nb
 
         # step 3: Upsert the rows with duplicate pk
-        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                             desired_field_names=[default_primary_key_field_name,
-                                                                  default_string_field_name])
+        new_rows = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            desired_field_names=[default_primary_key_field_name, default_string_field_name],
+        )
 
         self.upsert(client, collection_name, new_rows, partial_update=True)
         for i, row in enumerate(dup_rows):
             row[default_string_field_name] = new_rows[i][default_string_field_name]
 
-        res = self.query(client, collection_name, filter=default_search_exp,
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: dup_rows,
-                                      "pk_name": default_primary_key_field_name})[0]
+        res = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: dup_rows, "pk_name": default_primary_key_field_name},
+        )[0]
 
         assert len(res) == default_nb
 
@@ -1368,8 +1767,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows with duplicate pk
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
@@ -1383,9 +1783,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         assert result[0][0]["count(*)"] == default_nb * 2
 
         # step 3: Upsert the rows with duplicate pk with partial update
-        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                             desired_field_names=[default_primary_key_field_name,
-                                                                  default_int32_field_name])
+        new_rows = cf.gen_row_data_by_schema(
+            nb=default_nb, schema=schema, desired_field_names=[default_primary_key_field_name, default_int32_field_name]
+        )
         self.upsert(client, collection_name, new_rows, partial_update=True)
         result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
         assert result[0][0]["count(*)"] == default_nb
@@ -1414,15 +1814,21 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert full rows, then partial upsert dynamic field `end_timestamp`
         nb = 100
         vectors = cf.gen_vectors(nb, default_dim)
-        rows = [{default_primary_key_field_name: i,
-                 default_vector_field_name: vectors[i],
-                 default_string_field_name: f"row_{i}"} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: f"row_{i}",
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -1431,14 +1837,16 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # verify dynamic field was written
-        res = self.query(client, collection_name, filter="id < 5",
-                         output_fields=[default_primary_key_field_name, "end_timestamp"])[0]
+        res = self.query(
+            client, collection_name, filter="id < 5", output_fields=[default_primary_key_field_name, "end_timestamp"]
+        )[0]
         for r in res:
             assert "end_timestamp" in r, f"end_timestamp should exist as dynamic field, got {r}"
 
         # step 3: add `end_timestamp` as a static column (schema evolution)
-        self.add_collection_field(client, collection_name, field_name="end_timestamp",
-                                  data_type=DataType.INT64, nullable=True)
+        self.add_collection_field(
+            client, collection_name, field_name="end_timestamp", data_type=DataType.INT64, nullable=True
+        )
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
 
@@ -1449,12 +1857,14 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # step 5: verify the static field has the new value
-        res = self.query(client, collection_name, filter="id < 5",
-                         output_fields=[default_primary_key_field_name, "end_timestamp"])[0]
+        res = self.query(
+            client, collection_name, filter="id < 5", output_fields=[default_primary_key_field_name, "end_timestamp"]
+        )[0]
         for r in res:
             pk = r[default_primary_key_field_name]
-            assert r["end_timestamp"] == new_ts + pk, \
+            assert r["end_timestamp"] == new_ts + pk, (
                 f"end_timestamp mismatch for pk={pk}: expected {new_ts + pk}, got {r['end_timestamp']}"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -1488,40 +1898,63 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert initial data with dynamic field 'tag'
         vectors = cf.gen_vectors(nb_initial, dim)
-        initial_rows = [{default_primary_key_field_name: i,
-                         default_vector_field_name: vectors[i],
-                         "name": f"item_{i}", "tag": f"tag_{i}"}
-                        for i in range(nb_initial)]
+        initial_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                "name": f"item_{i}",
+                "tag": f"tag_{i}",
+            }
+            for i in range(nb_initial)
+        ]
         self.insert(client, collection_name, initial_rows)
         self.flush(client, collection_name)
 
         # Mixed batch: existing (full) + new (full), all same fields
         new_vectors = cf.gen_vectors(4, dim)
         mixed_rows = [
-            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0],
-             "name": "upd_0", "tag": "upd_tag_0"},
-            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1],
-             "name": "upd_1", "tag": "upd_tag_1"},
-            {default_primary_key_field_name: 700, default_vector_field_name: new_vectors[2],
-             "name": "new_700", "tag": "new_tag_700"},
-            {default_primary_key_field_name: 701, default_vector_field_name: new_vectors[3],
-             "name": "new_701", "tag": "new_tag_701"},
+            {
+                default_primary_key_field_name: 0,
+                default_vector_field_name: new_vectors[0],
+                "name": "upd_0",
+                "tag": "upd_tag_0",
+            },
+            {
+                default_primary_key_field_name: 1,
+                default_vector_field_name: new_vectors[1],
+                "name": "upd_1",
+                "tag": "upd_tag_1",
+            },
+            {
+                default_primary_key_field_name: 700,
+                default_vector_field_name: new_vectors[2],
+                "name": "new_700",
+                "tag": "new_tag_700",
+            },
+            {
+                default_primary_key_field_name: 701,
+                default_vector_field_name: new_vectors[3],
+                "name": "new_701",
+                "tag": "new_tag_701",
+            },
         ]
         self.upsert(client, collection_name, mixed_rows, partial_update=True)
 
         # Verify all rows with check_query_results
-        result = self.query(client, collection_name,
-                            filter=f"{default_primary_key_field_name} in [0, 1, 700, 701]",
-                            output_fields=[default_vector_field_name, "name", "tag"],
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: mixed_rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [0, 1, 700, 701]",
+            output_fields=[default_vector_field_name, "name", "tag"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: mixed_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == 4
 
         self.drop_collection(client, collection_name)
@@ -1550,40 +1983,38 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert initial data — NO dynamic fields
         vectors = cf.gen_vectors(nb_initial, dim)
-        initial_rows = [{default_primary_key_field_name: i,
-                         default_vector_field_name: vectors[i],
-                         "name": f"item_{i}"}
-                        for i in range(nb_initial)]
+        initial_rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: vectors[i], "name": f"item_{i}"}
+            for i in range(nb_initial)
+        ]
         self.insert(client, collection_name, initial_rows)
         self.flush(client, collection_name)
 
         # Mixed upsert: existing + new, all static-only fields
         new_vectors = cf.gen_vectors(4, dim)
         mixed_rows = [
-            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0],
-             "name": "static_upd_0"},
-            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1],
-             "name": "static_upd_1"},
-            {default_primary_key_field_name: 800, default_vector_field_name: new_vectors[2],
-             "name": "static_new_800"},
-            {default_primary_key_field_name: 801, default_vector_field_name: new_vectors[3],
-             "name": "static_new_801"},
+            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0], "name": "static_upd_0"},
+            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1], "name": "static_upd_1"},
+            {default_primary_key_field_name: 800, default_vector_field_name: new_vectors[2], "name": "static_new_800"},
+            {default_primary_key_field_name: 801, default_vector_field_name: new_vectors[3], "name": "static_new_801"},
         ]
         self.upsert(client, collection_name, mixed_rows, partial_update=True)
 
         # Verify
-        result = self.query(client, collection_name,
-                            filter=f"{default_primary_key_field_name} in [0, 1, 800, 801]",
-                            output_fields=[default_vector_field_name, "name"],
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: mixed_rows,
-                                         "with_vec": True,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [0, 1, 800, 801]",
+            output_fields=[default_vector_field_name, "name"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: mixed_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == 4
 
         self.drop_collection(client, collection_name)
@@ -1615,29 +2046,51 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert initial data with dynamic field 'tag'
         vectors = cf.gen_vectors(nb_initial, dim)
-        initial_rows = [{default_primary_key_field_name: i,
-                         default_vector_field_name: vectors[i],
-                         "name": f"item_{i}", "tag": f"tag_{i}"}
-                        for i in range(nb_initial)]
+        initial_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                "name": f"item_{i}",
+                "tag": f"tag_{i}",
+            }
+            for i in range(nb_initial)
+        ]
         self.insert(client, collection_name, initial_rows)
         self.flush(client, collection_name)
 
         # Step 3: Different dynamic keys, same field count
         new_vectors = cf.gen_vectors(4, dim)
         mixed_diff_keys = [
-            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0],
-             "name": "mixed_key_0", "tag": "upd_tag_0"},
-            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1],
-             "name": "mixed_key_1", "tag": "upd_tag_1"},
-            {default_primary_key_field_name: 1000, default_vector_field_name: new_vectors[2],
-             "name": "mixed_key_1000", "category": "cat_A"},
-            {default_primary_key_field_name: 1001, default_vector_field_name: new_vectors[3],
-             "name": "mixed_key_1001", "category": "cat_B"},
+            {
+                default_primary_key_field_name: 0,
+                default_vector_field_name: new_vectors[0],
+                "name": "mixed_key_0",
+                "tag": "upd_tag_0",
+            },
+            {
+                default_primary_key_field_name: 1,
+                default_vector_field_name: new_vectors[1],
+                "name": "mixed_key_1",
+                "tag": "upd_tag_1",
+            },
+            {
+                default_primary_key_field_name: 1000,
+                default_vector_field_name: new_vectors[2],
+                "name": "mixed_key_1000",
+                "category": "cat_A",
+            },
+            {
+                default_primary_key_field_name: 1001,
+                default_vector_field_name: new_vectors[3],
+                "name": "mixed_key_1001",
+                "category": "cat_B",
+            },
         ]
         self.upsert(client, collection_name, mixed_diff_keys, partial_update=True)
 
@@ -1647,34 +2100,61 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             {default_primary_key_field_name: 1000, "name": "mixed_key_1000", "category": "cat_A"},
             {default_primary_key_field_name: 1001, "name": "mixed_key_1001", "category": "cat_B"},
         ]
-        self.query(client, collection_name,
-                   filter=f"{default_primary_key_field_name} in [0, 1, 1000, 1001]",
-                   output_fields=["name", "tag", "category"],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: expected_step3,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [0, 1, 1000, 1001]",
+            output_fields=["name", "tag", "category"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: expected_step3, "pk_name": default_primary_key_field_name},
+        )
 
         # Step 4: Multiple dynamic fields per row (tag, category, score)
         new_vectors = cf.gen_vectors(4, dim)
         multi_dyn_rows = [
-            {default_primary_key_field_name: 2, default_vector_field_name: new_vectors[0],
-             "name": "multi_dyn_2", "tag": "t2", "category": "c2", "score": 0.95},
-            {default_primary_key_field_name: 3, default_vector_field_name: new_vectors[1],
-             "name": "multi_dyn_3", "tag": "t3", "category": "c3", "score": 0.85},
-            {default_primary_key_field_name: 1100, default_vector_field_name: new_vectors[2],
-             "name": "multi_dyn_1100", "tag": "t1100", "category": "c1100", "score": 0.75},
-            {default_primary_key_field_name: 1101, default_vector_field_name: new_vectors[3],
-             "name": "multi_dyn_1101", "tag": "t1101", "category": "c1101", "score": 0.65},
+            {
+                default_primary_key_field_name: 2,
+                default_vector_field_name: new_vectors[0],
+                "name": "multi_dyn_2",
+                "tag": "t2",
+                "category": "c2",
+                "score": 0.95,
+            },
+            {
+                default_primary_key_field_name: 3,
+                default_vector_field_name: new_vectors[1],
+                "name": "multi_dyn_3",
+                "tag": "t3",
+                "category": "c3",
+                "score": 0.85,
+            },
+            {
+                default_primary_key_field_name: 1100,
+                default_vector_field_name: new_vectors[2],
+                "name": "multi_dyn_1100",
+                "tag": "t1100",
+                "category": "c1100",
+                "score": 0.75,
+            },
+            {
+                default_primary_key_field_name: 1101,
+                default_vector_field_name: new_vectors[3],
+                "name": "multi_dyn_1101",
+                "tag": "t1101",
+                "category": "c1101",
+                "score": 0.65,
+            },
         ]
         self.upsert(client, collection_name, multi_dyn_rows, partial_update=True)
 
-        self.query(client, collection_name,
-                   filter=f"{default_primary_key_field_name} in [2, 3, 1100, 1101]",
-                   output_fields=[default_vector_field_name, "name", "tag", "category", "score"],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: multi_dyn_rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [2, 3, 1100, 1101]",
+            output_fields=[default_vector_field_name, "name", "tag", "category", "score"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: multi_dyn_rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
 
         # Step 5: Partial update different dynamic fields per row
         # Each row: id + one different dynamic field (same field count)
@@ -1687,19 +2167,36 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         # Verify: updated fields changed, non-updated dynamic fields preserved
         expected_step5 = [
-            {default_primary_key_field_name: 2, "name": "multi_dyn_2",
-             "tag": "partial_tag_2", "category": "c2", "score": 0.95},
-            {default_primary_key_field_name: 3, "name": "multi_dyn_3",
-             "tag": "t3", "category": "partial_cat_3", "score": 0.85},
-            {default_primary_key_field_name: 1101, "name": "multi_dyn_1101",
-             "tag": "t1101", "category": "c1101", "score": 0.99},
+            {
+                default_primary_key_field_name: 2,
+                "name": "multi_dyn_2",
+                "tag": "partial_tag_2",
+                "category": "c2",
+                "score": 0.95,
+            },
+            {
+                default_primary_key_field_name: 3,
+                "name": "multi_dyn_3",
+                "tag": "t3",
+                "category": "partial_cat_3",
+                "score": 0.85,
+            },
+            {
+                default_primary_key_field_name: 1101,
+                "name": "multi_dyn_1101",
+                "tag": "t1101",
+                "category": "c1101",
+                "score": 0.99,
+            },
         ]
-        self.query(client, collection_name,
-                   filter=f"{default_primary_key_field_name} in [2, 3, 1101]",
-                   output_fields=["name", "tag", "category", "score"],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: expected_step5,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [2, 3, 1101]",
+            output_fields=["name", "tag", "category", "score"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: expected_step5, "pk_name": default_primary_key_field_name},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -1730,16 +2227,21 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert initial data with known price values and dynamic field 'tag'
         vectors = cf.gen_vectors(nb_initial, dim)
-        initial_rows = [{default_primary_key_field_name: i,
-                         default_vector_field_name: vectors[i],
-                         "name": f"item_{i}",
-                         "price": float(i * 10 + 1)}
-                        for i in range(nb_initial)]
+        initial_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                "name": f"item_{i}",
+                "price": float(i * 10 + 1),
+            }
+            for i in range(nb_initial)
+        ]
         self.insert(client, collection_name, initial_rows)
         self.flush(client, collection_name)
 
@@ -1752,17 +2254,17 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         # Verify: name updated, price and tag preserved
         expected = [
-            {default_primary_key_field_name: 0, "name": "static_only_upd_0",
-             "price": 1.0},
-            {default_primary_key_field_name: 1, "name": "static_only_upd_1",
-             "price": 11.0}
+            {default_primary_key_field_name: 0, "name": "static_only_upd_0", "price": 1.0},
+            {default_primary_key_field_name: 1, "name": "static_only_upd_1", "price": 11.0},
         ]
-        result = self.query(client, collection_name,
-                            filter=f"{default_primary_key_field_name} in [0, 1]",
-                            output_fields=["name", "price"],
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: expected,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [0, 1]",
+            output_fields=["name", "price"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: expected, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == 2
 
         partial_rows = [
@@ -1771,12 +2273,14 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         ]
         self.upsert(client, collection_name, partial_rows, partial_update=True)
 
-        result = self.query(client, collection_name,
-                            filter=f"{default_primary_key_field_name} in [4, 5]",
-                            output_fields=["tag"],
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: partial_rows,
-                                         "pk_name": default_primary_key_field_name})[0]
+        result = self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} in [4, 5]",
+            output_fields=["tag"],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: partial_rows, "pk_name": default_primary_key_field_name},
+        )[0]
         assert len(result) == 2
 
         self.drop_collection(client, collection_name)
@@ -1803,41 +2307,44 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         seed_vec = cf.gen_vectors(1, dim)[0]
-        self.insert(client, collection_name, [{
-            default_primary_key_field_name: 1,
-            default_vector_field_name: seed_vec,
-            "name": "seed_dynamic",
-            "tag": "seed_tag",
-            "category": "seed_category",
-        }])
+        self.insert(
+            client,
+            collection_name,
+            [
+                {
+                    default_primary_key_field_name: 1,
+                    default_vector_field_name: seed_vec,
+                    "name": "seed_dynamic",
+                    "tag": "seed_tag",
+                    "category": "seed_category",
+                }
+            ],
+        )
         self.flush(client, collection_name)
 
-        self.upsert(client, collection_name,
-                    [{default_primary_key_field_name: 1, "tag": "updated_tag"}],
-                    partial_update=True)
-        res = self.query(client, collection_name,
-                         filter=f"{default_primary_key_field_name} == 1",
-                         output_fields=["tag", "category"])[0]
+        self.upsert(
+            client, collection_name, [{default_primary_key_field_name: 1, "tag": "updated_tag"}], partial_update=True
+        )
+        res = self.query(
+            client, collection_name, filter=f"{default_primary_key_field_name} == 1", output_fields=["tag", "category"]
+        )[0]
         assert res[0]["tag"] == "updated_tag"
         assert res[0]["category"] == "seed_category"
 
-        self.upsert(client, collection_name,
-                    [{default_primary_key_field_name: 1, "tag": None}],
-                    partial_update=True)
-        res = self.query(client, collection_name,
-                         filter=f"{default_primary_key_field_name} == 1",
-                         output_fields=["tag", "category"])[0]
+        self.upsert(client, collection_name, [{default_primary_key_field_name: 1, "tag": None}], partial_update=True)
+        res = self.query(
+            client, collection_name, filter=f"{default_primary_key_field_name} == 1", output_fields=["tag", "category"]
+        )[0]
         assert res[0]["tag"] is None
         assert res[0]["category"] == "seed_category"
 
         # Verify filter behavior on null dynamic field
-        res_null = self.query(client, collection_name,
-                              filter="tag is null",
-                              output_fields=["tag"])[0]
+        res_null = self.query(client, collection_name, filter="tag is null", output_fields=["tag"])[0]
         assert len(res_null) >= 1
         assert any(r[default_primary_key_field_name] == 1 for r in res_null)
 
@@ -1899,26 +2406,33 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
         index_params.add_index("weight", index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="L2")
 
-        client.create_collection(collection_name=collection_name, schema=schema,
-                                 index_params=index_params, consistency_level="Strong")
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Seed data: odd ids have explicit values, even ids omit scalar fields (use defaults)
         seed_rows = []
         for i in range(1, 11):
             vec = [round((i * 0.1 + j * 0.1) % 1.0, 1) for j in range(PU_DEFAULT_DIM)]
             if i % 2 == 1:
-                seed_rows.append({
-                    default_primary_key_field_name: i,
-                    "text": f"seed_{i}", "score": i * 100,
-                    "weight": float(i * 10), "flag": True,
-                    default_vector_field_name: vec,
-                })
+                seed_rows.append(
+                    {
+                        default_primary_key_field_name: i,
+                        "text": f"seed_{i}",
+                        "score": i * 100,
+                        "weight": float(i * 10),
+                        "flag": True,
+                        default_vector_field_name: vec,
+                    }
+                )
             else:
                 # Omit scalar fields → defaults applied
-                seed_rows.append({
-                    default_primary_key_field_name: i,
-                    default_vector_field_name: vec,
-                })
+                seed_rows.append(
+                    {
+                        default_primary_key_field_name: i,
+                        default_vector_field_name: vec,
+                    }
+                )
 
         client.insert(collection_name=collection_name, data=seed_rows)
 
@@ -1929,6 +2443,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
                     c.drop_collection(self.PU_DEFAULT_COLLECTION)
             except Exception:
                 pass
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1954,16 +2469,12 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
         assert res[0]["text"] == "seed_1"
 
         # Partial update id=1: set text from "seed_1" to "" (the default value)
-        self.upsert(client, cn,
-                    [{pk: 1, "text": ""}],
-                    partial_update=True)
+        self.upsert(client, cn, [{pk: 1, "text": ""}], partial_update=True)
         res = self.query(client, cn, filter=f"{pk} == 1", output_fields=["text"])[0]
         assert res[0]["text"] == ""
 
         # Partial update id=2: update only text, vector preserved
-        self.upsert(client, cn,
-                    [{pk: 2, "text": "updated_only_text"}],
-                    partial_update=True)
+        self.upsert(client, cn, [{pk: 2, "text": "updated_only_text"}], partial_update=True)
         res = self.query(client, cn, filter=f"{pk} == 2", output_fields=["text", vec])[0]
         assert res[0]["text"] == "updated_only_text"
         assert len(res[0][vec]) == PU_DEFAULT_DIM  # vector preserved
@@ -2062,8 +2573,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
         vec = default_vector_field_name
 
         # Verify all defaults on id=10
-        res = self.query(client, cn, filter=f"{pk} == 10",
-                         output_fields=["text", "score", "weight", "flag"])[0]
+        res = self.query(client, cn, filter=f"{pk} == 10", output_fields=["text", "score", "weight", "flag"])[0]
         assert res[0]["text"] == ""
         assert res[0]["score"] == 0
         assert res[0]["weight"] == 0.0
@@ -2071,8 +2581,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
 
         # Update text only
         self.upsert(client, cn, [{pk: 10, "text": "updated"}], partial_update=True)
-        res = self.query(client, cn, filter=f"{pk} == 10",
-                         output_fields=["text", "score", "weight", "flag", vec])[0]
+        res = self.query(client, cn, filter=f"{pk} == 10", output_fields=["text", "score", "weight", "flag", vec])[0]
         assert res[0]["text"] == "updated"
         assert res[0]["score"] == 0
         assert res[0]["weight"] == 0.0
@@ -2080,8 +2589,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
 
         # Update score only
         self.upsert(client, cn, [{pk: 10, "score": 42}], partial_update=True)
-        res = self.query(client, cn, filter=f"{pk} == 10",
-                         output_fields=["text", "score", "weight", "flag"])[0]
+        res = self.query(client, cn, filter=f"{pk} == 10", output_fields=["text", "score", "weight", "flag"])[0]
         assert res[0]["text"] == "updated"
         assert res[0]["score"] == 42
         assert res[0]["weight"] == 0.0
@@ -2089,8 +2597,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
 
         # Update weight only
         self.upsert(client, cn, [{pk: 10, "weight": 3.14}], partial_update=True)
-        res = self.query(client, cn, filter=f"{pk} == 10",
-                         output_fields=["text", "score", "weight", "flag"])[0]
+        res = self.query(client, cn, filter=f"{pk} == 10", output_fields=["text", "score", "weight", "flag"])[0]
         assert res[0]["text"] == "updated"
         assert res[0]["score"] == 42
         assert abs(res[0]["weight"] - 3.14) < 0.01
@@ -2128,9 +2635,8 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             assert abs(res[0][vec][i] - v) < 1e-6
 
 
-
 class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
-    """ Test case of partial update interface """
+    """Test case of partial update interface"""
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -2166,16 +2672,21 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: partial upsert a new pk with only partial field
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                         desired_field_names=[default_primary_key_field_name, default_int32_field_name])
-        error = {ct.err_code: 1100, ct.err_msg:
-            f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter"}
-        self.upsert(client, collection_name, rows, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        rows = cf.gen_row_data_by_schema(
+            nb=default_nb, schema=schema, desired_field_names=[default_primary_key_field_name, default_int32_field_name]
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter",
+        }
+        self.upsert(
+            client, collection_name, rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2185,7 +2696,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         target:  Test PU will return error when provided new field without dynamic field
         method:
             1. Create a collection with dynamic field
-            2. partial upsert a new field 
+            2. partial upsert a new field
         expected: Step 2 should result fail
         """
         # step 1: create collection with dynamic field
@@ -2197,18 +2708,22 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: partial upsert a new field
         row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, row, partial_update=True)
 
         new_row = [{default_primary_key_field_name: i, default_int32_field_name: 99} for i in range(default_nb)]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"Attempt to insert an unexpected field `{default_int32_field_name}` to collection without enabling dynamic field"}
-        self.upsert(client, collection_name, new_row, partial_update=True, check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Attempt to insert an unexpected field `{default_int32_field_name}` to collection without enabling dynamic field",
+        }
+        self.upsert(
+            client, collection_name, new_row, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2216,7 +2731,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
     def test_milvus_client_partial_update_after_release_collection(self):
         """
         target: test basic function of partial update
-        method: 
+        method:
                 1. create collection
                 2. insert a full row of data using partial update
                 3. partial update data
@@ -2235,30 +2750,35 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_string_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # Step 2: insert a full row of data using partial update
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, rows, partial_update=True)
 
         # Step 3: partial update data
-        new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                            desired_field_names=[default_primary_key_field_name,
-                                                                 default_string_field_name])
+        new_row = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            desired_field_names=[default_primary_key_field_name, default_string_field_name],
+        )
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # Step 4: release collection
         self.release_collection(client, collection_name)
 
         # Step 5: partial update data
-        new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                            desired_field_names=[default_primary_key_field_name,
-                                                                 default_string_field_name])
-        error = {ct.err_code: 101,
-                 ct.err_msg: f"failed to query: collection not loaded"}
-        self.upsert(client, collection_name, new_row, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        new_row = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            desired_field_names=[default_primary_key_field_name, default_string_field_name],
+        )
+        error = {ct.err_code: 101, ct.err_msg: "failed to query: collection not loaded"}
+        self.upsert(
+            client, collection_name, new_row, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2284,8 +2804,9 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # Step 2: insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -2294,18 +2815,22 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         # Step 3: delete the rows
         result = self.delete(client, collection_name, filter=default_search_exp)[0]
         assert result["delete_count"] == default_nb
-        result = self.query(client, collection_name, filter=default_search_exp,
-                            check_task=CheckTasks.check_nothing)[0]
+        result = self.query(client, collection_name, filter=default_search_exp, check_task=CheckTasks.check_nothing)[0]
         assert len(result) == 0
 
         # Step 4: upsert the rows with same pk and partial field
-        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
-                                             desired_field_names=[default_primary_key_field_name,
-                                                                  default_vector_field_name])
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter"}
-        self.upsert(client, collection_name, new_rows, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        new_rows = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            desired_field_names=[default_primary_key_field_name, default_vector_field_name],
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter",
+        }
+        self.upsert(
+            client, collection_name, new_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2328,7 +2853,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         schema.add_field("int32_field", DataType.INT32, nullable=True)
 
         bm25_function = Function(
-            name=f"text",
+            name="text",
             function_type=FunctionType.BM25,
             input_field_names=["text"],
             output_field_names=["text_sparse_emb"],
@@ -2340,15 +2865,20 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         # 3. upsert data
-        new_rows = [{
-            default_primary_key_field_name: i,
-            "text_sparse_emb": cf.gen_sparse_vectors(1, dim=128),
-        } for i in range(10)]
-        error = {ct.err_code: 999,
-                 ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection"}
-        self.upsert(client, collection_name, new_rows,
-                    partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        new_rows = [
+            {
+                default_primary_key_field_name: i,
+                "text_sparse_emb": cf.gen_sparse_vectors(1, dim=128),
+            }
+            for i in range(10)
+        ]
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection",
+        }
+        self.upsert(
+            client, collection_name, new_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_partial_update_pk_in_wrong_partition(self):
@@ -2372,8 +2902,9 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # Step 2: Create 2 partitions
         num_of_partitions = 2
@@ -2387,17 +2918,27 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         gap = default_nb // num_of_partitions
         for i, partition in enumerate(partition_names):
-            self.upsert(client, collection_name, rows[i * gap:(i + 1) * gap], partition_name=partition,
-                        partial_update=True)
+            self.upsert(
+                client, collection_name, rows[i * gap : (i + 1) * gap], partition_name=partition, partial_update=True
+            )
 
         # Step 4: upsert the rows with pk in wrong partition
-        new_rows = cf.gen_row_data_by_schema(nb=gap, schema=schema,
-                                             desired_field_names=[default_primary_key_field_name,
-                                                                  default_vector_field_name])
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter"}
-        self.upsert(client, collection_name, new_rows, partition_name=partition_names[-1], partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        new_rows = cf.gen_row_data_by_schema(
+            nb=gap, schema=schema, desired_field_names=[default_primary_key_field_name, default_vector_field_name]
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter",
+        }
+        self.upsert(
+            client,
+            collection_name,
+            new_rows,
+            partition_name=partition_names[-1],
+            partial_update=True,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2422,8 +2963,9 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -2441,10 +2983,13 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
                 data[default_primary_key_field_name] = 0
             new_rows.append(data)
 
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"The data fields length is inconsistent. previous length is {default_nb}, current length is {default_nb // 2}"}
-        self.upsert(client, collection_name, new_rows, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"The data fields length is inconsistent. previous length is {default_nb}, current length is {default_nb // 2}",
+        }
+        self.upsert(
+            client, collection_name, new_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2472,15 +3017,21 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert initial data with dynamic field 'tag'
         vectors = cf.gen_vectors(nb_initial, dim)
-        initial_rows = [{default_primary_key_field_name: i,
-                         default_vector_field_name: vectors[i],
-                         "name": f"item_{i}", "tag": f"tag_{i}"}
-                        for i in range(nb_initial)]
+        initial_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                "name": f"item_{i}",
+                "tag": f"tag_{i}",
+            }
+            for i in range(nb_initial)
+        ]
         self.insert(client, collection_name, initial_rows)
         self.flush(client, collection_name)
 
@@ -2491,10 +3042,13 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
             {default_primary_key_field_name: 500, "tag": "new_tag_500"},
             {default_primary_key_field_name: 501, "tag": "new_tag_501"},
         ]
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter"}
-        self.upsert(client, collection_name, mixed_rows, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter",
+        }
+        self.upsert(
+            client, collection_name, mixed_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2522,15 +3076,21 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert initial data with dynamic field 'tag'
         vectors = cf.gen_vectors(nb_initial, dim)
-        initial_rows = [{default_primary_key_field_name: i,
-                         default_vector_field_name: vectors[i],
-                         "name": f"item_{i}", "tag": f"tag_{i}"}
-                        for i in range(nb_initial)]
+        initial_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                "name": f"item_{i}",
+                "tag": f"tag_{i}",
+            }
+            for i in range(nb_initial)
+        ]
         self.insert(client, collection_name, initial_rows)
         self.flush(client, collection_name)
 
@@ -2540,12 +3100,16 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
             # Existing row: 2 fields (id + tag)
             {default_primary_key_field_name: 0, "tag": "updated_tag_0"},
             # New row: 4 fields (id + vector + name + tag)
-            {default_primary_key_field_name: 600, default_vector_field_name: new_vectors[0],
-             "name": "new_600", "tag": "new_tag_600"},
+            {
+                default_primary_key_field_name: 600,
+                default_vector_field_name: new_vectors[0],
+                "name": "new_600",
+                "tag": "new_tag_600",
+            },
         ]
-        error = {ct.err_code: 1,
-                 ct.err_msg: "The data fields length is inconsistent"}
-        self.upsert(client, collection_name, mixed_rows, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: "The data fields length is inconsistent"}
+        self.upsert(
+            client, collection_name, mixed_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
         self.drop_collection(client, collection_name)

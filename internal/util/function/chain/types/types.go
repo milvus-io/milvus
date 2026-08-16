@@ -26,6 +26,9 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
 // =============================================================================
@@ -110,7 +113,7 @@ func (ctx *FuncContext) Stage() string {
 // Functions are stateless and only focus on computation logic.
 // Column mapping is handled by the Operator layer (MapOp).
 type FunctionExpr interface {
-	// Name returns the function name (e.g., "decay", "score_combine").
+	// Name returns the function name (e.g., "decay", "num_combine").
 	Name() string
 
 	// OutputDataTypes returns the data types of output columns.
@@ -130,5 +133,24 @@ type FunctionExpr interface {
 	IsRunnable(stage string) bool
 }
 
-// FunctionFactory is a factory function that creates a FunctionExpr from parameters.
-type FunctionFactory func(params map[string]interface{}) (FunctionExpr, error)
+// FunctionArgValidator validates public expression args for functions that have
+// per-expression arg policy.
+type FunctionArgValidator interface {
+	ValidateArgs(args []*schemapb.FunctionChainExprArg) error
+}
+
+// FunctionBuildContext contains runtime-only context used while constructing a FunctionExpr.
+// It is not serialized in public FunctionChain proto params.
+type FunctionBuildContext struct {
+	ModelExtraInfo *models.ModelExtraInfo
+}
+
+// FunctionConfig contains the public function expression configuration from FunctionChain proto.
+type FunctionConfig struct {
+	Name   string
+	Params map[string]*schemapb.FunctionParamValue
+	Args   []*schemapb.FunctionChainExprArg
+}
+
+// FunctionFactory is a factory function that creates a FunctionExpr from typed config.
+type FunctionFactory func(ctx FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error)

@@ -1628,7 +1628,6 @@ const (
 	QueryNode_UpdateIndex_FullMethodName            = "/milvus.proto.query.QueryNode/UpdateIndex"
 	QueryNode_RunAnalyzer_FullMethodName            = "/milvus.proto.query.QueryNode/RunAnalyzer"
 	QueryNode_GetHighlight_FullMethodName           = "/milvus.proto.query.QueryNode/GetHighlight"
-	QueryNode_DropIndex_FullMethodName              = "/milvus.proto.query.QueryNode/DropIndex"
 	QueryNode_ValidateAnalyzer_FullMethodName       = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
 	QueryNode_SyncFileResource_FullMethodName       = "/milvus.proto.query.QueryNode/SyncFileResource"
 	QueryNode_ClearReadTaskQueue_FullMethodName     = "/milvus.proto.query.QueryNode/ClearReadTaskQueue"
@@ -1671,7 +1670,6 @@ type QueryNodeClient interface {
 	UpdateIndex(ctx context.Context, in *UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error)
-	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -1994,15 +1992,6 @@ func (c *queryNodeClient) GetHighlight(ctx context.Context, in *GetHighlightRequ
 	return out, nil
 }
 
-func (c *queryNodeClient) DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, QueryNode_DropIndex_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error) {
 	out := new(ValidateAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryNode_ValidateAnalyzer_FullMethodName, in, out, opts...)
@@ -2075,7 +2064,6 @@ type QueryNodeServer interface {
 	UpdateIndex(context.Context, *UpdateIndexRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error)
-	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
@@ -2173,9 +2161,6 @@ func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerReq
 }
 func (UnimplementedQueryNodeServer) GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHighlight not implemented")
-}
-func (UnimplementedQueryNodeServer) DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DropIndex not implemented")
 }
 func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
@@ -2729,24 +2714,6 @@ func _QueryNode_GetHighlight_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _QueryNode_DropIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DropIndexRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryNodeServer).DropIndex(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: QueryNode_DropIndex_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryNodeServer).DropIndex(ctx, req.(*DropIndexRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _QueryNode_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ValidateAnalyzerRequest)
 	if err := dec(in); err != nil {
@@ -2933,10 +2900,6 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetHighlight",
 			Handler:    _QueryNode_GetHighlight_Handler,
-		},
-		{
-			MethodName: "DropIndex",
-			Handler:    _QueryNode_DropIndex_Handler,
 		},
 		{
 			MethodName: "ValidateAnalyzer",

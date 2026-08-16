@@ -40,6 +40,15 @@ IsCompareOp(proto::plan::OpType op) {
            op == proto::plan::OpType::LessThan;
 }
 
+// Ops served by the per-field text index (segment_->GetTextIndex()) instead of
+// the scalar index path; add a new text-index op here and the dispatch follows.
+inline bool
+IsTextIndexOpType(proto::plan::OpType op) {
+    return op == proto::plan::OpType::TextMatch ||
+           op == proto::plan::OpType::PhraseMatch ||
+           op == proto::plan::OpType::TextMatchFuzzy;
+}
+
 [[maybe_unused]] static ColumnVectorPtr
 GetColumnVector(const VectorPtr& result) {
     ColumnVectorPtr res;
@@ -121,7 +130,7 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                ThrowInfo(DataTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported data type {}",
                           arr2.array(i).val_case());
         }

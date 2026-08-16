@@ -31,6 +31,8 @@
 #include "common/Types.h"
 #include "common/BitsetView.h"
 #include "common/OffsetMapping.h"
+#include "common/GrowingOffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
@@ -76,7 +78,8 @@ class VectorIndex : public IndexBase {
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
-                    const BitsetView& bitset) const {
+                    const BitsetView& bitset,
+                    milvus::OpContext* = nullptr) const {
         ThrowInfo(NotImplemented,
                   "VectorIndex:" + this->GetIndexType() +
                       " didn't implement VectorIterator interface, "
@@ -196,9 +199,11 @@ class VectorIndex : public IndexBase {
     }
 
     void
-    BuildValidData(const bool* valid_data, int64_t total_count) {
+    BuildValidData(const bool* valid_data,
+                   int64_t total_count,
+                   const milvus::OffsetMappingBuildOptions& options = {}) {
         auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
-        sealed_mapping->Build(valid_data, total_count);
+        sealed_mapping->Build(valid_data, total_count, options);
         offset_mapping_ = std::move(sealed_mapping);
     }
 

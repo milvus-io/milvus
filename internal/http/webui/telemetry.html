@@ -1300,11 +1300,14 @@
                         </div>
 
                         <div class="form-row" style="margin-top: 16px;">
-                            <div class="form-group" style="display: flex; align-items: center;">
+                            <div class="form-group" style="display: flex; align-items: center; flex-direction: column; align-items: flex-start;">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="configPersistent" checked>
-                                    Persistent (survives client restart)
+                                    Persistent (re-applied to matching clients)
                                 </label>
+                                <small id="configPersistentHint" style="color: var(--gray-400); margin-top: 4px; display: none;">
+                                    Only accepted if the target client uses a stable ClientID. A generated ID changes on restart, so the config would stop applying; the server rejects those.
+                                </small>
                             </div>
                         </div>
 
@@ -2555,6 +2558,19 @@
             const scope = document.getElementById('configTargetScope').value;
             document.getElementById('configClientIdGroup').style.display = scope === 'client' ? 'block' : 'none';
             document.getElementById('configDatabaseIdGroup').style.display = scope === 'database' ? 'block' : 'none';
+
+            // Whether a client-scoped config may be persistent depends on the target having a
+            // stable ClientID, which only the server can verify. Default it off and explain,
+            // but leave it selectable so an operator targeting a pinned client can still use it.
+            const persistentBox = document.getElementById('configPersistent');
+            const hint = document.getElementById('configPersistentHint');
+            const clientScoped = scope === 'client';
+
+            persistentBox.disabled = false;
+            if (clientScoped) {
+                persistentBox.checked = false;
+            }
+            hint.style.display = clientScoped ? 'block' : 'none';
         }
 
         function setConfigEnabled(value) {

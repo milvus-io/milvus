@@ -373,10 +373,10 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 	if err != nil {
 		return 0, err
 	}
-	physicalTs, logicalTs := tsoutil.ParseTS(ts)
-	expirePhysicalTs := physicalTs.Add(time.Duration(Params.DataCoordCfg.SegAssignmentExpiration.GetAsFloat()) * time.Millisecond)
-	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
-	return expireTs, nil
+	return tsoutil.AddPhysicalDurationOnTs(
+		ts,
+		Params.DataCoordCfg.SegAssignmentExpiration.GetAsDuration(time.Millisecond),
+	), nil
 }
 
 // AllocNewGrowingSegment allocates segment for streaming node.

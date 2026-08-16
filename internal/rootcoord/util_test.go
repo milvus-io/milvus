@@ -760,3 +760,67 @@ func Test_updateMaxFieldIDProperty(t *testing.T) {
 		assert.Equal(t, "103", result[1].Value)
 	})
 }
+
+func TestValidateLocalFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		field     *schemapb.FieldSchema
+		errorText string
+	}{
+		{
+			name: "raw scalar",
+			field: &schemapb.FieldSchema{
+				Name:       "raw_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatRaw}},
+			},
+		},
+		{
+			name: "vortex scalar",
+			field: &schemapb.FieldSchema{
+				Name:       "vortex_scalar",
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatVortex}},
+			},
+		},
+		{
+			name: "invalid value",
+			field: &schemapb.FieldSchema{
+				Name:       "invalid",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: "unknown"}},
+			},
+			errorText: "invalid local_format",
+		},
+		{
+			name: "primary key",
+			field: &schemapb.FieldSchema{
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				TypeParams:   []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatVortex}},
+			},
+			errorText: "not supported for primary key",
+		},
+		{
+			name: "vector field",
+			field: &schemapb.FieldSchema{
+				Name:       "vector",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatVortex}},
+			},
+			errorText: "not supported for vector field",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateLocalFormat(test.field)
+			if test.errorText == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, test.errorText)
+		})
+	}
+}

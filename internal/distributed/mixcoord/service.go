@@ -1032,6 +1032,14 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	return s.mixCoord.RestoreSnapshot(ctx, req)
 }
 
+func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	return s.mixCoord.ExportSnapshot(ctx, req)
+}
+
+func (s *Server) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	return s.mixCoord.GetExportSnapshotState(ctx, req)
+}
+
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	return s.mixCoord.GetRestoreSnapshotState(ctx, req)
 }

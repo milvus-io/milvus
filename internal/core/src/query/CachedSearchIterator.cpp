@@ -39,7 +39,8 @@ CachedSearchIterator::CachedSearchIterator(
     const milvus::index::VectorIndex& index,
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
-    const BitsetView& bitset) {
+    const BitsetView& bitset,
+    milvus::OpContext* op_context) {
     if (query_ds == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
@@ -66,7 +67,7 @@ CachedSearchIterator::CachedSearchIterator(
         search_info, batch_size_, index.GetMetricType(), search_json);
 
     auto expected_iterators =
-        index.VectorIterators(query_ds, search_json, bitset);
+        index.VectorIterators(query_ds, search_json, bitset, op_context);
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
@@ -109,6 +110,7 @@ CachedSearchIterator::InitializeChunkedIterators(
 CachedSearchIterator::CachedSearchIterator(
     const dataset::SearchDataset& query_ds,
     const segcore::VectorBase* vec_data,
+    const ChunkSnapshot& chunks,
     const int64_t row_count,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
@@ -147,10 +149,18 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, &vec_data, vec_size_per_chunk, row_count, is_element_level](
-            int64_t chunk_id) {
-            const void* chunk_data = vec_data->get_chunk_data(chunk_id);
-            // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
+        [this,
+         &vec_data,
+         &chunks,
+         vec_size_per_chunk,
+         row_count,
+         is_element_level](int64_t chunk_id) {
+            // Read through the caller's snapshot, not the live container: the
+            // generation behind `chunks` is pinned and cannot be reclaimed
+            // under us. There is no PinWrapper here (unlike the sealed path)
+            // because the snapshot itself is the pin, and the caller holds it
+            // for at least as long as this iterator lives.
+            const void* chunk_data = vec_data->get_chunk_data(chunks, chunk_id);
             int64_t chunk_size = std::min(
                 vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
             if (!is_element_level) {
@@ -250,8 +260,7 @@ CachedSearchIterator::NextBatch(const SearchInfo& search_info,
 
     for (size_t query_idx = 0; query_idx < nq_; ++query_idx) {
         auto rst = GetBatchedNextResults(query_idx, search_info);
-        WriteSingleQuerySearchResult(
-            search_result, query_idx, rst, search_info.round_decimal_);
+        WriteSingleQuerySearchResult(search_result, query_idx, rst);
     }
 }
 
@@ -278,8 +287,18 @@ CachedSearchIterator::GetNextValidResult(
     const std::optional<float>& radius,
     const std::optional<float>& range_filter) {
     auto& iterator = iterators_[iterator_idx];
-    while (iterator->HasNext()) {
-        auto result = ConvertIteratorResult(iterator->Next());
+    while (true) {
+        auto has_next = iterator->HasNext();
+        AssertInfo(has_next.has_value(),
+                   "knowhere iterator HasNext failed: {}",
+                   has_next.what());
+        if (!has_next.value()) {
+            break;
+        }
+        auto next = iterator->Next();
+        AssertInfo(
+            next.has_value(), "knowhere iterator Next failed: {}", next.what());
+        auto result = ConvertIteratorResult(next.value());
         if (IsValid(result, last_bound, radius, range_filter)) {
             return result;
         }
@@ -342,8 +361,19 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
 
     if (num_chunks_ == 1) {
         auto& iterator = iterators_[query_idx];
-        while (iterator->HasNext() && rst.size() < batch_size_) {
-            auto result = ConvertIteratorResult(iterator->Next());
+        while (rst.size() < batch_size_) {
+            auto has_next = iterator->HasNext();
+            AssertInfo(has_next.has_value(),
+                       "knowhere iterator HasNext failed: {}",
+                       has_next.what());
+            if (!has_next.value()) {
+                break;
+            }
+            auto next = iterator->Next();
+            AssertInfo(next.has_value(),
+                       "knowhere iterator Next failed: {}",
+                       next.what());
+            auto result = ConvertIteratorResult(next.value());
             if (IsValid(result, last_bound, radius, range_filter)) {
                 rst.emplace_back(result);
             }
@@ -367,20 +397,11 @@ void
 CachedSearchIterator::WriteSingleQuerySearchResult(
     SearchResult& search_result,
     const size_t idx,
-    std::vector<DisIdPair>& rst,
-    const int64_t round_decimal) {
-    const float multiplier = pow(10.0, round_decimal);
-
+    std::vector<DisIdPair>& rst) {
     std::transform(rst.begin(),
                    rst.end(),
                    search_result.distances_.begin() + idx * batch_size_,
-                   [multiplier, round_decimal](DisIdPair& x) {
-                       if (round_decimal != -1) {
-                           x.first =
-                               std::round(x.first * multiplier) / multiplier;
-                       }
-                       return x.first;
-                   });
+                   [](const DisIdPair& x) { return x.first; });
 
     std::transform(rst.begin(),
                    rst.end(),

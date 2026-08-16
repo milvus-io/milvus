@@ -81,7 +81,7 @@ class PhyTermFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -104,6 +104,13 @@ class PhyTermFilterExpr : public SegmentExpr {
     GetColumnInfo() const override {
         return expr_->column_;
     }
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     void
@@ -162,7 +169,6 @@ class PhyTermFilterExpr : public SegmentExpr {
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
-    std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 

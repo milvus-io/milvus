@@ -56,6 +56,14 @@ template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
     uint32_t tantivy_index_version,
     const storage::FileManagerContext& file_manager_context)
+    : HybridScalarIndex(tantivy_index_version, file_manager_context, false) {
+}
+
+template <typename T>
+HybridScalarIndex<T>::HybridScalarIndex(
+    uint32_t tantivy_index_version,
+    const storage::FileManagerContext& file_manager_context,
+    bool is_nested_index)
     : ScalarIndex<T>(HYBRID_INDEX_TYPE),
       is_built_(false),
       tantivy_index_version_(tantivy_index_version),
@@ -63,7 +71,8 @@ HybridScalarIndex<T>::HybridScalarIndex(
           DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT),
       low_cardinality_index_type_(ScalarIndexType::BITMAP),
       high_cardinality_index_type_(ScalarIndexType::STLSORT),
-      file_manager_context_(file_manager_context) {
+      file_manager_context_(file_manager_context),
+      is_nested_index_(is_nested_index) {
     if (file_manager_context.Valid()) {
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -181,14 +190,18 @@ HybridScalarIndex<T>::GetInternalIndex() {
         return internal_index_;
     }
     if (internal_index_type_ == ScalarIndexType::BITMAP) {
-        internal_index_ =
-            std::make_shared<BitmapIndex<T>>(this->file_manager_context_);
+        internal_index_ = std::make_shared<BitmapIndex<T>>(
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
-        internal_index_ =
-            std::make_shared<ScalarIndexSort<T>>(this->file_manager_context_);
+        internal_index_ = std::make_shared<ScalarIndexSort<T>>(
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
-            tantivy_index_version_, this->file_manager_context_);
+            tantivy_index_version_,
+            this->file_manager_context_,
+            false,
+            true,
+            is_nested_index_);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -205,16 +218,20 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
 
     if (internal_index_type_ == ScalarIndexType::BITMAP) {
         internal_index_ = std::make_shared<BitmapIndex<std::string>>(
-            this->file_manager_context_);
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::MARISA) {
         internal_index_ =
             std::make_shared<StringIndexMarisa>(this->file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
-        internal_index_ =
-            std::make_shared<StringIndexSort>(this->file_manager_context_);
+        internal_index_ = std::make_shared<StringIndexSort>(
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
-            tantivy_index_version_, this->file_manager_context_);
+            tantivy_index_version_,
+            this->file_manager_context_,
+            false,
+            true,
+            is_nested_index_);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");

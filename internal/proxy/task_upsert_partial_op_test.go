@@ -197,6 +197,34 @@ func TestValidateFieldPartialUpdateOps_RejectsNonArrayField(t *testing.T) {
 	assert.Contains(t, err.Error(), "Array field")
 }
 
+func TestValidateFieldPartialUpdateOps_RejectsStructOps(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "profile",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+				},
+			},
+		},
+	}
+
+	req := &milvuspb.UpsertRequest{
+		FieldsData: []*schemapb.FieldData{{FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct}},
+		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("profile", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
+	}
+	_, err := validateFieldPartialUpdateOps(req, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported for struct field")
+
+	req = &milvuspb.UpsertRequest{
+		FieldOps: []*schemapb.FieldPartialUpdateOp{op("profile[age]", schemapb.FieldPartialUpdateOp_REPLACE)},
+	}
+	_, err = validateFieldPartialUpdateOps(req, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "partial struct update is not supported")
+}
+
 func TestValidateFieldPartialUpdateOps_RejectsElementTypeMismatch(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},

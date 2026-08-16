@@ -88,6 +88,25 @@ type reqCollName interface {
 	requestutil.CollectionNameGetter
 }
 
+func getRequestNamespace(req any) *string {
+	switch r := req.(type) {
+	case *milvuspb.InsertRequest:
+		return r.Namespace
+	case *milvuspb.UpsertRequest:
+		return r.Namespace
+	case *milvuspb.DeleteRequest:
+		return r.Namespace
+	case *milvuspb.SearchRequest:
+		return r.Namespace
+	case *milvuspb.HybridSearchRequest:
+		return r.Namespace
+	case *milvuspb.QueryRequest:
+		return r.Namespace
+	default:
+		return nil
+	}
+}
+
 func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map[int64][]int64, error) {
 	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
@@ -97,20 +116,42 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 	if err != nil {
 		return 0, nil, err
 	}
-	if r.GetPartitionName() == "" {
-		collectionSchema, err := globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+
+	var collectionSchema *schemaInfo
+	if namespace := getRequestNamespace(r); namespace != nil {
+		collectionSchema, err = globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
 		if err != nil {
 			return 0, nil, err
 		}
+		partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(collectionSchema.CollectionSchema, namespace, r.GetPartitionName())
+		if err != nil {
+			return 0, nil, err
+		}
+		if namespaceAsPartition {
+			part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), partitionName)
+			if err != nil {
+				return 0, nil, err
+			}
+			return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
+		}
+	}
+
+	if r.GetPartitionName() == "" {
+		if collectionSchema == nil {
+			collectionSchema, err = globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+			if err != nil {
+				return 0, nil, err
+			}
+		}
 		if collectionSchema.IsPartitionKeyCollection() {
-			return db.dbID, map[int64][]int64{collectionID: {}}, nil
+			return db.DBID, map[int64][]int64{collectionID: {}}, nil
 		}
 	}
 	part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
 	if err != nil {
 		return 0, nil, err
 	}
-	return db.dbID, map[int64][]int64{collectionID: {part.partitionID}}, nil
+	return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
 }
 
 func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, map[int64][]int64, error) {
@@ -122,16 +163,28 @@ func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, m
 	if err != nil {
 		return 0, nil, err
 	}
-	parts := make([]int64, len(r.GetPartitionNames()))
-	for i, s := range r.GetPartitionNames() {
+	partitionNames := r.GetPartitionNames()
+	if namespace := getRequestNamespace(r); namespace != nil {
+		collectionSchema, err := globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+		if err != nil {
+			return 0, nil, err
+		}
+		partitionNames, _, err = resolveNamespacePartitionNames(collectionSchema.CollectionSchema, namespace, partitionNames)
+		if err != nil {
+			return 0, nil, err
+		}
+	}
+
+	parts := make([]int64, len(partitionNames))
+	for i, s := range partitionNames {
 		part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)
 		if err != nil {
 			return 0, nil, err
 		}
-		parts[i] = part.partitionID
+		parts[i] = part.PartitionID
 	}
 
-	return db.dbID, map[int64][]int64{collectionID: parts}, nil
+	return db.DBID, map[int64][]int64{collectionID: parts}, nil
 }
 
 func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
@@ -140,7 +193,15 @@ func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
 		return util.InvalidDBID, map[int64][]int64{}
 	}
 	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-	return db.dbID, map[int64][]int64{collectionID: {}}
+	return db.DBID, map[int64][]int64{collectionID: {}}
+}
+
+func getDatabaseID(dbName string) int64 {
+	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), dbName)
+	if db == nil {
+		return util.InvalidDBID
+	}
+	return db.DBID
 }
 
 // failedMutationResult returns failed mutation result.

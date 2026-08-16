@@ -17,12 +17,15 @@
 package initcore
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -147,6 +150,152 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
 	assert.NoError(t, InitArrowReaderConfig(pt))
+}
+
+func TestInitLoonReaderConfig(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	// Defaults (0/0) keep the pre-existing sequential behavior and must not
+	// create the pool: GetParallelism() reports 1 when no pool exists.
+	assert.NoError(t, InitLoonReaderConfig(pt))
+	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "536870912"))
+	assert.NoError(t, InitLoonReaderConfig(pt))
+
+	// Out-of-range pool sizes are rejected instead of being narrowed to
+	// int32: 4294967296 would wrap to 0 and silently disable the pool.
+	for _, invalid := range []string{"-1", "4294967296", "1025"} {
+		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, invalid))
+		err := InitLoonReaderConfig(pt)
+		assert.Error(t, err, "pool size %s must be rejected", invalid)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	assert.NoError(t, pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key))
+
+	// An out-of-range window is rejected before the (non-destroyable)
+	// reader pool is resized, so a rejected update leaves nothing applied.
+	before := EffectiveLoonReaderThreadPoolSize()
+	assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "8"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "8589934592"))
+	err := InitLoonReaderConfig(pt)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Equal(t, before, EffectiveLoonReaderThreadPoolSize(),
+		"the reader pool must not be resized when the window is rejected")
+}
+
+// TestInitLoonReaderConfigSerialized pins the read-then-apply critical
+// section. Config-event handlers run inline on the updating goroutine with no
+// cross-handler ordering guarantee, and resizing the reader pool is not
+// idempotent, so a call that read a stale paramtable value must not be able to
+// apply after a newer one. Holding the lock must therefore block the whole
+// call, not just the C-side apply.
+func TestInitLoonReaderConfigSerialized(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	loonReaderConfigMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			loonReaderConfigMu.Unlock()
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- InitLoonReaderConfig(pt) }()
+
+	select {
+	case <-done:
+		t.Fatal("InitLoonReaderConfig completed while the config lock was held; read-then-apply is not serialized")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	loonReaderConfigMu.Unlock()
+	locked = false
+
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("InitLoonReaderConfig did not finish after the lock was released")
+	}
+}
+
+// TestInitLoonReaderConfigConcurrent exercises the same path from several
+// goroutines so `go test -race` covers the lock itself. Values stay at the
+// defaults: a non-zero pool size cannot be undone at runtime and would leak
+// into every later test in this binary.
+func TestInitLoonReaderConfigConcurrent(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = InitLoonReaderConfig(pt)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		assert.NoError(t, err, "concurrent call %d", i)
+	}
+	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
+}
+
+// TestRegisterLoonReaderConfigWatchers verifies the helper registers a handler
+// under both loon reader keys and that the handler survives a rejected update.
+func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	assert.NotPanics(t, func() { RegisterLoonReaderConfigWatchers(pt, "test") })
+
+	var poolFires, windowFires atomic.Int32
+	poolSentinel := config.NewHandler("sentinel-loon-pool", func(*config.Event) { poolFires.Add(1) })
+	windowSentinel := config.NewHandler("sentinel-loon-window", func(*config.Event) { windowFires.Add(1) })
+	pt.Watch(pt.CommonCfg.StorageReaderThreadPoolSize.Key, poolSentinel)
+	pt.Watch(pt.CommonCfg.IndexBuildReadWindowBytes.Key, windowSentinel)
+	defer pt.Unwatch(pt.CommonCfg.StorageReaderThreadPoolSize.Key, poolSentinel)
+	defer pt.Unwatch(pt.CommonCfg.IndexBuildReadWindowBytes.Key, windowSentinel)
+
+	// Updating only the window must not warn about the pool: with the pool
+	// disabled (default 0) the effective size reads back as 1 because the
+	// singleton does not exist, which is not a failure to destroy it.
+	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "536870912"))
+	assert.Positive(t, windowFires.Load(),
+		"helper must have registered a handler on IndexBuildReadWindowBytes")
+
+	// Drive the handler's error branch: an out-of-range window is rejected
+	// by InitLoonReaderConfig, so the handler logs and returns.
+	assert.NotPanics(t, func() {
+		_ = pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "8589934592")
+	})
+	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "0"))
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
+	assert.Positive(t, poolFires.Load(),
+		"helper must have registered a handler on StorageReaderThreadPoolSize")
+}
+
+func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
+	assert.NotPanics(t, func() {
+		UpdateLoadTransientBudgetBytes(0)
+		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
+	})
 }
 
 func TestInitStorageV2FileSystem(t *testing.T) {

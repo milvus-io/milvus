@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -62,6 +64,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
+	validData := []bool{true, false}
+	newField := func(name string) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: name,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: validData},
+			},
+		}
+	}
+	outputField := newField("output")
+	legacyGroupBy := newField("legacy_group_by")
+	groupBy := newField("group_by")
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{outputField},
+			GroupByFieldValue:  legacyGroupBy,
+			GroupByFieldValues: []*schemapb.FieldData{groupBy},
+		},
+	}
+
+	projectSearchResultValidDataForLegacy(result)
+
+	for _, field := range []*schemapb.FieldData{outputField, legacyGroupBy, groupBy} {
+		assert.Equal(t, validData, field.GetValidData())
+		assert.Equal(t, validData, field.GetScalars().GetValidData())
+	}
+}
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	paramtable.Init()
@@ -84,6 +115,127 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	status, err := node.InvalidateCollectionMetaCache(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+// TestProxy_InvalidateCollectionMetaCache_AliasScanGating locks in the
+// holder-scan fallback fingerprint: ONLY Create/AlterAlias broadcasts WITHOUT
+// target ids (an old rootcoord) may scan. DropAlias legitimately carries no id
+// in every version -- scanning there would reintroduce a permanent O(N) stall
+// on the normal drop path -- and id-carrying broadcasts never scan. The strict
+// mock fails the test on any unexpected RemoveAliasHolders call.
+func TestProxy_InvalidateCollectionMetaCache_AliasScanGating(t *testing.T) {
+	paramtable.Init()
+	oldCache := globalMetaCache
+	defer func() { globalMetaCache = oldCache }()
+	ctx := context.Background()
+	const ts = uint64(42)
+
+	newNode := func(t *testing.T) (*Proxy, *MockCache) {
+		cache := NewMockCache(t)
+		globalMetaCache = cache
+		shard := shardclient.NewMockShardClientManager(t)
+		shard.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
+		node := &Proxy{shardMgr: shard}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		return node, cache
+	}
+	req := func(mt commonpb.MsgType, id int64) *proxypb.InvalidateCollMetaCacheRequest {
+		return &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           &commonpb.MsgBase{MsgType: mt, Timestamp: ts},
+			DbName:         "db",
+			CollectionName: "a",
+			CollectionID:   id,
+		}
+	}
+
+	t.Run("DropAlias without id must NOT scan", func(t *testing.T) {
+		node, cache := newNode(t)
+		cache.EXPECT().InvalidateCollectionMeta(mock.Anything, "db", "a", int64(0), true).Return(nil)
+		// no RemoveAliasHolders expectation: the strict mock fails on a call
+		status, err := node.InvalidateCollectionMetaCache(ctx, req(commonpb.MsgType_DropAlias, 0))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
+	for _, mt := range []commonpb.MsgType{commonpb.MsgType_CreateAlias, commonpb.MsgType_AlterAlias} {
+		t.Run(mt.String()+" without id (old rootcoord) must scan", func(t *testing.T) {
+			node, cache := newNode(t)
+			cache.EXPECT().InvalidateCollectionMeta(mock.Anything, "db", "a", int64(0), true).Return(nil)
+			cache.EXPECT().RemoveAliasHolders(mock.Anything, "db", "a").Return().Once()
+			status, err := node.InvalidateCollectionMetaCache(ctx, req(mt, 0))
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+		})
+	}
+
+	t.Run("AlterAlias WITH id (new rootcoord) must NOT scan", func(t *testing.T) {
+		node, cache := newNode(t)
+		cache.EXPECT().InvalidateCollectionMeta(mock.Anything, "db", "a", int64(7), true).Return(nil)
+		status, err := node.InvalidateCollectionMetaCache(ctx, req(commonpb.MsgType_AlterAlias, 7))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+}
+
+func TestProxy_InvalidateCollectionMetaCache_DatabaseInvalidationScope(t *testing.T) {
+	paramtable.Init()
+	oldCache := globalMetaCache
+	defer func() { globalMetaCache = oldCache }()
+
+	t.Run("alter database removes database info only", func(t *testing.T) {
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveDatabaseInfo(mock.Anything, "db").Return().Once()
+		globalMetaCache = cache
+
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := node.InvalidateCollectionMetaCache(context.Background(), &proxypb.InvalidateCollMetaCacheRequest{
+			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase},
+			DbName: "db",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
+	t.Run("drop database still removes all database metadata", func(t *testing.T) {
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveDatabase(mock.Anything, "db").Return().Once()
+		globalMetaCache = cache
+
+		shardMgr := shardclient.NewMockShardClientManager(t)
+		shardMgr.EXPECT().RemoveDatabase("db").Return().Once()
+		node := &Proxy{shardMgr: shardMgr}
+		assert.NoError(t, node.initRateCollector())
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := node.InvalidateCollectionMetaCache(context.Background(), &proxypb.InvalidateCollMetaCacheRequest{
+			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DropDatabase},
+			DbName: "db",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+}
+
+func TestProxy_InvalidateCollectionMetaCache_EmptyPartitionNameReturnsTypedStatus(t *testing.T) {
+	paramtable.Init()
+	oldCache := globalMetaCache
+	defer func() { globalMetaCache = oldCache }()
+	globalMetaCache = NewMockCache(t)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err := node.InvalidateCollectionMetaCache(context.Background(), &proxypb.InvalidateCollMetaCacheRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
+		DbName:         "db",
+		CollectionName: "collection",
+		CollectionID:   100,
+	})
+
+	assert.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), status.GetCode())
+	assert.Contains(t, status.GetReason(), "empty partition name")
+	assert.NotEqual(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
 }
 
 func TestProxy_CheckHealth(t *testing.T) {
@@ -226,6 +378,28 @@ func TestProxyRoleDescriptionValidation(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func TestRestoreRBACDoesNotLogPasswordHash(t *testing.T) {
+	logs := captureProxyLogs(t)
+	node := &Proxy{mixCoord: NewMixCoordMock()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	hashSentinel := "$2a$10$RESTORE_RBAC_DIRECT_LOG_SENTINEL"
+	req := &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Users: []*milvuspb.UserInfo{{
+				User:     "restore-user",
+				Password: hashSentinel,
+			}},
+		},
+	}
+
+	status, err := node.RestoreRBAC(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	assert.Equal(t, hashSentinel, req.GetRBACMeta().GetUsers()[0].GetPassword())
+	assert.NotContains(t, logs.String(), hashSentinel)
+	assert.Contains(t, logs.String(), "restore-user")
 }
 
 func TestProxyRoleDescriptionForwarding(t *testing.T) {
@@ -1260,6 +1434,9 @@ func TestProxyDescribeCollection(t *testing.T) {
 			},
 		},
 	}, nil).Maybe()
+	mixCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+		return req.DbName == "db_not_exists"
+	})).Return(nil, merr.WrapErrDatabaseNotFound("db_not_exists")).Maybe()
 	mixCoord.On("ShowPartitions", mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
 		PartitionNames:       []string{"default"},
@@ -1291,6 +1468,8 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=test_1][collection=test_not_exists]")
 		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), resp.GetStatus().GetCode())
+		assert.Equal(t, "true", resp.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
 	})
 
 	t.Run("collection id not exists", func(t *testing.T) {
@@ -1301,6 +1480,8 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=test_1][collection=]")
 		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), resp.GetStatus().GetCode())
+		assert.Equal(t, "true", resp.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
 	})
 
 	t.Run("db not exists", func(t *testing.T) {
@@ -1309,8 +1490,11 @@ func TestProxyDescribeCollection(t *testing.T) {
 			CollectionName: "test_collection",
 		})
 		assert.NoError(t, err)
-		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=db_not_exists][collection=test_collection]")
-		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+		assert.Contains(t, resp.GetStatus().GetReason(), "database not found")
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, merr.Code(merr.ErrDatabaseNotFound), resp.GetStatus().GetCode())
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrDatabaseNotFound)
+		assert.Equal(t, "true", resp.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
 	})
 
 	t.Run("describe collection ok", func(t *testing.T) {
@@ -1411,9 +1595,9 @@ func TestProxy_Delete(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
-		collID: collectionID,
+		CollID: collectionID,
 	}
 	paramtable.Init()
 
@@ -1430,7 +1614,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
-		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -1615,7 +1799,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
 		globalMetaCache = mc
 
@@ -1840,7 +2024,7 @@ func TestRunAnalyzer(t *testing.T) {
 					Name:    "test_text",
 				}},
 			},
-			fieldMap: fieldMap,
+			FieldMap: fieldMap,
 		}, nil)
 
 		lb := shardclient.NewMockLBPolicy(t)
@@ -2207,6 +2391,88 @@ func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
 	})
 }
 
+func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery", t, func() {
+		paramtable.Init()
+		originalCache := globalMetaCache
+		defer func() { globalMetaCache = originalCache }()
+
+		namespace := "tenant_a"
+		schema := &schemapb.CollectionSchema{
+			Name:            "test_collection",
+			EnableNamespace: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:    101,
+					Name:       "vec",
+					DataType:   schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+				},
+			},
+		}
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
+		globalMetaCache = cache
+
+		var capturedNamespace *string
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			capturedNamespace = qt.request.Namespace
+			return &milvuspb.QueryResults{
+				Status: merr.Success(),
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "id",
+						FieldId:   100,
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1}},
+								},
+							},
+						},
+					},
+					{
+						FieldName: "vec",
+						FieldId:   101,
+						Type:      schemapb.DataType_FloatVector,
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 2,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}},
+								},
+							},
+						},
+					},
+				},
+			}, segcore.StorageCost{}, nil
+		}).Build()
+
+		node := &Proxy{}
+		req := &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+			Namespace:      &namespace,
+			SearchInput: &milvuspb.SearchRequest_Ids{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+				},
+			},
+			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
+		}
+
+		_, err := node.handleIfSearchByPK(context.Background(), req)
+		assert.NoError(t, err)
+		require.NotNil(t, capturedNamespace)
+		assert.Equal(t, namespace, *capturedNamespace)
+	})
+}
+
 func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 	// Save and restore globalMetaCache
 	cache := globalMetaCache
@@ -2224,7 +2490,7 @@ func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 
 	m1 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
 	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		schema: newSchemaInfo(externalSchema),
+		Schema: mustNewSchemaInfo(externalSchema),
 	}, nil).Build()
 	defer m1.UnPatch()
 	defer m2.UnPatch()
@@ -2254,7 +2520,7 @@ func TestProxy_Insert_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2283,7 +2549,7 @@ func TestProxy_Delete_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2313,7 +2579,7 @@ func TestProxy_Upsert_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2342,7 +2608,7 @@ func TestProxy_Flush_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2371,7 +2637,7 @@ func TestProxy_CreatePartition_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2401,7 +2667,7 @@ func TestProxy_DropPartition_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2431,7 +2697,7 @@ func TestProxy_ImportV2_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -2698,7 +2964,7 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 		},
 	}
 
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(externalSchema), nil).Build()
 	defer m1.UnPatch()
 
 	proxy := &Proxy{}
@@ -3118,17 +3384,20 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cases := []struct {
-		name       string
-		src, spec  string
-		wantSubstr string
+		name          string
+		src, spec     string
+		wantSubstr    string
+		secretSubstrs []string
 	}{
-		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
-		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
-		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
-		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
-		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
-		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
-		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
+		{"source only rejected", "s3://SOURCE_ACCESS_SENTINEL:SOURCE_SECRET_SENTINEL@bucket/p", "", "both provided or both omitted", []string{"SOURCE_ACCESS_SENTINEL", "SOURCE_SECRET_SENTINEL"}},
+		{"spec only rejected", "", `{"format":"parquet","extfs":{"access_key_id":"AKIA_ERROR_SENTINEL","access_key_value":"SECRET_ERROR_SENTINEL"}}`, "both provided or both omitted", []string{"AKIA_ERROR_SENTINEL", "SECRET_ERROR_SENTINEL"}},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"invalid format includes validation detail", "s3://bucket/prefix", `{"format":"FORMAT_REFRESH_SECRET_SENTINEL"}`, "external_spec is invalid", nil},
+		{"invalid extfs includes validation detail", "s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_refresh_secret_sentinel"}}`, "external_spec is invalid", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3141,6 +3410,9 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 			if tc.wantSubstr != "" {
 				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
+			}
+			for _, secret := range tc.secretSubstrs {
+				assert.NotContains(t, resp.GetStatus().GetReason(), secret)
 			}
 		})
 	}
@@ -3163,8 +3435,8 @@ func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t 
 			},
 		}
 		return &collectionInfo{
-			collID: 1,
-			schema: &schemaInfo{CollectionSchema: schema},
+			CollID: 1,
+			Schema: &schemaInfo{CollectionSchema: schema},
 		}
 	}
 
@@ -3274,8 +3546,8 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 		},
 	}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		collID: 101,
-		schema: &schemaInfo{
+		CollID: 101,
+		Schema: &schemaInfo{
 			CollectionSchema: schema,
 		},
 	}, nil).Build()

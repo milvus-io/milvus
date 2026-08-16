@@ -77,6 +77,13 @@ type SyncTask struct {
 
 	manifestPath string
 
+	// stats is the writer-built Statistics for SegmentInfo.Stats: insert /
+	// delta counts and sizes, bloom-filter / BM25 stats_binlog_size,
+	// timestamp_from/to/quantiles. DataCoord persists it directly on
+	// SaveBinlogPathsRequest.Stats; for V2 (or any flush that returns nil
+	// here) the handler falls back to computing from FieldBinlog arrays.
+	stats *datapb.Statistics
+
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
@@ -134,16 +141,25 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	columnGroups := t.getColumnGroups(segmentInfo)
 
+	// statsWriter, when set (V2 / V3), exposes this sync's prepared cumulative
+	// stats. SyncTask.Run installs it on the metaCache only after the DataCoord
+	// ack below, so a failed/retried sync never double-counts.
+	var statsWriter interface {
+		PreparedStats() *metacache.SegmentStats
+	}
+
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		statsWriter = writer
 	case storage.StorageV3:
 		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		statsWriter = writer
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		if writerErr != nil {
@@ -191,6 +207,11 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	if t.pack.isFlush {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
+	// Install the prepared cumulative stats directly in the commit transaction:
+	// no digest work, the exact object whose Publish() DataCoord just persisted.
+	if statsWriter != nil {
+		actions = append(actions, metacache.SetStatistics(statsWriter.PreparedStats()))
+	}
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
 	if t.pack.isDrop {
@@ -213,26 +234,30 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 }
 
 func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storagecommon.ColumnGroup {
-	// column group only needed for storage v2 segment
+	return resolveColumnGroups(segmentInfo, t.schema, t.segmentID, t.calcColumnStats)
+}
+
+func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.CollectionSchema, segmentID int64, calcColumnStats func() map[int64]storagecommon.ColumnStats) []storagecommon.ColumnGroup {
+	// column group only needed for storage v2/v3 segments
 	if segmentInfo.GetStorageVersion() != storage.StorageV2 && segmentInfo.GetStorageVersion() != storage.StorageV3 {
 		return nil
 	}
 
 	// empty pack
-	if len(t.pack.insertData) == 0 && t.schema == nil {
+	if schema == nil {
 		return nil
 	}
 
-	allFields := typeutil.GetAllFieldSchemas(t.schema)
+	allFields := typeutil.GetAllFieldSchemas(schema)
 
 	// use previous split if already exists
 	if currentSplit := segmentInfo.GetCurrentSplit(); currentSplit != nil {
 		for _, cg := range currentSplit {
 			// legacy split found, use legacy policy
 			if len(cg.Fields) == 0 {
-				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewLocalFormatPolicy(), storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
 				result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
-				mlog.Info(context.TODO(), "use legacy split policy", mlog.FieldSegmentID(t.segmentID), mlog.Stringers("columnGroups", result))
+				mlog.Info(context.TODO(), "use legacy split policy", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
 				return result
 			}
 		}
@@ -253,9 +278,13 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 	}
 
 	policies := storagecommon.DefaultPolicies()
-	result := storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+	stats := map[int64]storagecommon.ColumnStats{}
+	if calcColumnStats != nil {
+		stats = calcColumnStats()
+	}
+	result := storagecommon.SplitColumns(allFields, stats, policies...)
 	result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
-	mlog.Info(context.TODO(), "sync new split columns", mlog.FieldSegmentID(t.segmentID), mlog.Stringers("columnGroups", result))
+	mlog.Info(context.TODO(), "sync new split columns", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
 	return result
 }
 

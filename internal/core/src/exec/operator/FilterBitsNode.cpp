@@ -46,28 +46,34 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     auto* segment =
         query_context != nullptr ? query_context->get_segment() : nullptr;
     if (segment != nullptr &&
-        segment->get_schema().get_ttl_field_id().has_value()) {
+        segment->get_schema_snapshot()->get_ttl_field_id().has_value()) {
         key += fmt::format("|entity_ttl_physical_time_us:{}",
                            query_context->get_entity_ttl_physical_time_us());
     }
     return key;
 }
 
-void
+}  // namespace
+
+bool
 ConvertPredicateToFilteredBitset(TargetBitmapView data,
                                  TargetBitmapView valid,
                                  const size_t size) {
     // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
     // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
     // excluded together with FALSE.
+    if (valid.all()) {
+        data.flip();
+        return true;
+    }
+
     data.flip();
     TargetBitmap invalid(valid);
     invalid.flip();
     data.inplace_or(invalid, size);
     valid.set();
+    return false;
 }
-
-}  // namespace
 
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
@@ -82,11 +88,29 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This operator folds UNKNOWN predicate rows into the excluded set
+    // (ConvertPredicateToFilteredBitset), i.e. it is a null-rejecting
+    // consumer: let conjunctions in the predicate tree drop UNKNOWN rows
+    // from their active sets early.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
 
     enable_expr_cache_ = query_context_->get_enable_expr_cache();
+    if (enable_expr_cache_) {
+        // Only cache the predicate result when EVERY expression in it is
+        // cacheable. A bloom_match subtree is non-cacheable (its slim ToString
+        // cache key cannot distinguish distinct filter blobs), and that
+        // propagates up, so a predicate containing bloom_match is never cached
+        // and can never reuse another query's bitmap.
+        for (const auto& e : exprs_->exprs()) {
+            if (e && !e->IsCacheable()) {
+                enable_expr_cache_ = false;
+                break;
+            }
+        }
+    }
     if (enable_expr_cache_) {
         expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
     }
@@ -149,6 +173,8 @@ PhyFilterBitsNode::GetOutput() {
     tracer::AutoSpan span(
         "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
     tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
+
+    exprs_->WaitPrefetch();
 
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
@@ -225,11 +251,11 @@ PhyFilterBitsNode::GetOutput() {
                 valid_bitset.append(valid_view);
                 num_processed_rows_ += col_vec_size;
             } else {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "PhyFilterBitsNode result should be bitmap");
             }
         } else {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }

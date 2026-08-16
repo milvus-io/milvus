@@ -41,6 +41,7 @@ type deleteNode struct {
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
 func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) {
+	ctx := msg.TraceCtx()
 	deleteData, ok := deleteDatas[msg.PartitionID]
 	if !ok {
 		deleteData = &delegator.DeleteData{
@@ -53,7 +54,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 	deleteData.Timestamps = append(deleteData.Timestamps, msg.Timestamps...)
 	deleteData.RowCount += int64(len(pks))
 
-	mlog.Info(context.TODO(), "pipeline fetch delete msg",
+	mlog.Info(ctx, "pipeline fetch delete msg",
 		mlog.FieldCollectionID(dNode.collectionID),
 		mlog.FieldPartitionID(msg.PartitionID),
 		mlog.Int("deleteRowNum", len(pks)),
@@ -66,25 +67,36 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	nodeMsg := in.(*deleteNodeMsg)
 
 	if len(nodeMsg.deleteMsgs) > 0 {
-		// partition id = > DeleteData
-		deleteDatas := make(map[UniqueID]*delegator.DeleteData)
+		deleteDataByTs := make(map[uint64]map[UniqueID]*delegator.DeleteData)
+		// deleteMsgs are ordered by WAL timetick within a vchannel; keep first-seen EndTs order
+		// because the delete buffer expects non-decreasing timestamps on Put.
+		tsOrder := make([]uint64, 0)
 
 		for _, msg := range nodeMsg.deleteMsgs {
+			ts := msg.EndTs()
+			deleteDatas, ok := deleteDataByTs[ts]
+			if !ok {
+				deleteDatas = make(map[UniqueID]*delegator.DeleteData)
+				deleteDataByTs[ts] = deleteDatas
+				tsOrder = append(tsOrder, ts)
+			}
 			dNode.addDeleteData(deleteDatas, msg)
 		}
-		// do Delete, use ts range max as ts
-		dNode.delegator.ProcessDelete(lo.Values(deleteDatas), nodeMsg.timeRange.timestampMax)
+
+		batches := make([]delegator.DeleteBatch, 0, len(tsOrder))
+		for _, ts := range tsOrder {
+			batches = append(batches, delegator.DeleteBatch{
+				Ts:   ts,
+				Data: lo.Values(deleteDataByTs[ts]),
+			})
+		}
+		dNode.delegator.ProcessDeleteBatches(batches)
 	}
 
 	if nodeMsg.schema != nil {
 		ctx := context.TODO()
 		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
-			mlog.Warn(ctx, "failed to update schema in delete node",
-				mlog.Int64("collectionID", dNode.collectionID),
-				mlog.String("channel", dNode.channel),
-				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
-				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
-				mlog.Err(err))
+			panic(err)
 		}
 	}
 

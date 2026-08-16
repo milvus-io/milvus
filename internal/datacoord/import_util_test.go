@@ -29,7 +29,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -130,6 +129,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -205,6 +205,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -268,6 +269,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -346,6 +348,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -378,6 +381,90 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	assert.Equal(t, task.GetCollectionID(), importReq.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), importReq.GetPartitionIDs())
 	assert.Equal(t, job.GetVchannels(), importReq.GetVchannels())
+}
+
+func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			PartitionIDs: []int64{3},
+			Vchannels:    []string{"c0"},
+			Options: []*commonpb.KeyValuePair{
+				{Key: importutilv2.L0Import, Value: "true"},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
+		},
+	}
+	taskProto := &datapb.ImportTaskV2{
+		JobID:        job.GetJobID(),
+		TaskID:       4,
+		CollectionID: job.GetCollectionID(),
+		FileStats: []*datapb.ImportFileStats{
+			{
+				ImportFile: &internalpb.ImportFile{Id: 0, Paths: []string{"l0-prefix"}},
+				HashedStats: map[string]*datapb.PartitionImportStats{
+					"c0": {PartitionDataSize: map[int64]int64{3: 1}},
+				},
+			},
+		},
+	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
+	task := &importTask{
+		importMeta: importMeta,
+	}
+	task.task.Store(taskProto)
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(10), nil)
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(100), nil)
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		return 1000, 1000 + n, nil
+	})
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+
+	segments, err := AssignSegments(job, task, alloc, meta, 1024)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{10}, segments)
+	segment := meta.GetSegment(context.Background(), 10)
+	assert.NotNil(t, segment)
+	assert.Equal(t, datapb.SegmentLevel_L0, segment.GetLevel())
+	assert.EqualValues(t, storage.StorageV2, segment.GetStorageVersion())
+
+	importReq, err := AssembleImportRequest(task, job, meta, alloc)
+	assert.NoError(t, err)
+	assert.EqualValues(t, storage.StorageV2, importReq.GetStorageVersion())
+	assert.False(t, importReq.GetUseLoonFfi())
 }
 
 func TestImportUtil_RegroupImportFiles(t *testing.T) {
@@ -433,6 +520,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -475,8 +563,10 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	assert.NoError(t, err)
 
 	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 100, State: commonpb.SegmentState_Flushed},
-		size:        *atomic.NewInt64(3000 * 1024 * 1024),
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 5, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			Stats: &datapb.Statistics{InsertBinlogSize: 3000 * 1024 * 1024},
+		},
 	}
 	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)
@@ -623,6 +713,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)

@@ -17,14 +17,21 @@
 package milvusclient
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 func TestDefaultTelemetryConfig(t *testing.T) {
@@ -260,14 +267,14 @@ func TestClientTelemetryManager(t *testing.T) {
 			}
 		})
 
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
 		// Config hash should be updated for persistent commands
 		assert.NotEmpty(t, manager.GetConfigHash())
 
 		// Process the same commands again - should be idempotent
 		oldHash := manager.GetConfigHash()
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 		assert.Equal(t, oldHash, manager.GetConfigHash())
 	})
 
@@ -291,14 +298,14 @@ func TestClientTelemetryManager(t *testing.T) {
 		commands := []*ClientCommand{
 			{CommandId: "cmd-1", CommandType: "test", CreateTime: 1000},
 		}
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
-		replies := manager.getPendingReplies()
+		replies := drainPendingReplies(manager)
 		assert.Len(t, replies, 1)
 		assert.Equal(t, "cmd-1", replies[0].CommandId)
 
 		// Second call should return empty
-		replies = manager.getPendingReplies()
+		replies = drainPendingReplies(manager)
 		assert.Len(t, replies, 0)
 	})
 }
@@ -484,7 +491,7 @@ func TestConfigHashUpdateTiming(t *testing.T) {
 			{CommandId: "cfg2", CommandType: "enable_trace", Payload: []byte(`{"enabled": true}`), Persistent: true},
 		}
 
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
 		// Hash should be updated after all commands processed
 		hash := manager.GetConfigHash()
@@ -492,7 +499,7 @@ func TestConfigHashUpdateTiming(t *testing.T) {
 
 		// Hash should include both commands
 		// Verify by processing again - hash should remain the same
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 		assert.Equal(t, hash, manager.GetConfigHash())
 	})
 
@@ -504,7 +511,7 @@ func TestConfigHashUpdateTiming(t *testing.T) {
 			{CommandId: "cmd1", CommandType: "show_errors", Persistent: false},
 		}
 
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
 		// Hash should remain empty
 		assert.Equal(t, "", manager.GetConfigHash())
@@ -520,16 +527,16 @@ func TestConfigHashUpdateTiming(t *testing.T) {
 			{CommandId: "cmd2", CommandType: "clear_metrics", Persistent: false},
 		}
 
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
 		// Hash should be calculated based on persistent commands only
 		hash := manager.GetConfigHash()
 		assert.NotEmpty(t, hash)
 
 		// Add another non-persistent command - hash shouldn't change
-		manager.processCommands([]*ClientCommand{
+		manager.processProtoCommands(toProtoCommands([]*ClientCommand{
 			{CommandId: "cmd3", CommandType: "show_metrics", Persistent: false},
-		})
+		}))
 		assert.Equal(t, hash, manager.GetConfigHash())
 	})
 }
@@ -555,10 +562,10 @@ func TestPartialDeliveryScenario(t *testing.T) {
 		assert.Equal(t, "", manager.GetConfigHash())
 
 		// Now process all commands properly
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
 		// Hash should now be updated
-		expectedHash := manager.calculateConfigHash(commands)
+		expectedHash := manager.calculateProtoConfigHash(toProtoCommands(commands))
 		assert.Equal(t, expectedHash, manager.GetConfigHash())
 	})
 }
@@ -1656,7 +1663,7 @@ func TestCollectProtoMetrics(t *testing.T) {
 		manager.RecordOperation("Search", "test_col", startTime, nil)
 		manager.RecordOperation("Insert", "test_col", startTime, errors.New("insert error"))
 
-		metrics := manager.collectProtoMetrics()
+		metrics := manager.toProtoOperationMetrics(manager.collectMetrics())
 		assert.NotEmpty(t, metrics)
 
 		// Find Search metrics
@@ -1685,7 +1692,7 @@ func TestCollectProtoMetrics(t *testing.T) {
 		manager.RecordOperation("Query", "col_a", startTime, nil)
 		manager.RecordOperation("Query", "col_b", startTime, nil) // Not enabled
 
-		metrics := manager.collectProtoMetrics()
+		metrics := manager.toProtoOperationMetrics(manager.collectMetrics())
 		for _, m := range metrics {
 			if m.Operation == "Query" {
 				// Only col_a should have collection metrics
@@ -1766,7 +1773,7 @@ func TestCalculateProtoConfigHash(t *testing.T) {
 func TestCalculateConfigHash(t *testing.T) {
 	t.Run("empty commands", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
-		hash := manager.calculateConfigHash(nil)
+		hash := manager.calculateProtoConfigHash(nil)
 		assert.Empty(t, hash)
 	})
 
@@ -1775,7 +1782,7 @@ func TestCalculateConfigHash(t *testing.T) {
 		commands := []*ClientCommand{
 			{CommandId: "cmd-1", CommandType: "show_errors", Persistent: false},
 		}
-		hash := manager.calculateConfigHash(commands)
+		hash := manager.calculateProtoConfigHash(toProtoCommands(commands))
 		assert.Empty(t, hash)
 	})
 }
@@ -1980,7 +1987,7 @@ func TestCollectProtoMetricsEdgeCases(t *testing.T) {
 	t.Run("no collectors", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
 
-		metrics := manager.collectProtoMetrics()
+		metrics := manager.toProtoOperationMetrics(manager.collectMetrics())
 		assert.Empty(t, metrics)
 	})
 
@@ -1992,7 +1999,7 @@ func TestCollectProtoMetricsEdgeCases(t *testing.T) {
 		manager.collectors["EmptyOp"] = NewOperationMetricsCollector()
 		manager.mu.Unlock()
 
-		metrics := manager.collectProtoMetrics()
+		metrics := manager.toProtoOperationMetrics(manager.collectMetrics())
 		assert.Empty(t, metrics) // Should skip collectors with no data
 	})
 
@@ -2007,7 +2014,7 @@ func TestCollectProtoMetricsEdgeCases(t *testing.T) {
 		// Record operations
 		manager.RecordOperation("Search", "any_collection", time.Now().Add(-10*time.Millisecond), nil)
 
-		metrics := manager.collectProtoMetrics()
+		metrics := manager.toProtoOperationMetrics(manager.collectMetrics())
 		assert.NotEmpty(t, metrics)
 
 		// Find Search metrics and verify collection is included
@@ -2468,11 +2475,21 @@ func TestHandleShowLatencyHistoryMarshalError(t *testing.T) {
 			manager.createSnapshot()
 		}
 
+		// end_time is a second past "now" on purpose. RFC3339 has second granularity, so
+		// formatting time.Now() rounds the query end *down* by up to 999ms -- and these
+		// five snapshots are all created inside a single millisecond, so their windows now
+		// start after that truncated boundary and fall outside the range.
+		//
+		// This only shows up because snapshot windows are honest now: they run from the
+		// previous window's end rather than always claiming to start one heartbeat
+		// interval ago, which used to put every snapshot 30s in the past no matter when it
+		// was taken. Real snapshots are seconds apart, so their start is never inside the
+		// truncation gap; only a back-to-back test loop can produce a zero-width window.
 		now := time.Now()
 		tenMinAgo := now.Add(-10 * time.Minute)
 		payload := LatencyHistoryPayload{
 			StartTime: tenMinAgo.Format(time.RFC3339),
-			EndTime:   now.Format(time.RFC3339),
+			EndTime:   now.Add(time.Second).Format(time.RFC3339),
 			Detail:    true, // Detail mode
 		}
 		payloadBytes, _ := json.Marshal(payload)
@@ -3296,4 +3313,298 @@ func TestAggregateSnapshotsZeroRequestCount(t *testing.T) {
 	assert.NotNil(t, result.Aggregated.Metrics["Search"])
 	assert.Equal(t, float64(0), result.Aggregated.Metrics["Search"].AvgLatencyMs)
 	assert.Equal(t, float64(0), result.Aggregated.Metrics["Search"].P99LatencyMs)
+}
+
+// toProtoCommands converts local test fixtures into the proto form the production command
+// path consumes. Tests drive processProtoCommands/calculateProtoConfigHash through this so
+// they exercise the same code that runs against a real server, rather than a parallel
+// local-type implementation that can silently drift from it.
+func toProtoCommands(commands []*ClientCommand) []*commonpb.ClientCommand {
+	if commands == nil {
+		return nil
+	}
+	result := make([]*commonpb.ClientCommand, 0, len(commands))
+	for _, cmd := range commands {
+		result = append(result, &commonpb.ClientCommand{
+			CommandId:   cmd.CommandId,
+			CommandType: cmd.CommandType,
+			Payload:     cmd.Payload,
+			CreateTime:  cmd.CreateTime,
+			Persistent:  cmd.Persistent,
+			TargetScope: cmd.TargetScope,
+		})
+	}
+	return result
+}
+
+// drainPendingReplies returns the queued command replies and clears them, mirroring what a
+// successful heartbeat does, so assertions can be written against local types.
+func drainPendingReplies(m *ClientTelemetryManager) []*CommandReply {
+	protoReplies := m.getPendingProtoRepliesSnapshot()
+	m.clearPendingProtoReplies(len(protoReplies))
+
+	var result []*CommandReply
+	for _, r := range protoReplies {
+		result = append(result, &CommandReply{
+			CommandId:    r.GetCommandId(),
+			Success:      r.GetSuccess(),
+			ErrorMessage: r.GetErrorMessage(),
+			Payload:      r.GetPayload(),
+		})
+	}
+	return result
+}
+
+func TestTelemetryClientID(t *testing.T) {
+	t.Run("defaults to generated uuid", func(t *testing.T) {
+		m1 := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		m2 := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		assert.NotEmpty(t, m1.clientID)
+		assert.NotEqual(t, m1.clientID, m2.clientID)
+	})
+
+	t.Run("honors configured stable id", func(t *testing.T) {
+		cfg := DefaultTelemetryConfig()
+		cfg.ClientID = "milvus-worker-0"
+
+		m := NewClientTelemetryManager(nil, cfg)
+		assert.Equal(t, "milvus-worker-0", m.clientID)
+
+		// The heartbeat must carry it, that is what the server keys scoping on.
+		assert.Equal(t, "milvus-worker-0", m.buildClientInfo().GetReserved()["client_id"])
+	})
+}
+
+func TestMaxLatencyIsReported(t *testing.T) {
+	m := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+	m.handleCollectionMetrics(&ClientCommand{
+		CommandId:   "enable-all",
+		CommandType: "collection_metrics",
+		Payload:     []byte(`{"enabled": true, "collections": ["*"]}`),
+	})
+
+	start := time.Now().Add(-50 * time.Millisecond)
+	m.RecordOperation("Search", "coll-1", start, nil)
+
+	protoMetrics := m.toProtoOperationMetrics(m.collectMetrics())
+	assert.Len(t, protoMetrics, 1)
+
+	global := protoMetrics[0].GetGlobal()
+	assert.Greater(t, global.GetMaxLatencyMs(), float64(0), "max_latency_ms must reach the wire")
+	assert.GreaterOrEqual(t, global.GetMaxLatencyMs(), global.GetAvgLatencyMs())
+
+	collMetrics := protoMetrics[0].GetCollectionMetrics()["coll-1"]
+	assert.NotNil(t, collMetrics)
+	assert.Greater(t, collMetrics.GetMaxLatencyMs(), float64(0))
+}
+
+// TestHeartbeatAgainstUnimplementedServer covers a client talking to a Milvus that predates
+// ClientTelemetryService: the heartbeat can never succeed, so it must latch off instead of
+// firing forever on every interval.
+func TestHeartbeatAgainstUnimplementedServer(t *testing.T) {
+	lis := bufconn.Listen(bufSize)
+	// Deliberately register no services: every RPC answers codes.Unimplemented.
+	svr := grpc.NewServer()
+	go func() { _ = svr.Serve(lis) }()
+	defer func() {
+		svr.Stop()
+		lis.Close()
+	}()
+
+	c, err := New(context.Background(), &ClientConfig{
+		Address:         "bufnet",
+		DisableConn:     true,
+		TelemetryConfig: &TelemetryConfig{Enabled: false},
+		DialOptions: []grpc.DialOption{
+			grpc.WithBlock(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+		},
+	})
+	require.NoError(t, err)
+	defer c.Close(context.Background())
+
+	m := NewClientTelemetryManager(c, &TelemetryConfig{
+		Enabled:           true,
+		HeartbeatInterval: 30 * time.Second,
+		SamplingRate:      1.0,
+		ErrorMaxCount:     10,
+	})
+	require.True(t, m.IsSupported())
+	require.NoError(t, m.LastHeartbeatError())
+
+	m.sendHeartbeat()
+
+	assert.False(t, m.IsSupported(), "Unimplemented must be visible")
+	assert.Error(t, m.LastHeartbeatError(), "the failure must be observable, not silently swallowed")
+
+	// Each further rejection backs off further, but never to the point of giving up.
+	before := m.nextHeartbeatDelay()
+	assert.Greater(t, before, 30*time.Second, "a rejection must widen the interval")
+	m.sendHeartbeat()
+	assert.Greater(t, m.nextHeartbeatDelay(), before, "repeated rejections must back off further")
+}
+
+// TestUnsupportedBacksOffAndRecovers is the rolling-upgrade case: a client is
+// load-balanced across proxies, so one heartbeat may reach an old proxy while the rest of
+// the cluster already serves the API. Treating that single answer as final would leave
+// telemetry off for the life of the client, long after the upgrade finished.
+func TestUnsupportedBacksOffAndRecovers(t *testing.T) {
+	m := NewClientTelemetryManager(nil, &TelemetryConfig{
+		Enabled:           true,
+		HeartbeatInterval: 30 * time.Second,
+		SamplingRate:      1.0,
+		ErrorMaxCount:     10,
+	})
+
+	assert.Equal(t, 30*time.Second, m.nextHeartbeatDelay())
+
+	t.Run("backs off while rejected", func(t *testing.T) {
+		m.unsupportedStreak.Store(1)
+		assert.Equal(t, time.Minute, m.nextHeartbeatDelay())
+
+		m.unsupportedStreak.Store(3)
+		assert.Equal(t, 4*time.Minute, m.nextHeartbeatDelay())
+
+		assert.False(t, m.IsSupported())
+	})
+
+	t.Run("backoff is capped", func(t *testing.T) {
+		m.unsupportedStreak.Store(1000)
+		assert.Equal(t, maxUnsupportedBackoff, m.nextHeartbeatDelay(),
+			"an old cluster must cost almost nothing, but still be probed")
+	})
+
+	t.Run("a success restores the normal interval", func(t *testing.T) {
+		m.unsupportedStreak.Store(0)
+
+		assert.Equal(t, 30*time.Second, m.nextHeartbeatDelay())
+		assert.True(t, m.IsSupported(), "the client must recover once the cluster is upgraded")
+	})
+}
+
+// TestHeartbeatLoopKeepsProbingWhenUnsupported pins the behavior the previous latch got
+// wrong: the loop must stay alive so it can pick the service back up.
+func TestHeartbeatLoopKeepsProbingWhenUnsupported(t *testing.T) {
+	m := NewClientTelemetryManager(nil, &TelemetryConfig{
+		Enabled:           true,
+		HeartbeatInterval: 50 * time.Millisecond,
+		SamplingRate:      1.0,
+		ErrorMaxCount:     10,
+	})
+	m.unsupportedStreak.Store(2)
+	m.Start()
+
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("heartbeat loop exited instead of backing off; an upgraded cluster would never be noticed")
+	case <-time.After(300 * time.Millisecond):
+		// Still running, as it must be.
+	}
+
+	m.Stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat loop did not stop on Stop()")
+	}
+}
+
+// TestUnsupportedStreakResetsOnAnyReply pins that the backoff clears as soon as the server
+// answers at all. Reaching a business status proves the method is implemented, so an
+// unhealthy-but-reachable server must not leave the client stuck at an interval inflated
+// by an earlier Unimplemented.
+func TestUnsupportedStreakResetsOnAnyReply(t *testing.T) {
+	lis := bufconn.Listen(bufSize)
+	svr := grpc.NewServer()
+	milvuspb.RegisterClientTelemetryServiceServer(svr, &unhealthyTelemetryServer{})
+	go func() { _ = svr.Serve(lis) }()
+	defer func() {
+		svr.Stop()
+		lis.Close()
+	}()
+
+	c, err := New(context.Background(), &ClientConfig{
+		Address:         "bufnet",
+		DisableConn:     true,
+		TelemetryConfig: &TelemetryConfig{Enabled: false},
+		DialOptions: []grpc.DialOption{
+			grpc.WithBlock(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+		},
+	})
+	require.NoError(t, err)
+	defer c.Close(context.Background())
+
+	m := NewClientTelemetryManager(c, &TelemetryConfig{
+		Enabled:           true,
+		HeartbeatInterval: 30 * time.Second,
+		SamplingRate:      1.0,
+		ErrorMaxCount:     10,
+	})
+
+	// Left over from an earlier heartbeat that landed on a stale proxy.
+	m.unsupportedStreak.Store(3)
+	require.Greater(t, m.nextHeartbeatDelay(), 30*time.Second)
+
+	m.sendHeartbeat()
+
+	assert.Equal(t, 30*time.Second, m.nextHeartbeatDelay(),
+		"a reachable server must clear the backoff even when it reports an error")
+	assert.True(t, m.IsSupported())
+	assert.Error(t, m.LastHeartbeatError(), "the unhealthy status is still reported")
+}
+
+// unhealthyTelemetryServer implements the service but reports a failure status, the way a
+// coordinator that is still starting up does.
+type unhealthyTelemetryServer struct {
+	milvuspb.UnimplementedClientTelemetryServiceServer
+}
+
+func (s *unhealthyTelemetryServer) ClientHeartbeat(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	return &milvuspb.ClientHeartbeatResponse{
+		Status: &commonpb.Status{Code: 1, Reason: "telemetry manager not initialized"},
+	}, nil
+}
+
+// TestSnapshotWindowTracksActualElapsedTime covers the window a snapshot claims to cover.
+//
+// Counters accumulate until they are collected, so the window has to be the time actually
+// covered. Deriving it as now - HeartbeatInterval assumes the loop ran on schedule, which
+// the Unimplemented backoff breaks: it can stretch a gap to 30 minutes while the configured
+// interval still says 30 seconds. Half an hour of traffic then gets labeled a 30 second
+// window, and every rate derived from it, plus any history query filtering on the range, is
+// wrong by that factor.
+func TestSnapshotWindowTracksActualElapsedTime(t *testing.T) {
+	cfg := DefaultTelemetryConfig()
+	cfg.HeartbeatInterval = time.Hour // deliberately nothing like the real gap below
+	m := NewClientTelemetryManager(nil, cfg)
+
+	m.createSnapshot()
+	time.Sleep(20 * time.Millisecond)
+	m.createSnapshot()
+
+	m.snapshotsMu.RLock()
+	snapshots := append([]*MetricsSnapshot(nil), m.snapshots...)
+	m.snapshotsMu.RUnlock()
+
+	require.Len(t, snapshots, 2)
+	first, second := snapshots[0], snapshots[1]
+
+	assert.Equal(t, first.EndTime, second.Timestamp,
+		"a window must start where the previous one ended, not one configured interval ago")
+	assert.LessOrEqual(t, second.EndTime-second.Timestamp, int64(5000),
+		"a 20ms gap must not be reported as an hour-long window")
+
+	// The first snapshot has no predecessor, so falling back to the configured interval is
+	// the only estimate available.
+	assert.Equal(t, cfg.HeartbeatInterval.Milliseconds(), first.EndTime-first.Timestamp)
 }

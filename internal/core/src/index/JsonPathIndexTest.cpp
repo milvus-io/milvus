@@ -309,6 +309,99 @@ TEST(JsonPathIndexTest, SortDouble_ExistsSemantics) {
     EXPECT_EQ(exists.count(), 4);
 }
 
+template <typename IndexT>
+void
+AssertDoubleComparisonUnknowns(IndexT& idx) {
+    auto known = idx.IsNotNull();
+    ASSERT_EQ(known.size(), 6);
+    EXPECT_TRUE(known[0]);
+    EXPECT_TRUE(known[1]);
+    EXPECT_FALSE(known[2]);
+    EXPECT_FALSE(known[3]);
+    EXPECT_FALSE(known[4]);
+    EXPECT_TRUE(known[5]);
+    EXPECT_EQ(known.count(), 3);
+
+    auto exists = idx.Exists();
+    ASSERT_EQ(exists.size(), 6);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    EXPECT_TRUE(exists[2]);   // path exists, but cast fails
+    EXPECT_FALSE(exists[3]);  // path missing
+    EXPECT_FALSE(exists[4]);  // JSON null is not an existing comparable value
+    EXPECT_TRUE(exists[5]);
+    EXPECT_EQ(exists.count(), 4);
+
+    double two = 2.0;
+    auto not_in = idx.NotIn(1, &two);
+    ASSERT_EQ(not_in.size(), 6);
+    EXPECT_TRUE(not_in[0]);
+    EXPECT_FALSE(not_in[1]);
+    EXPECT_FALSE(not_in[2]);
+    EXPECT_FALSE(not_in[3]);
+    EXPECT_FALSE(not_in[4]);
+    EXPECT_TRUE(not_in[5]);
+    EXPECT_EQ(not_in.count(), 2);
+
+    auto greater_than_one = idx.Range(1.0, OpType::GreaterThan);
+    ASSERT_EQ(greater_than_one.size(), 6);
+    EXPECT_FALSE(greater_than_one[0]);
+    EXPECT_TRUE(greater_than_one[1]);
+    EXPECT_FALSE(greater_than_one[2]);
+    EXPECT_FALSE(greater_than_one[3]);
+    EXPECT_FALSE(greater_than_one[4]);
+    EXPECT_TRUE(greater_than_one[5]);
+    EXPECT_EQ(greater_than_one.count(), 2);
+}
+
+std::shared_ptr<FieldData<Json>>
+MakeMixedJsonDoubleFieldData() {
+    return MakeJsonFieldData({
+        R"({"a": 1.0})",
+        R"({"a": 2.0})",
+        R"({"a": "bad"})",
+        R"({"b": 3.0})",
+        R"({"a": null})",
+        R"({"a": 3.0})",
+    });
+}
+
+TEST(JsonPathIndexTest, SortDouble_ComparisonUnknowns) {
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> idx(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx);
+
+    idx.BuildWithFieldData({json_fd});
+    AssertDoubleComparisonUnknowns(idx);
+}
+
+TEST(JsonPathIndexTest, InvertedDouble_ComparisonUnknowns) {
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonScalarIndexWrapper<double, InvertedIndexTantivy<double>> idx(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx,
+        TANTIVY_INDEX_LATEST_VERSION);
+
+    idx.BuildWithFieldData({json_fd});
+    idx.finish();
+    idx.create_reader(milvus::index::SetBitsetSealed);
+
+    AssertDoubleComparisonUnknowns(idx);
+}
+
 TEST(JsonPathIndexTest, BitmapBool_ExistsSemantics) {
     auto json_fd = MakeJsonFieldData({
         R"({"f": true})",
@@ -449,6 +542,23 @@ TEST(JsonPathIndexTest, Hybrid_ExistsSemantics) {
     EXPECT_TRUE(exists[1]);   // cast fail → still EXISTS
     EXPECT_FALSE(exists[2]);  // path not exist
     EXPECT_TRUE(exists[3]);   // valid
+}
+
+TEST(JsonPathIndexTest, Hybrid_ComparisonUnknowns) {
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonHybridScalarIndex<double> idx(JsonCastType::FromString("DOUBLE"),
+                                      "/a",
+                                      JsonCastFunction::FromString("unknown"),
+                                      schema,
+                                      0,
+                                      ctx);
+
+    idx.bitmap_index_cardinality_limit_ = 3;
+    idx.BuildWithFieldData({json_fd});
+    AssertDoubleComparisonUnknowns(idx);
 }
 
 // ============================================================

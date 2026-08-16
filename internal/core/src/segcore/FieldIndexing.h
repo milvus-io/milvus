@@ -523,6 +523,11 @@ class IndexingRecord {
     }
 
     bool
+    has_field_index_meta(FieldId fieldId) const {
+        return index_meta_ != nullptr && index_meta_->HasField(fieldId);
+    }
+
+    bool
     is_in(FieldId field_id) const {
         return field_indexings_.count(field_id);
     }
