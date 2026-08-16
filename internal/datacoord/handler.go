@@ -790,15 +790,20 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 	}
 
 	// get delta logs from compactTo segments
-	lo.ForEach(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) {
+	for _, segInfo := range segmentInfos {
+		// Failing here is not optional. Returning early would leave this segment
+		// with its descendants' deletes missing AND its own post-boundary deletes
+		// unfiltered -- both corruptions at once -- while the snapshot still got
+		// saved as complete. The caller retries, which is the correct response to
+		// a segment that moved under us.
 		deltalogs, err := h.GetDeltaLogFromCompactTo(ctx, segInfo.GetID())
 		if err != nil {
-			mlog.Error(ctx, "get delta logs from compactTo failed when generating snapshot",
+			mlog.Warn(ctx, "get delta logs from compactTo failed when generating snapshot",
 				mlog.FieldCollectionID(collectionID),
 				mlog.Uint64("snapshotTs", snapshotTs),
 				mlog.FieldSegmentID(segInfo.GetID()),
 				mlog.Err(err))
-			return
+			return nil, err
 		}
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
 
@@ -809,12 +814,14 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		// the snapshot claims to describe.
 		seekTs, ok := boundary.SeekTs(segInfo.GetInsertChannel())
 		if !ok {
-			// Membership was already decided with this channel above, so a miss here
-			// is impossible; drop nothing rather than guess.
-			return
+			// Membership was already decided with this channel above, so a miss
+			// here is impossible -- and leaving the deletes unbounded would be a
+			// silently wrong snapshot, so surface it rather than guess.
+			return nil, merr.WrapErrServiceInternalMsg(
+				"missing snapshot channel seek position for segment channel %s", segInfo.GetInsertChannel())
 		}
 		segInfo.Deltalogs = filterDeltalogsBefore(segInfo.GetDeltalogs(), seekTs)
-	})
+	}
 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
 		segID := segInfo.GetID()

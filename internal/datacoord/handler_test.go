@@ -1867,7 +1867,11 @@ func TestGenSnapshot(t *testing.T) {
 	defer mock7.UnPatch()
 
 	mock8 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false // No compaction children
+		// (nil, true) is "segment present, no compaction children". The bool
+		// reports whether the segment itself is still in meta, so false would
+		// mean it vanished -- which GenSnapshot now correctly treats as an error
+		// instead of silently capturing unbounded deletes.
+		return nil, true
 	}).Build()
 	defer mock8.UnPatch()
 
@@ -2151,7 +2155,8 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false
+		// present, no children -- see the note in TestGenSnapshot
+		return nil, true
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
@@ -2350,7 +2355,8 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false
+		// present, no children -- see the note in TestGenSnapshot
+		return nil, true
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
@@ -2654,7 +2660,8 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		mockers = append(mockers, m3)
 
 		m4 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-			return nil, false
+			// present, no children -- see the note in TestGenSnapshot
+			return nil, true
 		}).Build()
 		mockers = append(mockers, m4)
 

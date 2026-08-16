@@ -140,20 +140,31 @@ func (b *SnapshotBoundary) SeekTs(channel string) (uint64, bool) {
 	return 0, false
 }
 
-// filterDeltalogsBefore keeps the delete logs whose contents predate the
-// snapshot boundary.
+// filterDeltalogsBefore keeps the delete logs that contain any delete predating
+// the snapshot boundary.
 //
-// File granularity is exact here, not an approximation: the CreateSnapshot
-// message fences its collection at the boundary, so a delete written before it
-// is sealed into a file that ends before it, and a delete written after starts a
-// new one. No file spans the boundary, and TimestampTo is the file's last row.
+// A file the fence itself produced never spans the boundary, but a file can
+// still span it: L0 delete compaction merges the deletes of ALL its input L0
+// segments and writes one file per target, stamped with the min/max of that
+// union. It is exempt from the snapshot compaction block and commits through
+// UpdateSegmentsInfo rather than CompleteCompactionMutation, so neither gate
+// sees it, and during a staging window it can merge a pre-boundary L0 segment
+// with post-boundary ones.
+//
+// So the test is TimestampFrom, not TimestampTo. Dropping a spanning file would
+// discard the pre-boundary deletes inside it, and since its L0 inputs are
+// Dropped by then, nothing else carries them -- rows deleted before the cut
+// would come back. Keeping it instead over-applies the post-boundary deletes it
+// also holds. Both are wrong at row granularity, which this cannot reach, but
+// resurrecting deleted rows is the worse way to be wrong: the same reasoning
+// the TimestampTo == 0 case below already follows.
 //
 // A file with no TimestampTo is kept. Those are legacy or not-yet-populated
 // binlogs, and dropping deletes because their metadata is incomplete would
 // resurrect rows -- the wrong direction to fail in.
 func filterDeltalogsBefore(deltalogs []*datapb.FieldBinlog, seekTs uint64) []*datapb.FieldBinlog {
 	kept := func(binlog *datapb.Binlog) bool {
-		return binlog.GetTimestampTo() == 0 || binlog.GetTimestampTo() < seekTs
+		return binlog.GetTimestampTo() == 0 || binlog.GetTimestampFrom() < seekTs
 	}
 	// The common case is that nothing is dropped, since deletes issued after the
 	// snapshot are rare relative to the ones already in the segment. Return the

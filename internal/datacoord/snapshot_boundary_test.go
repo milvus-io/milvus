@@ -852,6 +852,36 @@ func TestFilterDeltalogsBefore(t *testing.T) {
 	// The input must not be mutated: the same SegmentInfo is live in meta.
 	assert.Len(t, deltalogs[0].GetBinlogs(), 2)
 
+	t.Run("keeps a file that spans the boundary", func(t *testing.T) {
+		// L0 delete compaction merges the deletes of all its input L0 segments
+		// into one file per target, stamped with the min/max of that union, and
+		// it is exempt from the snapshot compaction block -- so during a staging
+		// window it can produce a file straddling the boundary. Dropping it would
+		// discard the pre-boundary deletes inside, and its L0 inputs are Dropped
+		// by then, so nothing else carries them: rows deleted before the cut
+		// would come back. Over-applying the post-boundary deletes it also holds
+		// is the less bad way to be wrong.
+		kept := filterDeltalogsBefore([]*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{
+				{LogID: 7, TimestampFrom: boundaryTestSeekTs - 10, TimestampTo: boundaryTestSeekTs + 10},
+			}},
+		}, boundaryTestSeekTs)
+		assert.Len(t, kept, 1)
+		assert.Len(t, kept[0].GetBinlogs(), 1)
+		assert.Equal(t, int64(7), kept[0].GetBinlogs()[0].GetLogID())
+	})
+
+	t.Run("still drops a file that starts at the boundary", func(t *testing.T) {
+		// Nothing in it predates the cut, so it carries no delete the snapshot
+		// should apply.
+		kept := filterDeltalogsBefore([]*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{
+				{LogID: 8, TimestampFrom: boundaryTestSeekTs, TimestampTo: boundaryTestSeekTs + 10},
+			}},
+		}, boundaryTestSeekTs)
+		assert.Empty(t, kept)
+	})
+
 	t.Run("keeps files with no TimestampTo", func(t *testing.T) {
 		// Incomplete metadata must not drop deletes -- that resurrects rows,
 		// which is the wrong direction to fail in.
@@ -864,8 +894,18 @@ func TestFilterDeltalogsBefore(t *testing.T) {
 
 	t.Run("nil when everything is filtered out", func(t *testing.T) {
 		assert.Nil(t, filterDeltalogsBefore([]*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1, TimestampTo: 200}}},
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1, TimestampFrom: 150, TimestampTo: 200}}},
 		}, boundaryTestSeekTs))
+	})
+
+	t.Run("keeps a file with no TimestampFrom", func(t *testing.T) {
+		// Same principle as the missing-TimestampTo case: unset metadata cannot
+		// prove the file is entirely after the cut, and guessing that it is
+		// resurrects rows.
+		kept := filterDeltalogsBefore([]*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 9, TimestampTo: 200}}},
+		}, boundaryTestSeekTs)
+		assert.Len(t, kept, 1)
 	})
 }
 
