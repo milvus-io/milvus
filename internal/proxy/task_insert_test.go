@@ -186,8 +186,9 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
 
-	// Preserve the legacy non-idempotent path: the final streaming-message size
-	// guard exists specifically for the extra idempotency metadata.
+	// The non-idempotent path must stay under the same limit: the final
+	// streaming-message size guard exists specifically for the extra idempotency
+	// metadata, so a plain insert of the same body must still pass.
 	withoutIdempotency, err := repackInsertDataForStreamingService(
 		context.Background(),
 		mockMetaCache,

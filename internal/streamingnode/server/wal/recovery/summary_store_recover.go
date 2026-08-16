@@ -341,10 +341,10 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	expectedTerm int64,
 ) (map[string][]*streamingpb.SummaryEntry, *streamingpb.PChannelSummaryChunkFooter, string, error) {
 	chunkKey := buildPChannelSummaryChunkKey(pchannel, generation, expectedTerm)
-	// Bounded retry on the raw read: a transient object-storage blip must not
-	// hard-fail the WAL open now that referenced-state corruption does — only a
-	// VERIFIED decode/checksum failure below is corruption; IO errors here are
-	// retried and, if persistent, abort with the transient cause intact.
+	// Bounded retry on the raw read. Referenced-state corruption hard-fails the
+	// WAL open, so only a VERIFIED decode/checksum failure below may be called
+	// corruption; a transient object-storage blip is retried here and, if
+	// persistent, aborts with the transient cause intact.
 	var payload []byte
 	if err := retry.Do(ctx, func() error {
 		var readErr error

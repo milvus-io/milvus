@@ -1,8 +1,9 @@
 package recovery
 
 // effectivePersistCheckpoint clamps the consume checkpoint by the pchannel
-// summary snapshot checkpoint and the flusher checkpoint, both supplied by the
-// caller (summaryManager no longer reaches into recoveryStorageImpl for them).
+// summary snapshot checkpoint and the flusher checkpoint. Both are supplied by
+// the caller: summaryManager holds no reference back to recoveryStorageImpl, so
+// the lock order stays one-directional.
 func (m *summaryManager) effectivePersistCheckpoint(snapshot *RecoverySnapshot, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
 	return clampPersistCheckpoint(snapshot.Checkpoint, m.pchannelSummaryCheckpointForPersist(snapshot), m.flusherClampCheckpoint(flusherCheckpoint))
 }

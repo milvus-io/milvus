@@ -144,8 +144,9 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 		}
 		req, err := option.UpsertRequest(collection)
 		if err != nil {
-			// Only the idempotency-key-on-Upsert rejection short-circuits; other
-			// parameter errors fall through to the schema-mismatch retry as before.
+			// Only the idempotency-key-on-Upsert rejection short-circuits: it is
+			// a caller mistake no schema refresh can fix. Every other parameter
+			// error falls through to the schema-mismatch retry.
 			if errors.Is(err, errIdempotencyKeyUnsupportedForDML) {
 				return collection.UpdateTimestamp, err
 			}

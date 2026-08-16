@@ -33,7 +33,7 @@ type idempotencyInterceptor struct {
 	// txnActive reports whether a txn session is still tracked by the txn
 	// manager; a duplicate commit only synthesizes a rollback for a txn that is
 	// positively known to be still open. nil means "unknown" and skips the
-	// rollback (the txn then falls back to keepalive expiry as before).
+	// rollback, leaving the txn to keepalive expiry.
 	txnActive idempotencyutils.TxnActiveChecker
 	// replicateRole is intentionally dynamic: AlterReplicateConfig can switch the
 	// WAL role while this interceptor instance stays alive. On SECONDARY, native
@@ -327,7 +327,7 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			// still be legitimately retried by the client after the owner's
 			// failure, and rolling its session back would turn that recoverable
 			// commit retry into a whole-txn retry. A retried txn under its own
-			// txnID falls back to keepalive expiry, as before this interceptor.
+			// txnID is left to keepalive expiry, like any abandoned txn.
 			return nil, result.Err
 		}
 		logIdempotencyDuplicateHit(ctx, msg.VChannel(), key)
@@ -353,7 +353,7 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 // The rollback is synthesized only for a txn positively known to be still open
 // — a concurrent duplicate commit sharing the owner's txnID was already closed
 // by the owner's commit and must not be rolled back. Failure is non-fatal: the
-// txn then falls back to keepalive expiry as before.
+// txn then falls back to keepalive expiry.
 func (impl *idempotencyInterceptor) resolveRetriedTxnAfterDuplicate(ctx context.Context, msg message.MutableMessage, append interceptors.Append) {
 	txnCtx := msg.TxnContext()
 	if txnCtx == nil {

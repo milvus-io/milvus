@@ -32,10 +32,11 @@ func collectionInsertIdempotencyEnabled(properties []*commonpb.KeyValuePair) boo
 	}
 	enabled, err := strconv.ParseBool(value)
 	if err != nil {
-		// DDL validation rejects unparseable values, but a property written
-		// before that validation existed may still carry one; make the silent
-		// downgrade observable instead of quietly disabling the durability
-		// guarantee the operator believes is on.
+		// Defense in depth: validateInsertIdempotencyProperty rejects an
+		// unparseable value at DDL time, so reaching here means the property
+		// entered the collection meta by some other path. Log it rather than
+		// disable the durability guarantee the operator believes is on without
+		// a trace.
 		mlog.Warn(context.TODO(), "malformed collection insert idempotency property; treating idempotency as disabled",
 			mlog.String("key", common.CollectionInsertIdempotencyEnabledKey),
 			mlog.String("value", value))

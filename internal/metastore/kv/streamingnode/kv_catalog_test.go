@@ -243,14 +243,13 @@ func TestCatalogVChannelSummaryMetas(t *testing.T) {
 	})
 }
 
-// TestCatalogVChannelSummaryMetasRecover is a regression test for the recover-side
-// vchannel-prefix bug. A real etcdkv returns keys that INCLUDE the metaKV rootPath,
-// so ListVChannelSummaryMetas must strip the prefix rootPath-tolerantly. A naive
-// strings.TrimPrefix leaves the whole key as the vchannel name and fails recovery
-// with "vchannel mismatch", which wedged the WAL reopen on streamingnode restart
-// (collections on the pchannel became permanently unloadable). The mock-based
-// save_and_list case above could not catch this because the mock returns the
-// relative key, not the rootPath-prefixed key a real metaKV returns.
+// TestCatalogVChannelSummaryMetasRecover pins ListVChannelSummaryMetas against a
+// REAL etcdkv, which returns keys that INCLUDE the metaKV rootPath. The prefix
+// must be stripped rootPath-tolerantly: a naive strings.TrimPrefix leaves the
+// whole key as the vchannel name, recovery fails with "vchannel mismatch", and
+// the WAL reopen wedges on streamingnode restart — every collection on the
+// pchannel becomes unloadable. The mock-based save_and_list case above cannot
+// cover this: the mock returns the relative key, not the rootPath-prefixed one.
 func TestCatalogVChannelSummaryMetasRecover(t *testing.T) {
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	rootPath := "testCatalogVChannelSummaryMetasRecover-" + uuid.New().String() + "/meta"

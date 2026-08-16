@@ -33,8 +33,8 @@ func TestIdempotencyKeyProperty(t *testing.T) {
 		MustBuildMutable()
 	require.Equal(t, "key-1", IdempotencyKeyOf(commit))
 
-	// An empty key must not materialize the property at all, so a non-idempotent
-	// write carries exactly the properties it carried before this feature.
+	// An empty key must not materialize the property at all: a non-idempotent
+	// write must carry no idempotency property, not an empty-valued one.
 	keyless := NewInsertMessageBuilderV1().
 		WithVChannel("v1").
 		WithHeader(&InsertMessageHeader{}).

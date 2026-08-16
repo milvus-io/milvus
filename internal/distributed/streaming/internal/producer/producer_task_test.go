@@ -492,8 +492,8 @@ func TestIdempotencyKeyFromProduceOptions(t *testing.T) {
 		ProduceOption{IdempotencyKey: "key-2"},
 	))
 
-	// An empty key must not materialize the property at all, so a keyless commit
-	// txn message stays indistinguishable from one built before this feature.
+	// An empty key must not materialize the property at all: a keyless commit txn
+	// message must carry no idempotency property, not an empty-valued one.
 	msg := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("test-v").
 		WithHeader(&message.CommitTxnMessageHeader{}).

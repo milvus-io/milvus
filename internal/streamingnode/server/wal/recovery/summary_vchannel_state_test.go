@@ -64,10 +64,11 @@ func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
 
 // The durable-retention ledger must keep chunk generations recoverable for the
 // full retention policy even after evictPersisted cleared the staging memory.
-// Previously minRequiredGeneration was derived from materialized entries only,
-// so every persist cycle collapsed it to the latest generation, chunk GC
-// trimmed everything below, and a restart could rebuild only ~one snapshot
-// interval of the summary instead of a TTL's worth.
+// minRequiredGeneration therefore derives from the ledger, not from the
+// materialized entries: a boundary computed from staging memory would collapse
+// to the latest generation on every persist cycle, chunk GC would trim
+// everything below it, and a restart could rebuild only ~one snapshot interval
+// of the summary instead of a TTL's worth.
 func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	entryAt := func(vchannel, key string, physicalMs int64) *streamingpb.SummaryEntry {
 		return (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(physicalMs).IntoProto(), SourceTimetick: tsoutil.ComposeTS(physicalMs, 0), Idempotency: &streamingpb.IdempotencyContent{Key: key}})

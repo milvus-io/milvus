@@ -15,11 +15,11 @@ import (
 )
 
 func TestReplicateMessagePreservesIdempotencyKey(t *testing.T) {
-	// A replicated message carries the SOURCE cluster's idempotency key, exactly
-	// as it did when the key lived inside the specialized header (itself a
-	// property). The idempotency interceptor and the recovery observer therefore
-	// must keep skipping replicated messages BEFORE reading the key — otherwise a
-	// foreign key would materialize a local window entry.
+	// A replicated message carries the SOURCE cluster's idempotency key: message
+	// properties cross the replication boundary verbatim. The idempotency
+	// interceptor and the recovery observer must therefore skip replicated
+	// messages BEFORE reading the key — otherwise a foreign key would
+	// materialize a local window entry.
 	msgID := walimplstest.NewTestMessageID(1)
 	immutableMsg := message.NewInsertMessageBuilderV1().
 		WithVChannel("v1").

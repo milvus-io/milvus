@@ -218,8 +218,8 @@ func TestIdempotencySummaryLifecycleMovedToVChannelEvents(t *testing.T) {
 // A corrupted chunk the meta references fails the WAL open: the summary
 // snapshot checkpoint gated WAL truncation, so a referenced chunk is the only
 // durable copy of the idempotency keys below the consume checkpoint. Silently
-// resetting to an empty summary (the old behavior) would accept in-TTL client
-// retries as fresh writes — duplicate data with no error anywhere. Here the
+// resetting to an empty summary would accept in-TTL client retries as fresh
+// writes — duplicate data with no error anywhere. Here the
 // consume checkpoint (120) has advanced together with the chunk, modeling the
 // truncated-WAL reality where key-1@99 is not replayable.
 func TestRecoverSummariesFailsOnReferencedChunkCorruption(t *testing.T) {

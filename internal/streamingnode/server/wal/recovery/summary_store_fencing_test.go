@@ -50,7 +50,7 @@ func TestWritePChannelSummaryChunkIfAbsentArbitratesByTerm(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, currentPayload, stored)
 
-	// Same term, different content: undecidable — corruption, as before.
+	// Same term, different content: undecidable — corruption.
 	conflictPayload, conflictFooter, _, err := marshalPChannelSummaryChunk("p1", 7, 5, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(200), TimeTick: 200}, nil)
 	require.NoError(t, err)
 	err = writePChannelSummaryChunkIfAbsent(ctx, chunkKey, conflictPayload, conflictFooter, 5)
