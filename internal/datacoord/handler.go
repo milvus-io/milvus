@@ -742,7 +742,23 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 
 	// get segment info
 	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		if info.GetState() == commonpb.SegmentState_Dropped || info.GetIsImporting() {
+			return false
+		}
+		// Same rule GetQueryVChanPositions applies when building the load set: a
+		// compaction output that has not been published yet is not part of the
+		// collection anyone reads, and its inputs are still serving in its place.
+		//
+		// This is not redundant with dropSupersededByLineage below. That walk
+		// fails open when a parent is missing from meta, and the parent of an
+		// invisible sort output is the clustering tmp segment the sort retired
+		// atomically -- which GC removes once THAT child is indexed, per child,
+		// while its siblings are still building. The lineage then dangles for
+		// hours and the walk keeps both the output and the original inputs.
+		//
+		// Excluding cannot lose rows: invisible means the clustering run has not
+		// published, which means its inputs are still alive and captured.
+		return !(info.GetIsInvisible() && info.GetCreatedByCompaction())
 	}))
 	segments := make([]*SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {

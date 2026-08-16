@@ -1989,6 +1989,25 @@ func TestGenSnapshot_CapturesOneGenerationPerLineage(t *testing.T) {
 			clusteringOutput(3, false, 1, 2), clusteringOutput(4, false, 3))
 		assert.ElementsMatch(t, []int64{1, 2}, ids)
 	})
+
+	t.Run("still one generation when the lineage dangles", func(t *testing.T) {
+		// The sort of a clustering tmp segment retires that segment atomically
+		// and inherits its invisibility, and GC removes the retired parent once
+		// THIS child is indexed -- per child, while its siblings still build. The
+		// surviving output then points at a segment meta no longer has, so the
+		// lineage walk finds no ancestor and fails open. Only the visibility
+		// filter keeps the duplicate out.
+		ids := capturedIDs(t, segment(1), segment(2),
+			clusteringOutput(9, true, 404 /* parent already GC'd */))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("an unpublished compaction output is never captured", func(t *testing.T) {
+		// It is not in the load set any reader sees, it is un-backfilled, and its
+		// inputs are still serving in its place.
+		ids := capturedIDs(t, segment(1), segment(2), clusteringOutput(3, true, 1, 2))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
 }
 
 func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
