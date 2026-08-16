@@ -653,9 +653,15 @@ func (sm *snapshotManager) channelsBehindBoundary(boundary *SnapshotBoundary) []
 // sealed-loaded, backfill-eligible, its manifest exactly what a reader sees --
 // and there is nothing about it to wait for. Waiting on unsortedness there
 // waits forever for a state change that is not coming and was never needed.
-// The two also differ the other way: a clustering result is published invisible
-// and its sort output inherits that, so it can be sorted yet still invisible,
-// which the old predicate skipped and should not have.
+// !CreatedByCompaction narrows it to segments with no other representation.
+// A compaction output that is still invisible has its inputs alive and serving
+// -- clustering does not retire them until it publishes the output -- so the
+// capture takes those inputs instead and there is nothing to wait for;
+// dropSupersededByLineage picks the generation. Waiting on them would mean
+// waiting on the clustering output's index build, which is minutes at best and
+// never, if that build fails permanently: markResultSegmentsVisible is reached
+// only once every index reports Finished, and the staging freeze this wait
+// holds is not released on failure.
 //
 // A segment still on its way to Flushed is not in this set. That is covered by
 // channelsBehindBoundary in front of this call: until every channel checkpoint
@@ -682,6 +688,7 @@ func (sm *snapshotManager) segmentsAwaitingVisibility(ctx context.Context, colle
 		return info.GetState() == commonpb.SegmentState_Flushed &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
 			info.GetIsInvisible() &&
+			!info.GetCreatedByCompaction() &&
 			!info.GetIsImporting()
 	}))
 
@@ -722,6 +729,12 @@ func (sm *snapshotManager) segmentsAwaitingVisibility(ctx context.Context, colle
 // invisible exactly when enableSortCompaction() holds. So with sort on they will
 // join the wait set, and with sort off they will flush straight to visible and
 // never enter it.
+//
+// It mirrors segmentsAwaitingVisibility's !CreatedByCompaction exactly. Without
+// that, an in-flight clustering compaction would make this refuse the snapshot
+// with "stranded invisible ... can never be published" whenever sort compaction
+// is off -- untrue, since the index build publishes them, and the wait does not
+// block on them anyway.
 func segmentsWouldAwaitVisibility(ctx context.Context, m *meta, collectionID int64) ([]int64, error) {
 	sortWillRun := enableSortCompaction()
 	candidates := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
@@ -730,7 +743,7 @@ func segmentsWouldAwaitVisibility(ctx context.Context, m *meta, collectionID int
 		}
 		switch info.GetState() {
 		case commonpb.SegmentState_Flushed:
-			return info.GetIsInvisible()
+			return info.GetIsInvisible() && !info.GetCreatedByCompaction()
 		case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing:
 			return sortWillRun
 		default:

@@ -250,17 +250,29 @@ func TestSegmentsAwaitingVisibility(t *testing.T) {
 			want: false,
 		},
 		{
-			// The case unsortedness gets wrong in the safe direction. A
-			// clustering result is published invisible and its sort output
-			// inherits that, so a sorted segment can still be one readers do not
-			// see -- unindexed, outside the sealed load set, refused by backfill.
-			// Capturing it while its still-visible inputs are also in the
-			// boundary would duplicate rows.
-			name: "sorted but still invisible",
+			// A clustering result, and the sort output that inherits its
+			// invisibility, are both CreatedByCompaction. Their inputs are alive
+			// and serving until the results are published, so the capture takes
+			// those instead and must NOT block here -- waiting would mean waiting
+			// on the clustering output's index build, which can never finish.
+			// dropSupersededByLineage picks the generation at capture time.
+			name: "invisible compaction output is not awaited",
 			segment: boundaryTestSegment(12, func(s *datapb.SegmentInfo) {
 				s.IsSorted = true
+				s.CreatedByCompaction = true
+				s.CompactionFrom = []int64{99}
 			}),
-			want: true,
+			want: false,
+		},
+		{
+			// Same shape but unsorted -- still a compaction output, still not
+			// this wait's problem.
+			name: "invisible unsorted compaction output is not awaited",
+			segment: boundaryTestSegment(14, func(s *datapb.SegmentInfo) {
+				s.CreatedByCompaction = true
+				s.CompactionFrom = []int64{99}
+			}),
+			want: false,
 		},
 		{
 			// The case unsortedness gets wrong in the dangerous direction. With
@@ -520,6 +532,21 @@ func TestCheckSnapshotVisibilityReachable(t *testing.T) {
 			boundaryTestSegment(1, visible),
 			boundaryTestSegment(2, visible),
 		)
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		assert.NoError(t, checkSnapshotVisibilityReachable(context.Background(), sm.meta, 100))
+	})
+
+	t.Run("passes with sort off while a clustering compaction is in flight", func(t *testing.T) {
+		// Its results are invisible but CreatedByCompaction, so the wait skips
+		// them and the index build will publish them. Refusing here -- with
+		// "can never be published" -- would be simply untrue.
+		sm := boundaryTestManager(boundaryTestSegment(1, func(s *datapb.SegmentInfo) {
+			s.CreatedByCompaction = true
+			s.CompactionFrom = []int64{99}
+		}))
 
 		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
