@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -276,6 +277,51 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMa
 		}
 	}
 	s.True(found, "MinHash output field should be materialized into insert logs")
+}
+
+// TestBumpSchemaVersionMaterializesAbsentOrdinaryField pins the #52159 core fix:
+// a target ordinary field (no function attached) that is physically absent from
+// the source manifest must be materialized as default/NULL through the additive
+// path. Before the fix it routed to a metadata-only bump and was never written.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionMaterializesAbsentOrdinaryField() {
+	segID := int64(100)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.initSegBufferForSchemaBump(segID) // source physically has {row_id, ts, 100, 101}
+	s.finishBumpSchemaVersionSegment()
+
+	// Target adds an absent ordinary field (103) and declares no function, so the
+	// only reason to touch data is the ordinary field itself.
+	const absentOrdinaryID = int64(103)
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Name: "schema_bump_absent_ordinary",
+		Fields: append(schemaBumpBaseFields(), &schemapb.FieldSchema{
+			FieldID:  absentOrdinaryID,
+			Name:     "added_nullable",
+			DataType: schemapb.DataType_Int64,
+			Nullable: true,
+		}),
+	}
+	s.task.plan.Functions = nil
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.NotEmpty(segment.GetManifest())
+
+	found := false
+	for _, fl := range segment.GetInsertLogs() {
+		if fl.GetFieldID() == absentOrdinaryID {
+			found = true
+			s.Require().Len(fl.GetBinlogs(), 1)
+			s.EqualValues(3, fl.GetBinlogs()[0].GetEntriesNum())
+		}
+	}
+	s.True(found, "absent ordinary field must be materialized into insert logs")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
@@ -893,12 +939,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{int64(2): deleteTs}, int64(time.Minute), currentTime, 0)
 
-	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true, nil)
+	selection, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true)
 	s.Require().NoError(err)
 	s.Require().NotNil(selection)
 	s.Equal(2, selection.Len())
 	s.Equal([]rowRange{{start: 0, end: 1}, {start: 4, end: 5}}, selection.ranges)
-	s.Equal([]int64{keptTTLField, keptTTLField}, ttlValues)
 	s.Equal(1, entityFilter.GetDeletedCount())
 	s.Equal(2, entityFilter.GetExpiredCount())
 }
@@ -971,6 +1016,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionWi
 	s.prepareBumpSchemaVersionCompaction()
 
 	s.task.plan.Schema.Functions = []*schemapb.FunctionSchema{}
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
 	result, err := s.task.Compact()
 	s.NoError(err)
 	s.NotNil(result)
@@ -994,15 +1040,29 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionIn
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionInvalidOutputField() {
-	s.prepareBumpSchemaVersionCompaction()
+	segID := int64(100)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.initSegBufferForSchemaBumpWithFields(segID, schemaBumpBaseFields(), nil)
+	s.finishBumpSchemaVersionSegment()
 
-	// Test with wrong output field type (VarChar instead of SparseFloatVector)
-	s.task.plan.Schema.Functions = []*schemapb.FunctionSchema{{
-		Name:           "BM25",
-		Type:           schemapb.FunctionType_BM25,
-		InputFieldIds:  []int64{101},
-		OutputFieldIds: []int64{101, 102},
-	}}
+	// A physically-absent BM25 output declared with the wrong type (VarChar
+	// instead of SparseFloatVector) must be rejected at output-type validation.
+	// A single absent output keeps this on the type-check path, not the
+	// partial-materialization guard.
+	const badOut = int64(105)
+	fields := append(schemaBumpBaseFields(), &schemapb.FieldSchema{
+		FieldID: badOut, Name: "bad_output", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true,
+	})
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Name:   "bump_invalid_output",
+		Fields: fields,
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "BM25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{badOut},
+		}},
+	}
 
 	_, err := s.task.Compact()
 	s.Error(err)
@@ -1352,10 +1412,14 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
 		"V3 schema bump binlog presence marker must have non-zero LogID")
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSelectsAllOutputsOnPartialState() {
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsRejectsPartialState() {
 	s.setupTest()
 	schema := schemaBumpMultiOutputBM25Schema()
 	s.task.plan.Schema = schema
+	// Output 102 present, 103 absent: a partially materialized function is
+	// persisted-schema corruption. It must fail loud (DataIntegrity) rather than
+	// silently re-select the already-present output (which would append a
+	// duplicate column group in the additive path).
 	existingFields := map[int64]struct{}{
 		common.RowIDField:     {},
 		common.TimeStampField: {},
@@ -1364,29 +1428,10 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSe
 		102:                   {},
 	}
 
-	outputFields, outputFieldIDs, err := s.task.missingFunctionOutputFields(schema.GetFunctions(), existingFields)
-	s.NoError(err)
-
-	s.Equal([]int64{102, 103}, outputFieldIDs)
-	s.Require().Len(outputFields, 2)
-	s.Equal(int64(102), outputFields[0].GetFieldID())
-	s.Equal(int64(103), outputFields[1].GetFieldID())
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializerExistingFieldsTreatsAllFunctionOutputsAsMissing() {
-	schema := schemaBumpMultiOutputBM25Schema()
-	existingFields := map[int64]struct{}{
-		common.RowIDField:     {},
-		common.TimeStampField: {},
-		100:                   {},
-		101:                   {},
-		102:                   {},
-	}
-
-	materializerFields := partialMaterializerExistingFields(schema, schema.GetFunctions(), existingFields)
-
-	s.NotContains(materializerFields, int64(102))
-	s.NotContains(materializerFields, int64(103))
+	_, _, err := s.task.missingFunctionOutputFields(schema.GetFunctions(), existingFields)
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.Contains(err.Error(), "partially materialized output fields")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsReplacesExistingOutputFieldLogs() {

@@ -271,6 +271,17 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
+// Abort releases the underlying FFI writer without producing column groups for
+// CommitManifestUpdates. It prevents metadata publication; storage already
+// flushed before the abort remains subject to normal orphan-file reclamation.
+func (pw *packedRecordBatchWriter) Abort() {
+	if pw.writer == nil {
+		return
+	}
+	pw.writer.Destroy()
+	pw.writer = nil
+}
+
 func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
 	if pw.writer != nil {
 		pw.writer.AsNewColumnGroups()
@@ -303,6 +314,25 @@ func NewPartialPackedRecordBatchWriter(
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
 	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
+}
+
+// NewPartialPackedRecordBatchWriterWithTextRefsAsBinary creates a partial
+// column-group writer whose TEXT columns use the binary LOB-reference Arrow
+// representation. Schema-bump reconciliation uses this for newly added,
+// nullable TEXT columns, whose historical values are materialized as binary
+// NULLs without rewriting any existing LOB data.
+func NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, true, writerFormat, schemaBasedFormats)
 }
 
 func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {

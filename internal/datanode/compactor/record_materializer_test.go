@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -541,10 +542,24 @@ func TestBM25FunctionMaterializerRejectsBadRunnerOutput(t *testing.T) {
 	})
 }
 
-func TestFunctionOutputIndexesToMaterializePartialStateReturnsAllOutputs(t *testing.T) {
-	functionSchema := &schemapb.FunctionSchema{OutputFieldIds: []int64{101, 102}}
-	require.Nil(t, functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}, 102: {}}))
-	require.Equal(t, []int{0, 1}, functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}}))
+func TestFunctionOutputIndexesToMaterialize(t *testing.T) {
+	functionSchema := &schemapb.FunctionSchema{Name: "f", OutputFieldIds: []int64{101, 102}}
+
+	// All outputs physically present -> nothing to materialize.
+	idx, err := functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}, 102: {}})
+	require.NoError(t, err)
+	require.Nil(t, idx)
+
+	// All outputs absent -> materialize every index.
+	idx, err = functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{})
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 1}, idx)
+
+	// Partial presence (101 present, 102 absent) is persisted-schema corruption
+	// and must fail loud, not silently re-materialize the present output.
+	_, err = functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}})
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "partially materialized output fields")
 }
 
 func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing.T) {
