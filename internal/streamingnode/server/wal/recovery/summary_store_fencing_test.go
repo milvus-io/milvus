@@ -25,7 +25,7 @@ import (
 func TestWritePChannelSummaryChunkIfAbsentArbitratesByTerm(t *testing.T) {
 	ctx := context.Background()
 	catalog, _ := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
@@ -33,7 +33,7 @@ func TestWritePChannelSummaryChunkIfAbsentArbitratesByTerm(t *testing.T) {
 	require.NoError(t, err)
 	currentPayload, currentFooter, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, nil)
 	require.NoError(t, err)
-	chunkKey := buildPChannelSummaryChunkKey("p1", 7)
+	chunkKey := buildPChannelSummaryChunkKey(chunkManager, "p1", 7)
 
 	// A stale owner (term 3) must not overwrite the newer owner's chunk (term 5).
 	require.NoError(t, chunkManager.Write(ctx, chunkKey, currentPayload))
@@ -65,7 +65,7 @@ func TestWritePChannelSummaryChunkIfAbsentArbitratesByTerm(t *testing.T) {
 func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t *testing.T) {
 	ctx := context.Background()
 	catalog, _ := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	checkpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(100), TimeTick: 100}
@@ -84,7 +84,7 @@ func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t
 	}
 	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 7, 5, checkpoint, records)
 	require.NoError(t, err)
-	chunkKey := buildPChannelSummaryChunkKey("p1", 7)
+	chunkKey := buildPChannelSummaryChunkKey(chunkManager, "p1", 7)
 
 	// Simulate a byte-different but semantically identical stored chunk by
 	// padding the footer with a proto unknown field, which a decoder preserves
@@ -106,7 +106,7 @@ func TestWritePChannelSummaryChunkIfAbsentAcceptsByteDifferentSameContentRetry(t
 func TestPChannelSummaryCleanerFencedByNewerTerm(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
@@ -146,7 +146,7 @@ func TestRecoverSummariesFencedByNewerTermMeta(t *testing.T) {
 func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCASCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	footer, _, _ := writeTestPChannelSummaryChunkWithTerm(ctx, t, "p1", 0, 5, chunkManager, &utility.WALCheckpoint{
@@ -183,7 +183,7 @@ func TestPersistPChannelSummaryFencesBeforeSavingVChannelMetas(t *testing.T) {
 func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCASCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	staleRecords := map[string][]*streamingpb.SummaryEntry{
@@ -239,7 +239,7 @@ func TestRecoverSummariesReadsOnlyManifestPublishedTerm(t *testing.T) {
 func TestRecoverSummariesRejectsManifestFooterTermMismatch(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCASCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	payload, _, _, err := marshalPChannelSummaryChunk("p1", 0, 1, &utility.WALCheckpoint{
@@ -247,7 +247,7 @@ func TestRecoverSummariesRejectsManifestFooterTermMismatch(t *testing.T) {
 		TimeTick:  100,
 	}, nil)
 	require.NoError(t, err)
-	require.NoError(t, chunkManager.Write(ctx, buildPChannelSummaryChunkKey("p1", 0, 2), payload))
+	require.NoError(t, chunkManager.Write(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", 0, 2), payload))
 	catalogState.storeMeta = &streamingpb.PChannelSummaryMeta{
 		Pchannel:                  "p1",
 		SourceCheckpointTimetick:  100,
@@ -280,7 +280,7 @@ func TestRecoverSummariesRejectsManifestFooterTermMismatch(t *testing.T) {
 func TestRecoverSummariesSealsPreviousTermByScanningChunks(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCASCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	for generation := uint64(0); generation <= 12; generation++ {
@@ -328,7 +328,7 @@ func TestRecoverSummariesSealsPreviousTermByScanningChunks(t *testing.T) {
 func TestRecoverSummariesAdoptsMultipleCurrentTermOrphanChunks(t *testing.T) {
 	ctx := context.Background()
 	catalog, _ := newTestPChannelSummaryCASCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	footer, _, _ := writeTestPChannelSummaryChunkWithTerm(ctx, t, "p1", 0, 2, chunkManager, &utility.WALCheckpoint{

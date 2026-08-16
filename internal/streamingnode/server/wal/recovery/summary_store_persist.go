@@ -11,13 +11,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func (m *summaryManager) persistPChannelSummary(
@@ -91,7 +91,7 @@ func (m *summaryManager) persistPChannelSummaryChunk(
 	if err != nil {
 		return nil, err
 	}
-	chunkKey := buildPChannelSummaryChunkKey(m.pchannel, nextGeneration, m.term)
+	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), m.pchannel, nextGeneration, m.term)
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelSummaryChunk"), mlog.Uint64("generation", nextGeneration)),
 		func(ctx context.Context) error {
@@ -289,22 +289,30 @@ func pchannelSummaryChunkFooterSameContent(left, right *streamingpb.PChannelSumm
 	return true
 }
 
-func buildPChannelSummaryChunkKey(pchannel string, generation uint64, term ...int64) string {
+func buildPChannelSummaryChunkKey(cm storage.ChunkManager, pchannel string, generation uint64, term ...int64) string {
 	chunkName := pchannelSummaryChunkObjectPrefix + strconv.FormatUint(generation, 10)
 	if len(term) > 0 {
 		chunkName += ".term" + strconv.FormatInt(term[0], 10)
 	}
-	return buildPChannelSummaryChunkPrefix(pchannel) +
+	return buildPChannelSummaryChunkPrefix(cm, pchannel) +
 		chunkName + pchannelSummaryChunkObjectExt
 }
 
 // buildPChannelSummaryChunkPrefix returns the object prefix holding every chunk of
 // the pchannel's summary store. The trailing separator keeps the prefix from
 // matching a sibling whose name merely starts with "chunks".
-func buildPChannelSummaryChunkPrefix(pchannel string) string {
-	root := paramtable.Get().MinioCfg.RootPath.GetValue()
+//
+// The prefix is rooted at the chunk manager that will store the object, which is
+// what every object key in Milvus is built from: a remote chunk manager returns
+// the configured minio.rootPath (a key prefix), a local one returns the local
+// storage directory. Reading minio.rootPath directly would be wrong for
+// storageType=local — LocalChunkManager writes the key verbatim, so the chunks
+// would land under the process working directory instead of the configured
+// local storage path. The manager is a parameter rather than a global lookup so
+// a key can never be built against a different root than the one that writes it.
+func buildPChannelSummaryChunkPrefix(cm storage.ChunkManager, pchannel string) string {
 	return path.Join(
-		root,
+		cm.RootPath(),
 		"streamingnode",
 		"summary-store",
 		sanitizeSummaryStorePathPart(pchannel),
@@ -325,7 +333,7 @@ func buildPChannelSummaryChunkPrefix(pchannel string) string {
 // before saving the meta, and any chunk left behind by an earlier partial
 // removal.
 func removeAllPChannelSummaryChunks(ctx context.Context, pchannel string) error {
-	prefix := buildPChannelSummaryChunkPrefix(pchannel)
+	prefix := buildPChannelSummaryChunkPrefix(resource.Resource().ChunkManager(), pchannel)
 	// A store that was never written has no chunk directory at all: object
 	// storage lists nothing, local storage reports the missing directory.
 	if err := resource.Resource().ChunkManager().RemoveWithPrefix(ctx, prefix); err != nil && !errors.Is(err, fs.ErrNotExist) {

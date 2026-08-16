@@ -673,8 +673,7 @@ func (_c *MockStreamingNodeCataLog_SaveVChannelSummaryMetas_Call) RunAndReturn(r
 func NewMockStreamingNodeCataLog(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockStreamingNodeCataLog {
+}) *MockStreamingNodeCataLog {
 	mock := &MockStreamingNodeCataLog{}
 	mock.Mock.Test(t)
 

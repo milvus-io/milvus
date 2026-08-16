@@ -132,12 +132,7 @@ func TestRecoveryStorage(t *testing.T) {
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(mixCoord)
 
-	summaryStoreRoot := t.TempDir()
-	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, summaryStoreRoot)
-	t.Cleanup(func() {
-		paramtable.Get().Reset(paramtable.Get().MinioCfg.RootPath.Key)
-	})
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(summaryStoreRoot))
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	pchannelSummaryMeta = writeTestBootstrapPChannelSummaryMeta(
 		context.Background(),
 		t,

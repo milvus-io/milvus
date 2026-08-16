@@ -80,10 +80,9 @@ func initResourceForTest(t *testing.T) {
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
 	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
-	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
+	chunkManagerRoot := t.TempDir()
 	t.Cleanup(func() {
 		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
-		params.Reset(params.MinioCfg.RootPath.Key)
 	})
 
 	rc := idalloc.NewMockRootCoordClient(t)
@@ -108,7 +107,7 @@ func initResourceForTest(t *testing.T) {
 		t,
 		resource.OptMixCoordClient(fMixCoordClient),
 		resource.OptStreamingNodeCatalog(catalog),
-		resource.OptChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(params.MinioCfg.RootPath.GetValue()))),
+		resource.OptChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(chunkManagerRoot))),
 	)
 }
 

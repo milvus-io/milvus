@@ -162,7 +162,7 @@ func writeTestBootstrapPChannelSummaryMeta(
 	}
 	payload, footer, _, err := marshalPChannelSummaryChunk(pchannel, 0, 0, checkpoint, nil)
 	require.NoError(t, err)
-	key := buildPChannelSummaryChunkKey(pchannel, footer.Generation, footer.Term)
+	key := buildPChannelSummaryChunkKey(chunkManager, pchannel, footer.Generation, footer.Term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 	return newPChannelSummaryStoreMetaFromChunk(pchannel, footer, 0, 0).intoCatalogMeta()
 }
@@ -194,7 +194,7 @@ func writeTestPChannelSummaryChunkWithTerm(
 	}
 	payload, footer, checksum, err := marshalPChannelSummaryChunk(pchannel, generation, term, checkpoint, records)
 	require.NoError(t, err)
-	key := buildPChannelSummaryChunkKey(pchannel, generation, term)
+	key := buildPChannelSummaryChunkKey(chunkManager, pchannel, generation, term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 	return footer, key, checksum
 }
@@ -258,11 +258,6 @@ func (c *testPChannelSummaryCASCatalog) CompareAndSwapPChannelSummaryMeta(ctx co
 }
 
 func newTestPChannelSummaryCatalog(t *testing.T) (*mock_metastore.MockStreamingNodeCataLog, *testPChannelSummaryCatalogState) {
-	params := paramtable.Get()
-	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
-	t.Cleanup(func() {
-		params.Reset(params.MinioCfg.RootPath.Key)
-	})
 	state := &testPChannelSummaryCatalogState{
 		summaryMetas: make(map[string]*streamingpb.VChannelSummaryMeta),
 	}
@@ -309,10 +304,6 @@ func newTestPChannelSummaryCatalog(t *testing.T) (*mock_metastore.MockStreamingN
 
 func TestPersistPChannelSummaryRetriesTransientMetaLoad(t *testing.T) {
 	ctx := context.Background()
-	params := paramtable.Get()
-	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
-	t.Cleanup(func() { params.Reset(params.MinioCfg.RootPath.Key) })
-
 	state := &testPChannelSummaryCatalogState{summaryMetas: make(map[string]*streamingpb.VChannelSummaryMeta)}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
@@ -935,7 +926,8 @@ func TestPChannelSummaryChunkCodecDetectsVChannelBlockChecksumMismatch(t *testin
 }
 
 func TestPChannelSummaryChunkKeyIsDeterministic(t *testing.T) {
-	key := buildPChannelSummaryChunkKey("by-dev-rootcoord-dml_0", 42, 7)
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
+	key := buildPChannelSummaryChunkKey(chunkManager, "by-dev-rootcoord-dml_0", 42, 7)
 	require.Contains(t, key, "/streamingnode/summary-store/by-dev-rootcoord-dml_0/chunks/chunk.42.term7.psc")
 	require.NotContains(t, key, "manifests")
 	require.NotContains(t, key, "checksum")
@@ -1242,7 +1234,7 @@ func TestPChannelSummaryRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T)
 	corruptPayload := rewritePChannelSummaryFooterPayload(t, payload, func(footer *streamingpb.PChannelSummaryChunkFooter) {
 		footer.SourceCheckpointTimetick = 999999
 	})
-	orphanKey := buildPChannelSummaryChunkKey("p1", 1, 0)
+	orphanKey := buildPChannelSummaryChunkKey(chunkManager, "p1", 1, 0)
 	require.NoError(t, chunkManager.Write(ctx, orphanKey, corruptPayload))
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, initialCheckpoint)
@@ -1564,7 +1556,7 @@ func TestPChannelSummaryBootstrapCreatesGenerationZeroChunk(t *testing.T) {
 	require.Equal(t, uint64(0), meta.GetMinInUseGeneration())
 	require.Equal(t, uint64(10), meta.GetSourceCheckpointTimetick())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
+	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", meta.GetLatestGeneration(), meta.GetTerm()))
 	require.NoError(t, err)
 	records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
@@ -1619,7 +1611,7 @@ func TestPChannelSummaryPersistsCheckpointOnlyGeneration(t *testing.T) {
 	require.Equal(t, uint64(0), meta.GetMinAvailableGeneration())
 	require.Equal(t, uint64(0), meta.GetMinInUseGeneration())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
+	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", meta.GetLatestGeneration(), meta.GetTerm()))
 	require.NoError(t, err)
 	records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
@@ -1666,7 +1658,7 @@ func TestForcePersistIdempotencySummaryToTimeTickPersistsCleanCheckpoint(t *test
 	require.Equal(t, uint64(150), catalogState.storeMeta.GetSourceCheckpointTimetick())
 	require.Equal(t, int64(0), catalogState.storeMeta.GetTerm())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey("p1", 1, 0))
+	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", 1, 0))
 	require.NoError(t, err)
 	records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
@@ -1715,7 +1707,7 @@ func TestPChannelSummaryPersistWritesContinuousGenerationsWhenCheckpointAdvances
 	}
 
 	for generation := uint64(0); generation <= 2; generation++ {
-		chunkKey := buildPChannelSummaryChunkKey("p1", generation, 0)
+		chunkKey := buildPChannelSummaryChunkKey(chunkManager, "p1", generation, 0)
 		exists, err := chunkManager.Exist(ctx, chunkKey)
 		require.NoError(t, err)
 		require.True(t, exists)
@@ -1726,7 +1718,7 @@ func TestPChannelSummaryPersistWritesContinuousGenerationsWhenCheckpointAdvances
 		require.Empty(t, records)
 		require.Equal(t, generation, footer.Generation)
 	}
-	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey("p1", 3, 0))
+	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", 3, 0))
 	require.NoError(t, err)
 	require.False(t, exists)
 }
@@ -1825,7 +1817,7 @@ func TestPChannelSummaryPersistRetryDoesNotAllocateNextGenerationWhenCheckpointC
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
-	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey("p1", 1, 0))
+	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", 1, 0))
 	require.NoError(t, err)
 	require.False(t, exists)
 }

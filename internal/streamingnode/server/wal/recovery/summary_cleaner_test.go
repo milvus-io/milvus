@@ -17,13 +17,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestPChannelSummaryCleanerAdvancesMinAvailableAndDeletesOldChunks(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
@@ -48,7 +47,7 @@ func TestPChannelSummaryCleanerAdvancesMinAvailableAndDeletesOldChunks(t *testin
 func TestPChannelSummaryCleanerDoesNotDeleteLatestGeneration(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
@@ -73,7 +72,7 @@ func TestPChannelSummaryCleanerDoesNotDeleteLatestGeneration(t *testing.T) {
 func TestPChannelSummaryCleanerWaitsForActiveViewInitialization(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 2)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 2, 0, 0)
@@ -96,7 +95,7 @@ func TestPChannelSummaryCleanerWaitsForActiveViewInitialization(t *testing.T) {
 func TestPChannelSummaryCleanerNoActiveViewsKeepsOnlyLatestGeneration(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 2)
@@ -120,7 +119,7 @@ func TestPChannelSummaryCleanerNoActiveViewsKeepsOnlyLatestGeneration(t *testing
 func TestPChannelSummaryCleanerEmptyActiveSummaryKeepsOnlyLatestGeneration(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
@@ -150,7 +149,7 @@ func TestPChannelSummaryCleanerEmptyActiveSummaryKeepsOnlyLatestGeneration(t *te
 func TestPChannelSummaryCleanerReclaimsFromMinAvailableLeavingLowerChunks(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 4)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 4, 2, 2)
@@ -180,7 +179,7 @@ func TestPChannelSummaryCleanerReclaimsFromMinAvailableLeavingLowerChunks(t *tes
 func TestPChannelSummaryCleanerReDeletesIdempotentlyAfterCrashBeforeSave(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	// A prior cleaner cycle persisted the advanced MinInUseGeneration (2), then
@@ -189,7 +188,7 @@ func TestPChannelSummaryCleanerReDeletesIdempotentlyAfterCrashBeforeSave(t *test
 	// MinAvailableGeneration, so the meta still says MinAvailable=0. The next
 	// cycle must re-delete the range idempotently and finish the advance.
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 2)
-	require.NoError(t, chunkManager.Remove(ctx, buildPChannelSummaryChunkKey("p1", 0, 0)))
+	require.NoError(t, chunkManager.Remove(ctx, buildPChannelSummaryChunkKey(chunkManager, "p1", 0, 0)))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(300),
@@ -227,7 +226,7 @@ func (f removeFailingChunkManager) Remove(ctx context.Context, key string) error
 func TestPChannelSummaryCleanerPersistsMinInUseBeforeDeleting(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := newTestPChannelSummaryCleanerChunkManager()
+	chunkManager := newTestPChannelSummaryCleanerChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(removeFailingChunkManager{chunkManager}))
 	writeTestPChannelSummaryChunks(t, ctx, "p1", chunkManager, 0, 3)
 	catalogState.storeMeta = testPChannelSummaryStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
@@ -277,8 +276,14 @@ func addTestSummaryPinnedAtGeneration(m *summaryManager, vchannel string, genera
 	m.setSummary(vchannel, summary)
 }
 
-func newTestPChannelSummaryCleanerChunkManager() storage.ChunkManager {
-	return storage.NewLocalChunkManager(objectstorage.RootPath(paramtable.Get().MinioCfg.RootPath.GetValue()))
+// newTestPChannelSummaryCleanerChunkManager roots the store at a per-test
+// temp directory. The root MUST come straight from t.TempDir(): chunk keys are
+// built from the chunk manager's own root, and LocalChunkManager writes a key
+// verbatim, so a relative root would drop the chunk files into the package
+// directory.
+func newTestPChannelSummaryCleanerChunkManager(t *testing.T) storage.ChunkManager {
+	t.Helper()
+	return storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 }
 
 func writeTestPChannelSummaryChunks(t *testing.T, ctx context.Context, pchannel string, chunkManager storage.ChunkManager, startGeneration uint64, endGeneration uint64) {
@@ -310,7 +315,7 @@ func testPChannelSummaryStoreMeta(
 
 func requirePChannelSummaryChunkExists(t *testing.T, ctx context.Context, chunkManager storage.ChunkManager, pchannel string, generation uint64, expected bool) {
 	t.Helper()
-	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey(pchannel, generation, 0))
+	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey(chunkManager, pchannel, generation, 0))
 	require.NoError(t, err)
 	require.Equal(t, expected, exists)
 }

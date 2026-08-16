@@ -227,7 +227,7 @@ func (m *summaryManager) deletePChannelSummaryChunks(ctx context.Context, logger
 		if !ok {
 			return pchannelSummaryStoreCorruptedf("pchannel summary chunk manifest misses generation %d before clean", generation)
 		}
-		chunkKey := buildPChannelSummaryChunkKey(m.pchannel, generation, termRange.GetTerm())
+		chunkKey := buildPChannelSummaryChunkKey(chunkManager, m.pchannel, generation, termRange.GetTerm())
 		exists, err := chunkManager.Exist(ctx, chunkKey)
 		if err != nil {
 			return errors.Wrapf(err, "failed to check pchannel summary chunk %s before clean", chunkKey)

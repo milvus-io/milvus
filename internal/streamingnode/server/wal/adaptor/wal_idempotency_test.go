@@ -41,14 +41,12 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.EtcdCfg.RootPath.Key, fmt.Sprintf("idempotency-wal-%d", time.Now().UnixNano()))
-	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
 	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
-		params.Reset(params.MinioCfg.RootPath.Key)
 		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
 	}()
 
@@ -244,7 +242,10 @@ func initIdempotencyResourceForTest(t *testing.T) {
 
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixCoordClient.Set(rc)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(paramtable.Get().MinioCfg.RootPath.GetValue()))
+	// The root must be the raw t.TempDir(): summary chunk keys are built from the
+	// chunk manager's own root and LocalChunkManager writes a key verbatim, so a
+	// relative root would drop the chunk files into the package directory.
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(
 		t,
 		resource.OptMixCoordClient(fMixCoordClient),

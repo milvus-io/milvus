@@ -189,7 +189,7 @@ func (m *summaryManager) bootstrapPChannelSummaryStore(ctx context.Context, pcha
 	if err != nil {
 		return nil, err
 	}
-	chunkKey := buildPChannelSummaryChunkKey(pchannel, footer.Generation, m.term)
+	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, footer.Generation, m.term)
 	logger := m.Logger().With(mlog.String("op", "bootstrapPChannelSummaryStore"), mlog.Uint64("generation", footer.Generation))
 	// Do not remove chunks here based only on the earlier no-meta read: another
 	// owner may have bootstrapped and published a meta after that read. A stale
@@ -264,7 +264,7 @@ func (m *summaryManager) recoverSummariesFromStore(ctx context.Context, pchannel
 		return actualMeta, nil
 	}
 	for generation := meta.LatestGeneration + 1; ; generation++ {
-		chunkKey := buildPChannelSummaryChunkKey(pchannel, generation, m.term)
+		chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, m.term)
 		exists, err := resource.Resource().ChunkManager().Exist(ctx, chunkKey)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to probe pchannel summary chunk %s", chunkKey)
@@ -340,7 +340,7 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	generation uint64,
 	expectedTerm int64,
 ) (map[string][]*streamingpb.SummaryEntry, *streamingpb.PChannelSummaryChunkFooter, string, error) {
-	chunkKey := buildPChannelSummaryChunkKey(pchannel, generation, expectedTerm)
+	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, expectedTerm)
 	// Bounded retry on the raw read. Referenced-state corruption hard-fails the
 	// WAL open, so only a VERIFIED decode/checksum failure below may be called
 	// corruption; a transient object-storage blip is retried here and, if
@@ -388,7 +388,7 @@ func (m *summaryManager) sealPreviousPChannelSummaryTerm(ctx context.Context, pc
 	}
 	scanned := 0
 	for generation := lastRange.GetEndGeneration() + 1; ; generation++ {
-		chunkKey := buildPChannelSummaryChunkKey(pchannel, generation, lastRange.GetTerm())
+		chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, lastRange.GetTerm())
 		exists, err := resource.Resource().ChunkManager().Exist(ctx, chunkKey)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to probe previous-term pchannel summary chunk %s", chunkKey)
