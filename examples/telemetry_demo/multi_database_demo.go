@@ -13,6 +13,9 @@
 //   2. Database-targeted command push (push_config only to specific database)
 //   3. Verification that commands are received by the correct client only
 //   4. Database filtering in telemetry API
+
+//go:build ignore
+
 package main
 
 import (
