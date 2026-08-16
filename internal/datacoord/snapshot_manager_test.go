@@ -3449,7 +3449,7 @@ func TestAcquireCaptureSlot(t *testing.T) {
 		release()
 	}
 
-	// A cancelled context must not leak a slot or block forever.
+	// A canceled context must not leak a slot or block forever.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	saturate := make([]func(), 0, maxConcurrentSnapshotCaptures)

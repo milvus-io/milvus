@@ -758,7 +758,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		//
 		// Excluding cannot lose rows: invisible means the clustering run has not
 		// published, which means its inputs are still alive and captured.
-		return !(info.GetIsInvisible() && info.GetCreatedByCompaction())
+		return !info.GetIsInvisible() || !info.GetCreatedByCompaction()
 	}))
 	segments := make([]*SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {

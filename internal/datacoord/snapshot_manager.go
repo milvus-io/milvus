@@ -513,7 +513,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	// planned, validated and committed.
 	//
 	// This cannot strand a collection: the flag is in-memory only, nothing else
-	// clears it, and the retry loop can be abandoned only by cancelling the ack
+	// clears it, and the retry loop can be abandoned only by canceling the ack
 	// scheduler's context -- which happens solely on process shutdown, the same
 	// shutdown that drops the flag. On restart the callback is replayed from
 	// persisted state and re-establishes staging from scratch.
