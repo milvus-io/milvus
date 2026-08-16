@@ -573,6 +573,13 @@ func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
 
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
+//
+// The swap is overlap-based on purpose: results are published first, inputs
+// retired last, so a crash leaves both generations live rather than neither.
+// The two are separate catalog writes; collapsing them into one ordered
+// catalog.Update (as completeMixCompactionMutation does) would close the
+// both-visible window, but not the earlier invisible-results one, so readers
+// would still have to dedup. Left as a follow-up.
 func (t *clusteringCompactionTask) completeTask() error {
 	var err error
 	// first mark result segments visible

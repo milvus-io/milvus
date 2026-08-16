@@ -765,24 +765,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		}
 	}
 
-	// Keep one generation per compaction lineage. The tests above are all
-	// per-segment, and a compaction publishes its output before its inputs go
-	// away -- atomically for mix and sort, but across several catalog writes for
-	// clustering, which marks its results visible and only then drops its inputs
-	// (compaction_task_clustering.go completeTask). Anywhere in that gap both
-	// generations pass every test above, and the snapshot would carry the same
-	// rows twice.
-	//
-	// The query path answers the same question with two mechanisms: it skips
-	// IsInvisible && CreatedByCompaction outright, then resolves the rest by
-	// lineage in retrieveSegment. Only the second is reproduced here, because it
-	// subsumes the first for every reachable state -- an invisible compaction
-	// output always has its inputs still alive, since clustering does not drop
-	// them until it has published the output visible -- and because skipping on
-	// invisibility alone drops a segment without checking whether anything else
-	// covers its rows. That distinction matters: this runs on the capture path,
-	// where dropping an uncovered segment is silent data loss rather than a
-	// query that reads one generation older.
+	// The tests above are per-segment, but clustering keeps both generations
+	// live across several catalog writes, so inputs and outputs can pass all of
+	// them at once and the snapshot would carry the same rows twice.
 	segments = dropSupersededByLineage(ctx, h.s.meta, segments)
 
 	if len(segments) == 0 {
@@ -933,31 +918,21 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 }
 
 // dropSupersededByLineage removes any selected segment that has a selected
-// ancestor, so a compaction lineage contributes exactly one generation to a
-// snapshot.
+// ancestor, so a compaction lineage contributes exactly one generation.
 //
-// It only ever removes. retrieveSegment, which the query path uses for the same
-// job, instead *replaces* an output with its inputs -- correct there, wrong
-// here, because it can introduce ids that were never eligible for this
-// snapshot. A Dropped input would be one: a snapshot must not reference a
-// segment whose files GC may already be reclaiming, and snapshot protection is
-// registered by SaveSnapshot, which runs after this. An out-of-boundary input
-// would be another: a compaction output takes its StartPosition from the
-// earliest of its inputs, so an output can sit inside the boundary while a
-// later input sits outside it, and descending would pull post-boundary rows in.
-// Removal cannot do either, because everything it considers has already passed
-// the boundary and state tests.
+// It only removes, unlike the query path's retrieveSegment, which replaces an
+// output with its inputs. Replacement would introduce ids this snapshot never
+// qualified: a Dropped input (whose files GC may already be reclaiming, since
+// snapshot protection is registered later, by SaveSnapshot), or an
+// out-of-boundary one (an output inherits StartPosition from its earliest
+// input, so it can be in-boundary while a later input is not).
 //
-// Preferring the inputs loses nothing. GenSnapshot already walks forward with
-// GetDeltaLogFromCompactTo and merges a descendant's deltalogs onto the
-// captured segment before trimming them at the boundary, so deletes that landed
-// on the output still apply.
+// Keeping the inputs loses no deletes: GenSnapshot separately merges
+// descendants' deltalogs via GetDeltaLogFromCompactTo.
 //
-// The walk needs segments the snapshot itself will not capture -- a lineage can
-// run A -> C -> E with C already Dropped -- so parents resolve against
-// unfiltered meta rather than against the selected set. A parent missing from
-// meta entirely (GC'd) ends that branch and the output is kept, which is the
-// same conclusion the query path reaches for that shape.
+// Parents resolve against unfiltered meta, because a lineage can run
+// A -> C -> E with C already Dropped. A parent missing entirely (GC'd) ends
+// that branch and the output is kept.
 func dropSupersededByLineage(ctx context.Context, m *meta, selected []*SegmentInfo) []*SegmentInfo {
 	if len(selected) < 2 {
 		return selected

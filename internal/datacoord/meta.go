@@ -2532,7 +2532,14 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	for _, seg := range compactToInfos {
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
-	// only add new segments
+	// Only add new segments. Unlike mix and sort, clustering does not retire its
+	// inputs in this write: the outputs are born IsInvisible and cannot serve
+	// until indexed, so the inputs keep serving until completeTask drops them.
+	//
+	// Readers must therefore expect both generations to be live in between, and
+	// must dedup by CompactionFrom -- IsInvisible only separates them until
+	// markResultSegmentsVisible, after which both are visible. See
+	// retrieveSegment (query) and dropSupersededByLineage (snapshot).
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		mlog.Warn(m.ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
