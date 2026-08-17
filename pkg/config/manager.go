@@ -568,9 +568,9 @@ func (m *Manager) SetMapConfig(key, value string) {
 
 // mapConfigKey is the identity SetMapConfig stores under, and therefore the one
 // ResetConfig and DeleteConfig have to clear as well as the formatted one.
-// Shared so the three cannot drift: they previously disagreed for keys below
-// NotFormatPrefix, whose case lowerKey preserves but ToLower does not, and for
-// keys spelled with slashes.
+// Named and shared so the three cannot drift apart again: the removers used to
+// clear only the formatted identity, so a group value written through
+// BaseTable.SaveGroup survived its own deletion.
 func mapConfigKey(key string) string {
 	return strings.ToLower(key)
 }
@@ -726,23 +726,57 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	}
 
 	resolved := resolvedKey{lookup: formattedKey, dotted: dotted}
-	var environmentOnly *bool
+	var environmentOnly, environmentBacked *bool
+	lazily := func(cached **bool, compute func() bool) bool {
+		if *cached == nil {
+			verdict := compute()
+			*cached = &verdict
+		}
+		return **cached
+	}
 	m.registeredKeyPrefixes.Range(func(prefix string) bool {
-		if !strings.HasPrefix(dotted, prefix) || len(dotted) <= len(prefix) {
+		switch {
+		case hasNamespacePrefix(dotted, prefix):
+			// The key names the namespace explicitly, separators and all. Only
+			// the environment can produce such a name without meaning it — see
+			// groupMemberIsEnvironmentOnly.
+			if lazily(&environmentOnly, func() bool {
+				return m.groupMemberIsEnvironmentOnly(dotted, formattedKey)
+			}) {
+				return true
+			}
+		case hasNamespacePrefix(formattedKey, formatKeyUncached(prefix)):
+			// Separators already collapsed, so the namespace can only be matched
+			// fuzzily — "tlsclustersprodcapempath" against "tlsclusters". That is
+			// how AlterConfigsInEtcd stores a member, and how FileSource and
+			// EnvSource store their aliases, so the identity has to be accepted
+			// or a key written through the alter endpoint becomes invisible to
+			// the very projections this file exists to make truthful.
+			//
+			// Fuzzy matching is only safe on sources that hold nothing but
+			// Milvus configuration. The environment holds everything in the pod,
+			// and a collapsed name cannot be checked against the namespace's
+			// structure, so an environment-backed identity is not accepted here.
+			if lazily(&environmentBacked, func() bool {
+				source, ok := m.keySourceMap.Get(formattedKey)
+				return ok && source == environmentSourceName
+			}) {
+				return true
+			}
+		default:
 			return true
 		}
-		// Computed lazily and at most once: only a prefix hit needs it.
-		if environmentOnly == nil {
-			verdict := m.groupMemberIsEnvironmentOnly(dotted, formattedKey)
-			environmentOnly = &verdict
-		}
-		if !*environmentOnly {
-			resolved.kind = RegisteredConfigGroup
-			return false
-		}
-		return true
+		resolved.kind = RegisteredConfigGroup
+		return false
 	})
 	return resolved
+}
+
+// hasNamespacePrefix reports whether key names something strictly below prefix.
+// An empty prefix covers every non-empty key, which is what a ParamGroup with
+// no KeyPrefix declares.
+func hasNamespacePrefix(key, prefix string) bool {
+	return strings.HasPrefix(key, prefix) && len(key) > len(prefix)
 }
 
 // IsSensitive reports whether key is a credential. It accepts any spelling of

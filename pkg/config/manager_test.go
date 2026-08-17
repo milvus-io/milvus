@@ -574,16 +574,61 @@ func TestProjectionsOmitInertOverlays(t *testing.T) {
 	assert.NotContains(t, mgr.GetConfigs(), "some.declared.key")
 	assert.NotContains(t, mgr.GetConfigsView(), "some.declared.key")
 
-	// SetConfig on a group member: getBy's dotted prefix filter never sees this.
-	mgr.SetConfig("some.group.member", "inert-stripped")
-	require.Empty(t, mgr.GetByRaw(WithPrefix("some.group.")))
-	assert.NotContains(t, mgr.GetConfigs(), formatKey("some.group.member"))
+	// A group member under the collapsed identity is NOT inert: that is the
+	// identity AlterConfigsInEtcd writes, and a caller that builds the key
+	// itself reads it back through Manager.GetConfig. Only the ParamGroup
+	// aggregate misses it, and the aggregate is not the only consumer.
+	mgr.SetConfig("some.group.member", "written-by-alter")
+	assert.Equal(t, "written-by-alter", mgr.GetConfigs()[formatKey("some.group.member")])
+	_, live, err := mgr.GetConfig("some.group.member")
+	require.NoError(t, err)
+	assert.Equal(t, "written-by-alter", live)
 
-	// And the authoritative spellings still come through.
+	// And the authoritative scalar spelling still comes through.
 	mgr.SetConfig("some.declared.key", "live")
-	mgr.SetMapConfig("some.group.member", "live-group")
 	assert.Equal(t, "live", mgr.GetConfigs()[formatKey("some.declared.key")])
-	assert.Equal(t, "live-group", mgr.GetConfigs()["some.group.member"])
+}
+
+// A member written through /management/config/alter lands in etcd under the
+// collapsed identity only. It is in force — grpcConfig's per-cluster CDC
+// settings read exactly that way — so the projections have to show it, or the
+// endpoint accepts a write it then denies ever happened.
+func TestAlterWrittenGroupMemberIsProjected(t *testing.T) {
+	const dotted = "tls.clusters.prod.caPemPath"
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("tls.clusters.")
+	require.NoError(t, mgr.AddSource(&mapSource{
+		name:    "EtcdLikeSource",
+		configs: map[string]string{EtcdConfigKey(dotted): "/etc/ca.pem"},
+	}))
+
+	_, kind := mgr.ResolveRegisteredConfigKey(dotted)
+	assert.Equal(t, RegisteredConfigGroup, kind)
+	assert.Contains(t, mgr.GetConfigsView()[EtcdConfigKey(dotted)], "/etc/ca.pem")
+	_, reported, err := mgr.GetRegisteredConfig(dotted)
+	require.NoError(t, err)
+	// What a caller that builds the key itself reads.
+	_, live, err := mgr.GetConfig(dotted)
+	require.NoError(t, err)
+	assert.Equal(t, live, reported)
+}
+
+// The same fuzzy match must not be extended to the environment: a collapsed
+// name cannot be checked against the namespace's structure, and the environment
+// holds everything in the pod rather than only configuration.
+func TestCollapsedMatchIsNotExtendedToTheEnvironment(t *testing.T) {
+	t.Setenv("TLS_CLUSTERS_PROD_CAPEMPATH", "/etc/env.pem")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	t.Setenv("DATABASE_URL", "db-secret")
+
+	mgr, _ := Init(WithEnvSource(formatKey))
+	mgr.RegisterConfigPrefix("tls.clusters.")
+
+	require.NotEmpty(t, mgr.GetConfigsRaw(), "the environment was never imported")
+	_, kind := mgr.ResolveRegisteredConfigKey("tls.clusters.prod.caPemPath")
+	assert.Equal(t, RegisteredConfigUnknown, kind)
+	assert.Empty(t, mgr.GetConfigs())
+	assert.Empty(t, mgr.GetConfigsView())
 }
 
 // A ParamGroup member set through both overlay spellings must be reported as
