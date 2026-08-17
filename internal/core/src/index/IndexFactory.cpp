@@ -745,6 +745,25 @@ IndexFactory::ScalarIndexLoadResource(
 }
 
 LoadResourceRequest
+IndexFactory::ScalarIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    bool field_nullable) {
+    return ScalarIndexLoadResourceImpl(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows,
+                                       std::nullopt,
+                                       field_nullable);
+}
+
+LoadResourceRequest
 IndexFactory::ScalarIndexLoadResourceImpl(
     DataType field_type,
     IndexVersion index_version,

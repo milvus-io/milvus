@@ -189,6 +189,24 @@ TEST(JsonPathIndexTest, LoadResourceIncludesResidentRoaringRowMasks) {
     EXPECT_EQ(json.final_memory_cost, 2 * kOneMaskBudget + kRowCount / 8);
 }
 
+TEST(JsonPathIndexTest, LoadResourceSkipsRowMaskForNonNullableScalarField) {
+    constexpr int64_t kRowCount = 65536;
+    constexpr uint64_t kIndexSize = 1024;
+    constexpr uint64_t kOneMaskBudget = kRowCount / 4;
+
+    std::map<std::string, std::string> params{
+        {INDEX_TYPE, INVERTED_INDEX_TYPE},
+        {SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    auto non_nullable = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64, 0, kIndexSize, params, true, kRowCount, false);
+    auto nullable = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64, 0, kIndexSize, params, true, kRowCount, true);
+
+    EXPECT_EQ(non_nullable.final_memory_cost, 0);
+    EXPECT_EQ(nullable.final_memory_cost, kOneMaskBudget);
+}
+
 TEST(JsonPathIndexTest, ConvertDouble_PathNotExist) {
     auto json_fd = MakeJsonFieldData({
         R"({"b": 1})",    // path /a doesn't exist

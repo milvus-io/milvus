@@ -105,6 +105,16 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows,
+        bool field_nullable);
+
+    LoadResourceRequest
+    ScalarIndexLoadResource(
+        DataType field_type,
+        IndexVersion index_version,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
         const std::vector<std::string>& index_files,
         const storage::FileManagerContext& file_manager_context,
         std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
