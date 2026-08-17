@@ -206,9 +206,8 @@ func (s *WriteModeSuite) queryStrongCount(ctx context.Context, collectionName st
 // seconds, so this must be polled rather than checked once.
 func (s *WriteModeSuite) waitForStrongCount(ctx context.Context, collectionName string, want int64, timeout time.Duration) int64 {
 	deadline := time.Now().Add(timeout)
-	var last int64 = -1
 	for {
-		last = s.queryStrongCount(ctx, collectionName)
+		last := s.queryStrongCount(ctx, collectionName)
 		mlog.Info(ctx, "polling row count while waiting for L0 compaction + Reopen",
 			mlog.String("collection", collectionName), mlog.Int64("want", want), mlog.Int64("got", last))
 		if last == want {

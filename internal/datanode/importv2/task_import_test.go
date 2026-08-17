@@ -106,7 +106,7 @@ func (s *ImportTaskDeleteModeSuite) SetupTest() {
 }
 
 // newInputChunkManager returns a ChunkManager mock that serves a delete-key JSON file
-// containing s.pks as the "pk" column, the pattern used by the neighbouring preimport tests.
+// containing s.pks as the "pk" column, the pattern used by the neighboring preimport tests.
 func (s *ImportTaskDeleteModeSuite) newInputChunkManager() *mocks.ChunkManager {
 	content := &deleteKeyContent{Rows: make([]deleteKeyRow, 0, s.rowCount)}
 	for _, pk := range s.pks {
@@ -353,7 +353,7 @@ func (s *ImportTaskUpsertModeSuite) SetupTest() {
 }
 
 // newInputChunkManager returns a ChunkManager mock that serves a full insert-file JSON
-// containing s.pks and s.vecs, the pattern used by the neighbouring append-mode tests.
+// containing s.pks and s.vecs, the pattern used by the neighboring append-mode tests.
 func (s *ImportTaskUpsertModeSuite) newInputChunkManager() *mocks.ChunkManager {
 	content := &upsertContent{Rows: make([]upsertRow, 0, s.rowCount)}
 	for i := 0; i < s.rowCount; i++ {
@@ -617,7 +617,7 @@ func (s *ImportTaskUpsertPartitionKeySuite) SetupTest() {
 func (s *ImportTaskUpsertPartitionKeySuite) findPartitionKeys() (int64, int64) {
 	var key0, key1 int64
 	var found0, found1 bool
-	for i := int64(0); i < 1000 && !(found0 && found1); i++ {
+	for i := int64(0); i < 1000 && (!found0 || !found1); i++ {
 		h, err := typeutil.Hash32Int64(i)
 		s.Require().NoError(err)
 		if int64(h)%2 == 0 && !found0 {
