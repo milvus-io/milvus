@@ -67,13 +67,20 @@ func IsSecurityGoverningConfig(key string) bool {
 	// also matches a hypothetical "common.securityFoo". That over-match is the
 	// safe direction for a fence, and no such key exists.
 	identity := config.EtcdConfigKey(key)
-	if strings.HasPrefix(identity, config.EtcdConfigKey(SecurityGoverningConfigPrefix)) {
+	if strings.HasPrefix(identity, securityGoverningConfigPrefixIdentity) {
 		return true
 	}
-	for _, governing := range securityGoverningConfigKeys {
-		if identity == config.EtcdConfigKey(governing) {
-			return true
-		}
-	}
-	return false
+	_, ok := securityGoverningConfigIdentities[identity]
+	return ok
 }
+
+var (
+	securityGoverningConfigPrefixIdentity = config.EtcdConfigKey(SecurityGoverningConfigPrefix)
+	securityGoverningConfigIdentities     = func() map[string]struct{} {
+		identities := make(map[string]struct{}, len(securityGoverningConfigKeys))
+		for _, governing := range securityGoverningConfigKeys {
+			identities[config.EtcdConfigKey(governing)] = struct{}{}
+		}
+		return identities
+	}()
+)

@@ -136,8 +136,12 @@ type Manager struct {
 	immutableKeys        *typeutil.ConcurrentSet[string]
 	sensitiveKeys        *typeutil.ConcurrentSet[string]
 	sensitiveKeyPrefixes *typeutil.ConcurrentSet[string]
-	nonSensitiveKeys     *typeutil.ConcurrentSet[string]
-	nonSensitiveSuffixes *typeutil.ConcurrentSet[string]
+	// sensitiveKeyPrefixesCollapsed holds the same prefixes with separators
+	// removed, so a key stored under the collapsed identity can be matched
+	// without reformatting every prefix on every lookup.
+	sensitiveKeyPrefixesCollapsed *typeutil.ConcurrentSet[string]
+	nonSensitiveKeys              *typeutil.ConcurrentSet[string]
+	nonSensitiveSuffixes          *typeutil.ConcurrentSet[string]
 	// declaredKeys maps a declared ParamItem's separator-free identity to its
 	// dotted spelling, so the structure of the key survives a lookup made under
 	// any of its aliases.
@@ -151,19 +155,20 @@ type Manager struct {
 
 func NewManager() *Manager {
 	manager := &Manager{
-		Dispatcher:            NewEventDispatcher(),
-		sources:               typeutil.NewConcurrentMap[string, Source](),
-		keySourceMap:          typeutil.NewConcurrentMap[string, string](),
-		overlays:              typeutil.NewConcurrentMap[string, string](),
-		forbiddenKeys:         typeutil.NewConcurrentSet[string](),
-		immutableKeys:         typeutil.NewConcurrentSet[string](),
-		sensitiveKeys:         typeutil.NewConcurrentSet[string](),
-		sensitiveKeyPrefixes:  typeutil.NewConcurrentSet[string](),
-		nonSensitiveKeys:      typeutil.NewConcurrentSet[string](),
-		nonSensitiveSuffixes:  typeutil.NewConcurrentSet[string](),
-		declaredKeys:          typeutil.NewConcurrentMap[string, string](),
-		registeredKeyPrefixes: typeutil.NewConcurrentSet[string](),
-		configCache:           make(map[string]any),
+		Dispatcher:                    NewEventDispatcher(),
+		sources:                       typeutil.NewConcurrentMap[string, Source](),
+		keySourceMap:                  typeutil.NewConcurrentMap[string, string](),
+		overlays:                      typeutil.NewConcurrentMap[string, string](),
+		forbiddenKeys:                 typeutil.NewConcurrentSet[string](),
+		immutableKeys:                 typeutil.NewConcurrentSet[string](),
+		sensitiveKeys:                 typeutil.NewConcurrentSet[string](),
+		sensitiveKeyPrefixes:          typeutil.NewConcurrentSet[string](),
+		sensitiveKeyPrefixesCollapsed: typeutil.NewConcurrentSet[string](),
+		nonSensitiveKeys:              typeutil.NewConcurrentSet[string](),
+		nonSensitiveSuffixes:          typeutil.NewConcurrentSet[string](),
+		declaredKeys:                  typeutil.NewConcurrentMap[string, string](),
+		registeredKeyPrefixes:         typeutil.NewConcurrentSet[string](),
+		configCache:                   make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
 		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
@@ -572,7 +577,10 @@ func (m *Manager) SetMapConfig(key, value string) {
 // clear only the formatted identity, so a group value written through
 // BaseTable.SaveGroup survived its own deletion.
 func mapConfigKey(key string) string {
-	return strings.ToLower(key)
+	// lowerKey, not ToLower: FileSource stores keys below NotFormatPrefix with
+	// their case intact, so folding it here would make SaveGroup add a second,
+	// differently-cased member beside the file's rather than override it.
+	return lowerKey(key)
 }
 
 // Delete config at runtime, which has the highest priority to override all other sources.
@@ -660,6 +668,7 @@ func (m *Manager) RegisterSensitivePrefix(prefix string) {
 	canonicalPrefix := strings.ToLower(prefix)
 	if canonicalPrefix != "" {
 		m.sensitiveKeyPrefixes.Insert(canonicalPrefix)
+		m.sensitiveKeyPrefixesCollapsed.Insert(formatKeyUncached(canonicalPrefix))
 	}
 }
 
@@ -857,22 +866,35 @@ const (
 func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
 	verdict := prefixNoMatch
 	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
-		if strings.HasPrefix(dotted, prefix) {
-			if m.suffixExempted(prefix, dotted[len(prefix):]) {
-				// Exempted for this prefix, but a longer sensitive prefix may
-				// still cover the key without exempting it, so keep scanning.
-				verdict = prefixExempted
-				return true
-			}
-			verdict = prefixSensitive
-			return false
+		if !strings.HasPrefix(dotted, prefix) {
+			return true
 		}
-		// No separators left to locate the leaf with, so a declared suffix
-		// exemption cannot be proven and the group's default stands. That
-		// over-redacts an exempted leaf reached by its collapsed spelling, which
-		// is the safe direction: the dotted spelling of the same entry is
-		// published beside it whenever a config file supplied it.
-		if strings.HasPrefix(lookup, formatKeyUncached(prefix)) {
+		if m.suffixExempted(prefix, dotted[len(prefix):]) {
+			// Exempted for this prefix, but a longer sensitive prefix may still
+			// cover the key without exempting it, so keep scanning.
+			verdict = prefixExempted
+			return true
+		}
+		verdict = prefixSensitive
+		return false
+	})
+	if verdict != prefixNoMatch {
+		return verdict
+	}
+
+	// Nothing matched the dotted form. Try the collapsed one, which is the only
+	// identity an alter-endpoint write leaves behind, and the alias FileSource
+	// and EnvSource insert beside every key they load.
+	//
+	// A collapsed key has no separators left to locate its leaf with, so a
+	// declared NonSensitiveSuffixes exemption cannot be proven and the group's
+	// default stands. That over-redacts an exempted leaf reached by its
+	// collapsed spelling — the value shows as ***** even though the dotted
+	// spelling of the same entry is readable. Fail-closed is the right side to
+	// err on, and the dotted spelling is what an operator types; recovering the
+	// leaf would mean guessing where the separators used to be.
+	m.sensitiveKeyPrefixesCollapsed.Range(func(prefix string) bool {
+		if strings.HasPrefix(lookup, prefix) {
 			verdict = prefixSensitive
 			return false
 		}

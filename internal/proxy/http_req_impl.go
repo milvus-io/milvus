@@ -57,6 +57,14 @@ var (
 	sensitiveMark      = config.RedactedValue
 )
 
+// authorizeConfigView restricts the configuration views to root.
+//
+// Root and not common.security.superUsers: an authorization input has to be at
+// least as hard to write as the thing it authorizes, and superUsers is
+// configuration. /management/config/alter refuses to touch anything
+// IsSecurityGoverningConfig covers, superUsers included, but that endpoint is on
+// the metrics port and has no authentication of its own — so the list would be
+// only as protected as that one fence. root is an identity, not a config value.
 func authorizeConfigView() gin.HandlerFunc {
 	// Read once, at router construction: internal/distributed/proxy installs the
 	// authentication middleware that populates the username from the same flag
@@ -89,14 +97,6 @@ func authorizeConfigView() gin.HandlerFunc {
 		}
 	}
 }
-
-// Note on why this is root and not common.security.superUsers: an authorization
-// input has to be at least as hard to write as the thing it authorizes, and
-// superUsers is configuration. /management/config/alter now refuses to touch
-// anything IsSecurityGoverningConfig covers, superUsers included, but that
-// endpoint is on the metrics port and still has no authentication of its own —
-// so the list is only as protected as that one fence. root is an identity, not
-// a config value, and does not depend on the fence holding.
 
 // getConfigs serves a configuration map that the caller has already projected
 // through the owning config.Manager. Do not redact here: only that manager
