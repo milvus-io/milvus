@@ -45,6 +45,10 @@ const (
 	// collection's whole desired placement or only the placement of the
 	// resource groups it names.
 	CapLoadPlacementScope CapabilityID = "load_placement_scope"
+
+	// CapInternalSurfaces is the unauthenticated internal-domain listeners a
+	// form serves its control plane on.
+	CapInternalSurfaces CapabilityID = "internal_surfaces"
 )
 
 // Capabilities is the table a Provider fills in. A nil field means the
@@ -62,6 +66,7 @@ type Capabilities struct {
 	ResourceGroups    ResourceGroupInterceptor
 	IndexDrain        IndexDrainer
 	LoadPlacement     LoadPlacementScope
+	InternalSurfaces  InternalSurfaces
 }
 
 func (c Capabilities) has(id CapabilityID) bool {
@@ -82,6 +87,8 @@ func (c Capabilities) has(id CapabilityID) bool {
 		return c.IndexDrain != nil
 	case CapLoadPlacementScope:
 		return c.LoadPlacement != nil
+	case CapInternalSurfaces:
+		return c.InternalSurfaces != nil
 	default:
 		return false
 	}
