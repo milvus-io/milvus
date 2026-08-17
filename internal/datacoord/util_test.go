@@ -129,12 +129,13 @@ func TestUtil(t *testing.T) {
 
 func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 	const (
-		numRows      = int64(1000)
-		pkField      = int64(100)
-		vecField     = int64(101)
-		jsonField    = int64(102)
-		varcharField = int64(103)
-		badField     = int64(104)
+		numRows          = int64(1000)
+		pkField          = int64(100)
+		vecField         = int64(101)
+		jsonField        = int64(102)
+		varcharField     = int64(103)
+		badField         = int64(104)
+		nullableVecField = int64(105)
 	)
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -158,6 +159,15 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 			},
 			// VarChar without max_length cannot be estimated
 			{FieldID: badField, Name: "bad", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID:  nullableVecField,
+				Name:     "nullable_vec",
+				DataType: schemapb.DataType_FloatVector,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
 		},
 	}
 
@@ -257,6 +267,34 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		pkRead, err := estimateFieldsReadSize(schema, segment, []int64{pkField})
 		suite.NoError(err)
 		suite.Equal(pkSize*numRows, pkRead)
+	})
+
+	suite.Run("residual keeps sub-row remainder bytes", func() {
+		// a group size that is not a multiple of the row count must not lose
+		// its remainder to a per-record truncation: near a slot bucket
+		// boundary that loss could drop the task into a lower bucket
+		jsonBytes := jsonSize*numRows + 777
+		segment := newSegment(group(vecSize*numRows+jsonBytes, vecField, jsonField))
+		size, err := estimateFieldsReadSize(schema, segment, []int64{jsonField})
+		suite.NoError(err)
+		suite.Equal(jsonBytes, size)
+	})
+
+	suite.Run("nullable fixed width field is charged from the residual", func() {
+		// a nullable vector is stored with a variable length encoding and rows
+		// holding null store less than the full width, so the schema size is
+		// not exact: the field takes the measured residual of its group
+		nullableVecBytes := vecSize * numRows / 2
+		segment := newSegment(group(pkSize*numRows+nullableVecBytes, pkField, nullableVecField))
+
+		size, err := estimateFieldsReadSize(schema, segment, []int64{nullableVecField})
+		suite.NoError(err)
+		suite.Equal(nullableVecBytes, size)
+
+		// and it does not consume the fixed width budget of the group
+		size, err = estimateFieldsReadSize(schema, segment, []int64{pkField})
+		suite.NoError(err)
+		suite.Equal(pkSize*numRows, size)
 	})
 
 	suite.Run("schema estimate is used when the group has no residual", func() {
