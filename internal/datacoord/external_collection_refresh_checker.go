@@ -75,6 +75,10 @@ type externalCollectionRefreshChecker struct {
 	// GC so the manager can release any per-job bookkeeping (notifiedJobs
 	// dedup entry). Keeps the dedup map bounded across DataCoord lifetime.
 	onJobGC func(jobID int64)
+	// unindexedSegments answers which of the given segments still lack a
+	// finished index, from datacoord's index meta. Injected so the gate below
+	// is testable without a full meta; nil disables the gate outright.
+	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64
 	// onInitJobPending is fired for jobs still in Init state with no tasks
 	// yet. This is the retry hook for the two-phase submission scheme: the
 	// WAL ack callback persists the Job record in Init state and kicks off
@@ -94,16 +98,18 @@ func newRefreshChecker(
 	onJobFailed func(jobID int64),
 	onJobGC func(jobID int64),
 	onInitJobPending func(jobID int64),
+	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64,
 ) *externalCollectionRefreshChecker {
 	return &externalCollectionRefreshChecker{
-		ctx:              ctx,
-		refreshMeta:      refreshMeta,
-		closeChan:        closeChan,
-		onJobFinished:    onJobFinished,
-		applyJobInfo:     applyJobInfo,
-		onJobFailed:      onJobFailed,
-		onJobGC:          onJobGC,
-		onInitJobPending: onInitJobPending,
+		ctx:               ctx,
+		refreshMeta:       refreshMeta,
+		closeChan:         closeChan,
+		onJobFinished:     onJobFinished,
+		applyJobInfo:      applyJobInfo,
+		onJobFailed:       onJobFailed,
+		onJobGC:           onJobGC,
+		onInitJobPending:  onInitJobPending,
+		unindexedSegments: unindexedSegments,
 	}
 }
 
@@ -237,6 +243,37 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	if state == indexpb.JobState_JobStateNone {
 		// No tasks yet
 		return
+	}
+
+	// The index gate, ahead of the Finished transition. With
+	// refreshWaitForIndex on, a refresh whose ingest finished but whose new
+	// segments are not yet indexed is not done: marking it Finished would
+	// broadcast the schema update and expose those segments to queries that
+	// can only brute-force them. Hold the job InProgress with progress
+	// tracking the indexed fraction (90-100), push the stragglers to the
+	// index-build acceleration channel, and let a later pass finish the job.
+	// The gate consults the tasks' own segment results, which are cleared
+	// only on the Finished transition this gate is deferring.
+	if state == indexpb.JobState_JobStateFinished && Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool() {
+		if total, unindexed := c.refreshSegmentIndexDebt(job); len(unindexed) > 0 {
+			for _, segID := range unindexed {
+				select {
+				case getBuildIndexChSingleton() <- segID:
+				default:
+				}
+			}
+			held := int64(90)
+			if total > 0 {
+				held = 90 + int64(10*(total-len(unindexed))/total)
+			}
+			if held != job.GetProgress() {
+				if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
+					mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
+						mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+				}
+			}
+			return
+		}
 	}
 
 	// Update job if state or progress changed
@@ -497,4 +534,29 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			c.onJobGC(job.GetJobId())
 		}
 	}
+}
+
+// refreshSegmentIndexDebt reports how many segments the job's tasks produced
+// and which of them still lack a finished index. A nil unindexedSegments -
+// no index meta wired - reports no debt, which keeps the gate inert.
+func (c *externalCollectionRefreshChecker) refreshSegmentIndexDebt(job *datapb.ExternalCollectionRefreshJob) (int, []int64) {
+	if c.unindexedSegments == nil {
+		return 0, nil
+	}
+	tasks, err := c.refreshMeta.GetCommittedTasksByJobID(job.GetJobId())
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to read task results for the index gate; not holding the job on a guess",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return 0, nil
+	}
+	segIDs := make([]int64, 0)
+	for _, task := range tasks {
+		for _, seg := range task.GetUpdatedSegments() {
+			segIDs = append(segIDs, seg.GetID())
+		}
+	}
+	if len(segIDs) == 0 {
+		return 0, nil
+	}
+	return len(segIDs), c.unindexedSegments(job.GetCollectionId(), segIDs)
 }
