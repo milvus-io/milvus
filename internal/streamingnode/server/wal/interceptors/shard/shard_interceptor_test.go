@@ -60,6 +60,7 @@ func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing
 func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -96,6 +97,7 @@ func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -332,6 +334,7 @@ func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -363,6 +366,7 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 	allocWALSchemaForTest(t, 1, "v1", 3)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -402,6 +406,7 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 	allocWALSchemaForTest(t, 1, "v1", 0)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -459,6 +464,8 @@ func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
+	// The insert path fence-checks the vchannel before anything else.
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil)
 	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
@@ -488,6 +495,7 @@ func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T)
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(0), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
@@ -502,6 +510,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
