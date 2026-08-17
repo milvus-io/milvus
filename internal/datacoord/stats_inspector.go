@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -247,12 +248,14 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 }
 
 // canSubmitStatsTask reports whether the global scheduler still has room for a
-// new stats task. The pending queue is shared by every task type, but tasks in
-// retry backoff are excluded because they are not currently waiting for a
-// worker slot. Discovery re-runs on every TaskCheckInterval tick, so a segment
-// skipped here is picked up again once the runnable queue drains.
+// new stats task. The pending queue is shared by every task type, so the count is
+// scoped to stats work: an index or compaction backlog must not starve text-index
+// and JSON-shredding submission. Stats tasks waiting on a retry backoff are
+// counted, because they still occupy queue depth. Discovery re-runs on every
+// TaskCheckInterval tick, so a segment skipped here is picked up again once the
+// stats queue drains.
 func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
-	pendingTaskCount := si.scheduler.GetPendingTaskCount()
+	pendingTaskCount := si.scheduler.GetPendingTaskCount(taskcommon.Stats)
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
 	if pendingTaskCount > pendingTaskLimit {
 		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
