@@ -47,8 +47,13 @@ const (
 	RegisteredConfigGroup
 )
 
-// sensitiveKeyPatterns provides defense in depth for secret-like dynamic and
-// source keys. Reviewed false positives use explicit NonSensitive metadata.
+// sensitiveKeyPatterns is the last-resort classifier for keys no ParamItem or
+// ParamGroup declares. Configuration projections omit undeclared keys outright,
+// so on the main table this only matters for logs — but a manager whose
+// ParamGroup declares the empty prefix (hook.yaml, whose keys are plugin-defined
+// and cannot be enumerated by the core) has nothing else, which is why the list
+// must not be narrower than the audit tripwire in paramtable. Reviewed false
+// positives use explicit NonSensitive metadata, which is consulted first.
 var sensitiveKeyPatterns = []string{
 	"password",
 	"secret",
@@ -57,6 +62,16 @@ var sensitiveKeyPatterns = []string{
 	"privatekey",
 	"accesskey",
 	"apikey",
+	"authparams",
+	"saslusername",
+	"licensekey",
+}
+
+// SensitiveKeyPatterns returns the substrings the last-resort classifier matches
+// on. Exported so the paramtable audit can build its own, wider tripwire from
+// this list rather than a copy that silently drifts below it.
+func SensitiveKeyPatterns() []string {
+	return append([]string(nil), sensitiveKeyPatterns...)
 }
 
 // sensitivePatternReplacer normalizes a key before matching it against
@@ -271,6 +286,12 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 // entry and report a stale value, with the wrong source, after an etcd
 // override. The dotted form is still needed for runtime overlays written
 // through SetMapConfig, which keeps the separators.
+//
+// One case this does not reconcile: if BOTH overlay spellings of the same group
+// member are populated, this reports the separator-free one while GetByRaw —
+// and therefore ParamGroup.GetValue — reports the dotted one, because its
+// overlay pass runs last and overwrites. Only SetMapConfig writes the dotted
+// overlay and it has no production caller, so the case is latent.
 func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (string, string, error) {
 	candidates := []string{resolved.lookup}
 	// Only a ParamGroup member can legitimately live under the dotted spelling:
@@ -448,7 +469,11 @@ func (m *Manager) GetConfigsView() map[string]string {
 		switch m.classify(key) {
 		case projectionOmit:
 		case projectionRedact:
-			config[key] = RedactedValue
+			// Keep the annotation: which source supplies a credential is not
+			// secret, it is the most useful thing left to say about it, and
+			// dropping it would break the value[source] shape for exactly the
+			// entries an operator is most likely to be chasing.
+			config[key] = fmt.Sprintf("%s[%s]", RedactedValue, source)
 		default:
 			config[key] = fmt.Sprintf("%s[%s]", value, source)
 		}
@@ -628,6 +653,14 @@ func (m *Manager) RegisterConfigKey(key string) {
 // to configuration projections, so ComponentParam is asserted to have no
 // empty-prefix ParamGroup (see TestNoEmptyPrefixParamGroup).
 func (m *Manager) RegisterConfigPrefix(prefix string) {
+	// An empty prefix declares every key of this manager to be Milvus
+	// configuration. That is correct for a table whose sources are all
+	// operator-authored — hook.yaml is the one such case — and catastrophic for
+	// one that imports the process environment, so refuse exactly that pairing.
+	if prefix == "" && m.HasEnvironmentSource() {
+		panic("an empty config prefix on a manager that imports the process " +
+			"environment would declare every variable in the pod to be Milvus configuration")
+	}
 	m.registeredKeyPrefixes.Insert(strings.ToLower(prefix))
 }
 

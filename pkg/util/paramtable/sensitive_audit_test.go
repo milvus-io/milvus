@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/v3/config"
 )
 
 // Sensitive means the value is a credential, or directly enables
@@ -36,18 +38,11 @@ import (
 // sensitivePatterns are substrings that identify such a value by name. Any
 // ParamItem whose key matches one MUST set Sensitive: true, set
 // NonSensitive: true, or be listed in sensitiveAuditAllowlist.
-var sensitivePatterns = []string{
-	"password",
-	"secret",
-	"credential",
-	"token",
-	"accesskey",
-	"apikey",
-	"privatekey",
-	"authparams",
-	"saslusername",
-	"superuser",
-}
+// Built from the runtime classifier so the tripwire can never end up narrower
+// than the thing it is supposed to be a tripwire for; the extras are names that
+// only ever appear on declared keys, where a review decision is what we want,
+// not a runtime guess.
+var sensitivePatterns = append(config.SensitiveKeyPatterns(), "superuser")
 
 // sensitiveAuditAllowlist enumerates ParamItem keys whose names match a
 // sensitive pattern but are confirmed non-sensitive after review. Adding to

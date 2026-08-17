@@ -339,6 +339,21 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 	mgr := paramtable.GetBaseTable().Manager()
 	coord := &mixCoordImpl{}
 
+	t.Run("security-governing config cannot be altered at all", func(t *testing.T) {
+		params := paramtable.Get()
+		for _, key := range []string{params.CommonCfg.AuthorizationEnabled.Key, params.CommonCfg.SuperUsers.Key} {
+			for _, cfg := range []map[string]interface{}{{"key": key, "value": "false"}, {"key": key}} {
+				reqBody := map[string]interface{}{"configs": []map[string]interface{}{cfg}}
+				body, _ := json.Marshal(reqBody)
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+				w := httptest.NewRecorder()
+				coord.HandleAlterConfig(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code, key)
+				assert.Contains(t, w.Body.String(), "security-governing configuration", key)
+			}
+		}
+	})
+
 	t.Run("sensitive config should fail before etcd access", func(t *testing.T) {
 		const key = "test.alter.sensitive"
 		mgr.RegisterConfigKey(key)
@@ -395,8 +410,12 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "new ParamGroup members")
 
-		// ...while a member the config file does declare stays writable.
-		const declared = "function.textEmbedding.providers.openai.url"
+		// ...while a member some source does declare stays writable. Declared
+		// here rather than relying on configs/milvus.yaml being discoverable
+		// from this package's working directory.
+		const declared = "function.textEmbedding.providers.zzprobe.url"
+		mgr.SetMapConfig(declared, "https://example.invalid")
+		t.Cleanup(func() { mgr.ResetConfig(declared) })
 		reqBody = map[string]interface{}{"configs": []map[string]interface{}{{"key": declared, "value": "https://example.invalid"}}}
 		body, _ = json.Marshal(reqBody)
 		req = httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))

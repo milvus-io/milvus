@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // this file contains proxy management restful API handler
@@ -1257,6 +1258,15 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 //
 //	Batch format: {"configs": [{"key": "k1", "value": "v1"}, {"key": "k2"}]}
 //	Legacy single format: {"key": "config.key", "value": "value"}
+//
+// securityGoverningConfigKeys are the switches that decide whether Milvus
+// authenticates or authorizes at all. They are held by dotted identity, which
+// is what ResolveRegisteredConfigKey returns.
+var securityGoverningConfigKeys = typeutil.NewSet(
+	"common.security.authorizationenabled",
+	"common.security.superusers",
+)
+
 func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		writeJSONError(writer, "Method not allowed, use POST", http.StatusMethodNotAllowed)
@@ -1322,6 +1332,19 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 		seen[pkgconfig.EtcdConfigKey(canonicalKey)] = struct{}{}
+
+		// Keys that decide who may do anything at all are out of reach of an
+		// endpoint that asks nobody who they are. This one is on the metrics
+		// port with no authentication in front of it, so letting it rewrite the
+		// authorization switch or the superuser list would make every other
+		// check here decorative. Deletes are refused too: dropping an etcd entry
+		// that holds "authorization enabled" is itself a way to turn it off.
+		if securityGoverningConfigKeys.Contain(canonicalKey) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
 
 		// Check if it's mqtype configuration. canonicalKey is already dotted and
 		// lower-cased, except below NotFormatPrefix where the case is

@@ -439,17 +439,9 @@ type ParamGroup struct {
 }
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
-	// An empty prefix declares every key of the manager to be Milvus
-	// configuration. That is correct for a table whose sources are all
-	// operator-authored — hook.yaml is the one such case — and catastrophic for
-	// one that imports the process environment, so refuse exactly that pairing
-	// rather than the shape that merely resembles it.
-	if pg.KeyPrefix == "" && manager.HasEnvironmentSource() {
-		panic("ParamGroup with an empty KeyPrefix on a config manager that imports " +
-			"the process environment would declare every variable in the pod to be " +
-			"Milvus configuration")
-	}
 	pg.manager = manager
+	// RegisterConfigPrefix rejects an empty prefix on a manager that imports the
+	// process environment.
 	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 	if pg.Sensitive {
 		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)

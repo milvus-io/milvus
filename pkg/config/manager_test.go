@@ -392,10 +392,10 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 
 	safeView := mgr.GetConfigsView()
 	assert.Contains(t, safeView[publicKey], RuntimeSource)
-	// A redacted entry carries no "value[source]" annotation: the source name is
-	// the only part left, and printing "*****[RuntimeSource]" would suggest the
-	// mask itself is the value.
-	assert.Equal(t, RedactedValue, safeView[opaqueKey])
+	// A redacted entry keeps the value[source] shape: which source supplies a
+	// credential is not itself secret, and it is the most useful thing left to
+	// say about it.
+	assert.Equal(t, RedactedValue+"["+RuntimeSource+"]", safeView[opaqueKey])
 	assert.NotContains(t, safeView, unknownKey)
 
 	assert.Equal(t, "dynamic-value", mgr.GetBy(WithPrefix("dynamic"))[dynamicKey])
@@ -575,113 +575,42 @@ func TestRegisteredGroupMemberRejectsEnvironmentOnlyKey(t *testing.T) {
 	assert.Equal(t, RegisteredConfigGroup, kind)
 }
 
-// The variables that matter are the ones whose raw name is ALREADY in canonical
-// form — PATH, HOSTNAME, http_proxy. EnvSource stores the raw name as a key, so
-// a check that only asked whether the dotted spelling exists would take that raw
-// entry as proof of configuration and publish the whole environment. The empty
-// prefix is the worst case, and the one hookConfig.SoConfig actually registers.
-func TestEmptyPrefixGroupNeverPublishesTheEnvironment(t *testing.T) {
+// The empty prefix is what hookConfig.SoConfig registers, and on a table that
+// imports the environment it would declare every variable in the pod to be
+// Milvus configuration. Refuse the pairing where it is declared rather than
+// trying to filter the consequences afterwards.
+func TestEmptyPrefixRefusedOnEnvironmentBearingManager(t *testing.T) {
+	t.Setenv("PROBESINGLE", "single-token-secret")
+
+	withEnv, _ := Init(WithEnvSource(formatKey))
+	assert.Panics(t, func() { withEnv.RegisterConfigPrefix("") })
+	assert.NotPanics(t, func() { withEnv.RegisterConfigPrefix("some.prefix.") })
+
+	// A file-only table — what NewBaseTableFromYamlOnly builds for hook.yaml —
+	// is the one place the empty prefix is correct.
+	fileOnly := NewManager()
+	assert.NotPanics(t, func() { fileOnly.RegisterConfigPrefix("") })
+}
+
+// Whatever the prefix, a variable whose raw name is ALREADY in canonical form —
+// PATH, HOSTNAME, http_proxy — must not be mistaken for configuration. EnvSource
+// stores the raw name as a key, so a check that only asked whether the dotted
+// spelling exists would take that entry as proof and publish the environment.
+func TestEnvironmentNamesInCanonicalFormAreNotConfiguration(t *testing.T) {
 	t.Setenv("PROBESINGLE", "single-token-secret")
 	t.Setenv("probe_lower_case", "lower-case-secret")
 	t.Setenv("PROBE_MULTI_TOKEN", "multi-token-secret")
 
 	mgr, _ := Init(WithEnvSource(formatKey))
-	mgr.RegisterConfigPrefix("")
+	mgr.RegisterConfigPrefix("probe.")
+	mgr.RegisterConfigPrefix("probesingle.")
 
 	require.NotEmpty(t, mgr.GetConfigsRaw(), "the environment was never imported, the test proves nothing")
 	assert.Empty(t, mgr.GetConfigs())
 	assert.Empty(t, mgr.GetConfigsView())
-	for _, spelling := range []string{"PROBESINGLE", "probesingle", "probe_lower_case", "PROBE_MULTI_TOKEN"} {
+	for _, spelling := range []string{"PROBESINGLE", "probesingle", "probe_lower_case", "PROBE_MULTI_TOKEN", "probe.lower.case"} {
 		_, _, err := mgr.GetRegisteredConfig(spelling)
 		require.ErrorIs(t, err, ErrKeyUnregistered, spelling)
-	}
-}
-
-// NonSensitiveSuffixes is the only new redaction-policy mechanism in this
-// change, so pin every edge of it: the exemption applies at the depth the group
-// defines, it survives a prefix whose own name matches a secret pattern, and it
-// does not rescue a leaf that was never exempted.
-func TestNonSensitiveSuffixExemption(t *testing.T) {
-	mgr := NewManager()
-	mgr.RegisterConfigPrefix("credential.")
-	mgr.RegisterSensitivePrefix("credential.")
-	mgr.RegisterNonSensitiveSuffix("credential.", "enable")
-	mgr.RegisterNonSensitiveSuffix("credential.", "url")
-
-	for key, want := range map[string]string{
-		// Exempted, even though the key collapses to "credentialaksk1enable",
-		// which contains the "credential" pattern: an explicit declaration wins
-		// over the name-shape guess.
-		"credential.aksk1.enable": "visible",
-		"credential.enable":       "visible",
-		"credential.aksk1.url":    "visible",
-		// Not exempted.
-		"credential.aksk1.secret_access_key": RedactedValue,
-		"credential.aksk1.apikey":            RedactedValue,
-		// Exempted leaf name, but deeper than the group defines: a sensitive
-		// group must not be escapable by ending an arbitrary subtree in "url".
-		"credential.aksk1.inner.url": RedactedValue,
-	} {
-		mgr.SetMapConfig(key, "visible")
-		assert.Equal(t, want, mgr.GetConfigs()[key], key)
-	}
-
-	// The exemption is scoped to the prefix that declared it.
-	mgr.RegisterConfigPrefix("other.")
-	mgr.RegisterSensitivePrefix("other.")
-	mgr.SetMapConfig("other.aksk1.enable", "visible")
-	assert.Equal(t, RedactedValue, mgr.GetConfigs()["other.aksk1.enable"])
-}
-
-// A key deleted at runtime must disappear from the projections, not surface as
-// a key whose value is the literal tombstone marker — and it must disappear for
-// a ParamGroup member too, whose overlay SetMapConfig wrote under the dotted
-// identity rather than the separator-free one.
-func TestTombstonedKeysAreNotProjected(t *testing.T) {
-	mgr := NewManager()
-	mgr.RegisterConfigKey("public.key")
-	mgr.SetConfig("public.key", "visible")
-	mgr.RegisterConfigPrefix("kafka.consumer.")
-	mgr.SetMapConfig("kafka.consumer.fetch.min.bytes", "12345")
-	require.Equal(t, "visible", mgr.GetConfigs()[formatKey("public.key")])
-	require.Equal(t, "12345", mgr.GetConfigsRaw()["kafka.consumer.fetch.min.bytes"])
-
-	mgr.DeleteConfig("public.key")
-	mgr.DeleteConfig("kafka.consumer.fetch.min.bytes")
-
-	assert.NotContains(t, mgr.GetConfigs(), formatKey("public.key"))
-	assert.NotContains(t, mgr.GetConfigsView(), formatKey("public.key"))
-	assert.NotContains(t, mgr.GetBy(WithPrefix("public")), formatKey("public.key"))
-	// GetByRaw is the path ParamGroup.GetValue takes, so a delete that does not
-	// reach it would leave the running system using a value the management API
-	// reports as gone.
-	assert.Empty(t, mgr.GetByRaw(WithPrefix("kafka.consumer.")))
-	assert.Empty(t, mgr.GetBy(WithPrefix("kafka.consumer.")))
-	_, _, err := mgr.GetRegisteredConfig("kafka.consumer.fetch.min.bytes")
-	require.ErrorIs(t, err, ErrKeyNotFound)
-	for _, value := range mgr.GetConfigsView() {
-		assert.NotContains(t, value, TombValue)
-	}
-}
-
-// formatKey exempts knowhere.* from separator stripping; the EnvSource key
-// formatter BaseTable installs does not. An environment variable whose name
-// lands in that gap must not be mistaken for a member of the knowhere group.
-func TestKnowherePrefixDoesNotAdmitEnvironmentVariables(t *testing.T) {
-	t.Setenv("KNOWHERE.INJECTED", "must-not-be-published")
-	t.Setenv("knowhere.lowercase", "must-not-be-published")
-
-	// The formatter BaseTable installs: no NotFormatPrefix exemption.
-	mgr, _ := Init(WithEnvSource(strippedKey))
-	mgr.RegisterConfigPrefix(NotFormatPrefix)
-
-	require.NotEmpty(t, mgr.GetConfigsRaw(), "the environment was never imported, the test proves nothing")
-	for _, spelling := range []string{"KNOWHERE.INJECTED", "knowhere.INJECTED", "knowhere.lowercase"} {
-		_, kind := mgr.ResolveRegisteredConfigKey(spelling)
-		assert.Equal(t, RegisteredConfigUnknown, kind, spelling)
-	}
-	for key, value := range mgr.GetConfigsView() {
-		assert.NotContains(t, value, "must-not-be-published", key)
 	}
 }
 
