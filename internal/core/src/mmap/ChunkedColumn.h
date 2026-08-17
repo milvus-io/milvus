@@ -754,6 +754,13 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         return PinWrapper<const size_t*>(
             std::move(ca), static_cast<VectorArrayChunk*>(chunk)->Offsets());
     }
+
+ protected:
+    void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
+        BuildVectorArrayValidOffsets(chunk_pws);
+    }
 };
 
 inline std::shared_ptr<ChunkedColumnInterface>
