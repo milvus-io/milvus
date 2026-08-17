@@ -66,4 +66,13 @@ type IndexDrainer interface {
 	// implementation can treat the call as proof the index is gone and take
 	// the collection out of service on it.
 	AfterDropIndex(ctx context.Context, req *indexpb.DropIndexRequest)
+
+	// AbortDropIndex runs when a drop BeginDropIndex asked about did NOT
+	// commit - the coordinator returned an error or a non-Ok status - so an
+	// implementation that opened any state in BeginDropIndex can close it
+	// again. Without this call a failed drop would leave that state dangling:
+	// BeginDropIndex has no way to know the drop's outcome, and AfterDropIndex
+	// only reports success. Exactly one of AfterDropIndex and AbortDropIndex
+	// follows a BeginDropIndex that returned true.
+	AbortDropIndex(ctx context.Context, req *indexpb.DropIndexRequest)
 }

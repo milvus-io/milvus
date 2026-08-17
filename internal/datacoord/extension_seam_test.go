@@ -40,6 +40,10 @@ func (d *answeringDrainer) AllowVectorIndexDropWhileLoaded(_ context.Context, co
 	return d.allow
 }
 
+func (d *answeringDrainer) AbortDropIndex(context.Context, *indexpb.DropIndexRequest) {
+	panic("datacoord must never reach AbortDropIndex")
+}
+
 func (d *answeringDrainer) BeginDropIndex(context.Context, *indexpb.DropIndexRequest) bool {
 	panic("datacoord must not classify drops itself")
 }

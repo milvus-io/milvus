@@ -85,11 +85,19 @@ func beforeDropIndex(ctx context.Context, req *indexpb.DropIndexRequest) bool {
 // it: a drainer that started draining for an index still in place would take a
 // healthy collection out of service.
 func afterDropIndex(ctx context.Context, req *indexpb.DropIndexRequest, drainOnCommit bool, status *commonpb.Status, err error) {
-	if !drainOnCommit || err != nil || !merr.Ok(status) {
+	if !drainOnCommit {
 		return
 	}
 	drainer := indexDrainer()
 	if drainer == nil {
+		return
+	}
+	// A drop that did not commit is reported too, on the abort branch: the
+	// drainer may have opened state in BeginDropIndex - a drain window that
+	// refuses queries, say - and with no report of the failure that state
+	// would outlive the drop it was opened for.
+	if err != nil || !merr.Ok(status) {
+		drainer.AbortDropIndex(ctx, req)
 		return
 	}
 	drainer.AfterDropIndex(ctx, req)

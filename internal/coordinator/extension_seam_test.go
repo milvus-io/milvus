@@ -57,6 +57,7 @@ type recordingDrainer struct {
 
 	seenBegin     []*indexpb.DropIndexRequest
 	seenAfterDrop []*indexpb.DropIndexRequest
+	seenAbortDrop []*indexpb.DropIndexRequest
 }
 
 func (d *recordingDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64) bool { return true }
@@ -68,6 +69,10 @@ func (d *recordingDrainer) BeginDropIndex(_ context.Context, req *indexpb.DropIn
 
 func (d *recordingDrainer) AfterDropIndex(_ context.Context, req *indexpb.DropIndexRequest) {
 	d.seenAfterDrop = append(d.seenAfterDrop, req)
+}
+
+func (d *recordingDrainer) AbortDropIndex(_ context.Context, req *indexpb.DropIndexRequest) {
+	d.seenAbortDrop = append(d.seenAbortDrop, req)
 }
 
 // forbiddenInterceptor fails the test if the coordinator consults it at all.
@@ -389,6 +394,7 @@ func TestDropIndexReportsOnlyClassifiedDrops(t *testing.T) {
 		assert.True(t, classifiedBeforeDrop, "classification must happen while the index metadata still reads")
 		require.Len(t, drainer.seenAfterDrop, 1)
 		assert.Same(t, req, drainer.seenAfterDrop[0])
+		assert.Empty(t, drainer.seenAbortDrop, "a committed drop must not also be reported aborted")
 	})
 
 	mockey.PatchConvey("drainer did not classify the drop", t, func() {
@@ -402,6 +408,7 @@ func TestDropIndexReportsOnlyClassifiedDrops(t *testing.T) {
 		assert.True(t, merr.Ok(status), "the drop itself proceeds whatever the drainer answered")
 		require.Len(t, drainer.seenBegin, 1)
 		assert.Empty(t, drainer.seenAfterDrop, "a drop the drainer did not claim must not be reported to it")
+		assert.Empty(t, drainer.seenAbortDrop, "an unclaimed drop has no state to unwind either")
 	})
 }
 
@@ -418,6 +425,8 @@ func TestDropIndexDoesNotArmDrainOnFailure(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, merr.Ok(status))
 		assert.Empty(t, drainer.seenAfterDrop, "a drop must never be reported for an index that is still in place")
+		require.Len(t, drainer.seenAbortDrop, 1,
+			"a claimed drop that did not commit must be reported on the abort branch, or the drainer's state dangles")
 	})
 
 	mockey.PatchConvey("datacoord call failed", t, func() {
@@ -429,6 +438,8 @@ func TestDropIndexDoesNotArmDrainOnFailure(t *testing.T) {
 		_, err := s.DropIndex(context.Background(), &indexpb.DropIndexRequest{CollectionID: 101})
 		require.Error(t, err)
 		assert.Empty(t, drainer.seenAfterDrop, "a drop whose outcome is unknown must not be reported as committed")
+		require.Len(t, drainer.seenAbortDrop, 1,
+			"an errored drop is reported aborted; if it did commit after all, the divergence reconcile heals it")
 	})
 }
 
