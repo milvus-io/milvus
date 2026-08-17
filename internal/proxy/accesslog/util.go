@@ -18,6 +18,7 @@ package accesslog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -99,4 +100,35 @@ func SetActualConsistencyLevel(ctx context.Context, acl commonpb.ConsistencyLeve
 			info.SetActualConsistencyLevel(acl)
 		}
 	}
+}
+
+type ConsistencyLevelCarrier interface {
+	GetConsistencyLevel() commonpb.ConsistencyLevel
+}
+
+type ConsistencyLevelHelper struct {
+	accessInfo  info.AccessInfo
+	clvlCarrier ConsistencyLevelCarrier
+}
+
+func (clHelper *ConsistencyLevelHelper) String() string {
+	if clHelper.accessInfo != nil {
+		return fmt.Sprintf("ACT-%s", clHelper.accessInfo.ConsistencyLevel())
+	}
+	if clHelper.clvlCarrier == nil {
+		return info.Unknown
+	}
+	return fmt.Sprintf("REQ-%s", clHelper.clvlCarrier.GetConsistencyLevel().String())
+}
+
+func NewConsistencyLevelHelper(ctx context.Context, clvlCarrier ConsistencyLevelCarrier) *ConsistencyLevelHelper {
+	cc := &ConsistencyLevelHelper{clvlCarrier: clvlCarrier}
+	if ctx != nil {
+		v := ctx.Value(AccessKey{})
+		info, ok := v.(info.AccessInfo)
+		if ok && info != nil {
+			cc.accessInfo = info
+		}
+	}
+	return cc
 }

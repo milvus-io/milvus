@@ -17,12 +17,71 @@
 package accesslog
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 )
 
 func TestJoin(t *testing.T) {
 	assert.Equal(t, "a/b", join("a", "b"))
 	assert.Equal(t, "a/b", join("a/", "b"))
+}
+
+func newTestGrpcAccessInfo(req any) *info.GrpcAccessInfo {
+	return info.NewGrpcAccessInfo(context.Background(), &grpc.UnaryServerInfo{}, req)
+}
+
+func TestConsistencyLevelHelperFallbackToCarrier(t *testing.T) {
+	carrier := &milvuspb.SearchRequest{ConsistencyLevel: commonpb.ConsistencyLevel_Bounded}
+	want := "REQ-" + commonpb.ConsistencyLevel_Bounded.String()
+
+	// ctx without access info
+	helper := NewConsistencyLevelHelper(context.Background(), carrier)
+	assert.Equal(t, want, helper.String())
+
+	// nil ctx
+	helper = NewConsistencyLevelHelper(nil, carrier)
+	assert.Equal(t, want, helper.String())
+
+	// ctx carries a value that is not an AccessInfo
+	ctx := context.WithValue(context.Background(), AccessKey{}, "not-an-access-info")
+	helper = NewConsistencyLevelHelper(ctx, carrier)
+	assert.Equal(t, want, helper.String())
+
+	// nil carrier
+	helper = NewConsistencyLevelHelper(context.Background(), nil)
+	assert.Equal(t, info.Unknown, helper.String())
+}
+
+func TestConsistencyLevelHelperUsesActualLevel(t *testing.T) {
+	req := &milvuspb.SearchRequest{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}
+	accessInfo := newTestGrpcAccessInfo(req)
+	accessInfo.SetActualConsistencyLevel(commonpb.ConsistencyLevel_Eventually)
+	ctx := context.WithValue(context.Background(), AccessKey{}, accessInfo)
+
+	helper := NewConsistencyLevelHelper(ctx, req)
+	assert.Equal(t, "ACT-"+commonpb.ConsistencyLevel_Eventually.String(), helper.String())
+}
+
+func TestConsistencyLevelHelperAccessInfoFallback(t *testing.T) {
+	// actual level not set, access info itself falls back to the request level
+	req := &milvuspb.QueryRequest{ConsistencyLevel: commonpb.ConsistencyLevel_Bounded}
+	accessInfo := newTestGrpcAccessInfo(req)
+	ctx := context.WithValue(context.Background(), AccessKey{}, accessInfo)
+
+	helper := NewConsistencyLevelHelper(ctx, req)
+	assert.Equal(t, "ACT-"+commonpb.ConsistencyLevel_Bounded.String(), helper.String())
+}
+
+func TestConsistencyLevelHelperQueryRequestCarrier(t *testing.T) {
+	// QueryRequest implements ConsistencyLevelCarrier
+	req := &milvuspb.QueryRequest{ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}
+	helper := NewConsistencyLevelHelper(context.Background(), req)
+	assert.Equal(t, "REQ-"+commonpb.ConsistencyLevel_Eventually.String(), helper.String())
 }
