@@ -682,7 +682,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 }
 
 func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager, s.mixCoord)
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
