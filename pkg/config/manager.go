@@ -621,7 +621,16 @@ func (m *Manager) SetConfig(key, value string) {
 }
 
 func (m *Manager) SetMapConfig(key, value string) {
-	m.overlays.Insert(strings.ToLower(key), value)
+	m.overlays.Insert(mapConfigKey(key), value)
+}
+
+// mapConfigKey is the identity SetMapConfig stores under, and therefore the one
+// ResetConfig and DeleteConfig have to clear as well as the formatted one.
+// Shared so the three cannot drift: they previously disagreed for keys below
+// NotFormatPrefix, whose case lowerKey preserves but ToLower does not, and for
+// keys spelled with slashes.
+func mapConfigKey(key string) string {
+	return strings.ToLower(key)
 }
 
 // Delete config at runtime, which has the highest priority to override all other sources.
@@ -630,7 +639,7 @@ func (m *Manager) SetMapConfig(key, value string) {
 // spelling would leave a ParamGroup member in force after it was deleted.
 func (m *Manager) DeleteConfig(key string) {
 	m.overlays.Insert(formatKey(key), TombValue)
-	m.overlays.Insert(lowerKey(strings.ReplaceAll(key, "/", ".")), TombValue)
+	m.overlays.Insert(mapConfigKey(key), TombValue)
 }
 
 // Remove the config which set at runtime, use config from sources.
@@ -639,7 +648,7 @@ func (m *Manager) DeleteConfig(key string) {
 // value set by BaseTable.SaveGroup in place forever.
 func (m *Manager) ResetConfig(key string) {
 	m.overlays.Remove(formatKey(key))
-	m.overlays.Remove(lowerKey(strings.ReplaceAll(key, "/", ".")))
+	m.overlays.Remove(mapConfigKey(key))
 }
 
 // Ignore any of update events, which means the config cannot auto refresh anymore
@@ -670,14 +679,6 @@ func (m *Manager) RegisterConfigKey(key string) {
 	}
 }
 
-// RegisterConfigPrefix records a declared dynamic configuration prefix.
-//
-// An empty prefix declares every key of this manager to be Milvus
-// configuration. That is correct only for a manager whose sources are all
-// operator-authored — hook.yaml is the one such case. Declaring it on a
-// manager that carries an EnvSource would hand the whole process environment
-// to configuration projections, so ComponentParam is asserted to have no
-// empty-prefix ParamGroup (see TestNoEmptyPrefixParamGroup).
 // RegisterConfigPrefix records a declared dynamic configuration prefix.
 //
 // An empty prefix declares every key of this manager to be Milvus

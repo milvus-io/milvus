@@ -29,7 +29,9 @@ func (h *hookConfig) init(base *BaseTable) {
 	h.SoConfig = ParamGroup{
 		// The hook table is built by NewBaseTableFromYamlOnly, so hook.yaml is
 		// its only source and every key in it really is plugin configuration.
-		// ParamGroup.Init rejects this on any table that imports the environment.
+		// TestNoEmptyPrefixParamGroup asserts ComponentParam declares no such
+		// group, and config.Manager omits environment-only keys whatever prefix
+		// matched them, so an empty prefix cannot publish the environment.
 		KeyPrefix: "",
 		Version:   "2.2.0",
 	}

@@ -16,7 +16,11 @@
 
 package paramtable
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/milvus-io/milvus/pkg/v3/config"
+)
 
 // SecurityGoverningConfigPrefix covers everything that decides whether Milvus
 // authenticates, who counts as privileged, and what each role may do — the
@@ -51,13 +55,23 @@ var securityGoverningConfigKeys = []string{
 // Deliberately a prefix plus a short list rather than an enumeration of names:
 // an enumeration has to be remembered every time someone adds a key, and the
 // first version of this fence named two of the six keys that mattered.
-func IsSecurityGoverningConfig(dottedKey string) bool {
-	key := strings.ToLower(dottedKey)
-	if strings.HasPrefix(key, SecurityGoverningConfigPrefix) {
+func IsSecurityGoverningConfig(key string) bool {
+	// Compare on the identity a write actually addresses, not on the spelling
+	// the caller used. The keys this fence exists for are the ones no ParamItem
+	// declares, so nothing normalises them on the way in:
+	// "proxy_enablePublicPrivilege", "proxy.enablePublicPrivilege" and
+	// "PROXYENABLEPUBLICPRIVILEGE" all reach the same etcd entry, and comparing
+	// dotted strings would fence exactly one of them.
+	//
+	// The prefix test therefore runs against the separator-free form too, which
+	// also matches a hypothetical "common.securityFoo". That over-match is the
+	// safe direction for a fence, and no such key exists.
+	identity := config.EtcdConfigKey(key)
+	if strings.HasPrefix(identity, config.EtcdConfigKey(SecurityGoverningConfigPrefix)) {
 		return true
 	}
 	for _, governing := range securityGoverningConfigKeys {
-		if key == governing {
+		if identity == config.EtcdConfigKey(governing) {
 			return true
 		}
 	}

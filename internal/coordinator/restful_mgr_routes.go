@@ -1333,20 +1333,18 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// authorization switch or the superuser list would make every other
 		// check here decorative. Deletes are refused too: dropping an etcd entry
 		// that holds "authorization enabled" is itself a way to turn it off.
-		// Checked against both identities: an undeclared legacy key resolves to
-		// whatever the caller typed, so only the raw spelling would match the
-		// fence, while a declared key is normalised to its dotted form first.
-		if paramtable.IsSecurityGoverningConfig(canonicalKey) || paramtable.IsSecurityGoverningConfig(config.Key) {
+		// IsSecurityGoverningConfig normalises to the identity the write would
+		// address, so every spelling of a fenced key is caught, declared or not.
+		if paramtable.IsSecurityGoverningConfig(canonicalKey) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
 		}
 
-		// Check if it's mqtype configuration. canonicalKey is already dotted and
-		// lower-cased, except below NotFormatPrefix where the case is
-		// deliberately preserved and no mq key can live.
-		if strings.Contains(canonicalKey, "mqtype") || strings.Contains(canonicalKey, "mq.type") {
+		// Check if it's mqtype configuration, on the same identity for the same
+		// reason: "mq_type" and "MQTYPE" address the entry "mq.type" does.
+		if strings.Contains(pkgconfig.EtcdConfigKey(canonicalKey), "mqtype") {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)

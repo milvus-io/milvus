@@ -353,6 +353,15 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 			params.CommonCfg.ExprAuthMode.Key,
 			// Declared outside common.security. but decides RBAC alias handling.
 			params.ProxyCfg.ResolveAliasForPrivilege.Key,
+			// Undeclared legacy alias read by EnablePublicPrivilege's Formatter:
+			// nothing normalises its spelling, so the fence has to.
+			"proxy.enablePublicPrivilege",
+			"proxy_enablePublicPrivilege",
+			"PROXY_ENABLEPUBLICPRIVILEGE",
+			"proxyenablepublicprivilege",
+			// Re-spellings of a declared fenced key.
+			"COMMON_SECURITY_SUPERUSERS",
+			"common/security/superUsers",
 		} {
 			for _, cfg := range []map[string]interface{}{{"key": key, "value": "false"}, {"key": key}} {
 				reqBody := map[string]interface{}{"configs": []map[string]interface{}{cfg}}

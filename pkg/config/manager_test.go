@@ -700,6 +700,67 @@ func TestEmptyPrefixNeverPublishesTheEnvironment(t *testing.T) {
 	}
 }
 
+// SetMapConfig, ResetConfig and DeleteConfig must agree on the identity a group
+// overlay lives under. They previously diverged for keys below NotFormatPrefix,
+// whose case one preserves and the other folds, and for keys spelled with
+// slashes — so a value set through BaseTable.SaveGroup survived its own removal.
+func TestGroupOverlayRemovalIsSymmetric(t *testing.T) {
+	for _, key := range []string{"knowhere.Xyz", "a/b/c", "kafka.consumer.x"} {
+		t.Run(key, func(t *testing.T) {
+			mgr := NewManager()
+			mgr.RegisterConfigPrefix("knowhere.")
+			mgr.RegisterConfigPrefix("a.")
+			mgr.RegisterConfigPrefix("kafka.consumer.")
+
+			mgr.SetMapConfig(key, "value")
+			require.NotEmpty(t, mgr.GetConfigsRaw(), "the overlay was never stored")
+			mgr.ResetConfig(key)
+			assert.Empty(t, mgr.GetConfigsRaw(), "reset left the overlay behind")
+
+			mgr.SetMapConfig(key, "value")
+			mgr.DeleteConfig(key)
+			assert.Empty(t, mgr.GetConfigsRaw(), "delete left the overlay behind")
+		})
+	}
+}
+
+// NonSensitiveSuffixes is the only new redaction-policy mechanism here, so pin
+// every edge: the exemption applies at the depth the group defines, it survives
+// a prefix whose own name matches a secret pattern, and it does not rescue a
+// leaf that was never exempted.
+func TestNonSensitiveSuffixExemption(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("credential.")
+	mgr.RegisterSensitivePrefix("credential.")
+	mgr.RegisterNonSensitiveSuffix("credential.", "enable")
+	mgr.RegisterNonSensitiveSuffix("credential.", "url")
+
+	for key, want := range map[string]string{
+		// Exempted, even though the key collapses to "credentialaksk1enable",
+		// which contains the "credential" pattern: an explicit declaration wins
+		// over the name-shape guess. This is the case the prefixExempted branch
+		// of isSensitiveResolved exists for.
+		"credential.aksk1.enable": "visible",
+		"credential.enable":       "visible",
+		"credential.aksk1.url":    "visible",
+		// Not exempted.
+		"credential.aksk1.secret_access_key": RedactedValue,
+		"credential.aksk1.apikey":            RedactedValue,
+		// Exempted leaf name, but deeper than the group defines: a sensitive
+		// group must not be escapable by ending an arbitrary subtree in "url".
+		"credential.aksk1.inner.url": RedactedValue,
+	} {
+		mgr.SetMapConfig(key, "visible")
+		assert.Equal(t, want, mgr.GetConfigs()[key], key)
+	}
+
+	// The exemption is scoped to the prefix that declared it.
+	mgr.RegisterConfigPrefix("other.")
+	mgr.RegisterSensitivePrefix("other.")
+	mgr.SetMapConfig("other.aksk1.enable", "visible")
+	assert.Equal(t, RedactedValue, mgr.GetConfigs()["other.aksk1.enable"])
+}
+
 // Keys below NotFormatPrefix keep their case, so every name-based rule has to
 // fold it explicitly or the same key classifies two ways depending on spelling.
 func TestNameBasedRulesIgnoreCaseUnderNotFormatPrefix(t *testing.T) {

@@ -121,6 +121,29 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 	assert.Equal(t, "configured-secret", raw["miniosecretaccesskey"])
 }
 
+// The fence guards keys no ParamItem declares, so nothing normalises their
+// spelling on the way in — it has to compare on the identity the write would
+// address, or one spelling is fenced and the three that reach the same etcd
+// entry are not.
+func TestSecurityFenceIsSpellingIndependent(t *testing.T) {
+	for _, key := range []string{
+		"proxy.enablePublicPrivilege",
+		"proxy_enablePublicPrivilege",
+		"PROXY_ENABLEPUBLICPRIVILEGE",
+		"proxyenablepublicprivilege",
+		"proxy/enablePublicPrivilege",
+		"common.security.superUsers",
+		"COMMON_SECURITY_SUPERUSERS",
+		"commonsecurityauthorizationenabled",
+	} {
+		assert.True(t, IsSecurityGoverningConfig(key), key)
+		assert.Equal(t, config.EtcdConfigKey(key), config.EtcdConfigKey(strings.ToLower(key)), key)
+	}
+	for _, key := range []string{"proxy.maxNameLength", "queryNode.gracefulStopTimeout", "minio.address"} {
+		assert.False(t, IsSecurityGoverningConfig(key), key)
+	}
+}
+
 func isConfigRegistered(m *config.Manager, key string) bool {
 	_, kind := m.ResolveRegisteredConfigKey(key)
 	return kind != config.RegisteredConfigUnknown
