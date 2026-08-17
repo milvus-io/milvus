@@ -22,11 +22,21 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// ordering two concurrent same-key requests would both miss and create two
 	// tasks. The guards are deliberately NOT consumed on a hit, so the caller's
 	// deferred Close() releases the locks.
-	if key := message.IdempotencyKeyOf(msg); key != "" {
-		if dup, ok := b.broadcaster.getOriginalBroadcastMessage(key); ok {
+	if clientKey := message.IdempotencyKeyOf(msg); clientKey != "" {
+		if err := validateIdempotencyKeyLength(clientKey); err != nil {
+			return nil, err
+		}
+		// The scope is derived from the resource keys the guards hold, not from the
+		// message header: the header is only stamped with them a few lines below, so
+		// reading it here would scope every broadcast against an empty key set. The
+		// guards carry exactly what OverwriteBroadcastHeader is about to write, which
+		// is what makes this read side agree with the write side in addBroadcastTask.
+		scope := idempotencyScope(msg.MessageType(), b.guards.ResourceKeys(), clientKey)
+		if dup, results, ok := b.broadcaster.getOriginalBroadcast(scope); ok {
 			return &types.BroadcastAppendResult{
-				BroadcastID: dup.BroadcastHeader().BroadcastID,
-				Duplicated:  dup,
+				BroadcastID:   dup.BroadcastHeader().BroadcastID,
+				AppendResults: results,
+				Duplicated:    dup,
 			}, nil
 		}
 	}
