@@ -222,34 +222,28 @@ func TestGetRequestFieldRedactsExternalCollectionCredentials(t *testing.T) {
 	}
 }
 
-// TestRedactReqForLogAndField covers the two call-site wrappers over
-// elideRequestForLog: RedactReqForLog (wraps a template-bearing request, returns
-// others unchanged) and the GetRequestFieldWithoutSensitiveInfo template branch.
-func TestRedactReqForLogAndField(t *testing.T) {
+// TestRedactTemplateBearingReqField covers the GetRequestFieldWithoutSensitiveInfo
+// template branch: a template-bearing request takes the wrapped-Stringer path
+// and must not leak the blob, while one without templates is logged as-is.
+func TestRedactTemplateBearingReqField(t *testing.T) {
 	blob := []byte("BLOB-SECRET-MUST-NOT-LOG")
 	tv := &schemapb.TemplateValue{Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}}
 	withTmpl := &milvuspb.QueryRequest{ExprTemplateValues: map[string]*schemapb.TemplateValue{"bf": tv}}
 	without := &milvuspb.QueryRequest{CollectionName: "c"}
 
-	// RedactReqForLog: a template-bearing request is wrapped so String() elides
-	// the blob; a request without templates is returned unchanged.
-	wrapped := RedactReqForLog(withTmpl)
-	assert.NotContains(t, fmt.Sprint(wrapped), string(blob))
-	assert.Same(t, without, RedactReqForLog(without))
-
-	// GetRequestFieldWithoutSensitiveInfo takes the wrapped-Stringer branch for a
-	// template-bearing request (must not panic, must not leak the blob).
 	f := GetRequestFieldWithoutSensitiveInfo(withTmpl)
 	assert.NotContains(t, fmt.Sprint(f.Interface), string(blob))
+
+	assert.Same(t, without, GetRequestFieldWithoutSensitiveInfo(without).Interface)
 }
 
-// TestElideRequestForLog verifies every expression-template value — of any
-// type, including a large bloom_match blob and a small scalar — is elided from
+// TestRedactedReqStringer verifies every expression-template value — of any
+// type, including a large bloom_match blob and a small scalar — is redacted from
 // the request's log string across all carriers (Search + sub_reqs, Query,
 // Delete, HybridSearch), that the original request is restored afterwards (no
 // clone, swap-restore), and that a request without template values is not
 // wrapped.
-func TestElideRequestForLog(t *testing.T) {
+func TestRedactedReqStringer(t *testing.T) {
 	blob := []byte("MBF1-a-very-large-binary-blob-that-must-not-be-logged")
 	secret := "super-secret-scalar-value"
 	newBytesTV := func() *schemapb.TemplateValue {
@@ -275,15 +269,15 @@ func TestElideRequestForLog(t *testing.T) {
 				{ExprTemplateValues: map[string]*schemapb.TemplateValue{"bf2": newBytesTV(), "s": newStrTV()}},
 			},
 		}
-		wrapped, ok := elideRequestForLog(req)
+		wrapped, ok := redactedReqStringer(req)
 		require.True(t, ok)
-		assert.False(t, logLeaks(wrapped), "all template values must be elided in the log string")
+		assert.False(t, logLeaks(wrapped), "all template values must be redacted in the log string")
 		assert.True(t, origLeaks(req), "original request must be restored after stringify (no mutation)")
 	})
 
 	t.Run("query", func(t *testing.T) {
 		req := &milvuspb.QueryRequest{ExprTemplateValues: map[string]*schemapb.TemplateValue{"bf": newBytesTV()}}
-		wrapped, ok := elideRequestForLog(req)
+		wrapped, ok := redactedReqStringer(req)
 		require.True(t, ok)
 		assert.False(t, logLeaks(wrapped))
 		assert.True(t, origLeaks(req))
@@ -291,7 +285,7 @@ func TestElideRequestForLog(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		req := &milvuspb.DeleteRequest{ExprTemplateValues: map[string]*schemapb.TemplateValue{"bf": newBytesTV()}}
-		wrapped, ok := elideRequestForLog(req)
+		wrapped, ok := redactedReqStringer(req)
 		require.True(t, ok)
 		assert.False(t, logLeaks(wrapped))
 	})
@@ -302,14 +296,29 @@ func TestElideRequestForLog(t *testing.T) {
 				{ExprTemplateValues: map[string]*schemapb.TemplateValue{"bf": newBytesTV(), "s": newStrTV()}},
 			},
 		}
-		wrapped, ok := elideRequestForLog(req)
+		wrapped, ok := redactedReqStringer(req)
 		require.True(t, ok)
 		assert.False(t, logLeaks(wrapped))
 	})
 
+	t.Run("shared map restored", func(t *testing.T) {
+		original := newStrTV()
+		shared := map[string]*schemapb.TemplateValue{"s": original}
+		req := &milvuspb.SearchRequest{
+			ExprTemplateValues: shared,
+			SubReqs: []*milvuspb.SubSearchRequest{
+				{ExprTemplateValues: shared},
+			},
+		}
+		wrapped, ok := redactedReqStringer(req)
+		require.True(t, ok)
+		assert.False(t, logLeaks(wrapped))
+		assert.Same(t, original, shared["s"], "shared map must be restored to its original value")
+	})
+
 	t.Run("no template values: not wrapped", func(t *testing.T) {
 		req := &milvuspb.SearchRequest{CollectionName: "c"}
-		_, ok := elideRequestForLog(req)
+		_, ok := redactedReqStringer(req)
 		assert.False(t, ok, "requests without template values must not be wrapped")
 	})
 }

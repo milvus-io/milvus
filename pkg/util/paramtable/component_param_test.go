@@ -98,6 +98,42 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 	}
 }
 
+func TestMembershipFilterConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	params := proxyConfig{}
+	params.init(base)
+
+	assert.Equal(t, 64*1024*1024, params.MaxMembershipFilterSize.GetAsInt())
+	base.Save(params.MaxMembershipFilterSize.Key, "1048576")
+	assert.Equal(t, 1048576, params.MaxMembershipFilterSize.GetAsInt())
+	base.Reset(params.MaxMembershipFilterSize.Key)
+
+	assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), params.MaxMembershipFilterPlanSize.GetAsInt64())
+	base.Save(params.MaxMembershipFilterPlanSize.Key, "1048576")
+	assert.Equal(t, int64(1048576), params.MaxMembershipFilterPlanSize.GetAsInt64())
+	for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+		base.Save(params.MaxMembershipFilterPlanSize.Key, invalid)
+		assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), params.MaxMembershipFilterPlanSize.GetAsInt64(), invalid)
+	}
+	base.Reset(params.MaxMembershipFilterPlanSize.Key)
+
+	t.Run("legacy bloom filter keys remain fallbacks", func(t *testing.T) {
+		legacySizeKey := params.MaxMembershipFilterSize.FallbackKeys[0]
+		base.Save(legacySizeKey, "2097152")
+		base.Reset(params.MaxMembershipFilterSize.Key)
+		assert.Equal(t, 2*1024*1024, params.MaxMembershipFilterSize.GetAsInt())
+		base.Reset(legacySizeKey)
+		base.Reset(params.MaxMembershipFilterSize.Key)
+
+		legacyPlanKey := params.MaxMembershipFilterPlanSize.FallbackKeys[0]
+		base.Save(legacyPlanKey, "4194304")
+		base.Reset(params.MaxMembershipFilterPlanSize.Key)
+		assert.Equal(t, int64(4*1024*1024), params.MaxMembershipFilterPlanSize.GetAsInt64())
+		base.Reset(legacyPlanKey)
+		base.Reset(params.MaxMembershipFilterPlanSize.Key)
+	})
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -316,14 +352,14 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum.GetAsInt64())
 
-		assert.Equal(t, int64(DefaultMaxBloomFilterPlanSize), Params.MaxBloomFilterPlanSize.GetAsInt64())
-		params.Save(Params.MaxBloomFilterPlanSize.Key, "1048576")
-		assert.Equal(t, int64(1048576), Params.MaxBloomFilterPlanSize.GetAsInt64())
+		assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), Params.MaxMembershipFilterPlanSize.GetAsInt64())
+		params.Save(Params.MaxMembershipFilterPlanSize.Key, "1048576")
+		assert.Equal(t, int64(1048576), Params.MaxMembershipFilterPlanSize.GetAsInt64())
 		for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
-			params.Save(Params.MaxBloomFilterPlanSize.Key, invalid)
-			assert.Equal(t, int64(DefaultMaxBloomFilterPlanSize), Params.MaxBloomFilterPlanSize.GetAsInt64(), invalid)
+			params.Save(Params.MaxMembershipFilterPlanSize.Key, invalid)
+			assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), Params.MaxMembershipFilterPlanSize.GetAsInt64(), invalid)
 		}
-		params.Reset(Params.MaxBloomFilterPlanSize.Key)
+		params.Reset(Params.MaxMembershipFilterPlanSize.Key)
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
 

@@ -31,6 +31,14 @@
 #include "pb/plan.pb.h"
 
 namespace milvus {
+
+// Only held by shared_ptr below, never dereferenced in this header. Keep it a
+// forward declaration: common/RoaringMembership.h pulls in <roaring/roaring.hh>,
+// whose portability.h unconditionally defines _GNU_SOURCE, and this header is
+// included nearly everywhere. On macOS that makes xsimd take its glibc path and
+// call ::exp10f, which the SDK does not provide.
+class RoaringMembership;
+
 namespace expr {
 
 // Collect information from expressions
@@ -950,6 +958,33 @@ class MatchExpr : public ITypeFilterExpr {
     std::string struct_name_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
+};
+
+// RoaringFilterExpr: exact integer membership filter (`roaring_match`).
+// See docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md.
+//
+// membership_ holds the decoded, immutable bitmap. Unlike BloomFilterExpr —
+// whose physical expressions probe a zero-copy view of the raw blob — a Roaring
+// body must be decoded before it can be probed, so decoding happens once here,
+// at plan-proto parse time, and every per-segment physical expression shares
+// this one instance through the shared_ptr. Decoding per segment instead would
+// repeat the parse and hold one copy of a multi-megabyte bitmap per segment.
+class RoaringFilterExpr : public ITypeFilterExpr {
+ public:
+    RoaringFilterExpr(const ColumnInfo& column,
+                      std::shared_ptr<const RoaringMembership> membership)
+        : column_(column), membership_(std::move(membership)) {
+    }
+
+    // Defined out-of-line in exec/expression/RoaringFilterExpr.cpp: it
+    // dereferences RoaringMembership, which is only forward-declared here so
+    // that <roaring/roaring.hh> does not leak into every translation unit.
+    std::string
+    ToString() const override;
+
+ public:
+    const ColumnInfo column_;
+    const std::shared_ptr<const RoaringMembership> membership_;
 };
 
 // BloomFilterExpr: approximate membership filter (`bloom_match`).

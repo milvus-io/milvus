@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -3009,6 +3010,58 @@ func Test_SegmentScorers(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, plan)
 		assert.Equal(t, 2, len(plan.Scorers))
+	})
+
+	t.Run("ok - membership scorer filters", func(t *testing.T) {
+		roaringBlob, err := roaringfilter.Build([]int64{1, 2, 3})
+		require.NoError(t, err)
+		bloomTemplate, _ := bloomBytesTemplate(t, 0.01, 1, 2, 3)
+
+		for _, tc := range []struct {
+			name   string
+			filter string
+			values map[string]*schemapb.TemplateValue
+			kind   string
+		}{
+			{
+				name:   "bloom_match",
+				filter: "bloom_match(Int64Field, {bf})",
+				values: map[string]*schemapb.TemplateValue{"bf": bloomTemplate},
+				kind:   "bloom",
+			},
+			{
+				name:   "roaring_match",
+				filter: "roaring_match(Int64Field, {rb})",
+				values: map[string]*schemapb.TemplateValue{
+					"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: roaringBlob}},
+				},
+				kind: "roaring",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fs := &schemapb.FunctionScore{
+					Functions: []*schemapb.FunctionSchema{
+						makeBoostRanker(tc.filter, "1.0"),
+					},
+				}
+				plan, err := CreateSearchPlan(
+					schema,
+					"",
+					"FloatVectorField",
+					&planpb.QueryInfo{GroupByFieldId: -1},
+					tc.values,
+					fs,
+				)
+				require.NoError(t, err)
+				require.Len(t, plan.GetScorers(), 1)
+				filter := plan.GetScorers()[0].GetFilter()
+				if tc.kind == "bloom" {
+					assert.NotNil(t, filter.GetBloomFilterExpr())
+				} else {
+					assert.NotNil(t, filter.GetRoaringFilterExpr())
+				}
+			})
+		}
 	})
 
 	t.Run("error - not segment scorer flag", func(t *testing.T) {

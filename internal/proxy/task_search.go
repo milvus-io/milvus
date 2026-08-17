@@ -500,7 +500,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
-	var bloomFilterPlanSize int64
+	var membershipFilterPlanSize int64
 	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
 		return err
 	}
@@ -694,7 +694,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-		internalSubReq.SerializedExprPlan, bloomFilterPlanSize, err = marshalPlanWithBloomFilterSizeLimit(plan, bloomFilterPlanSize)
+		internalSubReq.SerializedExprPlan, membershipFilterPlanSize, err = marshalPlanWithMembershipFilterSizeLimit(plan, membershipFilterPlanSize)
 		if err != nil {
 			return err
 		}
@@ -706,7 +706,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.queryInfos[index] = queryInfo
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if large term passed; bloom blobs elided.
+			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
@@ -1046,7 +1046,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		queryInfo.StrictGroupSize = true
 	}
 
-	t.SerializedExprPlan, _, err = marshalPlanWithBloomFilterSizeLimit(plan, 0)
+	t.SerializedExprPlan, _, err = marshalPlanWithMembershipFilterSizeLimit(plan, 0)
 	if err != nil {
 		return err
 	}
@@ -1129,7 +1129,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if large term passed; bloom blobs elided.
+		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 
 	return nil
 }
@@ -1190,14 +1190,14 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
-			mlog.String("dsl", dsl), // may be very large if large term passed.
+			mlog.Int("dsl_bytes", len(dsl)),
 			mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, wrapPlanCreationError(planErr, "failed to create query plan")
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	mlog.Debug(t.ctx, "create query plan",
-		mlog.String("dsl", t.request.Dsl), // may be very large if large term passed.
+		mlog.Int("dsl_bytes", len(dsl)),
 		mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchInfo.orderByFields, searchType, nil
 }

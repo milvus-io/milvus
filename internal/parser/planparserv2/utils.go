@@ -262,14 +262,14 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
-	// A raw-bytes value has exactly one consumer — the bloom_match filter blob,
-	// which FillBloomMatchExpressionValue validates and embeds without passing
-	// through castValue. Reject it in every typed/JSON comparison context here,
-	// at the proxy, instead of fanning out a GenericValue kBytesVal that
-	// segcore's plan parser cannot evaluate.
+	// A raw-bytes value has exactly two consumers — the bloom_match filter blob
+	// and the roaring_match bitmap blob — each validated and embedded by its own
+	// Fill*ExpressionValue without passing through castValue. Reject it in every
+	// typed/JSON comparison context here, at the proxy, instead of fanning out a
+	// GenericValue kBytesVal that segcore's plan parser cannot evaluate.
 	if IsBytes(value) {
 		return nil, merr.WrapErrParameterInvalidMsg(
-			"a bytes template value can only be used as the bloom_match filter argument")
+			"a bytes template value can only be used as the bloom_match or roaring_match filter argument")
 	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
@@ -301,7 +301,12 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 
-	return nil, merr.WrapErrQueryPlanMsg("cannot cast value to %s, value: %s", dataType.String(), value)
+	// The value is not echoed. castValue is reached from fill_expression_value
+	// after template substitution, so it can hold a value the caller supplied
+	// out of band; the design doc forbids rendering one. The declared type and
+	// the value's own type are what identify the mismatch anyway.
+	return nil, merr.WrapErrQueryPlanMsg(
+		"cannot cast value to %s: incompatible source type", dataType.String())
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {

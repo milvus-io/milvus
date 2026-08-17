@@ -95,8 +95,12 @@ const (
 	MaxFPR = 0.05
 
 	// DefaultFPR is the recommended false-positive rate when a caller has no
-	// specific target: ~1.38 bytes/member, so a 32 MiB blob (the largest that
-	// fits the default 64 MiB gRPC recv limit) holds ~24 M members.
+	// specific target. Sizing follows OptimalNumOfBytes, so a body holds roughly
+	// 0.72 members per byte at this rate: a 64 MiB body (the default
+	// proxy.maxMembershipFilterSize) holds ~48.6M members, a 32 MiB body ~24.3M.
+	// Because bodies are powers of two, a member count just past a tier boundary
+	// doubles the blob; raising fpr is usually the cheaper fix. 50M members, for
+	// example, need fpr >= ~0.0058 to stay inside 64 MiB.
 	DefaultFPR = 0.005
 )
 
@@ -151,7 +155,7 @@ func nextPower2(v uint32) uint32 {
 	return v
 }
 
-// hashInt64 encodes v as 8 little-endian bytes and returns XXH64(seed=0).
+// hashInt64 returns XXH64(seed=0) over v's 8-byte little-endian encoding.
 func hashInt64(v int64) uint64 {
 	var buf [8]byte
 	binary.LittleEndian.PutUint64(buf[:], uint64(v))
@@ -172,8 +176,10 @@ func blockIndex(hash uint64, numBlocks uint32) uint32 {
 
 // Builder incrementally constructs an SBBF and serializes it into an MBF1
 // envelope. It is not safe for concurrent use.
+// Marshal returns buf directly, so a filter costs one allocation of its final
+// size rather than a body plus an equal-sized serialization buffer.
 type Builder struct {
-	words     []uint32
+	buf       []byte // HeaderSize + numBlocks*BytesPerBlock: the blob Marshal returns
 	numBlocks uint32
 	nDeclared uint64
 	fpr       float64
@@ -191,7 +197,7 @@ func NewBuilder(n uint64, fpr float64) (*Builder, error) {
 	numBytes := optimalNumOfBytes(n, fpr)
 	numBlocks := numBytes / BytesPerBlock
 	return &Builder{
-		words:     make([]uint32, uint64(numBlocks)*wordsPerBlock),
+		buf:       make([]byte, HeaderSize+int(numBytes)),
 		numBlocks: numBlocks,
 		nDeclared: n,
 		fpr:       fpr,
@@ -215,12 +221,18 @@ func EstimateMarshalSize(n uint64, fpr float64) (int, error) {
 	return HeaderSize + int(optimalNumOfBytes(n, fpr)), nil
 }
 
+// addHash sets this hash's eight bits directly in the final MBF1 buffer. Words
+// are read-modify-written through binary.LittleEndian so the body keeps the
+// spec's little-endian layout on any host; on amd64/arm64 each access compiles
+// to a single load/store.
 func (b *Builder) addHash(h uint64) {
-	base := blockIndex(h, b.numBlocks) * wordsPerBlock
+	off := HeaderSize + int(blockIndex(h, b.numBlocks))*BytesPerBlock
+	blk := b.buf[off : off+BytesPerBlock : off+BytesPerBlock]
 	key := uint32(h)
 	for i := 0; i < wordsPerBlock; i++ {
 		mask := uint32(1) << ((key * salt[i]) >> 27)
-		b.words[base+uint32(i)] |= mask
+		w := binary.LittleEndian.Uint32(blk[i*4:])
+		binary.LittleEndian.PutUint32(blk[i*4:], w|mask)
 	}
 }
 
@@ -242,9 +254,16 @@ func (b *Builder) Domains() uint8 {
 	return b.domains
 }
 
-// Marshal serializes the filter as an MBF1 envelope (header + blocks).
+// Marshal stamps the MBF1 header onto the filter and returns the envelope.
+//
+// The returned slice aliases the Builder's buffer, so it must be treated as
+// READ-ONLY: writing through it corrupts the filter the Builder would emit
+// next. It is also valid only until the next Add* call, which mutates a blob
+// already handed out — callers that keep inserting after marshaling must copy
+// the result. Marshal may be called repeatedly; each call re-stamps the header
+// and returns the same slice.
 func (b *Builder) Marshal() []byte {
-	out := make([]byte, HeaderSize+len(b.words)*4)
+	out := b.buf
 	copy(out[0:4], Magic)
 	binary.LittleEndian.PutUint16(out[4:6], Version)
 	binary.LittleEndian.PutUint16(out[6:8], AlgoParquetSBBFXxh64)
@@ -252,10 +271,7 @@ func (b *Builder) Marshal() []byte {
 	binary.LittleEndian.PutUint64(out[16:24], math.Float64bits(b.fpr))
 	binary.LittleEndian.PutUint32(out[24:28], b.numBlocks)
 	out[28] = b.domains
-	// out[29:32] stays zero (reserved).
-	for i, w := range b.words {
-		binary.LittleEndian.PutUint32(out[HeaderSize+i*4:], w)
-	}
+	// out[29:32] stays zero (reserved), and the body is already in place.
 	return out
 }
 

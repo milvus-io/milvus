@@ -46,7 +46,7 @@ SplitBlockBloomFilterView::Parse(std::string_view blob) {
     }
     // Defensive upper bound on the whole envelope, checked before any field
     // is read. The proxy is the operator-tunable gate: it rejects blobs above
-    // proxy.maxBloomFilterSize (default 32 MiB) at plan-build time and
+    // proxy.maxMembershipFilterSize (default 64 MiB) at plan-build time and
     // validates the envelope via sbbf.Parse (same 128 MB format cap mirroring
     // Arrow's kMaximumBloomFilterBytes); in practice the blob is also bounded
     // by the gRPC transport limit. But a hand-crafted plan can reach segcore
@@ -203,13 +203,18 @@ PhyBloomFilterExpr::ExecVisitorImpl(EvalCtx& context) {
             field_id_.get());
     }
 
-    const auto& bitmap_input = context.get_bitmap_input();
-
     auto real_batch_size_opt = GetNextRealBatchSize(input, false);
     if (!real_batch_size_opt.has_value()) {
         return nullptr;
     }
     auto real_batch_size = *real_batch_size_opt;
+
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(bitmap_input.empty() ||
+                   bitmap_input.size() == static_cast<size_t>(real_batch_size),
+               "bloom_match bitmap input size {} does not match batch size {}",
+               bitmap_input.size(),
+               real_batch_size);
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
@@ -240,13 +245,13 @@ PhyBloomFilterExpr::ExecVisitorImpl(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             if (valid_data && !valid_data[offset]) {
                 // NULL never matches, under either bloom_match or
                 // not bloom_match — same three-valued behavior as TermExpr.
                 res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
             res[i] = filter.TestScalar(data[offset]);
@@ -291,6 +296,14 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(bitmap_input.empty() ||
+                   bitmap_input.size() == static_cast<size_t>(real_batch_size),
+               "bloom_match index path bitmap input size {} does not match "
+               "batch size {}",
+               bitmap_input.size(),
+               real_batch_size);
+
     const auto& filter = filter_;
     auto execute_sub_batch =
         [&filter]<FilterType filter_type = FilterType::sequential>(
@@ -300,9 +313,10 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res) {
-        // data == nullptr means the framework decided this row's result upstream
-        // (a NULL reverse lookup, for which it already set res/valid_res=false);
-        // nothing to test. NULLs still never match, mirroring the raw path.
+        // data == nullptr means the helper either pruned an inactive candidate
+        // before reverse lookup (leaving false/valid untouched), or found an
+        // active NULL row (after writing false/invalid). In both cases the
+        // reader already owns the result.
         if (data == nullptr) {
             return;
         }
@@ -324,8 +338,12 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
         // ProcessDataByOffsets routes to ProcessIndexLookupByOffsets because
         // UseIndexCursor() && num_data_chunk_ == 0, which recovers each value
         // via Reverse_Lookup and drives execute_sub_batch per row.
-        processed_size = ProcessDataByOffsets<T>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        processed_size = ProcessDataByOffsetsWithMask<T>(execute_sub_batch,
+                                                         std::nullptr_t{},
+                                                         input,
+                                                         res,
+                                                         valid_res,
+                                                         bitmap_input);
     } else {
         // No offset input: reverse-look-up the contiguous global row range
         // [current_index_chunk_pos_, +real_batch_size) for this batch.
@@ -334,8 +352,8 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
         for (int64_t i = 0; i < real_batch_size; ++i) {
             batch_offsets[i] = static_cast<int32_t>(start + i);
         }
-        processed_size = ProcessIndexLookupByOffsets<T>(
-            execute_sub_batch, &batch_offsets, res, valid_res);
+        processed_size = ProcessIndexLookupByOffsetsWithMask<T>(
+            execute_sub_batch, &batch_offsets, res, valid_res, bitmap_input);
         // ProcessIndexLookupByOffsets is stateless; advance the index cursor
         // for the next batch. MoveCursor() honors the has_offset_input_ guard
         // and, on the ScalarIndex path with no raw data, advances only the
@@ -365,13 +383,19 @@ PhyBloomFilterExpr::ExecVisitorImplJson(EvalCtx& context) {
                   field_id_.get());
     }
 
-    const auto& bitmap_input = context.get_bitmap_input();
-
     auto real_batch_size_opt = GetNextRealBatchSize(input, false);
     if (!real_batch_size_opt.has_value()) {
         return nullptr;
     }
     auto real_batch_size = *real_batch_size_opt;
+
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(bitmap_input.empty() ||
+                   bitmap_input.size() == static_cast<size_t>(real_batch_size),
+               "bloom_match JSON bitmap input size {} does not match batch "
+               "size {}",
+               bitmap_input.size(),
+               real_batch_size);
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
@@ -404,12 +428,12 @@ PhyBloomFilterExpr::ExecVisitorImplJson(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             if (valid_data && !valid_data[offset]) {
                 // Whole-row NULL never matches, under either polarity.
                 res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
             // STRICTLY TYPED probe: the hash domain has exactly two kinds,

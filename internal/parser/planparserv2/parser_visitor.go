@@ -1456,6 +1456,11 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 		// pre-built bloom filter blob instead of a generic CallExpr.
 		return v.visitBloomMatch(ctx)
 	}
+	if functionName == RoaringMatchFunctionName {
+		// Likewise roaring_match, into a RoaringFilterExpr carrying a pre-built
+		// bitmap blob.
+		return v.visitRoaringMatch(ctx)
+	}
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
 	for _, param := range ctx.AllExpr() {
@@ -3020,6 +3025,13 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 	if hasBloomFilterExpr(exprWithType.expr) {
 		return merr.WrapErrParameterInvalidMsg(
 			"bloom_match is not supported inside element_filter element expressions")
+	}
+	// roaring_match is also row-offset based. Exactness makes it safe for delete,
+	// but does not make it valid in an element-level executor that supplies
+	// global element IDs instead of row offsets.
+	if hasRoaringFilterExpr(exprWithType.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"roaring_match is not supported inside element_filter element expressions")
 	}
 
 	// Build ElementFilterExpr proto

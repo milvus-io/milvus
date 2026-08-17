@@ -39,9 +39,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
+func TestWrapPlanCreationError(t *testing.T) {
+	// This helper is on the shared Query/Search/Delete expression path, so its
+	// projection is a public contract: REST, Go SDK and Delete cases assert
+	// 1100 and match on the parameter/argument keywords. Pin both the code and
+	// the preserved cause -- returning the parser's 2201 verbatim broke E2E and
+	// the Go SDK geometry cases.
+	t.Run("keeps ordinary parser failures parameter invalid", func(t *testing.T) {
+		cause := merr.WrapErrQueryPlanMsg("invalid expression")
+		err := wrapPlanCreationError(cause, "failed to create query plan")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, cause)
+		// The cause survives in the chain even though the projected code is 1100.
+		assert.ErrorIs(t, err, merr.ErrQueryPlan)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, int32(1100), merr.Code(err))
+		assert.Equal(t, "failed to create query plan: invalid expression: query plan failed: invalid parameter", err.Error())
+		// The geometry cases match on this keyword.
+		assert.Contains(t, err.Error(), "parameter")
+	})
+
+	t.Run("delete keeps its InputError classification", func(t *testing.T) {
+		cause := merr.WrapErrQueryPlanMsg("invalid expression")
+		err := merr.WrapErrAsInputError(wrapPlanCreationError(cause, "failed to create delete plan"))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan)
+		assert.Equal(t, int32(1100), merr.Code(err))
+	})
+}
+
 func bloomPlanSizeTestLeaf(blob []byte) *planpb.Expr {
 	return &planpb.Expr{Expr: &planpb.Expr_BloomFilterExpr{
 		BloomFilterExpr: &planpb.BloomFilterExpr{FilterBlob: blob},
+	}}
+}
+
+func roaringPlanSizeTestLeaf(blob []byte) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_RoaringFilterExpr{
+		RoaringFilterExpr: &planpb.RoaringFilterExpr{BitmapBlob: blob},
 	}}
 }
 
@@ -64,9 +99,9 @@ func bloomPlanSizeTestPlan(blob []byte, copies int) *planpb.PlanNode {
 	}}
 }
 
-func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
+func TestMarshalPlanWithMembershipFilterSizeLimit(t *testing.T) {
 	params := paramtable.Get()
-	key := params.ProxyCfg.MaxBloomFilterPlanSize.Key
+	key := params.ProxyCfg.MaxMembershipFilterPlanSize.Key
 	t.Cleanup(func() { params.Reset(key) })
 
 	blob := make([]byte, 4*1024)
@@ -75,7 +110,7 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 
 	t.Run("exact limit succeeds", func(t *testing.T) {
 		params.Save(key, strconv.Itoa(repeatedPlanSize))
-		serialized, accumulated, err := marshalPlanWithBloomFilterSizeLimit(repeatedPlan, 0)
+		serialized, accumulated, err := marshalPlanWithMembershipFilterSizeLimit(repeatedPlan, 0)
 		require.NoError(t, err)
 		assert.Len(t, serialized, repeatedPlanSize)
 		assert.Equal(t, int64(repeatedPlanSize), accumulated)
@@ -83,7 +118,7 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 
 	t.Run("repeated reference over limit is input error 1102", func(t *testing.T) {
 		params.Save(key, strconv.Itoa(repeatedPlanSize-1))
-		serialized, accumulated, err := marshalPlanWithBloomFilterSizeLimit(repeatedPlan, 0)
+		serialized, accumulated, err := marshalPlanWithMembershipFilterSizeLimit(repeatedPlan, 0)
 		require.Error(t, err)
 		assert.Nil(t, serialized, "the amplified plan must be rejected before proto.Marshal allocates its output")
 		assert.Zero(t, accumulated)
@@ -91,7 +126,7 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 		assert.Equal(t, int32(1102), merr.Code(err))
 		assert.Equal(t, merr.InputError, merr.GetErrorType(err))
 		assert.False(t, merr.IsRetryableErr(err))
-		assert.Contains(t, err.Error(), "proxy.maxBloomFilterPlanSize")
+		assert.Contains(t, err.Error(), "proxy.maxMembershipFilterPlanSize")
 
 		status := merr.Status(err)
 		assert.Equal(t, int32(1102), status.GetCode())
@@ -105,39 +140,59 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 		singlePlanSize := proto.Size(singlePlan)
 		params.Save(key, strconv.Itoa(singlePlanSize*2-1))
 
-		first, accumulated, err := marshalPlanWithBloomFilterSizeLimit(singlePlan, 0)
+		first, accumulated, err := marshalPlanWithMembershipFilterSizeLimit(singlePlan, 0)
 		require.NoError(t, err)
 		assert.Len(t, first, singlePlanSize)
 		assert.Equal(t, int64(singlePlanSize), accumulated)
 
-		second, unchanged, err := marshalPlanWithBloomFilterSizeLimit(singlePlan, accumulated)
+		second, unchanged, err := marshalPlanWithMembershipFilterSizeLimit(singlePlan, accumulated)
 		require.Error(t, err)
 		assert.Nil(t, second)
 		assert.Equal(t, accumulated, unchanged)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
-	t.Run("scorer filter is included", func(t *testing.T) {
-		scorerPlan := &planpb.PlanNode{
-			Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
-			Scorers: []*planpb.ScoreFunction{{
-				Filter: bloomPlanSizeTestLeaf(blob),
-			}},
-		}
-		params.Save(key, strconv.Itoa(proto.Size(scorerPlan)-1))
-		serialized, _, err := marshalPlanWithBloomFilterSizeLimit(scorerPlan, 0)
+	t.Run("roaring filter is included", func(t *testing.T) {
+		roaringPlan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{Predicates: roaringPlanSizeTestLeaf(blob)},
+		}}
+		params.Save(key, strconv.Itoa(proto.Size(roaringPlan)-1))
+		serialized, accumulated, err := marshalPlanWithMembershipFilterSizeLimit(roaringPlan, 0)
 		require.Error(t, err)
 		assert.Nil(t, serialized)
+		assert.Zero(t, accumulated)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
-	t.Run("large non-bloom plan is unaffected", func(t *testing.T) {
-		nonBloomPlan := &planpb.PlanNode{
+	t.Run("scorer filters are included", func(t *testing.T) {
+		for name, filter := range map[string]*planpb.Expr{
+			"bloom":   bloomPlanSizeTestLeaf(blob),
+			"roaring": roaringPlanSizeTestLeaf(blob),
+		} {
+			t.Run(name, func(t *testing.T) {
+				plan := &planpb.PlanNode{
+					Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
+					Scorers: []*planpb.ScoreFunction{{
+						Filter: filter,
+					}},
+				}
+				params.Save(key, strconv.Itoa(proto.Size(plan)-1))
+				serialized, accumulated, err := marshalPlanWithMembershipFilterSizeLimit(plan, 0)
+				require.Error(t, err)
+				assert.Nil(t, serialized)
+				assert.Zero(t, accumulated)
+				assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+			})
+		}
+	})
+
+	t.Run("large non-membership plan is unaffected", func(t *testing.T) {
+		nonMembershipPlan := &planpb.PlanNode{
 			Node:           &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
 			OutputFieldIds: make([]int64, 4096),
 		}
 		params.Save(key, "1")
-		serialized, accumulated, err := marshalPlanWithBloomFilterSizeLimit(nonBloomPlan, 0)
+		serialized, accumulated, err := marshalPlanWithMembershipFilterSizeLimit(nonMembershipPlan, 0)
 		require.NoError(t, err)
 		assert.NotEmpty(t, serialized)
 		assert.Zero(t, accumulated)
@@ -178,9 +233,9 @@ func bloomPlanSizeSearchParams() []*commonpb.KeyValuePair {
 	}
 }
 
-func TestSearchTaskBloomFilterPlanSizeLimit(t *testing.T) {
+func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 	params := paramtable.Get()
-	key := params.ProxyCfg.MaxBloomFilterPlanSize.Key
+	key := params.ProxyCfg.MaxMembershipFilterPlanSize.Key
 	params.Save(key, "1")
 	t.Cleanup(func() { params.Reset(key) })
 
@@ -241,9 +296,9 @@ func TestSearchTaskBloomFilterPlanSizeLimit(t *testing.T) {
 	})
 }
 
-func TestQueryTaskBloomFilterPlanSizeLimit(t *testing.T) {
+func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 	params := paramtable.Get()
-	key := params.ProxyCfg.MaxBloomFilterPlanSize.Key
+	key := params.ProxyCfg.MaxMembershipFilterPlanSize.Key
 	params.Save(key, "1")
 	t.Cleanup(func() { params.Reset(key) })
 
