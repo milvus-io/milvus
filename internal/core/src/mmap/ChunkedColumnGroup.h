@@ -768,6 +768,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             });
     }
 
+ protected:
+    void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            return;
+        }
+        BuildVectorArrayValidOffsets(chunk_pws);
+    }
+
  private:
     // Resolve, for each requested offset, the chunk that owns it and invoke
     // fn(chunk, offset_in_chunk, i), preserving the original row order.
