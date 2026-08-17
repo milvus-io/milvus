@@ -15,7 +15,6 @@
 #include <boost/container/vector.hpp>
 #include <boost/cstdint.hpp>
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 #include <stddef.h>
 #include <algorithm>
 #include <atomic>
@@ -35,13 +34,9 @@
 
 #include "common/Common.h"
 #include "common/Consts.h"
-#include "common/IndexMeta.h"
-#include "common/PrometheusClient.h"
-#include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Vector.h"
-#include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/MatchExpr.h"
@@ -49,6 +44,7 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -63,7 +59,6 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
-#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -630,11 +625,13 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
                 auto child = std::make_shared<FixedBitmapExpr>(
                     bitmap_case.matches.clone(), bitmap_case.valid.clone());
                 std::vector<std::shared_ptr<exec::Expr>> inputs = {child};
-                auto logical_expr =
-                    std::make_shared<expr::MatchExpr>("struct_array",
-                                                      match_type,
-                                                      threshold,
-                                                      expr::TypedExprPtr{});
+                auto logical_expr = std::make_shared<expr::MatchExpr>(
+                    0,
+                    "struct_array",
+                    std::vector<std::string>{},
+                    match_type,
+                    threshold,
+                    expr::TypedExprPtr{});
                 exec::PhyMatchFilterExpr physical_expr(inputs,
                                                        logical_expr,
                                                        "PhyMatchFilterExpr",
@@ -1085,7 +1082,7 @@ class SealedMatchExprTest : public ::testing::Test {
         }
     }
 
-    void
+    virtual void
     LoadNestedInvertedIndexes() {
         // Load nested index for sub_str field
         {
@@ -1281,6 +1278,26 @@ class SealedMatchExprTest : public ::testing::Test {
 
         return seg_->Retrieve(
             nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    ColumnVectorPtr
+    EvalFilterWithOffsets(const std::string& filter_expr,
+                          const exec::OffsetVector& offsets) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.ParseSearch(
+            filter_expr, "vec", 10, "L2", R"({"nprobe": 10})", 3);
+        auto plan =
+            CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        if (plan == nullptr) {
+            return nullptr;
+        }
+
+        auto offset_copy = offsets;
+        auto filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get();
+        return milvus::test::gen_filter_res(
+            filter_node, seg_.get(), N_, MAX_TIMESTAMP, &offset_copy);
     }
 
     // Compute expected matching rows
@@ -1523,6 +1540,39 @@ class SealedMatchExprTestNoIndex : public SealedMatchExprTest {
         // Create sealed segment WITHOUT loading any index
         seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
         // No LoadNestedInvertedIndexes() call - brute force path
+    }
+};
+
+class SealedMatchExprTestLegacyRowLevelIndex : public SealedMatchExprTest {
+ protected:
+    void
+    LoadNestedInvertedIndexes() override {
+        {
+            auto index =
+                std::make_unique<index::InvertedIndexTantivy<std::string>>();
+            Config cfg;
+            cfg["is_array"] = true;
+            index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
+            LoadIndexInfo info{};
+            info.field_id = sub_str_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("sub_str_legacy", std::move(index));
+            seg_->LoadIndex(info);
+        }
+        {
+            auto index =
+                std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+            Config cfg;
+            cfg["is_array"] = true;
+            index->BuildWithRawDataForUT(N_, sub_int_arrays_.data(), cfg);
+            LoadIndexInfo info{};
+            info.field_id = sub_int_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("sub_int_legacy", std::move(index));
+            seg_->LoadIndex(info);
+        }
     }
 };
 
@@ -1913,6 +1963,26 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAnyNoIndex) {
         });
 }
 
+TEST_F(SealedMatchExprTestLegacyRowLevelIndex,
+       RetrieveMatchAnyFallsBackFromRowLevelStructArrayIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAny (Legacy Row-Level Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
 TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAllNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
@@ -1990,6 +2060,34 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchExactNoIndex) {
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count == threshold;
         });
+}
+
+TEST_F(SealedMatchExprTestNoIndex,
+       MatchAllImpossiblePredicateNoOffsetDoesNotVacuouslyMatch) {
+    const int32_t impossible_upper = 10000;
+
+    auto result = ExecuteRetrieve("match_all(struct_array, $[sub_int] > " +
+                                  std::to_string(impossible_upper) + ")");
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->offset_size(), 0);
+}
+
+TEST_F(SealedMatchExprTestNoIndex,
+       MatchAllImpossiblePredicateWithOffsetsDoesNotVacuouslyMatch) {
+    const int32_t impossible_upper = 10000;
+
+    exec::OffsetVector offsets{0, 1, 2, 37, 128, 255, 999};
+    auto result =
+        EvalFilterWithOffsets("match_all(struct_array, $[sub_int] > " +
+                                  std::to_string(impossible_upper) + ")",
+                              offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+    TargetBitmapView view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_FALSE(view.any());
+    EXPECT_TRUE(valid_view.all());
 }
 
 TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchAnyPartialIndex) {
@@ -2570,3 +2668,1400 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<IntTypeTestParam>& info) {
         return info.param.type_name;
     });
+
+// ==================== JSON MATCH — raw data path ====================
+// JSON MATCH intentionally does not use scalar indexes. These cases exercise
+// per-row JSON array extraction and element-level predicate aggregation.
+class SealedMatchExprJsonTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+        schema_ = std::make_shared<Schema>();
+        vec_fid_ = schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+        int64_fid_ = schema_->AddDebugField("id", DataType::INT64);
+        schema_->set_primary_field_id(int64_fid_);
+        json_fid_ = schema_->AddDebugField("json_field", DataType::JSON);
+
+        GenerateTestData();
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
+    }
+
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
+    void
+    GenerateTestData() {
+        std::default_random_engine rng(42);
+        std::vector<std::string> str_choices = {"aaa", "bbb", "ccc"};
+        std::uniform_int_distribution<> str_dist(0, 2);
+        std::uniform_int_distribution<> int_dist(50, 150);
+
+        arr_str_data_.resize(N_);
+        arr_int_data_.resize(N_);
+        arr_num_data_.resize(N_);
+        json_strs_.resize(N_);
+
+        auto insert_data = std::make_unique<InsertRecordProto>();
+
+        // vec
+        std::vector<float> vec_data(N_ * 4);
+        std::normal_distribution<float> vec_dist(0, 1);
+        for (auto& v : vec_data) {
+            v = vec_dist(rng);
+        }
+        auto vec_array = CreateDataArrayFrom(
+            vec_data.data(), nullptr, N_, schema_->operator[](vec_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        // id
+        std::vector<int64_t> id_data(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            id_data[i] = static_cast<int64_t>(i);
+        }
+        auto id_array = CreateDataArrayFrom(
+            id_data.data(), nullptr, N_, schema_->operator[](int64_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        // json
+        for (size_t i = 0; i < N_; ++i) {
+            arr_str_data_[i].resize(array_len_);
+            arr_int_data_[i].resize(array_len_);
+            std::string str_part = "[";
+            std::string int_part = "[";
+            std::string num_part;
+            for (int j = 0; j < array_len_; ++j) {
+                std::string s = str_choices[str_dist(rng)];
+                int32_t v = int_dist(rng);
+                arr_str_data_[i][j] = s;
+                arr_int_data_[i][j] = v;
+                if (j > 0) {
+                    str_part += ",";
+                    int_part += ",";
+                }
+                str_part += "\"" + s + "\"";
+                int_part += std::to_string(v);
+            }
+            str_part += "]";
+            int_part += "]";
+            switch (i % 6) {
+                case 0:
+                    arr_num_data_[i] = {50.0};
+                    num_part = "[50.0]";
+                    break;
+                case 1:
+                    arr_num_data_[i] = {50.0};
+                    num_part = "[50]";
+                    break;
+                case 2:
+                    arr_num_data_[i] = {50.5};
+                    num_part = "[50.5]";
+                    break;
+                case 3:
+                    arr_num_data_[i] = {50.0, 50.5};
+                    num_part = "[50.0,50.5]";
+                    break;
+                case 4:
+                    arr_num_data_[i] = {50.0};
+                    num_part = "[50,\"50\",true]";
+                    break;
+                default:
+                    arr_num_data_[i] = {};
+                    num_part = "[]";
+                    break;
+            }
+            std::string edge_part;
+            switch (i % 5) {
+                case 0:
+                    // Missing path.
+                    break;
+                case 1:
+                    edge_part = ",\"edge\":null";
+                    break;
+                case 2:
+                    edge_part = ",\"edge\":42";
+                    break;
+                case 3:
+                    edge_part = ",\"edge\":[]";
+                    break;
+                default:
+                    edge_part = ",\"edge\":[1]";
+                    break;
+            }
+            const auto precise_value =
+                i % 2 == 0 ? "9007199254740992" : "9007199254740993";
+            json_strs_[i] = "{\"arr_str\":" + str_part +
+                            ",\"arr_int\":" + int_part +
+                            ",\"arr_num\":" + num_part + edge_part +
+                            ",\"precise\":[" + precise_value + "]}";
+        }
+        auto json_array = CreateDataArrayFrom(
+            json_strs_.data(), nullptr, N_, schema_->operator[](json_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(json_array.release());
+
+        insert_data->set_num_rows(N_);
+        generated_data_.schema_ = schema_;
+        generated_data_.raw_ = insert_data.release();
+        for (size_t i = 0; i < N_; ++i) {
+            generated_data_.row_ids_.push_back(static_cast<int64_t>(i));
+            generated_data_.timestamps_.push_back(static_cast<int64_t>(i));
+        }
+    }
+
+    int
+    CountStr(size_t row, const std::string& target) const {
+        int c = 0;
+        for (const auto& s : arr_str_data_[row]) {
+            if (s == target) {
+                ++c;
+            }
+        }
+        return c;
+    }
+
+    int
+    CountIntGt(size_t row, int32_t boundary) const {
+        int c = 0;
+        for (auto v : arr_int_data_[row]) {
+            if (v > boundary) {
+                ++c;
+            }
+        }
+        return c;
+    }
+
+    int
+    CountNumEq(size_t row, double target) const {
+        int c = 0;
+        for (auto v : arr_num_data_[row]) {
+            if (v == target) {
+                ++c;
+            }
+        }
+        return c;
+    }
+
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    using CountFn = std::function<int(size_t)>;
+    using VerifyFn = std::function<bool(int match_count, int64_t threshold)>;
+    using RowVerifyFn = std::function<bool(size_t row)>;
+
+    void
+    RunAndVerify(const std::string& filter_expr,
+                 int64_t threshold,
+                 CountFn count_fn,
+                 VerifyFn verify_fn,
+                 const std::string& label) {
+        auto result = ExecuteRetrieve(filter_expr);
+
+        std::set<int64_t> expected;
+        for (size_t i = 0; i < N_; ++i) {
+            if (verify_fn(count_fn(i), threshold)) {
+                expected.insert(static_cast<int64_t>(i));
+            }
+        }
+        std::set<int64_t> actual(result->offset().begin(),
+                                 result->offset().end());
+
+        EXPECT_EQ(expected, actual) << label << ": expected=" << expected.size()
+                                    << " actual=" << actual.size();
+    }
+
+    void
+    RunAndVerifyRows(const std::string& filter_expr,
+                     RowVerifyFn verify_fn,
+                     const std::string& label) {
+        auto result = ExecuteRetrieve(filter_expr);
+
+        std::set<int64_t> expected;
+        for (size_t i = 0; i < N_; ++i) {
+            if (verify_fn(i)) {
+                expected.insert(static_cast<int64_t>(i));
+            }
+        }
+        std::set<int64_t> actual(result->offset().begin(),
+                                 result->offset().end());
+
+        EXPECT_EQ(expected, actual) << label << ": expected=" << expected.size()
+                                    << " actual=" << actual.size();
+    }
+
+    ColumnVectorPtr
+    EvalFilterWithOffsets(const std::string& filter_expr,
+                          const exec::OffsetVector& offsets) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.ParseSearch(
+            filter_expr, "vec", 10, "L2", R"({"nprobe": 10})", 3);
+        auto plan =
+            CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        if (plan == nullptr) {
+            return nullptr;
+        }
+
+        auto offset_copy = offsets;
+        auto filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get();
+        return milvus::test::gen_filter_res(
+            filter_node, seg_.get(), N_, MAX_TIMESTAMP, &offset_copy);
+    }
+
+    exec::OffsetVector
+    EmptyArrNumRows() const {
+        exec::OffsetVector offsets;
+        for (size_t i = 0; i < N_; ++i) {
+            if (i % 6 == 5) {
+                offsets.emplace_back(static_cast<int32_t>(i));
+            }
+        }
+        return offsets;
+    }
+
+    std::shared_ptr<Schema> schema_;
+    FieldId vec_fid_;
+    FieldId int64_fid_;
+    FieldId json_fid_;
+
+    std::vector<std::vector<std::string>> arr_str_data_;
+    std::vector<std::vector<int32_t>> arr_int_data_;
+    std::vector<std::vector<double>> arr_num_data_;
+    std::vector<std::string> json_strs_;
+
+    GeneratedData generated_data_;
+    SegmentSealedUPtr seg_;
+
+    static constexpr size_t N_ = 1000;
+    static constexpr int array_len_ = 5;
+    int64_t saved_batch_size_{0};
+};
+
+TEST_F(SealedMatchExprJsonTest, MatchLeastIntInnerAndRawData) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int64_t threshold = 2;
+    RunAndVerify(
+        "match_least(json_field[\"arr_int\"], $ > " + std::to_string(lo) +
+            " && $ < " + std::to_string(hi) +
+            ", threshold=" + std::to_string(threshold) + ")",
+        threshold,
+        [&](size_t i) {
+            int c = 0;
+            for (auto v : arr_int_data_[i]) {
+                if (v > lo && v < hi) {
+                    ++c;
+                }
+            }
+            return c;
+        },
+        [](int c, int64_t t) { return c >= t; },
+        "MatchLeastIntInnerAndRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyStrInnerTermRawData) {
+    RunAndVerify(
+        "match_any(json_field[\"arr_str\"], $ in [\"aaa\", \"bbb\"])",
+        0,
+        [&](size_t i) {
+            int c = 0;
+            for (const auto& s : arr_str_data_[i]) {
+                if (s == "aaa" || s == "bbb") {
+                    ++c;
+                }
+            }
+            return c;
+        },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyStrInnerTermRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyNumericTermIntLiteralRawData) {
+    RunAndVerify(
+        "match_any(json_field[\"arr_num\"], $ in [50])",
+        0,
+        [&](size_t i) { return CountNumEq(i, 50.0); },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyNumericTermIntLiteralRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAllNumericTermIntLiteralRawData) {
+    RunAndVerifyRows(
+        "match_all(json_field[\"arr_num\"], $ in [50])",
+        [&](size_t i) {
+            return CountNumEq(i, 50.0) ==
+                   static_cast<int>(arr_num_data_[i].size());
+        },
+        "MatchAllNumericTermIntLiteralRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, EmptyTermKeepsElementValidityRawData) {
+    RunAndVerifyRows(
+        "match_any(json_field[\"arr_num\"], $ in [])",
+        [](size_t) { return false; },
+        "MatchAnyEmptyTermRawData");
+    RunAndVerifyRows(
+        "match_all(json_field[\"arr_num\"], $ in [])",
+        [&](size_t i) { return arr_num_data_[i].empty(); },
+        "MatchAllEmptyTermRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest,
+       MatchAllNumericTermSkipsMixedTypeElementsRawData) {
+    RunAndVerifyRows(
+        "id % 6 == 4 && match_all(json_field[\"arr_num\"], $ in [50])",
+        [](size_t i) { return i % 6 == 4; },
+        "MatchAllNumericTermSkipsMixedTypeElementsRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyNumericArithAddRawData) {
+    RunAndVerify(
+        "match_any(json_field[\"arr_num\"], $ + 1 == 51)",
+        0,
+        [&](size_t i) {
+            int c = 0;
+            for (auto v : arr_num_data_[i]) {
+                if (v + 1.0 == 51.0) {
+                    ++c;
+                }
+            }
+            return c;
+        },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyNumericArithAddRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyNumericArithFloatRawData) {
+    RunAndVerify(
+        "match_any(json_field[\"arr_num\"], $ + 0.5 == 51.0)",
+        0,
+        [&](size_t i) {
+            int c = 0;
+            for (auto v : arr_num_data_[i]) {
+                if (v + 0.5 == 51.0) {
+                    ++c;
+                }
+            }
+            return c;
+        },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyNumericArithFloatRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest,
+       MatchAllNumericArithSkipsMixedTypeElementsRawData) {
+    RunAndVerifyRows(
+        "id % 6 == 4 && match_all(json_field[\"arr_num\"], $ % 2 == 0)",
+        [](size_t i) { return i % 6 == 4; },
+        "MatchAllNumericArithSkipsMixedTypeElementsRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyStrRawData) {
+    const std::string target = "aaa";
+    RunAndVerify(
+        "match_any(json_field[\"arr_str\"], $ == \"" + target + "\")",
+        0,
+        [&](size_t i) { return CountStr(i, target); },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyStr");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyStrRegexRawData) {
+    RunAndVerify(
+        "match_any(json_field[\"arr_str\"], $ =~ \"a.*\")",
+        0,
+        [&](size_t i) { return CountStr(i, "aaa"); },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyStrRegexRawData");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAllStrRawData) {
+    const std::string target = "aaa";
+    RunAndVerify(
+        "match_all(json_field[\"arr_str\"], $ == \"" + target + "\")",
+        array_len_,
+        [&](size_t i) { return CountStr(i, target); },
+        [](int c, int64_t n) { return c == n; },
+        "MatchAllStr");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchLeastStrRawData) {
+    const std::string target = "aaa";
+    const int64_t threshold = 2;
+    RunAndVerify(
+        "match_least(json_field[\"arr_str\"], $ == \"" + target +
+            "\", threshold=" + std::to_string(threshold) + ")",
+        threshold,
+        [&](size_t i) { return CountStr(i, target); },
+        [](int c, int64_t t) { return c >= t; },
+        "MatchLeastStr");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchMostStrRawData) {
+    const std::string target = "aaa";
+    const int64_t threshold = 2;
+    RunAndVerify(
+        "match_most(json_field[\"arr_str\"], $ == \"" + target +
+            "\", threshold=" + std::to_string(threshold) + ")",
+        threshold,
+        [&](size_t i) { return CountStr(i, target); },
+        [](int c, int64_t t) { return c <= t; },
+        "MatchMostStr");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchExactStrRawData) {
+    const std::string target = "aaa";
+    const int64_t threshold = 2;
+    RunAndVerify(
+        "match_exact(json_field[\"arr_str\"], $ == \"" + target +
+            "\", threshold=" + std::to_string(threshold) + ")",
+        threshold,
+        [&](size_t i) { return CountStr(i, target); },
+        [](int c, int64_t t) { return c == t; },
+        "MatchExactStr");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyIntRawData) {
+    const int32_t boundary = 100;
+    RunAndVerify(
+        "match_any(json_field[\"arr_int\"], $ > " + std::to_string(boundary) +
+            ")",
+        0,
+        [&](size_t i) { return CountIntGt(i, boundary); },
+        [](int c, int64_t) { return c > 0; },
+        "MatchAnyInt");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchLeastIntRawData) {
+    const int32_t boundary = 100;
+    const int64_t threshold = 2;
+    RunAndVerify(
+        "match_least(json_field[\"arr_int\"], $ > " + std::to_string(boundary) +
+            ", threshold=" + std::to_string(threshold) + ")",
+        threshold,
+        [&](size_t i) { return CountIntGt(i, boundary); },
+        [](int c, int64_t t) { return c >= t; },
+        "MatchLeastInt");
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAllNumericTermEmptyOffsetsRawData) {
+    auto offsets = EmptyArrNumRows();
+    auto result = EvalFilterWithOffsets(
+        "match_all(json_field[\"arr_num\"], $ in [50])", offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+    TargetBitmapView view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(view.all());
+    EXPECT_TRUE(valid_view.all());
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAllNumericCompoundEmptyOffsetsRawData) {
+    auto offsets = EmptyArrNumRows();
+    auto result = EvalFilterWithOffsets(
+        "match_all(json_field[\"arr_num\"], $ > 0 && $ < 100)", offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+    TargetBitmapView view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(view.all());
+    EXPECT_TRUE(valid_view.all());
+}
+
+TEST_F(SealedMatchExprJsonTest, MatchAnyNumericCompoundNonEmptyOffsetsRawData) {
+    exec::OffsetVector offsets{0, 2, 3, 4, 5, 8, 9, 10, 11};
+    auto result = EvalFilterWithOffsets(
+        "match_any(json_field[\"arr_num\"], $ > 50 && $ < 51)", offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+    TargetBitmapView view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view.all());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        auto row = static_cast<size_t>(offsets[i]);
+        bool expected = false;
+        for (auto v : arr_num_data_[row]) {
+            if (v > 50.0 && v < 51.0) {
+                expected = true;
+                break;
+            }
+        }
+        EXPECT_EQ(expected, static_cast<bool>(view[i])) << "row=" << row;
+    }
+}
+
+TEST_F(SealedMatchExprJsonTest,
+       MatchAllNumericCompoundEmptySequentialBatchRawData) {
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(1);
+    RunAndVerifyRows(
+        "match_all(json_field[\"arr_num\"], $ > 0 && $ < 1000)",
+        [](size_t) { return true; },
+        "MatchAllNumericCompoundEmptySequentialBatchRawData");
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
+
+TEST_F(SealedMatchExprJsonTest, InvalidArrayRowsDoNotUseEmptyArrayTruth) {
+    const exec::OffsetVector offsets{0, 1, 2, 3, 4};
+    const std::vector<std::string> filters{
+        "match_all(json_field[\"edge\"], $ == 1)",
+        "match_most(json_field[\"edge\"], $ == 1, threshold=0)",
+        "match_exact(json_field[\"edge\"], $ == 1, threshold=0)",
+    };
+
+    for (const auto& filter : filters) {
+        auto result = EvalFilterWithOffsets(filter, offsets);
+        ASSERT_NE(result, nullptr) << filter;
+        ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+        TargetBitmapView value_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < 3; ++i) {
+            EXPECT_FALSE(valid_view[i]) << filter << ", row=" << i;
+            EXPECT_FALSE(value_view[i]) << filter << ", row=" << i;
+        }
+
+        // A real empty array remains a valid row and follows empty-set
+        // semantics for ALL / MOST(0) / EXACT(0).
+        EXPECT_TRUE(valid_view[3]) << filter;
+        EXPECT_TRUE(value_view[3]) << filter;
+        EXPECT_TRUE(valid_view[4]) << filter;
+    }
+}
+
+TEST_F(SealedMatchExprJsonTest, Int64LiteralsRemainExactBeyondDoubleRange) {
+    RunAndVerifyRows(
+        "match_any(json_field[\"precise\"], $ == 9007199254740992)",
+        [](size_t i) { return i % 2 == 0; },
+        "MatchExactInt64At2Pow53");
+    RunAndVerifyRows(
+        "match_any(json_field[\"precise\"], $ == 9007199254740993)",
+        [](size_t i) { return i % 2 == 1; },
+        "MatchExactInt64Above2Pow53");
+}
+
+// ==================== Compound expression tests ====================
+// Verify match_* on JSON composes correctly with logical operators,
+// other-field conditions, and compound inner predicates.
+
+namespace {
+
+int
+CountIntInRange(const std::vector<int32_t>& arr, int32_t lo, int32_t hi) {
+    int c = 0;
+    for (auto v : arr) {
+        if (v > lo && v < hi) {
+            ++c;
+        }
+    }
+    return c;
+}
+
+}  // namespace
+
+// match_any AND match_any across two JSON sub-paths.
+TEST_F(SealedMatchExprJsonTest, MatchAnyAndMatchAny) {
+    const std::string target = "aaa";
+    const int32_t boundary = 100;
+    const std::string filter = "match_any(json_field[\"arr_str\"], $ == \"" +
+                               target +
+                               "\") && "
+                               "match_any(json_field[\"arr_int\"], $ > " +
+                               std::to_string(boundary) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountStr(i, target) > 0 && CountIntGt(i, boundary) > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_any OR other-field condition.
+TEST_F(SealedMatchExprJsonTest, MatchAnyOrIdRange) {
+    const std::string target = "aaa";
+    const int64_t id_boundary = 10;
+    const std::string filter = "match_any(json_field[\"arr_str\"], $ == \"" +
+                               target + "\") || id < " +
+                               std::to_string(id_boundary);
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        bool m = CountStr(i, target) > 0;
+        bool id_small = static_cast<int64_t>(i) < id_boundary;
+        if (m || id_small) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// NOT match_all : rows where not every element equals target.
+TEST_F(SealedMatchExprJsonTest, NotMatchAll) {
+    const std::string target = "aaa";
+    const std::string filter =
+        "!match_all(json_field[\"arr_str\"], $ == \"" + target + "\")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountStr(i, target) != array_len_) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_any with inner compound predicate ($ > lo && $ < hi).
+TEST_F(SealedMatchExprJsonTest, MatchAnyInnerCompound) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const std::string filter = "match_any(json_field[\"arr_int\"], $ > " +
+                               std::to_string(lo) + " && $ < " +
+                               std::to_string(hi) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountIntInRange(arr_int_data_[i], lo, hi) > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_all with inner compound AND: every element falls in (80, 120).
+TEST_F(SealedMatchExprJsonTest, MatchAllInnerCompoundAnd) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const std::string filter = "match_all(json_field[\"arr_int\"], $ > " +
+                               std::to_string(lo) + " && $ < " +
+                               std::to_string(hi) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountIntInRange(arr_int_data_[i], lo, hi) == array_len_) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_any with inner OR: any element outside [70, 130].
+TEST_F(SealedMatchExprJsonTest, MatchAnyInnerCompoundOr) {
+    const int32_t lo = 70;
+    const int32_t hi = 130;
+    const std::string filter = "match_any(json_field[\"arr_int\"], $ < " +
+                               std::to_string(lo) + " || $ > " +
+                               std::to_string(hi) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        int c = 0;
+        for (auto v : arr_int_data_[i]) {
+            if (v < lo || v > hi) {
+                ++c;
+            }
+        }
+        if (c > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_least with inner compound AND + threshold=2.
+TEST_F(SealedMatchExprJsonTest, MatchLeastInnerCompound) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int64_t threshold = 2;
+    const std::string filter = "match_least(json_field[\"arr_int\"], $ > " +
+                               std::to_string(lo) + " && $ < " +
+                               std::to_string(hi) +
+                               ", threshold=" + std::to_string(threshold) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountIntInRange(arr_int_data_[i], lo, hi) >= threshold) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_exact with inner compound: exactly `threshold` elements in range.
+TEST_F(SealedMatchExprJsonTest, MatchExactInnerCompound) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int64_t threshold = 3;
+    const std::string filter = "match_exact(json_field[\"arr_int\"], $ > " +
+                               std::to_string(lo) + " && $ < " +
+                               std::to_string(hi) +
+                               ", threshold=" + std::to_string(threshold) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountIntInRange(arr_int_data_[i], lo, hi) == threshold) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// String path with inner OR: any element in {"aaa", "bbb"}.
+TEST_F(SealedMatchExprJsonTest, MatchAnyStrInnerOr) {
+    const std::string filter =
+        "match_any(json_field[\"arr_str\"], $ == \"aaa\" || $ == \"bbb\")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        int c = 0;
+        for (const auto& s : arr_str_data_[i]) {
+            if (s == "aaa" || s == "bbb") {
+                ++c;
+            }
+        }
+        if (c > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// Three-leaf inner tree: ($ > 80 && $ < 120) || $ == 150.
+TEST_F(SealedMatchExprJsonTest, MatchAnyInnerNested) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int32_t eq = 150;
+    const std::string filter = "match_any(json_field[\"arr_int\"], ($ > " +
+                               std::to_string(lo) + " && $ < " +
+                               std::to_string(hi) +
+                               ") || $ == " + std::to_string(eq) + ")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        int c = 0;
+        for (auto v : arr_int_data_[i]) {
+            if ((v > lo && v < hi) || v == eq) {
+                ++c;
+            }
+        }
+        if (c > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// Outer AND combining two match_* that each have inner compound predicates.
+TEST_F(SealedMatchExprJsonTest, OuterAndBothInnerCompound) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const std::string filter =
+        "match_any(json_field[\"arr_int\"], $ > " + std::to_string(lo) +
+        " && $ < " + std::to_string(hi) +
+        ") && "
+        "match_any(json_field[\"arr_str\"], $ == \"aaa\" || $ == \"bbb\")";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        bool a = CountIntInRange(arr_int_data_[i], lo, hi) > 0;
+        int sc = 0;
+        for (const auto& s : arr_str_data_[i]) {
+            if (s == "aaa" || s == "bbb") {
+                ++sc;
+            }
+        }
+        if (a && sc > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// Cross-field AND: match_any on JSON AND id % 2 == 0.
+TEST_F(SealedMatchExprJsonTest, MatchAnyAndIdMod) {
+    const std::string target = "aaa";
+    const std::string filter = "match_any(json_field[\"arr_str\"], $ == \"" +
+                               target + "\") && id % 2 == 0";
+
+    auto result = ExecuteRetrieve(filter);
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (CountStr(i, target) > 0 && (i % 2 == 0)) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// ====================================================================
+// SealedMatchExprPlainArrayTest
+//
+// Plain array (DataType::ARRAY with element_type) MATCH coverage. Plain-array
+// MATCH intentionally evaluates raw field data and uses segment-owned offsets.
+// ====================================================================
+
+class SealedMatchExprPlainArrayTest : public ::testing::Test {
+ public:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+        schema_ = std::make_shared<Schema>();
+        vec_fid_ = schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+        int64_fid_ = schema_->AddDebugField("id", DataType::INT64);
+        schema_->set_primary_field_id(int64_fid_);
+        arr_int_fid_ =
+            schema_->AddDebugField("arr_int", DataType::ARRAY, DataType::INT32);
+        arr_str_fid_ = schema_->AddDebugField(
+            "arr_str", DataType::ARRAY, DataType::VARCHAR);
+
+        GenerateTestData();
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
+    }
+
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
+    void
+    GenerateTestData() {
+        std::default_random_engine rng(7);
+        std::vector<std::string> str_choices = {"aaa", "bbb", "ccc"};
+        std::uniform_int_distribution<> str_dist(0, 2);
+        std::uniform_int_distribution<> int_dist(50, 150);
+
+        arr_int_data_.assign(N_, {});
+        arr_str_data_.assign(N_, {});
+        arr_int_raw_.assign(N_, {});
+        arr_str_raw_.assign(N_, {});
+
+        auto insert_data = std::make_unique<InsertRecordProto>();
+
+        std::vector<float> vec_data(N_ * 4);
+        std::normal_distribution<float> vec_dist(0, 1);
+        for (auto& v : vec_data) {
+            v = vec_dist(rng);
+        }
+        auto vec_array = CreateDataArrayFrom(
+            vec_data.data(), nullptr, N_, schema_->operator[](vec_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        std::vector<int64_t> id_data(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            id_data[i] = static_cast<int64_t>(i);
+        }
+        auto id_array = CreateDataArrayFrom(
+            id_data.data(), nullptr, N_, schema_->operator[](int64_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        for (size_t i = 0; i < N_; ++i) {
+            for (int j = 0; j < array_len_; ++j) {
+                int32_t v = int_dist(rng);
+                arr_int_data_[i].mutable_int_data()->add_data(v);
+                arr_int_raw_[i].push_back(v);
+            }
+        }
+        auto int_arr_proto =
+            CreateDataArrayFrom(arr_int_data_.data(),
+                                nullptr,
+                                N_,
+                                schema_->operator[](arr_int_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(
+            int_arr_proto.release());
+
+        for (size_t i = 0; i < N_; ++i) {
+            for (int j = 0; j < array_len_; ++j) {
+                const auto& s = str_choices[str_dist(rng)];
+                arr_str_data_[i].mutable_string_data()->add_data(s);
+                arr_str_raw_[i].push_back(s);
+            }
+        }
+        auto str_arr_proto =
+            CreateDataArrayFrom(arr_str_data_.data(),
+                                nullptr,
+                                N_,
+                                schema_->operator[](arr_str_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(
+            str_arr_proto.release());
+
+        insert_data->set_num_rows(N_);
+        generated_data_.schema_ = schema_;
+        generated_data_.raw_ = insert_data.release();
+        for (size_t i = 0; i < N_; ++i) {
+            generated_data_.row_ids_.push_back(static_cast<int64_t>(i));
+            generated_data_.timestamps_.push_back(static_cast<int64_t>(i));
+        }
+    }
+
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    static int
+    CountIntPred(const std::vector<int32_t>& arr,
+                 const std::function<bool(int32_t)>& pred) {
+        int c = 0;
+        for (auto v : arr) {
+            if (pred(v)) {
+                ++c;
+            }
+        }
+        return c;
+    }
+
+    static int
+    CountStrPred(const std::vector<std::string>& arr,
+                 const std::function<bool(const std::string&)>& pred) {
+        int c = 0;
+        for (const auto& s : arr) {
+            if (pred(s)) {
+                ++c;
+            }
+        }
+        return c;
+    }
+
+    std::shared_ptr<Schema> schema_;
+    FieldId vec_fid_;
+    FieldId int64_fid_;
+    FieldId arr_int_fid_;
+    FieldId arr_str_fid_;
+
+    std::vector<milvus::proto::schema::ScalarField> arr_int_data_;
+    std::vector<milvus::proto::schema::ScalarField> arr_str_data_;
+    std::vector<std::vector<int32_t>> arr_int_raw_;
+    std::vector<std::vector<std::string>> arr_str_raw_;
+
+    GeneratedData generated_data_;
+    SegmentSealedUPtr seg_;
+
+    static constexpr size_t N_ = 1000;
+    static constexpr int array_len_ = 5;
+    int64_t saved_batch_size_{0};
+};
+
+// ==================== Shared test bodies ====================
+// Shared raw-data assertions. Each helper covers one non-redundant shape.
+
+namespace plain_array_match_cases {
+
+// match_any with a single predicate — baseline element-level dispatch.
+inline void
+CheckMatchAnyIntSimple(SealedMatchExprPlainArrayTest* f) {
+    const int32_t boundary = 100;
+    auto result = f->ExecuteRetrieve("match_any(arr_int, $ > " +
+                                     std::to_string(boundary) + ")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_int_raw_.size(); ++i) {
+        if (SealedMatchExprPlainArrayTest::CountIntPred(
+                f->arr_int_raw_[i], [=](int32_t v) { return v > boundary; }) >
+            0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_all with inner OR — string path + compound predicate.
+inline void
+CheckMatchAllStrInnerOr(SealedMatchExprPlainArrayTest* f) {
+    auto result =
+        f->ExecuteRetrieve("match_all(arr_str, $ == \"aaa\" || $ == \"bbb\")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_str_raw_.size(); ++i) {
+        int c = SealedMatchExprPlainArrayTest::CountStrPred(
+            f->arr_str_raw_[i],
+            [](const std::string& s) { return s == "aaa" || s == "bbb"; });
+        if (c == f->array_len_) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_least with inner AND + threshold — compound AND path.
+inline void
+CheckMatchLeastIntInnerAnd(SealedMatchExprPlainArrayTest* f) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int64_t threshold = 2;
+    auto result = f->ExecuteRetrieve(
+        "match_least(arr_int, $ > " + std::to_string(lo) + " && $ < " +
+        std::to_string(hi) + ", threshold=" + std::to_string(threshold) + ")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_int_raw_.size(); ++i) {
+        int c = SealedMatchExprPlainArrayTest::CountIntPred(
+            f->arr_int_raw_[i], [=](int32_t v) { return v > lo && v < hi; });
+        if (c >= threshold) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_exact with 3-leaf inner: (> lo && < hi) || == eq.
+inline void
+CheckMatchExactIntInnerNested(SealedMatchExprPlainArrayTest* f) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int32_t eq = 150;
+    const int64_t threshold = 3;
+    auto result = f->ExecuteRetrieve(
+        "match_exact(arr_int, ($ > " + std::to_string(lo) + " && $ < " +
+        std::to_string(hi) + ") || $ == " + std::to_string(eq) +
+        ", threshold=" + std::to_string(threshold) + ")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_int_raw_.size(); ++i) {
+        int c = SealedMatchExprPlainArrayTest::CountIntPred(
+            f->arr_int_raw_[i],
+            [=](int32_t v) { return (v > lo && v < hi) || v == eq; });
+        if (c == threshold) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// Outer combinator: match_any on plain array AND a scalar-field condition.
+inline void
+CheckOuterAndCrossField(SealedMatchExprPlainArrayTest* f) {
+    auto result =
+        f->ExecuteRetrieve("match_any(arr_str, $ == \"aaa\") && id % 2 == 0");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_str_raw_.size(); ++i) {
+        bool m = SealedMatchExprPlainArrayTest::CountStrPred(
+                     f->arr_str_raw_[i],
+                     [](const std::string& s) { return s == "aaa"; }) > 0;
+        if (m && (i % 2 == 0)) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// match_most (at most `threshold` hits) with inner AND — distinct
+// reduction semantics from the other match_* variants.
+inline void
+CheckMatchMostIntInnerAnd(SealedMatchExprPlainArrayTest* f) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    const int64_t threshold = 2;
+    auto result = f->ExecuteRetrieve(
+        "match_most(arr_int, $ > " + std::to_string(lo) + " && $ < " +
+        std::to_string(hi) + ", threshold=" + std::to_string(threshold) + ")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_int_raw_.size(); ++i) {
+        int c = SealedMatchExprPlainArrayTest::CountIntPred(
+            f->arr_int_raw_[i], [=](int32_t v) { return v > lo && v < hi; });
+        if (c <= threshold) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// Inner Term predicate: $ in [...] — hits a different Expr subclass
+// (PhyTermFilterExpr) from UnaryRange, so worth a separate case.
+inline void
+CheckMatchAnyInnerTerm(SealedMatchExprPlainArrayTest* f) {
+    auto result =
+        f->ExecuteRetrieve("match_any(arr_str, $ in [\"aaa\", \"bbb\"])");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_str_raw_.size(); ++i) {
+        int c = SealedMatchExprPlainArrayTest::CountStrPred(
+            f->arr_str_raw_[i],
+            [](const std::string& s) { return s == "aaa" || s == "bbb"; });
+        if (c > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// Outer OR between two match_* on different array fields, each with its
+// own compound inner — stresses both the multi-leaf-per-match dispatch
+// and the framework-level OR composition.
+inline void
+CheckOuterOrTwoCompoundInner(SealedMatchExprPlainArrayTest* f) {
+    const int32_t lo = 80;
+    const int32_t hi = 120;
+    auto result =
+        f->ExecuteRetrieve("match_any(arr_int, $ > " + std::to_string(lo) +
+                           " && $ < " + std::to_string(hi) +
+                           ") || "
+                           "match_all(arr_str, $ == \"aaa\" || $ == \"bbb\")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < f->arr_int_raw_.size(); ++i) {
+        bool int_side = SealedMatchExprPlainArrayTest::CountIntPred(
+                            f->arr_int_raw_[i],
+                            [=](int32_t v) { return v > lo && v < hi; }) > 0;
+        int sc = SealedMatchExprPlainArrayTest::CountStrPred(
+            f->arr_str_raw_[i],
+            [](const std::string& s) { return s == "aaa" || s == "bbb"; });
+        bool str_side = sc == f->array_len_;
+        if (int_side || str_side) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+}  // namespace plain_array_match_cases
+
+#define PLAIN_ARRAY_MATCH_CASES(FIXTURE)                              \
+    TEST_F(FIXTURE, MatchAnyIntSimple) {                              \
+        plain_array_match_cases::CheckMatchAnyIntSimple(this);        \
+    }                                                                 \
+    TEST_F(FIXTURE, MatchAllStrInnerOr) {                             \
+        plain_array_match_cases::CheckMatchAllStrInnerOr(this);       \
+    }                                                                 \
+    TEST_F(FIXTURE, MatchLeastIntInnerAnd) {                          \
+        plain_array_match_cases::CheckMatchLeastIntInnerAnd(this);    \
+    }                                                                 \
+    TEST_F(FIXTURE, MatchExactIntInnerNested) {                       \
+        plain_array_match_cases::CheckMatchExactIntInnerNested(this); \
+    }                                                                 \
+    TEST_F(FIXTURE, OuterAndCrossField) {                             \
+        plain_array_match_cases::CheckOuterAndCrossField(this);       \
+    }                                                                 \
+    TEST_F(FIXTURE, OuterOrTwoCompoundInner) {                        \
+        plain_array_match_cases::CheckOuterOrTwoCompoundInner(this);  \
+    }                                                                 \
+    TEST_F(FIXTURE, MatchMostIntInnerAnd) {                           \
+        plain_array_match_cases::CheckMatchMostIntInnerAnd(this);     \
+    }                                                                 \
+    TEST_F(FIXTURE, MatchAnyInnerTerm) {                              \
+        plain_array_match_cases::CheckMatchAnyInnerTerm(this);        \
+    }
+
+PLAIN_ARRAY_MATCH_CASES(SealedMatchExprPlainArrayTest)
+
+// ====================================================================
+// SealedMatchExprPlainArrayNullableTest
+//
+// Covers three overlapping corners with one data shape:
+//   - variable-length arrays (row i has i % 8 elements)
+//   - empty arrays (rows with length 0) — MatchAll vacuous-true branch
+//   - row-level null (nullable array column)
+// Empty arrays follow quantifier semantics (MatchAll is vacuously true), while
+// null rows are excluded by the row-level validity bitmap.
+// ====================================================================
+
+class SealedMatchExprPlainArrayNullableTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+        schema_ = std::make_shared<Schema>();
+        vec_fid_ = schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+        int64_fid_ = schema_->AddDebugField("id", DataType::INT64);
+        schema_->set_primary_field_id(int64_fid_);
+        arr_int_fid_ = schema_->AddDebugField(
+            "arr_int", DataType::ARRAY, DataType::INT32, /*nullable=*/true);
+
+        GenerateTestData();
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
+    }
+
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
+    void
+    GenerateTestData() {
+        std::default_random_engine rng(11);
+        std::uniform_int_distribution<> int_dist(50, 150);
+
+        arr_int_data_.assign(N_, {});
+        arr_int_raw_.assign(N_, {});
+        arr_valid_.assign(N_, 1);
+
+        auto insert_data = std::make_unique<InsertRecordProto>();
+
+        std::vector<float> vec_data(N_ * 4);
+        std::normal_distribution<float> vec_dist(0, 1);
+        for (auto& v : vec_data) {
+            v = vec_dist(rng);
+        }
+        auto vec_array = CreateDataArrayFrom(
+            vec_data.data(), nullptr, N_, schema_->operator[](vec_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        std::vector<int64_t> id_data(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            id_data[i] = static_cast<int64_t>(i);
+        }
+        auto id_array = CreateDataArrayFrom(
+            id_data.data(), nullptr, N_, schema_->operator[](int64_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        // Mix: every 13th row null, otherwise length = i % 8 (yields 0-length
+        // arrays regularly) with random values.
+        for (size_t i = 0; i < N_; ++i) {
+            if (i % 13 == 0) {
+                arr_valid_[i] = 0;
+                continue;  // leave ScalarField empty
+            }
+            int len = static_cast<int>(i % 8);
+            for (int j = 0; j < len; ++j) {
+                int32_t v = int_dist(rng);
+                arr_int_data_[i].mutable_int_data()->add_data(v);
+                arr_int_raw_[i].push_back(v);
+            }
+        }
+        auto arr_proto = CreateDataArrayFrom(arr_int_data_.data(),
+                                             arr_valid_.data(),
+                                             N_,
+                                             schema_->operator[](arr_int_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(arr_proto.release());
+
+        insert_data->set_num_rows(N_);
+        generated_data_.schema_ = schema_;
+        generated_data_.raw_ = insert_data.release();
+        for (size_t i = 0; i < N_; ++i) {
+            generated_data_.row_ids_.push_back(static_cast<int64_t>(i));
+            generated_data_.timestamps_.push_back(static_cast<int64_t>(i));
+        }
+    }
+
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    std::shared_ptr<Schema> schema_;
+    FieldId vec_fid_;
+    FieldId int64_fid_;
+    FieldId arr_int_fid_;
+
+    std::vector<milvus::proto::schema::ScalarField> arr_int_data_;
+    std::vector<std::vector<int32_t>> arr_int_raw_;
+    std::vector<uint8_t> arr_valid_;
+
+    GeneratedData generated_data_;
+    SegmentSealedUPtr seg_;
+
+    static constexpr size_t N_ = 520;
+    int64_t saved_batch_size_{0};
+};
+
+// MatchAny on variable-length / empty / null rows: a row hits iff it has
+// at least one element matching; both empty arrays and null rows miss.
+TEST_F(SealedMatchExprPlainArrayNullableTest, MatchAnyVariableLength) {
+    const int32_t boundary = 100;
+    auto result = ExecuteRetrieve("match_any(arr_int, $ > " +
+                                  std::to_string(boundary) + ")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (arr_valid_[i] == 0) {
+            continue;
+        }
+        int c = 0;
+        for (auto v : arr_int_raw_[i]) {
+            if (v > boundary) {
+                ++c;
+            }
+        }
+        if (c > 0) {
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}
+
+// MatchAll: vacuous-true branch — rows whose every element passes (empty
+// arrays count as vacuously satisfying per MatchSingleRow), while null rows
+// are filtered out by the row-level valid bitmap.
+TEST_F(SealedMatchExprPlainArrayNullableTest, MatchAllVacuousTrue) {
+    const int32_t boundary = 40;  // loose bound: most elements pass
+    auto result = ExecuteRetrieve("match_all(arr_int, $ > " +
+                                  std::to_string(boundary) + ")");
+    std::set<int64_t> expected;
+    for (size_t i = 0; i < N_; ++i) {
+        if (arr_valid_[i] == 0) {
+            continue;  // null row excluded (expected semantics)
+        }
+        bool all_pass = true;
+        for (auto v : arr_int_raw_[i]) {
+            if (!(v > boundary)) {
+                all_pass = false;
+                break;
+            }
+        }
+        if (all_pass) {
+            // Includes empty arrays (vacuous true).
+            expected.insert(static_cast<int64_t>(i));
+        }
+    }
+    std::set<int64_t> actual(result->offset().begin(), result->offset().end());
+    EXPECT_EQ(expected, actual);
+}

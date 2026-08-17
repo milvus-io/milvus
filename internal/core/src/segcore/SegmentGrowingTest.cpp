@@ -351,6 +351,42 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     }
 }
 
+TEST(Growing, MissingPlainArrayOffsetsReturnsEmptyForOldRows) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(old_schema, empty_index_meta);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(old_schema, row_count);
+    segment->Insert(0,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto tags = FieldId(pk.get() + 1);
+    new_schema->AddField(
+        FieldName("tags"), tags, DataType::ARRAY, DataType::VARCHAR, true);
+    segment->Reopen(new_schema);
+
+    auto offsets = segment->GetArrayOffsets(tags);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), row_count);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    for (int64_t i = 0; i <= row_count; ++i) {
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(start, 0);
+        EXPECT_EQ(end, 0);
+    }
+}
+
 TEST(Growing, LoadMissingStructArrayOffsetsReturnsEmptyForOldRows) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);

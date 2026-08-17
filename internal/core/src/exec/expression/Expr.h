@@ -20,17 +20,20 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include "common/Array.h"
 #include "common/ArrayOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/ExprCacheHelper.h"
@@ -1271,6 +1274,138 @@ class SegmentExpr : public Expr {
         }
     }
 
+    template <typename ElementType>
+    static bool
+    TryGetJsonElementValue(simdjson::dom::element element, ElementType& value) {
+        if constexpr (std::is_same_v<ElementType, std::string>) {
+            auto val = element.get<std::string_view>();
+            if (val.error()) {
+                return false;
+            }
+            value = std::string(val.value());
+            return true;
+        } else if constexpr (std::is_same_v<ElementType, std::string_view>) {
+            auto val = element.get<std::string_view>();
+            if (val.error()) {
+                return false;
+            }
+            value = val.value();
+            return true;
+        } else if constexpr (std::is_same_v<ElementType, bool>) {
+            auto val = element.get<bool>();
+            if (val.error()) {
+                return false;
+            }
+            value = val.value();
+            return true;
+        } else if constexpr (std::is_floating_point_v<ElementType>) {
+            auto val = element.get<double>();
+            if (val.error()) {
+                return false;
+            }
+            value = static_cast<ElementType>(val.value());
+            return true;
+        } else if constexpr (std::is_integral_v<ElementType>) {
+            auto val = element.get<int64_t>();
+            if (val.error()) {
+                return false;
+            }
+            auto raw = val.value();
+            if (raw < static_cast<int64_t>(
+                          (std::numeric_limits<ElementType>::min)()) ||
+                raw > static_cast<int64_t>(
+                          (std::numeric_limits<ElementType>::max)())) {
+                return false;
+            }
+            value = static_cast<ElementType>(raw);
+            return true;
+        } else {
+            static_assert(sizeof(ElementType) == 0,
+                          "Unsupported JSON element type");
+        }
+    }
+
+    template <typename RowFunc>
+    int64_t
+    VisitJsonRowsByOffsets(OffsetVector* row_offsets, RowFunc row_func) {
+        AssertInfo(row_offsets != nullptr,
+                   "JSON element-level filtering requires row offsets");
+
+        int64_t processed_rows = 0;
+        if (segment_->type() == SegmentType::Sealed) {
+            if (segment_->is_chunked()) {
+                for (size_t i = 0; i < row_offsets->size(); ++i) {
+                    auto row_offset = (*row_offsets)[i];
+                    auto [chunk_id, chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, row_offset);
+                    FixedVector<int32_t> offsets;
+                    offsets.push_back(static_cast<int32_t>(chunk_offset));
+                    auto pw = segment_->get_views_by_offsets<Json>(
+                        op_ctx_, field_id_, chunk_id, offsets);
+                    auto [data_vec, valid_data] = pw.get();
+                    bool row_valid = !valid_data.data() || valid_data[0];
+                    row_func(data_vec[0], row_valid);
+                    ++processed_rows;
+                }
+            } else {
+                auto pw = segment_->get_views_by_offsets<Json>(
+                    op_ctx_, field_id_, 0, *row_offsets);
+                auto [data_vec, valid_data] = pw.get();
+                for (size_t i = 0; i < row_offsets->size(); ++i) {
+                    bool row_valid = !valid_data.data() || valid_data[i];
+                    row_func(data_vec[i], row_valid);
+                    ++processed_rows;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < row_offsets->size(); ++i) {
+                auto row_offset = (*row_offsets)[i];
+                auto chunk_id = row_offset / size_per_chunk_;
+                auto chunk_offset = row_offset % size_per_chunk_;
+                auto pw =
+                    segment_->chunk_data<Json>(op_ctx_, field_id_, chunk_id);
+                auto chunk = pw.get();
+                const Json* data = chunk.data() + chunk_offset;
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += chunk_offset;
+                }
+                bool row_valid = !valid_data || valid_data[0];
+                row_func(*data, row_valid);
+                ++processed_rows;
+            }
+        }
+        return processed_rows;
+    }
+
+    template <typename ElementType>
+    int64_t
+    ExtractJsonElementValues(const Json& json,
+                             bool row_valid,
+                             const std::string& pointer,
+                             FixedVector<ElementType>& values,
+                             FixedVector<bool>& valid_values) {
+        values.clear();
+        valid_values.clear();
+        if (!row_valid) {
+            return 0;
+        }
+
+        auto array_res = json.array_at(pointer);
+        if (array_res.error()) {
+            return 0;
+        }
+
+        auto array = array_res.value();
+        for (auto element : array) {
+            ElementType value{};
+            bool valid = TryGetJsonElementValue<ElementType>(element, value);
+            values.push_back(std::move(value));
+            valid_values.push_back(valid);
+        }
+        return values.size();
+    }
+
     // Process element-level data without offset input
     // This is the counterpart of ProcessDataChunks for element-level expressions
     // Iterates over rows in batch, but returns element-level results
@@ -2022,6 +2157,12 @@ class SegmentExpr : public Expr {
                 }
             };
             prepare_index();
+            AssertInfo(index_ptr != nullptr,
+                       "scalar index type does not match rhs value type for "
+                       "field {} (nested_path='{}'); expected ScalarIndex<T> "
+                       "matching the literal's promoted type",
+                       field_id_.get(),
+                       milvus::Json::pointer(nested_path_));
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
 
             auto cached = ExprCacheHelper::GetOrCompute(
@@ -2107,8 +2248,12 @@ class SegmentExpr : public Expr {
         }
 
         if (need_element_slicing) {
-            // Nested index with element-level result: batch by rows, slice elements
+            // Nested index with element-level result: batch by rows, slice
+            // elements using the segment-owned row-to-element mapping.
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            AssertInfo(array_offsets != nullptr,
+                       "ArrayOffsets not found for nested index on field {}",
+                       field_id_.get());
 
             auto data_pos = current_index_chunk_pos_;
             auto batch_rows = std::min(batch_size_, active_count_ - data_pos);
@@ -2421,6 +2566,12 @@ class SegmentExpr : public Expr {
                 index_ptr = const_cast<Index*>(scalar_index);
             }
 
+            AssertInfo(index_ptr != nullptr,
+                       "scalar index type does not match valid-check type "
+                       "for field {} (nested_path='{}')",
+                       field_id_.get(),
+                       milvus::Json::pointer(nested_path_));
+
             cached_index_chunk_valid_res_ =
                 std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
             cached_index_chunk_id_ = 0;
@@ -2713,6 +2864,14 @@ class SegmentExpr : public Expr {
     // bypass this method entirely and never pin either.
     virtual void
     DetermineExecPath() {
+        // MATCH on plain ARRAY and JSON is intentionally raw-data-only. The
+        // only element-level index execution retained here is the existing
+        // struct-array sub-field path, whose physical field name contains the
+        // struct accessor suffix (for example, "items[price]").
+        if (IsElementLevelExpression() && !IsStructArraySubField()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
         if (!HasCompatibleScalarIndex() || !IsJsonPathCompatible()) {
             exec_path_ = ExprExecPath::RawData;
             return;
@@ -2724,6 +2883,10 @@ class SegmentExpr : public Expr {
         // the pin actually came up empty so pinned_index_ is non-empty iff
         // exec_path_ == ScalarIndex holds.
         if (pinned_index_.empty()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+        if (IsElementLevelExpression() && !AllPinnedIndexesAreNested()) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
@@ -2852,6 +3015,27 @@ class SegmentExpr : public Expr {
     }
 
  protected:
+    bool
+    IsElementLevelExpression() const {
+        auto column_info = GetColumnInfo();
+        return column_info.has_value() && column_info->element_level_;
+    }
+
+    bool
+    IsStructArraySubField() const {
+        auto schema = segment_->get_schema_snapshot();
+        const auto& field_meta = (*schema)[field_id_];
+        return GetStructNameForArrayField(field_meta).has_value();
+    }
+
+    bool
+    AllPinnedIndexesAreNested() const {
+        return std::all_of(
+            pinned_index_.begin(), pinned_index_.end(), [](const auto& index) {
+                return index.get() != nullptr && index.get()->IsNestedIndex();
+            });
+    }
+
     // Non-reentrant nested-index check for callers already inside
     // DetermineExecPath(). Do not call CanUseNestedIndex() from there because
     // it re-enters EnsureExecPathDetermined()'s std::call_once.

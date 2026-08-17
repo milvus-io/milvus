@@ -1854,9 +1854,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 const SegmentLoadInfo* load_info) const;
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count,
-                                     RuntimeResourceState& runtime);
+    EnsureArrayOffsetsForField(const FieldMeta& field_meta,
+                               int64_t row_count,
+                               RuntimeResourceState& runtime);
 
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids,

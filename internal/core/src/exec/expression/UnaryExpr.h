@@ -986,7 +986,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
         auto val_type = FromValCase(expr_->val_.val_case());
-        if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
+        if (!expr_->column_.element_level_ &&
+            (val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
             (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
              expr_->op_type_ == proto::plan::OpType::Match ||
              expr_->op_type_ == proto::plan::OpType::PrefixMatch ||

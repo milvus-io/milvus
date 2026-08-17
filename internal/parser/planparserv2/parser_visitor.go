@@ -39,16 +39,70 @@ func isInt64OverflowError(err error) bool {
 	return ok
 }
 
+// matchSourceType distinguishes the source of a MATCH_* expression.
+type matchSourceType int
+
+const (
+	matchSourceStruct matchSourceType = iota + 1
+	matchSourceArray
+	matchSourceJSON
+)
+
+// matchContext carries the MATCH_* first argument information while the
+// predicate is being parsed, so element-level accessors ($, $[id])
+// can be validated against the correct source kind and element-level ColumnInfo
+// can be emitted with the correct field_id / nested_path.
+type matchContext struct {
+	sourceType          matchSourceType
+	fieldID             int64
+	fieldName           string
+	dataType            schemapb.DataType
+	field               *schemapb.FieldSchema
+	elementType         schemapb.DataType
+	jsonPath            []string
+	usedElementAccessor bool
+}
+
 type ParserVisitor struct {
 	parser.BasePlanVisitor
 	schema *typeutil.SchemaHelper
 	args   *ParserVisitorArgs
 	// currentStructArrayField stores the struct array field name when processing ElementFilter
 	currentStructArrayField string
+	// currentMatchContext stores the MATCH_* first argument info while its
+	// predicate is being visited. nil means we are not inside a MATCH_* call.
+	currentMatchContext *matchContext
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
 	return &ParserVisitor{schema: schema, args: args}
+}
+
+func (v *ParserVisitor) rejectNonElementAccessorInMatchPredicate(source string) error {
+	if v.currentMatchContext == nil {
+		return nil
+	}
+	return merr.WrapErrParameterInvalidMsg(
+		"MATCH_* predicate can only reference the current element accessor for target field %q, got: %s",
+		v.currentMatchContext.fieldName,
+		source)
+}
+
+func validateMatchPredicate(predicate *ExprWithType, mctx *matchContext, funcName string, predicateText string) error {
+	fieldName := ""
+	usedElementAccessor := false
+	if mctx != nil {
+		fieldName = mctx.fieldName
+		usedElementAccessor = mctx.usedElementAccessor
+	}
+	if !canBeExecuted(predicate) || !usedElementAccessor {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s predicate must be a boolean expression over the current element accessor for target field %q, got: %s",
+			funcName,
+			fieldName,
+			predicateText)
+	}
+	return nil
 }
 
 // VisitParens unpack the parentheses.
@@ -80,6 +134,9 @@ func errNullLiteral() error {
 }
 
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
+	if err := v.rejectNonElementAccessorInMatchPredicate(identifier); err != nil {
+		return nil, err
+	}
 	return v.translateIdentifierWithText(identifier, false)
 }
 
@@ -1317,12 +1374,46 @@ func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
 	}
 }
 
+// JSON elements have no schema-level scalar type. The raw executor supports
+// the comparison leaves that choose their type from literal operands; leaves
+// such as IS NULL / EXISTS / GIS / timestamptz need a statically typed column
+// and therefore cannot run on the bare $ JSON element accessor.
+func validateJSONMatchPredicateShape(expr *planpb.Expr) error {
+	if expr == nil {
+		return merr.WrapErrParameterInvalidMsg("JSON MATCH predicate is missing")
+	}
+	switch realExpr := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryRangeExpr,
+		*planpb.Expr_BinaryRangeExpr,
+		*planpb.Expr_TermExpr,
+		*planpb.Expr_BinaryArithOpEvalRangeExpr:
+		return nil
+	case *planpb.Expr_UnaryExpr:
+		return validateJSONMatchPredicateShape(realExpr.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		if err := validateJSONMatchPredicateShape(realExpr.BinaryExpr.GetLeft()); err != nil {
+			return err
+		}
+		return validateJSONMatchPredicateShape(realExpr.BinaryExpr.GetRight())
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"JSON MATCH predicate only supports comparison, range, IN, and arithmetic expressions over $")
+	}
+}
+
 func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*planpb.ColumnInfo, error) {
 	if !isValidStructSubField(tokenText) {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid struct sub-field syntax: %s", tokenText)
 	}
 	// Remove "$[" prefix and "]" suffix
 	fieldName := tokenText[2 : len(tokenText)-1]
+
+	if v.currentMatchContext != nil {
+		if v.currentMatchContext.sourceType != matchSourceStruct {
+			return nil, merr.WrapErrParameterInvalidMsg("$[%s] is only valid when matching a struct array; use $ for array or JSON element MATCH", fieldName)
+		}
+		v.currentMatchContext.usedElementAccessor = true
+	}
 
 	// Check if we're inside an ElementFilter context
 	if v.currentStructArrayField == "" {
@@ -1359,6 +1450,9 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 }
 
 func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*planpb.ColumnInfo, error) {
+	if err := v.rejectNonElementAccessorInMatchPredicate(identifier); err != nil {
+		return nil, err
+	}
 	// Parse "struct_arr[0][sub_field]" -> fieldName="struct_arr", index="0", subField="sub_field"
 	parts := strings.SplitN(identifier, "[", 3)
 	if len(parts) != 3 {
@@ -1389,7 +1483,7 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	}, nil
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField, elementSelf antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
@@ -1404,6 +1498,14 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, st
 
 	if structIndexField != nil {
 		return v.getColumnInfoFromStructIndexField(structIndexField.GetText())
+	}
+
+	if elementSelf != nil {
+		elementExpr, err := v.getElementSelfExpr()
+		if err != nil {
+			return nil, err
+		}
+		return toColumnInfo(elementExpr), nil
 	}
 
 	return v.getColumnInfoFromJSONIdentifier(child.GetText())
@@ -1441,7 +1543,7 @@ func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNo
 			return columnInfo, err
 		}
 	}
-	return v.getChildColumnInfo(identifier, child, nil, nil)
+	return v.getChildColumnInfo(identifier, child, nil, nil, nil)
 }
 
 func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
@@ -1451,6 +1553,18 @@ func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
+	if v.currentMatchContext != nil {
+		isElementBloomMatch := false
+		if functionName == BloomMatchFunctionName && len(ctx.AllExpr()) > 0 {
+			firstArg := ctx.AllExpr()[0].GetText()
+			isElementBloomMatch = firstArg == "$" || strings.HasPrefix(firstArg, "$[")
+		}
+		if !isElementBloomMatch {
+			return merr.WrapErrParameterInvalidMsg(
+				"function calls are not supported inside MATCH predicate: %s",
+				ctx.GetText())
+		}
+	}
 	if functionName == BloomMatchFunctionName {
 		// bloom_match is compiled on the proxy into a BloomFilterExpr carrying a
 		// pre-built bloom filter blob instead of a generic CallExpr.
@@ -1485,6 +1599,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
+		ctx.ElementSelf(),
 	)
 	if err != nil {
 		return err
@@ -1565,6 +1680,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
+		ctx.ElementSelf(),
 	)
 	if err != nil {
 		return err
@@ -2118,6 +2234,9 @@ func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 */
 // More tests refer to plan_parser_v2_test.go::Test_JSONExpr
 func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
+	if err := v.rejectNonElementAccessorInMatchPredicate(identifier); err != nil {
+		return nil, err
+	}
 	// Do NOT decodeUnicode the whole identifier up front: a raw-string key
 	// (r"..." / R'...') is verbatim, so its \uXXXX must survive untouched. Decode
 	// the field name and normal (non-raw) keys individually below instead.
@@ -2216,6 +2335,9 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interface{} {
 	// Get the full identifier text, e.g., "struct_array[sub_int]"
 	identifier := ctx.StructFieldIdentifier().GetText()
+	if err := v.rejectNonElementAccessorInMatchPredicate(identifier); err != nil {
+		return err
+	}
 
 	// Look up the field directly by its full name
 	field, err := v.schema.GetFieldFromName(identifier)
@@ -2632,6 +2754,9 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 	if ctx.StructFieldIdentifier() != nil {
 		// Handle struct_arr[sub_field] syntax: look up the full field name directly
 		identifier := ctx.StructFieldIdentifier().GetText()
+		if err := v.rejectNonElementAccessorInMatchPredicate(identifier); err != nil {
+			return err
+		}
 		field, fieldErr := v.schema.GetFieldFromName(identifier)
 		if fieldErr != nil {
 			return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, fieldErr)
@@ -2650,7 +2775,7 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			}
 		}
 		if columnInfo == nil && err == nil {
-			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil, nil)
 		}
 		if err != nil {
 			return err
@@ -3056,6 +3181,10 @@ func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb
 
 // VisitElementFilter handles ElementFilter(structArrayField, elementExpr) syntax.
 func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) interface{} {
+	if err := v.rejectNonElementAccessorInMatchPredicate(ctx.GetText()); err != nil {
+		return err
+	}
+
 	// Check for nested ElementFilter - not allowed
 	if v.currentStructArrayField != "" {
 		return merr.WrapErrParameterInvalidMsg("nested ElementFilter is not supported, already inside ElementFilter for field: %s", v.currentStructArrayField)
@@ -3105,7 +3234,8 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 	}
 }
 
-// VisitStructSubField handles $[fieldName] syntax within ElementFilter.
+// VisitStructSubField handles $[fieldName] syntax within ElementFilter or
+// MATCH_* on a struct array.
 func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) interface{} {
 	// Extract the field name from $[fieldName]
 	tokenText := ctx.StructSubFieldIdentifier().GetText()
@@ -3115,9 +3245,17 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	// Remove "$[" prefix and "]" suffix
 	fieldName := tokenText[2 : len(tokenText)-1]
 
+	// Inside MATCH_*: only valid when the match target is a struct array.
+	if v.currentMatchContext != nil && v.currentMatchContext.sourceType != matchSourceStruct {
+		return merr.WrapErrParameterInvalidMsg("$[%s] is only valid when matching a struct array; use $ for array or JSON element MATCH", fieldName)
+	}
+
 	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
 		return merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
+	}
+	if v.currentMatchContext != nil {
+		v.currentMatchContext.usedElementAccessor = true
 	}
 
 	// Construct full field name for struct array field
@@ -3158,18 +3296,99 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	}
 }
 
+// VisitElementSelf handles the $ accessor used inside MATCH_* on either a
+// plain array field or a JSON field whose first-arg path resolves to an array
+// of scalars. In both cases $ refers to the scalar element; struct MATCH uses
+// $[sub] and is rejected here.
+func (v *ParserVisitor) VisitElementSelf(ctx *parser.ElementSelfContext) interface{} {
+	elementExpr, err := v.getElementSelfExpr()
+	if err != nil {
+		return err
+	}
+	return elementExpr
+}
+
+func (v *ParserVisitor) getElementSelfExpr() (*ExprWithType, error) {
+	if v.currentMatchContext == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("$ can only be used inside MATCH_*")
+	}
+	mctx := v.currentMatchContext
+	switch mctx.sourceType {
+	case matchSourceArray:
+		mctx.usedElementAccessor = true
+		field := mctx.field
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:         field.FieldID,
+							DataType:        schemapb.DataType_Array,
+							IsPrimaryKey:    field.IsPrimaryKey,
+							IsAutoID:        field.AutoID,
+							IsPartitionKey:  field.IsPartitionKey,
+							IsClusteringKey: field.IsClusteringKey,
+							ElementType:     mctx.elementType,
+							Nullable:        field.GetNullable(),
+							IsElementLevel:  true,
+						},
+					},
+				},
+			},
+			dataType:      mctx.elementType,
+			nodeDependent: true,
+		}, nil
+	case matchSourceJSON:
+		mctx.usedElementAccessor = true
+		field := mctx.field
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:         field.FieldID,
+							DataType:        schemapb.DataType_JSON,
+							IsPrimaryKey:    field.IsPrimaryKey,
+							IsAutoID:        field.AutoID,
+							IsPartitionKey:  field.IsPartitionKey,
+							IsClusteringKey: field.IsClusteringKey,
+							NestedPath:      mctx.jsonPath,
+							Nullable:        field.GetNullable(),
+							IsElementLevel:  true,
+						},
+					},
+				},
+			},
+			dataType:      schemapb.DataType_JSON,
+			nodeDependent: true,
+		}, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("$ is not valid for struct MATCH; use $[sub_field] instead")
+	}
+}
+
 // parseMatchExpr is a helper function for parsing match expressions
 // matchType: the type of match operation (MatchAll, MatchAny, MatchLeast, MatchMost)
 // count: for MatchLeast/MatchMost, the count parameter (N); for MatchAll/MatchAny, this is ignored (0)
-func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
+func (v *ParserVisitor) parseMatchExpr(mctx *matchContext, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
 	// Check for nested match expression - not allowed
+	if v.currentMatchContext != nil {
+		return merr.WrapErrParameterInvalidMsg("nested %s is not supported, already inside match expression for field: %s", funcName, v.currentMatchContext.fieldName)
+	}
 	if v.currentStructArrayField != "" {
-		return merr.WrapErrParameterInvalidMsg("nested %s is not supported, already inside match expression for field: %s", funcName, v.currentStructArrayField)
+		return merr.WrapErrParameterInvalidMsg("nested %s inside ElementFilter is not supported", funcName)
 	}
 
-	// Set current context for element expression parsing
-	v.currentStructArrayField = structArrayFieldName
-	defer func() { v.currentStructArrayField = "" }()
+	// Set current match context for element accessor parsing ($, $[id])
+	v.currentMatchContext = mctx
+	defer func() { v.currentMatchContext = nil }()
+
+	// For struct match, also populate currentStructArrayField so VisitStructSubField
+	// resolves sub-field names via the existing ConcatStructFieldName path.
+	if mctx.sourceType == matchSourceStruct {
+		v.currentStructArrayField = mctx.fieldName
+		defer func() { v.currentStructArrayField = "" }()
+	}
 
 	// Parse the predicate expression
 	predicate := exprCtx.Accept(v)
@@ -3181,12 +3400,20 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
+	if err := validateMatchPredicate(predicateExpr, mctx, funcName, exprCtx.GetText()); err != nil {
+		return err
+	}
 	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
 	}
 	if !isElementLevel {
 		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
+	}
+	if mctx.sourceType == matchSourceJSON {
+		if err := validateJSONMatchPredicateShape(predicateExpr.expr); err != nil {
+			return err
+		}
 	}
 
 	// bloom_match is not supported inside a MATCH_* element predicate. Its
@@ -3201,11 +3428,24 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	}
 
 	// Build MatchExpr proto
+	legacyStructName := ""
+	var matchColumn *planpb.ColumnInfo
+	if mctx.sourceType == matchSourceStruct {
+		legacyStructName = mctx.fieldName
+	} else {
+		matchColumn = &planpb.ColumnInfo{
+			FieldId:     mctx.fieldID,
+			DataType:    mctx.dataType,
+			ElementType: mctx.elementType,
+			NestedPath:  mctx.jsonPath,
+		}
+	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_MatchExpr{
 				MatchExpr: &planpb.MatchExpr{
-					StructName: structArrayFieldName,
+					StructName: legacyStructName,
+					Column:     matchColumn,
 					Predicate:  predicateExpr.expr,
 					MatchType:  matchType,
 					Count:      count,
@@ -3217,10 +3457,99 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	}
 }
 
+// buildMatchContextFromIdentifier resolves the first argument of a MATCH_* call
+// when it is a plain identifier. It classifies the target as struct / array / json
+// and returns a ready-to-use matchContext.
+func (v *ParserVisitor) buildMatchContextFromIdentifier(fieldName string) (*matchContext, error) {
+	// Struct array: the name refers to a struct array group, not a column.
+	if structField := v.schema.GetStructArrayFieldFromName(fieldName); structField != nil {
+		return &matchContext{
+			sourceType: matchSourceStruct,
+			fieldID:    structField.GetFieldID(),
+			fieldName:  fieldName,
+			dataType:   schemapb.DataType_ArrayOfStruct,
+		}, nil
+	}
+
+	field, err := v.schema.GetFieldFromName(fieldName)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("match target field not found: %s", fieldName)
+	}
+
+	switch field.GetDataType() {
+	case schemapb.DataType_Array:
+		return &matchContext{
+			sourceType:  matchSourceArray,
+			fieldID:     field.GetFieldID(),
+			fieldName:   fieldName,
+			dataType:    schemapb.DataType_Array,
+			field:       field,
+			elementType: field.GetElementType(),
+		}, nil
+	case schemapb.DataType_JSON:
+		// Bare JSON field: the column itself is treated as a JSON array at root.
+		return &matchContext{
+			sourceType: matchSourceJSON,
+			fieldID:    field.GetFieldID(),
+			fieldName:  fieldName,
+			dataType:   schemapb.DataType_JSON,
+			field:      field,
+		}, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("match target field %q has unsupported data type: %s", fieldName, field.GetDataType())
+	}
+}
+
+// buildMatchContextFromJSONIdentifier resolves the first argument when it is a
+// JSON path identifier like jsonA["path"]["nested"]. It extracts the root JSON
+// field and the nested path, returning a JSON matchContext.
+func (v *ParserVisitor) buildMatchContextFromJSONIdentifier(identifier string) (*matchContext, error) {
+	columnInfo, err := v.getColumnInfoFromJSONIdentifier(identifier)
+	if err != nil {
+		return nil, err
+	}
+	if columnInfo.GetDataType() != schemapb.DataType_JSON {
+		return nil, merr.WrapErrParameterInvalidMsg("path-style match target %q requires a JSON field, got: %s", identifier, columnInfo.GetDataType())
+	}
+	field, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return nil, merr.Wrapf(err, "resolve MATCH target field %q", identifier)
+	}
+
+	return &matchContext{
+		sourceType: matchSourceJSON,
+		fieldID:    field.GetFieldID(),
+		fieldName:  field.GetName(),
+		dataType:   schemapb.DataType_JSON,
+		field:      field,
+		jsonPath:   columnInfo.GetNestedPath(),
+	}, nil
+}
+
+// resolveMatchIdentifier resolves the (Identifier | JSONIdentifier) first argument
+// of a MATCH_* call into a matchContext.
+func (v *ParserVisitor) resolveMatchIdentifier(identNode, jsonIdentNode antlr.TerminalNode) (*matchContext, error) {
+	if identNode != nil {
+		return v.buildMatchContextFromIdentifier(identNode.GetText())
+	}
+	if jsonIdentNode != nil {
+		return v.buildMatchContextFromJSONIdentifier(jsonIdentNode.GetText())
+	}
+	return nil, merr.WrapErrParameterInvalidMsg("missing match target field")
+}
+
 // VisitMatchSimple handles MATCH_ALL and MATCH_ANY expressions
-// Syntax: MATCH_ALL/MATCH_ANY(structArrayField, $[intField] == 1 && $[strField] == "aaa")
+// Syntax:
+//
+//	MATCH_ALL(structArrayField, $[intField] == 1 && $[strField] == "aaa")
+//	MATCH_ANY(arrayField, $ == "Red" || $ == "Blue")
+//	MATCH_ANY(jsonField["path"], $ == "Red")
 func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
+	mctx, err := v.resolveMatchIdentifier(ctx.Identifier(), ctx.JSONIdentifier())
+	if err != nil {
+		return err
+	}
+
 	var matchType planpb.MatchType
 	var opName string
 	switch ctx.GetOp().GetTokenType() {
@@ -3233,13 +3562,16 @@ func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interfa
 	default:
 		return merr.WrapErrParameterInvalidMsg("unhandled match operator: %s", ctx.GetOp().GetText())
 	}
-	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), matchType, 0, opName)
+	return v.parseMatchExpr(mctx, ctx.Expr(), matchType, 0, opName)
 }
 
 // VisitMatchThreshold handles MATCH_LEAST, MATCH_MOST, and MATCH_EXACT expressions
-// Syntax: MATCH_LEAST/MATCH_MOST/MATCH_EXACT(structArrayField, $[intField] == 1, threshold=N)
+// Syntax: MATCH_LEAST/MATCH_MOST/MATCH_EXACT(targetField, predicate, threshold=N)
 func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
+	mctx, err := v.resolveMatchIdentifier(ctx.Identifier(), ctx.JSONIdentifier())
+	if err != nil {
+		return err
+	}
 
 	countStr := ctx.IntegerConstant().GetText()
 	count, err := strconv.ParseInt(countStr, 10, 64)
@@ -3272,5 +3604,5 @@ func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) i
 		return merr.WrapErrParameterInvalidMsg("unhandled match threshold operator: %s", ctx.GetOp().GetText())
 	}
 
-	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), matchType, count, opName)
+	return v.parseMatchExpr(mctx, ctx.Expr(), matchType, count, opName)
 }
