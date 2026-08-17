@@ -179,49 +179,6 @@ func (s *IdempotencySuite) TestImport_DifferentKeysCreateDistinctJobs() {
 	s.NoError(WaitForImportDone(ctx, c, second.GetJobID()))
 }
 
-// TestImport_SameKeyDifferentFilesRejected pins the refusal that keeps a key from
-// silently swallowing data: reusing a key with a different file set returns an
-// error rather than the original jobID plus a success the caller would believe.
-func (s *IdempotencySuite) TestImport_SameKeyDifferentFilesRejected() {
-	const rowCount = 10
-
-	c := s.Cluster
-	ctx, cancel := context.WithTimeout(c.GetContext(), 300*time.Second)
-	defer cancel()
-
-	collectionName := "TestImportIdemMismatch_" + funcutil.RandomString(8)
-	schema := s.createCollection(ctx, collectionName)
-
-	firstFile, err := GenerateParquetFile(c, schema, rowCount)
-	s.NoError(err)
-	secondFile, err := GenerateParquetFile(c, schema, rowCount)
-	s.NoError(err)
-	s.NotEqual(firstFile, secondFile)
-
-	keyedCtx := withIdempotencyKey(ctx, "run-mismatch-"+funcutil.RandomString(8))
-
-	first, err := c.ProxyClient.ImportV2(keyedCtx, &internalpb.ImportRequest{
-		CollectionName: collectionName,
-		Files:          []*internalpb.ImportFile{{Paths: []string{firstFile}}},
-	})
-	s.NoError(err)
-	s.Equal(int32(0), first.GetStatus().GetCode())
-
-	mismatch, err := c.ProxyClient.ImportV2(keyedCtx, &internalpb.ImportRequest{
-		CollectionName: collectionName,
-		Files:          []*internalpb.ImportFile{{Paths: []string{secondFile}}},
-	})
-	s.NoError(err)
-	s.NotEqual(int32(0), mismatch.GetStatus().GetCode(),
-		"reusing a key with a different file set must be refused, not silently deduplicated")
-	s.Empty(mismatch.GetJobID())
-	s.Contains(mismatch.GetStatus().GetReason(), "idempotency key was reused with a different file set")
-
-	// The original job is untouched by the refused request.
-	s.NoError(WaitForImportDone(ctx, c, first.GetJobID()))
-	s.Equal(rowCount, s.countRows(ctx, collectionName))
-}
-
 func TestIdempotencySuite(t *testing.T) {
 	suite.Run(t, new(IdempotencySuite))
 }

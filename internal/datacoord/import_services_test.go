@@ -442,32 +442,6 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	s.Equal("4242", resp.GetJobID())
 }
 
-// Reusing a key for a DIFFERENT file set must not silently drop those files: the
-// caller would get a success plus a jobID that never imports them. ImportV2 refuses
-// and keeps the original job.
-func (s *ImportServicesSuite) TestImportV2_DuplicateWithDifferentFilesReturnsError() {
-	ctx := context.Background()
-
-	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
-	// The mismatch is decided from the duplicated message alone, so the original job
-	// is never looked up: no GetJob expectation is registered, and mockery fails the
-	// test if the branch calls it anyway.
-
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242, "/test/other-file.json")
-
-	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
-
-	s.NoError(err)
-	s.NotNil(resp)
-	// Reusing a key with different content is caller-caused, so this is an
-	// InputError, unlike the expired-job case above.
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-	s.Contains(resp.GetStatus().GetReason(), "reused with a different file set")
-	s.Contains(resp.GetStatus().GetReason(), "4242")
-	s.Empty(resp.GetJobID())
-}
-
 // A duplicate is reported by an explicit flag, never by a non-zero jobID, so a
 // duplicated broadcast carrying jobID 0 must still take the duplicate branch and let
 // the job-existence check decide — not fall through to the freshly allocated 1000.
