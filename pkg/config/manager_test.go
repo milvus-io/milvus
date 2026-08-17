@@ -568,19 +568,54 @@ func TestNonSensitiveSuffixExemption(t *testing.T) {
 }
 
 // A key deleted at runtime must disappear from the projections, not surface as
-// a key whose value is the literal tombstone marker.
+// a key whose value is the literal tombstone marker — and it must disappear for
+// a ParamGroup member too, whose overlay SetMapConfig wrote under the dotted
+// identity rather than the separator-free one.
 func TestTombstonedKeysAreNotProjected(t *testing.T) {
 	mgr := NewManager()
 	mgr.RegisterConfigKey("public.key")
 	mgr.SetConfig("public.key", "visible")
+	mgr.RegisterConfigPrefix("kafka.consumer.")
+	mgr.SetMapConfig("kafka.consumer.fetch.min.bytes", "12345")
 	require.Equal(t, "visible", mgr.GetConfigs()[formatKey("public.key")])
+	require.Equal(t, "12345", mgr.GetConfigsRaw()["kafka.consumer.fetch.min.bytes"])
 
 	mgr.DeleteConfig("public.key")
+	mgr.DeleteConfig("kafka.consumer.fetch.min.bytes")
+
 	assert.NotContains(t, mgr.GetConfigs(), formatKey("public.key"))
 	assert.NotContains(t, mgr.GetConfigsView(), formatKey("public.key"))
 	assert.NotContains(t, mgr.GetBy(WithPrefix("public")), formatKey("public.key"))
+	// GetByRaw is the path ParamGroup.GetValue takes, so a delete that does not
+	// reach it would leave the running system using a value the management API
+	// reports as gone.
+	assert.Empty(t, mgr.GetByRaw(WithPrefix("kafka.consumer.")))
+	assert.Empty(t, mgr.GetBy(WithPrefix("kafka.consumer.")))
+	_, _, err := mgr.GetRegisteredConfig("kafka.consumer.fetch.min.bytes")
+	require.ErrorIs(t, err, ErrKeyNotFound)
 	for _, value := range mgr.GetConfigsView() {
 		assert.NotContains(t, value, TombValue)
+	}
+}
+
+// formatKey exempts knowhere.* from separator stripping; the EnvSource key
+// formatter BaseTable installs does not. An environment variable whose name
+// lands in that gap must not be mistaken for a member of the knowhere group.
+func TestKnowherePrefixDoesNotAdmitEnvironmentVariables(t *testing.T) {
+	t.Setenv("KNOWHERE.INJECTED", "must-not-be-published")
+	t.Setenv("knowhere.lowercase", "must-not-be-published")
+
+	// The formatter BaseTable installs: no NotFormatPrefix exemption.
+	mgr, _ := Init(WithEnvSource(strippedKey))
+	mgr.RegisterConfigPrefix(NotFormatPrefix)
+
+	require.NotEmpty(t, mgr.GetConfigsRaw(), "the environment was never imported, the test proves nothing")
+	for _, spelling := range []string{"KNOWHERE.INJECTED", "knowhere.INJECTED", "knowhere.lowercase"} {
+		_, kind := mgr.ResolveRegisteredConfigKey(spelling)
+		assert.Equal(t, RegisteredConfigUnknown, kind, spelling)
+	}
+	for key, value := range mgr.GetConfigsView() {
+		assert.NotContains(t, value, "must-not-be-published", key)
 	}
 }
 

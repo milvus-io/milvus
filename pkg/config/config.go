@@ -120,6 +120,18 @@ func formatKeyUncached(key string) string {
 	return keyFormatReplacer.Replace(strings.ToLower(key))
 }
 
+// strippedKey collapses a key with no NotFormatPrefix exemption at all.
+//
+// formatKey deliberately leaves knowhere.* alone, but the EnvSource key
+// formatter that BaseTable installs does not — it strips every separator
+// unconditionally. So the two disagree exactly on knowhere.*, and any check
+// that asks "did the environment supply this key?" has to look under this
+// spelling too, or an environment variable named KNOWHERE.SOMETHING is invisible
+// to it.
+func strippedKey(key string) string {
+	return keyFormatReplacer.Replace(strings.ToLower(key))
+}
+
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
 	for k, v := range m {
 		fullKey := k

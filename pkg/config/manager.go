@@ -304,9 +304,17 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 // configuration would hand every such variable to a group whose prefix they
 // happen to match, which for the empty prefix is all of them.
 func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
-	// EtcdSource keeps whatever separator the stored key used, so accept the
-	// slash spelling of the same namespace as well.
-	for _, candidate := range [3]string{dotted, strings.ReplaceAll(dotted, ".", "/"), lookup} {
+	// Every spelling the same key can be stored under. EtcdSource keeps whatever
+	// separator the stored key used, hence the slash form; strippedKey covers
+	// the one identity formatKey refuses to produce, which is the spelling
+	// EnvSource uses for knowhere.* — see strippedKey.
+	candidates := [4]string{
+		dotted,
+		strings.ReplaceAll(dotted, ".", "/"),
+		lookup,
+		strippedKey(dotted),
+	}
+	for _, candidate := range candidates {
 		// Overlays are written only through this package's own setters, never
 		// from a config source, so they are trusted evidence on their own.
 		if _, ok := m.overlays.Get(candidate); ok {
@@ -316,8 +324,12 @@ func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 			return false
 		}
 	}
-	_, fromEnvironment := m.keySourceMap.Get(lookup)
-	return fromEnvironment
+	for _, candidate := range candidates {
+		if _, ok := m.keySourceMap.Get(candidate); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // GetConfigs returns a safe projection of all key values: credentials are
@@ -503,9 +515,13 @@ func (m *Manager) SetMapConfig(key, value string) {
 	m.overlays.Insert(strings.ToLower(key), value)
 }
 
-// Delete config at runtime, which has the highest priority to override all other sources
+// Delete config at runtime, which has the highest priority to override all other sources.
+// Both identities are tombstoned for the same reason ResetConfig clears both:
+// SetMapConfig writes the dotted one, so covering only the separator-free
+// spelling would leave a ParamGroup member in force after it was deleted.
 func (m *Manager) DeleteConfig(key string) {
 	m.overlays.Insert(formatKey(key), TombValue)
+	m.overlays.Insert(lowerKey(strings.ReplaceAll(key, "/", ".")), TombValue)
 }
 
 // Remove the config which set at runtime, use config from sources.
@@ -527,9 +543,11 @@ func (m *Manager) ImmutableUpdate(key string) {
 	m.immutableKeys.Insert(formatKey(key))
 }
 
-// IsImmutable checks if a configuration key is marked as immutable
+// IsImmutable checks if a configuration key is marked as immutable.
+// Uncached for the same reason as resolveRegisteredKey: the management endpoint
+// hands this caller-supplied keys.
 func (m *Manager) IsImmutable(key string) bool {
-	return m.immutableKeys.Contain(formatKey(key))
+	return m.immutableKeys.Contain(formatKeyUncached(key))
 }
 
 // RegisterConfigKey records a declared configuration key. Config sources may
@@ -1112,12 +1130,12 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 	// Build transaction operations
 	ops := make([]clientv3.Op, 0, len(updates)+len(deletes))
 	for key, value := range updates {
-		fmtKey := formatKey(key)
+		fmtKey := formatKeyUncached(key)
 		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
 		ops = append(ops, clientv3.OpPut(etcdKey, value))
 	}
 	for _, key := range deletes {
-		fmtKey := formatKey(key)
+		fmtKey := formatKeyUncached(key)
 		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
 		ops = append(ops, clientv3.OpDelete(etcdKey))
 	}

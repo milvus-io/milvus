@@ -151,7 +151,11 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 	// Declared credentials are still named, and masked. Sources lowercase every
 	// key, so the projection carries the lowered spelling, not the declared one.
 	assert.NotContains(t, w.Body.String(), declaredSecret)
-	assert.Contains(t, w.Body.String(), strings.ToLower(params.MinioCfg.SecretAccessKey.Key))
+	// Save writes the overlay under the separator-free identity, so that is the
+	// spelling the projection is guaranteed to carry whether or not a
+	// milvus.yaml was discoverable from this package's working directory.
+	assert.Contains(t, w.Body.String(),
+		strings.NewReplacer(".", "", "_", "", "/", "").Replace(strings.ToLower(params.MinioCfg.SecretAccessKey.Key)))
 	assert.Contains(t, w.Body.String(), sensitiveMark)
 }
 

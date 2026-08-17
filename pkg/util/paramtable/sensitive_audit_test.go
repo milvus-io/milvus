@@ -170,7 +170,7 @@ func TestNoEmptyPrefixParamGroup(t *testing.T) {
 	params := newSensitiveAuditParams(t)
 
 	walkParamGroups(reflect.ValueOf(params).Elem(), func(group *ParamGroup) {
-		if group.KeyPrefix == "" {
+		if group.KeyPrefix == "" || group.AllowEmptyPrefix {
 			t.Errorf("ParamGroup with an empty KeyPrefix declares every source key, "+
 				"including every process environment variable, as registered configuration: %+v", group)
 		}
