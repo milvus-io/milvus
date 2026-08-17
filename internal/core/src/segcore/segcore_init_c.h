@@ -106,7 +106,10 @@ void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
 
 void
-SegcoreSetTakeForOutputTopKLimit(const int64_t value);
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value);
+
+int64_t
+SegcoreGetTakeForOutputResultCountLimit();
 
 void
 SegcoreCloseGlog();
