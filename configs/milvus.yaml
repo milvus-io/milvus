@@ -1017,7 +1017,6 @@ dataNode:
     lowWatermark: 0.75 # measured memory ratio below which admission resumes
     nonTaskMemoryFloor: 1073741824 # lower bound in bytes reserved for memory outside the task ledger
     slowGrowPeriods: 5 # consecutive lower samples required before the non-task memory reservation is allowed to shrink, i.e. before the task budget grows; samples are taken every 3s, so this is that many 3s periods
-    legacyMemoryPerSlot: 134217728 # bytes per legacy slot, used only when a request carries too little information to estimate
     headOfLineReservation: true # reserve budget for the longest-waiting task so large tasks cannot starve
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.

@@ -7748,14 +7748,13 @@ type dataNodeConfig struct {
 	SlotCap ParamItem `refreshable:"true"`
 
 	// resource guard
-	ResourceCPURatio            ParamItem `refreshable:"true"`
-	ResourceMemoryRatio         ParamItem `refreshable:"true"`
-	ResourceHighWatermark       ParamItem `refreshable:"true"`
-	ResourceLowWatermark        ParamItem `refreshable:"true"`
-	ResourceNonTaskMemoryFloor  ParamItem `refreshable:"true"`
-	ResourceSlowGrowPeriods     ParamItem `refreshable:"true"`
-	ResourceLegacyMemoryPerSlot ParamItem `refreshable:"true"`
-	ResourceHeadOfLineReserve   ParamItem `refreshable:"true"`
+	ResourceCPURatio           ParamItem `refreshable:"true"`
+	ResourceMemoryRatio        ParamItem `refreshable:"true"`
+	ResourceHighWatermark      ParamItem `refreshable:"true"`
+	ResourceLowWatermark       ParamItem `refreshable:"true"`
+	ResourceNonTaskMemoryFloor ParamItem `refreshable:"true"`
+	ResourceSlowGrowPeriods    ParamItem `refreshable:"true"`
+	ResourceHeadOfLineReserve  ParamItem `refreshable:"true"`
 
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
@@ -8407,15 +8406,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export: true,
 	}
 	p.ResourceSlowGrowPeriods.Init(base.mgr)
-
-	p.ResourceLegacyMemoryPerSlot = ParamItem{
-		Key:          "dataNode.resource.legacyMemoryPerSlot",
-		Version:      "3.0.0",
-		DefaultValue: "134217728",
-		Doc:          "bytes per legacy slot, used only when a request carries too little information to estimate",
-		Export:       true,
-	}
-	p.ResourceLegacyMemoryPerSlot.Init(base.mgr)
 
 	p.ResourceHeadOfLineReserve = ParamItem{
 		Key:          "dataNode.resource.headOfLineReservation",
