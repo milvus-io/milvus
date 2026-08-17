@@ -488,10 +488,10 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(100), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-		collID:     100,
-		dbName:     "db",
-		schema:     schema,
-		properties: properties,
+		CollID:     100,
+		DBName:     "db",
+		Schema:     schema,
+		Properties: properties,
 	}, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil)
 	return cache

@@ -638,22 +638,30 @@ func newPartialUpdateCASTestWAL(t *testing.T, term int64) *partialUpdateCASTestW
 	t.Helper()
 
 	w := &partialUpdateCASTestWAL{term: term}
-	appendMock := mockey.Mock((*partialUpdateCASTestWAL).AppendMessages).To(
-		func(w *partialUpdateCASTestWAL, ctx context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
-			w.appendCalls++
-			w.appended = append([]streamingmessage.MutableMessage(nil), msgs...)
-			w.appendedBatches = append(w.appendedBatches, append([]streamingmessage.MutableMessage(nil), msgs...))
-			if w.appendHook != nil {
-				return w.appendHook(ctx, msgs...)
-			}
-			responses := make([]streaming.AppendResponse, len(msgs))
-			for idx := range responses {
-				responses[idx].AppendResult = &streamingtypes.AppendResult{TimeTick: uint64(idx + 1)}
-			}
-			return streaming.AppendResponses{Responses: responses}
+	record := func(w *partialUpdateCASTestWAL, ctx context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+		w.appendCalls++
+		w.appended = append([]streamingmessage.MutableMessage(nil), msgs...)
+		w.appendedBatches = append(w.appendedBatches, append([]streamingmessage.MutableMessage(nil), msgs...))
+		if w.appendHook != nil {
+			return w.appendHook(ctx, msgs...)
+		}
+		responses := make([]streaming.AppendResponse, len(msgs))
+		for idx := range responses {
+			responses[idx].AppendResult = &streamingtypes.AppendResult{TimeTick: uint64(idx + 1)}
+		}
+		return streaming.AppendResponses{Responses: responses}
+	}
+	appendMock := mockey.Mock((*partialUpdateCASTestWAL).AppendMessages).To(record).Build()
+	t.Cleanup(func() { appendMock.UnPatch() })
+	// insertTask.Execute appends through the options variant so the append can
+	// carry the idempotency key; route it to the same recorder, otherwise it
+	// falls through to the nil embedded WALAccesser.
+	appendWithOptionsMock := mockey.Mock((*partialUpdateCASTestWAL).AppendMessagesWithOptions).To(
+		func(w *partialUpdateCASTestWAL, ctx context.Context, msgs []streamingmessage.MutableMessage, _ ...streaming.AppendOption) streaming.AppendResponses {
+			return record(w, ctx, msgs...)
 		},
 	).Build()
-	t.Cleanup(func() { appendMock.UnPatch() })
+	t.Cleanup(func() { appendWithOptionsMock.UnPatch() })
 	return w
 }
 
@@ -1313,7 +1321,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	entityPacked, err := channelmgr.GenInsertMsgsByPartition(
+	entityPacked, _, err := channelmgr.GenInsertMsgsByPartition(
 		context.Background(),
 		0,
 		200,

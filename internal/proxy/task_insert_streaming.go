@@ -306,7 +306,7 @@ func repackInsertDataByPartitionForStreamingService(
 		pack := pending[0]
 		pending = pending[1:]
 		if pack.insertMsg == nil {
-			packedMsgs, err := channelmgr.GenInsertMsgsByPartition(
+			packedMsgs, _, err := channelmgr.GenInsertMsgsByPartition(
 				ctx,
 				0,
 				partitionID,

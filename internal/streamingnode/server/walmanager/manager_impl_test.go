@@ -37,10 +37,10 @@ func TestOpenManager(t *testing.T) {
 }
 
 func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
-	builders := newInterceptorBuilders()
-	assert.Len(t, builders, 6)
-	assert.IsType(t, shard.NewInterceptorBuilder(), builders[4])
-	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[5])
+	builders := defaultInterceptorBuilders()
+	assert.Len(t, builders, 7)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[5])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[6])
 }
 
 func TestDefaultInterceptorBuilderOrder(t *testing.T) {

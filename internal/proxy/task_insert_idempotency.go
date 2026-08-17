@@ -103,7 +103,7 @@ func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 	}
 
 	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
-	channelNames, err := it.chMgr.getVChannels(it.collectionID)
+	channelNames, err := it.chMgr.GetVChannels(it.collectionID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels for idempotent autoID assignment failed",
 			mlog.Int64("collectionID", it.collectionID),
