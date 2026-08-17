@@ -580,6 +580,7 @@ queryNode:
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
+    scanPinUntilCellExhausted: false # Experimental: reuse the current scalar Scan Cell pin across sequential expression windows
     tieredStorage:
       warmup:
         # options: sync, async, disable.

@@ -130,10 +130,11 @@ consumes a sparse local file view behind these column-level operations.
 
 Milvus is in a transition state where two access families coexist:
 
-- `ChunkedBase` remains the raw chunk-oriented path for the existing raw local
-  format and existing chunk consumers.
-- `ChunkedColumnInterface` is the local-format-aware path used by Vortex and by
-  scan/take code that should not depend on physical chunk ownership.
+- `ChunkedBase` remains the physical raw-chunk interface for existing consumers
+  that explicitly need chunk ownership.
+- `ChunkedColumnInterface` is the local-format-aware path used by scan/take
+  code. Raw columns implement `Scan` as zero-copy views over their existing
+  chunks, while Vortex columns implement it with reader-backed cursors.
 
 Filter scan path:
 
@@ -155,7 +156,7 @@ Retrieve output / bulk_subscript
   -> VortexColumn::Take...
   -> VortexPlanner::PlanForOffsets
   -> VortexColumnGroup cache slot pin
-  -> VortexFormatReader::read_with_plan(row indices)
+  -> VortexFormatReader::take(file-local offsets)
 ```
 
 The key ownership split is:
@@ -263,12 +264,14 @@ Vortex local format uses Vortex-specific extensions:
 
 - `read_with_plan(const VortexReadPlan&)`
 - `read_row_ids_with_plan(const VortexReadPlan&)`
+- `take(const std::vector<int64_t>& offsets)`
 
 `read_with_plan` returns data as an Arrow stream. `read_row_ids_with_plan`
 returns file-local row ids satisfying the predicate in the plan. Predicate state
 is carried by `VortexReadPlan`, not by long-lived reader state. Existing
 `set_predicate` behavior remains for compatibility but is not the local format
-path.
+path. For positional Take, the footer planner selects the Cells to pin, while
+`take` receives file-local offsets and returns fully materialized Arrow data.
 
 ### Milvus-Side Components
 
@@ -300,9 +303,59 @@ Scan outputs:
 Data scan supports:
 
 - row range;
-- value kind (`FixedWidth`, `StringView`, `JsonView`, `ArrayView`);
+- value kind (`FixedWidth`, `StringView`, `JsonView`, `ArrayView`,
+  `VectorArrayView`);
 - validity;
-- validity-only projection.
+- nullable-only validity projection.
+
+`ScanBatch::validity` has one evaluator-facing representation: a batch-relative
+`ValidityView`. An empty view means every row in the batch is valid. A non-empty
+view may reference either one-byte-per-row expanded booleans or an LSB-first
+packed bitmap with a bit offset; indexing remains relative to the returned dense
+rows or sparse row ids in both cases. Raw scans reference the validity already
+owned by the pinned Chunk or Span. Vortex scans reference the Arrow null bitmap
+directly, including the Arrow array offset and the returned batch position,
+instead of expanding it into `FixedVector<bool>`. `ScanBatch::owner` retains the
+pin, Chunk, Arrow reader/array, and any derived values required for both the
+validity view and value payload to remain alive for the batch lifetime.
+
+Every Column generation owns exactly one immutable `ColumnPlanner`. It is the
+only layer that translates expression ranges into Cell locations and provides
+the default Raw mapping from segment offsets to Cell-local addresses:
+
+- `PlanTake` preserves offset order and duplicates while producing the Cell id
+  and Cell-local offset used by the default Raw Take implementation. Take does
+  not apply SkipIndex filtering;
+- `PlanScan` clips an expression range into ordered Cell ranges and evaluates
+  each preloaded Cell decision once;
+- execution supplies the expression-specific skip predicate for Scan and
+  consumes the resulting plan, but does not call `GetChunkIDByOffset`,
+  calculate Cell ends, or cache Cell decisions itself;
+- Raw cursors use the same planner for their physical position, while the
+  Vortex planner facade delegates physical read-plan construction to the
+  footer-backed per-file planners owned by the ColumnGroup.
+
+The statistics snapshot remains generation-stable execution input. It is not
+mutated into a reused Column during reopen; the Column-owned planner invokes a
+predicate bound to that immutable snapshot.
+
+`Scan(ScanOptions)` creates one persistent logical cursor for the expression
+leaf without pinning the complete remaining range. Each
+`Next(position, length, mode, out)` request uses an absolute segment position
+and an upper-bound length. The cursor locates the requested Cell or reader
+range, pins only the resources needed for the returned batch, and may stop at a
+Raw Cell or backend batch boundary. Validity-only mode is accepted only by
+nullable data scans, omits values, and may avoid data parsing when the backend
+can provide validity directly.
+
+With `ScanPinPolicy::PerCall`, the cursor retains no Cell between calls; each
+returned `ScanBatch::owner` keeps its own Cell pin, batch-local values, and
+normalized validity alive until that batch is released. With
+`ScanPinPolicy::UntilCellExhausted`, the cursor may additionally retain the
+current file/Cell plan across calls. An identical next plan reuses that pin;
+when the plan changes, the cursor releases the old plan before pinning the new
+one. The expression layer does not separately pin Cells or reopen the cursor
+between windows.
 
 Row-id scan supports:
 
@@ -310,8 +363,10 @@ Row-id scan supports:
 - binary range predicates;
 - sparse row-id batches.
 
-If a column implementation cannot support a scan mode, it falls back to the
-raw-compatible behavior through the existing chunked path.
+Every sealed scalar column used by expression evaluation must provide the
+raw-compatible data scan. A missing sealed scan implementation is a column
+contract violation rather than a per-batch fallback. Growing and non-chunked
+segments continue to use their existing chunk access path.
 
 #### `VortexColumnGroup`
 
@@ -319,12 +374,15 @@ raw-compatible behavior through the existing chunked path.
 
 Each file state contains:
 
-- source filesystem and resolved source path;
+- source path for diagnostics and its segment row range;
 - sparse filesystem and sparse path;
 - `VortexFooterReader`;
-- group-level `VortexPlanner`;
-- cache slot and translator;
-- row count and memory accounting.
+- per-field footer planners;
+- cache slot, which owns the Cell translator;
+- planner memory accounting.
+
+The source filesystem, resolved source path, group planner, and validated file
+row count are construction-local and are not retained in `FileState`.
 
 All fields in the same physical group share the same `VortexColumnGroup`.
 
@@ -387,24 +445,73 @@ This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
 
+Each expression leaf creates one persistent cursor with `Scan(ScanOptions)`.
+For every expression window it calls
+`ScanCursor::Next(position, length, mode, out)` with an absolute segment
+position. `length` is an upper bound: a Raw Cell or reader boundary may produce
+a shorter dense batch, and the expression layer continues from the returned
+batch end. A greater `position` advances the same cursor without reading the
+intervening rows.
+
+The expression layer keeps both its segment-global execution position and the
+existing chunk id/in-chunk offset cursor synchronized. Scan uses the global
+position to describe its logical row window, while legacy Raw and Growing reads
+continue from the chunk cursor. For Vortex, that cursor describes only the
+logical file range and local row offset; maintaining it does not create a Raw
+Chunk, pin a Cell, or open a reader. Normal evaluation and conjunction
+short-circuit advance both representations. `Next` pins the Cell required by
+the requested position. The returned batch and the configured scan pin policy
+define how long that Cell stays pinned; the expression layer does not manage
+Cell pins separately or reopen the cursor between windows.
+
 ### Offset Input Execution
 
 Offset-input execution is used when expression evaluation is restricted to a
 known set of segment offsets.
 
-The initial Vortex local format implementation handles dense sorted offsets by
-scanning one continuous range:
+Offset input uses positional `Take`, not a dense range `Scan`:
 
 ```text
 ProcessDataByOffsets
-  -> ProcessSortedDataByOffsetsByScan
-  -> scan [min_offset, max_offset + 1)
-  -> expression layer checks the offset bitmap
+  -> ChunkedColumnInterface::Take(TakeOptions{segment_offsets})
+  -> consume one ordered TakeResult
+  -> evaluate exactly the requested rows in input order
 ```
 
-Bitmap or selection pushdown into `ChunkedColumnInterface::Scan` is left as
-future work. The current strategy avoids many small reads while keeping
-semantics simple.
+Take keeps segment offsets as its public coordinate and does not apply either
+preloaded or loaded-payload SkipIndex filtering. The default Raw implementation
+uses `ColumnPlanner::PlanTake` to convert those offsets into ordered source Cell
+ids and Cell-local offsets without pinning payload. Backends with a different
+physical addressing model may override `Take(TakeOptions)` and consume the
+segment offsets directly.
+
+The public contract preserves plan order and duplicate offsets. `Take` is a
+synchronous operation over one finite plan and returns one `TakeResult`. `Get(i)`
+accesses the ith logical result, while `GetOwn()` exposes an ordered dense result
+whose lifetime is independent of backend Cell pins.
+
+Raw consumes the planned Cell locations without resolving offsets again.
+Borrowed access pins only the Cell containing the requested row and reuses that
+pin while later accesses remain in the same Cell. Switching Cells replaces the
+pin; result destruction releases the last pin. Fixed-width `Get(i)` returns a
+value copied from the pinned Chunk. A string/JSON/array view is valid until the
+next access that switches Cells, `GetOwn()`, or result destruction. `GetOwn()`
+groups positions by Cell, pins each Cell once while copying into the ordered
+owned result, and then releases the borrowed pin.
+
+Vortex sorts, groups, and deduplicates segment offsets by the immutable ordered
+file table to reduce reader work. Its per-file footer planner is used only to
+select the Cells that must be pinned; the file-local offset conversion remains
+an internal reader detail rather than part of the public Take plan. Vortex then
+restores the original input order in an already-owned decoded result. These
+physical details do not cross the `TakeResult` boundary.
+
+Generated columns implement the same logical interface without entering either
+storage backend. In particular, `VirtualPKChunkedColumn` computes Scan batches
+and planned Take values directly from `(segment id, row offset)` and returns
+owned INT64 data. Its Scan/Take path does not pin a Raw Cell, open a Vortex
+reader, or materialize the synthetic full-column Chunk retained for legacy
+Chunk consumers.
 
 ### Retrieve and Requery
 
@@ -414,35 +521,40 @@ selected row offsets.
 ```text
 FillTargetEntry / Retrieve output
   -> bulk_subscript
-  -> ChunkedColumnInterface positional take
-  -> VortexColumn::BulkPrimitiveValueAt / BulkRawStringAt / BulkArrayAt
-  -> TakeOwn / TakeStringLikeViews
-  -> VortexPlanner::PlanForOffsets
-  -> pin planned cells
-  -> VortexFormatReader::read_with_plan(row indices)
-  -> restore requested output order
+  -> ChunkedColumnInterface::Take(offsets)
+  -> ordered TakeResult
+  -> GetOwn(), copy, or serialize into the final owned result
 ```
 
-The planner disables predicate semantics for take because retrieve output is
-positional. Random requery over long strings can still touch many cells; this is
-tracked as a separate performance area from filter pushdown.
+For Vortex, `PlanForOffsets` selects and pins Cells only while the reader imports
+and materializes the requested data. The returned result owns the materialized
+Arrow/copied data rather than retaining Cell pins. Raw read-only expression Take
+keeps at most its current Cell pinned, while retrieve/requery uses `GetOwn()` or
+serializes each borrowed value before advancing. Random requery over long
+strings can still cause frequent Cell transitions and remains a separate
+performance area from filter pushdown.
 
 ### Nullable and Validity
 
-The `ChunkedColumnInterface` scan API uses `ValidityView` to present nullability
-uniformly.
+The `ChunkedColumnInterface` scan API presents nullability uniformly through
+`ScanBatch::validity`.
 
 Rules:
 
-- Non-nullable fields may return all-valid validity.
+- Non-nullable or all-valid batches return an empty `ValidityView`.
 - Nullable dense data scans must return validity aligned with the dense row
   range.
 - Row-id scans may return validity aligned with sparse row ids.
-- Validity-only projection is part of the scan model so callers that only need
-  nullability do not need to materialize full values.
+- Validity-only projection is restricted to nullable data scans so callers
+  that need the stored nullability do not materialize full values.
+  Non-nullable columns reject this mode; their all-valid representation is
+  only returned alongside normal data batches.
 
-The raw path may adapt its existing `bool*` validity representation into this
-model. Vortex uses Arrow bitmap/null-buffer semantics.
+Raw cursors expose their existing expanded or packed Chunk validity through
+`ValidityView`. Vortex cursors expose the relevant Arrow null-bitmap slice as a
+packed `ValidityView` without materializing a per-row boolean mask. Callers use
+the common view contract and do not depend on the backing encoding; the batch
+owner keeps the referenced storage alive through consumption.
 
 ### Sparse Local File and Cache Loading
 
@@ -489,9 +601,9 @@ level so all field proxies in the same physical group share the same state.
 - Existing non-Vortex segments continue to load through the raw path.
 - A schema can contain default (empty), raw, and Vortex local format fields;
   column group splitting keeps the three intents physically separate.
-- During the transition, QueryNode keeps both access paths: raw fields continue
-  to use the `ChunkedBase` chunk-oriented path, while Vortex fields use the
-  `ChunkedColumnInterface` column-oriented path.
+- During the transition, existing raw storage and non-scan chunk consumers are
+  unchanged. Sealed scalar expression evaluation uses the same
+  `ChunkedColumnInterface::Scan` contract for both raw and Vortex columns.
 - Vortex local format is only used for Storage V3 sealed segments.
 - Rolling upgrades must ensure QueryNodes understand Vortex local format before
   new Vortex column groups are loaded. Older readers cannot load Vortex physical
@@ -520,7 +632,7 @@ Unit and component validation:
 - `VortexColumn` row-id scan, data scan, validity, and take paths.
 - `VortexFooterReader` footer and optional zone-map lifecycle.
 - `VortexPlanner` row range, offset, and predicate pruning plans.
-- `VortexFormatReader::read_with_plan` and `read_row_ids_with_plan`.
+- `VortexFormatReader::read_with_plan`, `read_row_ids_with_plan`, and `take`.
 
 Performance validation:
 
