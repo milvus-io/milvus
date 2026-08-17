@@ -219,7 +219,8 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 }
 
 // pickNode selects the least-loaded node -- the one with the most available
-// slots -- for a task requiring taskSlot slots.
+// slots -- for a task requiring taskSlot slots. It is pickNodeWithMinimumVersion
+// with no version constraint, so every node in the heap is a candidate.
 //
 // When no node can fully satisfy taskSlot it still dispatches, to that
 // most-available node, and drains its slots. That is deliberate and not the
@@ -229,16 +230,25 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // admits such a task only once every other reservation has been released and
 // runs it alone, so the harm in #52180 -- an oversized task running
 // *concurrently* with everything else -- cannot recur once every DataNode
-// carries that guard. That precondition is not enforced here: nothing in this
-// path checks a worker's capability, so during a partial rollout, a rollback,
-// or before a node has restarted into the new build, an oversized task
-// dispatched to a guard-less worker still behaves as it did in #52180.
-// Refusing to place it here would instead leave it pending forever, because
-// no node ever grows.
+// carries that guard. Refusing to place the task here would instead leave it
+// pending forever, because no node ever grows.
 //
-// It returns NullNodeID when the heap holds no nodes at all, or when every
-// node in it reports zero available slots; either way the task waits for the
-// next scheduling round.
+// That precondition is not enforced on this path, and the worker-version
+// filter in pickNodeWithMinimumVersion does not change it. The filter screens
+// against a minimum version the *task* declares (Task.MinimumWorkerVersion),
+// and the only task that declares one today is an external-snapshot copy
+// segment; every oversized compaction, index or stats task reaches the heap
+// with an empty constraint, which workerSupportsMinimumVersion accepts from
+// every worker. Even a constrained task would not be a reliable screen for the
+// guard, since an unparsable development version is treated as compatible. So
+// during a partial rollout, a rollback, or before a node has restarted into
+// the new build, an oversized task dispatched to a guard-less worker still
+// behaves as it did in #52180.
+//
+// It returns NullNodeID when the heap holds no nodes at all, or when a task
+// needing slots finds every node reporting none; either way the task waits for
+// the next scheduling round. A task asking for no slots is placed on the
+// most-available node without consuming any.
 //
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
