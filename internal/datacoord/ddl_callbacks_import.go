@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -167,17 +166,6 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
 }
 
-// importIdempotencyScopedKey scopes a client-supplied idempotency key to the
-// target collection. The broadcaster stores it as an opaque string, so the scope
-// has to be baked in here — that also keeps the same client key usable on
-// different collections without colliding.
-func importIdempotencyScopedKey(collectionID int64, clientKey string) string {
-	if clientKey == "" {
-		return ""
-	}
-	return fmt.Sprintf("import/%d/%s", collectionID, clientKey)
-}
-
 // jobIDFromDuplicatedBroadcast recovers the original import jobID from the broadcast
 // message the broadcaster returned on an idempotency hit. The broadcaster does not
 // know about import-specific structures, so the decode happens here.
@@ -238,7 +226,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
-	scopedKey := importIdempotencyScopedKey(collectionID, idempotencyKey)
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -256,7 +243,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
-		WithIdempotencyKey(scopedKey).
+		// The raw client key travels as-is. The broadcaster derives the dedup identity
+		// itself from the message type and the resource keys this broadcast holds
+		// (SharedDBName + ExclusiveCollectionName, see startBroadcastWithCollectionID),
+		// so the collection is already part of the scope. Prefixing the key here would
+		// only eat into the length budget the proxy validates against.
+		WithIdempotencyKey(idempotencyKey).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
@@ -274,9 +266,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err != nil {
 		return 0, false, err
 	}
-	// Never log the raw key: it is client-controlled and may carry sensitive data. The
-	// fingerprint is taken of the scoped key, which is what the broadcaster indexed.
-	keyFingerprint := mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(scopedKey))
+	// Never log the raw key: it is client-controlled and may carry sensitive data.
+	keyFingerprint := mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey))
 
 	mlog.Info(ctx, "import broadcast deduplicated by idempotency key",
 		mlog.FieldCollectionID(collectionID),

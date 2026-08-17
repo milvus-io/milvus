@@ -640,6 +640,9 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	// capturedMsg is the last message handed to Broadcast, for assertions on what the
+	// caller actually put on the wire.
+	capturedMsg message.BroadcastMutableMessage
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -662,6 +665,7 @@ func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.Broadc
 	if msg == nil {
 		return nil, errors.New("message is nil")
 	}
+	m.capturedMsg = msg
 	if m.broadcastErr != nil {
 		return nil, m.broadcastErr
 	}
@@ -1264,23 +1268,11 @@ func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
 }
 
-func TestImportIdempotencyScopedKey(t *testing.T) {
-	// No client key means no scoped key at all, so the broadcast carries no
-	// property and is never deduplicated.
-	assert.Equal(t, "", importIdempotencyScopedKey(100, ""))
-	assert.Equal(t, "import/100/run-1", importIdempotencyScopedKey(100, "run-1"))
-	// The key is scoped to the collection: the same client key on a different
-	// collection is a different logical request.
-	assert.NotEqual(t,
-		importIdempotencyScopedKey(100, "run-1"),
-		importIdempotencyScopedKey(101, "run-1"))
-}
-
 func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{JobID: 4242}).
-		WithIdempotencyKey("import/100/run-1").
+		WithIdempotencyKey("run-1").
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
