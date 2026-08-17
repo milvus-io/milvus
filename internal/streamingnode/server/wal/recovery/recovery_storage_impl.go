@@ -99,7 +99,6 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 		channel:                channel,
 		dirtyCounter:           0,
 		persistNotifier:        make(chan struct{}, 1),
-		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
 	}
 	if cp != nil {
@@ -140,10 +139,10 @@ type recoveryStorageImpl struct {
 	moduleDirty            bool
 	// used to trigger the recovery persist operation.
 	persistNotifier        chan struct{}
-	gracefulClosed         bool
 	truncator              walimpls.WALImpls
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *dirtyPersistSnapshot
+	dataScannerWG          sync.WaitGroup
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -246,6 +245,7 @@ func (r *recoveryStorageImpl) VChannelManager() *vchannel.PChannelRecoveryManage
 func (r *recoveryStorageImpl) Close() {
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
+	r.dataScannerWG.Wait()
 	if r.broadcastAck != nil {
 		r.broadcastAck.Close()
 	}
@@ -429,13 +429,20 @@ func (r *recoveryStorageImpl) startDataLiveScanner(recoveryStreamBuilder Recover
 		EndTimeTick:         0,
 		UseWriteAheadBuffer: true,
 	})
-	go r.runDataLiveScanner(rs)
+	r.dataScannerWG.Add(1)
+	go func() {
+		defer r.dataScannerWG.Done()
+		r.runDataLiveScanner(rs)
+	}()
 }
 
 func (r *recoveryStorageImpl) runDataLiveScanner(rs RecoveryStream) {
 	defer rs.Close()
 	ctx := r.backgroundTaskNotifier.Context()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return

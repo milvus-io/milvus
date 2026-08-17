@@ -37,6 +37,7 @@ type ModuleConfig struct {
 	TransformLogMaterialRows  uint64
 	TransformLogMaterialBytes uint64
 	DataObservedTimeTick      uint64
+	OnCleanup                 func(*VChannelRecoveryModule)
 }
 
 // VChannelRecoveryModule owns all recovery_storage state for one vchannel.
@@ -66,6 +67,8 @@ type VChannelRecoveryModule struct {
 	segmentPackWriter segment.PackWriter
 
 	metaAndData bool
+	removed     bool
+	onCleanup   func(*VChannelRecoveryModule)
 }
 
 // NewModule creates a single-vchannel recovery module.
@@ -93,6 +96,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		segmentLifecycle:     config.SegmentLifecycle,
 		segmentPackWriter:    config.SegmentPackWriter,
 		dataObservedTimeTick: config.DataObservedTimeTick,
+		onCleanup:            config.OnCleanup,
 	}
 	if config.VChannelMeta != nil {
 		if adoptVChannelMeta {
@@ -140,22 +144,27 @@ func (m *VChannelRecoveryModule) segmentViewConfig() segment.ViewConfig {
 	}
 }
 
+// ObserveMessage returns false only when the module was concurrently removed;
+// the manager can then retry a CreateCollection against a fresh module.
 func (m *VChannelRecoveryModule) ObserveMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-) {
+) bool {
 	if m == nil {
-		return
+		return true
 	}
 	msg := retained.Message()
 	if !m.shouldObserve(msg) {
-		return
+		return true
 	}
 	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
-		return
+		return true
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.removed {
+		return false
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
 		m.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(msg))
@@ -192,6 +201,7 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	if m.metaAndData && msg.TimeTick() > m.dataObservedTimeTick {
 		m.dataObservedTimeTick = msg.TimeTick()
 	}
+	return true
 }
 
 func (m *VChannelRecoveryModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
@@ -573,12 +583,21 @@ func (m *VChannelRecoveryModule) markSegmentSnapshotPersisted(
 func (m *VChannelRecoveryModule) HasCleanupCandidates() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.cleanupSegments) > 0 || len(m.pendingCleanup) > 0
+	return m.hasCleanupCandidatesLocked()
+}
+
+func (m *VChannelRecoveryModule) hasCleanupCandidatesLocked() bool {
+	return !m.removed && (len(m.cleanupSegments) > 0 || len(m.pendingCleanup) > 0 ||
+		m.vchannelView != nil && m.vchannelView.HasCleanupCandidate())
 }
 
 func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.CleanupContext) []moduleapi.DirtySnapshot {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	if m.removed {
+		m.mu.Unlock()
+		return nil
+	}
+	vchannelChanged := m.vchannelView != nil && m.vchannelView.TryFinalizeTombstone(cleanup.DataPhysicalTimeTick)
 	var snapshots []moduleapi.DirtySnapshot
 	for segmentID, view := range m.cleanupSegments {
 		if !m.segmentCleanupReadyLocked(view, cleanup) {
@@ -601,7 +620,57 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 			func() { m.completeSegmentCleanup(segmentID, owner) },
 		))
 	}
+	if m.vchannelView != nil && m.transformLog != nil {
+		dropSnapshot, cleanupPartitions := m.vchannelView.TombstonedCleanupPlan(
+			cleanup.MetaPhysicalTimeTick,
+			cleanup.DataPhysicalTimeTick,
+			m.transformLog.PersistedMaterializedTimeTick(),
+		)
+		if len(cleanupPartitions) > 0 {
+			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
+		} else if dropSnapshot != nil && len(m.segments) == 0 &&
+			!m.transformLog.HasDirty() && !m.transformLog.HasPendingWork() {
+			tombstoneTimeTick := dropSnapshot.GetTombstoneTimeTick()
+			snapshots = append(snapshots,
+				newDirtySnapshot(
+					moduleapi.ModuleNameTransformLog,
+					moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: m.vchannel},
+					moduleapi.SnapshotOpDelete,
+					m.transformLog.SnapshotMeta(),
+					tombstoneTimeTick,
+					tombstoneTimeTick,
+					nil,
+				),
+				newDirtySnapshot(
+					moduleapi.ModuleNameVChannel,
+					moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: m.vchannel},
+					moduleapi.SnapshotOpDelete,
+					dropSnapshot,
+					tombstoneTimeTick,
+					tombstoneTimeTick,
+					func() { m.completeVChannelCleanup(tombstoneTimeTick) },
+				),
+			)
+		}
+	}
+	m.mu.Unlock()
+	if vchannelChanged && m.runtime.Notifier != nil {
+		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+	}
 	return snapshots
+}
+
+func (m *VChannelRecoveryModule) completeVChannelCleanup(tombstoneTimeTick uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed || len(m.segments) > 0 || m.vchannelView == nil ||
+		m.vchannelView.VChannelDropCleanupSnapshot(tombstoneTimeTick, tombstoneTimeTick) == nil {
+		return
+	}
+	m.removed = true
+	if m.onCleanup != nil {
+		m.onCleanup(m)
+	}
 }
 
 func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.SegmentView, cleanup moduleapi.CleanupContext) bool {

@@ -30,7 +30,8 @@ import (
 )
 
 type recordingRecoveryStreamBuilder struct {
-	param BuildRecoveryStreamParam
+	param  BuildRecoveryStreamParam
+	stream RecoveryStream
 }
 
 func newTestRecoveryStorage(t *testing.T, checkpoint *utility.WALCheckpoint) *recoveryStorageImpl {
@@ -81,7 +82,7 @@ func TestConsumeDirtySnapshotUsesLastPersistedPhysicalCheckpointsForCleanup(t *t
 	assert.Equal(t, uint64(9), cleanup.DataPhysicalTimeTick)
 }
 
-func TestRecoveryStorageCloseDrainsPendingCleanup(t *testing.T) {
+func TestRecoveryStorageCloseDoesNotPersist(t *testing.T) {
 	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(10),
 		TimeTick:  10,
@@ -90,25 +91,25 @@ func TestRecoveryStorageCloseDrainsPendingCleanup(t *testing.T) {
 			TimeTick:  9,
 		},
 	})
-	pending := true
-	consumed := 0
-	pendingMock := mockey.Mock((*vchannel.PChannelRecoveryManager).HasPendingCleanup).To(func(
-		*vchannel.PChannelRecoveryManager,
-	) bool {
-		return pending
-	}).Build()
-	defer pendingMock.UnPatch()
-	consumeMock := mockey.Mock((*vchannel.PChannelRecoveryManager).ConsumeCleanupSnapshots).To(func(
-		_ *vchannel.PChannelRecoveryManager,
-		_ moduleapi.CleanupContext,
-	) []moduleapi.DirtySnapshot {
-		consumed++
-		pending = false
+	storage.cfg.persistInterval = time.Hour
+	storage.mu.Lock()
+	storage.dirtyCounter++
+	storage.mu.Unlock()
+	persisted := 0
+	persistMock := mockey.Mock((*recoveryStorageImpl).persistDirtySnapshot).To(func(
+		_ *recoveryStorageImpl,
+		_ context.Context,
+		_ mlog.Level,
+	) error {
+		persisted++
 		return nil
 	}).Build()
-	defer consumeMock.UnPatch()
-	require.NoError(t, storage.persistDritySnapshotWhenClosing())
-	assert.Equal(t, 1, consumed)
+	defer persistMock.UnPatch()
+
+	go storage.backgroundTask()
+	storage.Close()
+
+	assert.Zero(t, persisted)
 }
 
 func (b *recordingRecoveryStreamBuilder) WALName() message.WALName {
@@ -121,6 +122,9 @@ func (b *recordingRecoveryStreamBuilder) Channel() types.PChannelInfo {
 
 func (b *recordingRecoveryStreamBuilder) Build(param BuildRecoveryStreamParam) RecoveryStream {
 	b.param = param
+	if b.stream != nil {
+		return b.stream
+	}
 	return &closedRecoveryStream{ch: make(chan message.ImmutableMessage)}
 }
 
@@ -149,6 +153,82 @@ func (s *closedRecoveryStream) Close() error {
 	return nil
 }
 
+type blockingRecoveryStream struct {
+	ch        chan message.ImmutableMessage
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func (s *blockingRecoveryStream) Chan() <-chan message.ImmutableMessage {
+	return s.ch
+}
+
+func (s *blockingRecoveryStream) Error() error {
+	return nil
+}
+
+func (s *blockingRecoveryStream) TxnBuffer() *utility.TxnBuffer {
+	return nil
+}
+
+func (s *blockingRecoveryStream) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestRecoveryStorageCloseWaitsForDataLiveScanner(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(2),
+			TimeTick:  2,
+		},
+	}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	storage.cfg.persistInterval = time.Hour
+	stream := &blockingRecoveryStream{
+		ch:     make(chan message.ImmutableMessage),
+		closed: make(chan struct{}),
+	}
+	storage.startDataLiveScanner(&recordingRecoveryStreamBuilder{stream: stream})
+	go storage.backgroundTask()
+
+	storage.Close()
+
+	select {
+	case <-stream.closed:
+	default:
+		t.Fatal("data live scanner is still running after recovery storage close")
+	}
+}
+
+func TestRecoveryStorageCloseCancelsAndWaitsForTasks(t *testing.T) {
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+	})
+	storage.cfg.persistInterval = time.Hour
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	storage.taskScheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return ctx.Err()
+	}))
+	<-started
+	go storage.backgroundTask()
+
+	storage.Close()
+
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("recovery task is still running after recovery storage close")
+	}
+}
+
 func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
@@ -164,6 +244,7 @@ func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 
 	builder := &recordingRecoveryStreamBuilder{}
 	storage.startDataLiveScanner(builder)
+	storage.dataScannerWG.Wait()
 
 	assert.True(t, builder.param.UseWriteAheadBuffer)
 	assert.True(t, checkpoint.DataCheckpoint.MessageID.EQ(builder.param.StartCheckpoint))
@@ -325,7 +406,9 @@ func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModule
 			return false
 		}
 	}, time.Second, 10*time.Millisecond)
-	assert.True(t, storage.isDirty())
+	storage.mu.Lock()
+	assert.True(t, storage.moduleDirty)
+	storage.mu.Unlock()
 }
 
 func newRecoveryTestVChannelMeta(vchannel string, collectionID int64) *streamingpb.VChannelMeta {

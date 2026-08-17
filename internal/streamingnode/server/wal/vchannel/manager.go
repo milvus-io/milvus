@@ -133,12 +133,17 @@ func (m *PChannelRecoveryManager) ObserveMessage(
 		m.observeBroadcastMessage(ctx, retained)
 		return
 	}
-	module := m.moduleForMessage(msg)
-	if module == nil {
+	for {
+		module := m.moduleForMessage(msg)
+		if module == nil {
+			return
+		}
+		if !module.ObserveMessage(ctx, retained) {
+			continue
+		}
+		m.markModuleUpdated(module)
 		return
 	}
-	module.ObserveMessage(ctx, retained)
-	m.markModuleUpdated(module)
 }
 
 func (m *PChannelRecoveryManager) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
@@ -250,12 +255,6 @@ func (m *PChannelRecoveryManager) ConsumeCleanupSnapshots(cleanup moduleapi.Clea
 	return snapshots
 }
 
-func (m *PChannelRecoveryManager) HasPendingCleanup() bool {
-	m.dirtyMu.Lock()
-	defer m.dirtyMu.Unlock()
-	return len(m.cleanupModules) > 0
-}
-
 func (m *PChannelRecoveryManager) markCleanupCandidate(module *VChannelRecoveryModule) {
 	m.dirtyMu.Lock()
 	if m.cleanupModules == nil {
@@ -282,9 +281,11 @@ func (m *PChannelRecoveryManager) observeBroadcastMessage(
 ) {
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
 		dispatch := retained.Clone()
-		module.ObserveMessage(ctx, dispatch)
+		observed := module.ObserveMessage(ctx, dispatch)
 		dispatch.Release()
-		m.markModuleUpdated(module)
+		if observed {
+			m.markModuleUpdated(module)
+		}
 		return true
 	})
 }
@@ -339,6 +340,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		TransformLogMaterialRows:  m.config.TransformLogMaterialRows,
 		TransformLogMaterialBytes: m.config.TransformLogMaterialBytes,
 		DataObservedTimeTick:      m.config.DataCheckpointTimeTick,
+		OnCleanup:                 m.removeModule,
 	})
 	if err != nil {
 		return nil, err
@@ -347,6 +349,25 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		m.markCleanupCandidate(module)
 	}
 	return module, nil
+}
+
+func (m *PChannelRecoveryManager) removeModule(module *VChannelRecoveryModule) {
+	if module == nil {
+		return
+	}
+	current, ok := m.modules.Get(module.vchannel)
+	if !ok || current != module {
+		return
+	}
+	m.modules.Remove(module.vchannel)
+	m.dirtyMu.Lock()
+	if m.dirtyModules[module.vchannel] == module {
+		delete(m.dirtyModules, module.vchannel)
+	}
+	if m.cleanupModules[module.vchannel] == module {
+		delete(m.cleanupModules, module.vchannel)
+	}
+	m.dirtyMu.Unlock()
 }
 
 func (m *PChannelRecoveryManager) markModuleUpdatedByVChannel(vchannel string) {
@@ -364,8 +385,10 @@ func (m *PChannelRecoveryManager) markModuleUpdated(module *VChannelRecoveryModu
 
 func (m *PChannelRecoveryManager) markModuleDirty(module *VChannelRecoveryModule) {
 	m.dirtyMu.Lock()
-	m.dirtyModules[module.vchannel] = module
-	m.dirtyMu.Unlock()
+	defer m.dirtyMu.Unlock()
+	if current, ok := m.modules.Get(module.vchannel); ok && current == module {
+		m.dirtyModules[module.vchannel] = module
+	}
 }
 
 func (m *PChannelRecoveryManager) takeDirtyModules() map[string]*VChannelRecoveryModule {

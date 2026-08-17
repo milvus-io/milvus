@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -12,31 +13,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-// isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
-func (rs *recoveryStorageImpl) isDirty() bool {
-	if rs.pendingPersistSnapshot != nil {
-		return true
-	}
-
-	rs.mu.Lock()
-	dirty := rs.dirtyCounter > 0 || rs.moduleDirty || rs.pendingSalvageCheckpoint != nil || rs.checkpointDirty
-	persistedCheckpoint := rs.persistedCheckpoint
-	ackTracker := rs.ackTracker
-	rs.mu.Unlock()
-	if !dirty && ackTracker != nil {
-		completed := ackTracker.CompletedPoint()
-		dirty = persistedCheckpoint == nil || !consumeCheckpointEqual(persistedCheckpoint.DataCheckpoint, &completed)
-	}
-	if dirty {
-		return true
-	}
-
-	if rs.vchannelManager != nil && rs.vchannelManager.HasPendingCleanup() {
-		return true
-	}
-	return false
-}
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
 // promise there's only one consumer of wal.
@@ -48,10 +24,6 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
 		ticker.Stop()
-		rs.Logger().Info(context.TODO(), "recovery storage background task, perform a graceful exit...")
-		if err := rs.persistDritySnapshotWhenClosing(); err != nil {
-			rs.Logger().Warn(context.TODO(), "failed to persist dirty snapshot when closing", mlog.Err(err))
-		}
 		rs.backgroundTaskNotifier.Finish(struct{}{})
 		rs.Logger().Info(context.TODO(), "recovery storage background task exit")
 	}()
@@ -67,35 +39,6 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 			return
 		}
 	}
-}
-
-// persistDritySnapshotWhenClosing persists the dirty snapshot when closing the recovery storage.
-func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
-	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
-	defer cancel()
-
-	for {
-		if rs.taskScheduler != nil {
-			if err := rs.taskScheduler.WaitIdle(ctx); err != nil {
-				return err
-			}
-		}
-		for rs.isDirty() {
-			if err := rs.persistDirtySnapshot(ctx, mlog.InfoLevel); err != nil {
-				return err
-			}
-		}
-		if rs.taskScheduler != nil {
-			if err := rs.taskScheduler.WaitIdle(ctx); err != nil {
-				return err
-			}
-		}
-		if !rs.isDirty() {
-			break
-		}
-	}
-	rs.gracefulClosed = true
-	return nil
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.

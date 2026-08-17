@@ -8593,9 +8593,8 @@ but not wait for the persist interval.`,
 	p.WALRecoveryGracefulCloseTimeout = ParamItem{
 		Key:     "streaming.walRecovery.gracefulCloseTimeout",
 		Version: "2.6.0",
-		Doc: `The graceful close timeout for wal recovery, 3s by default.
-When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
-If that persist operation exceeds this timeout, the wal recovery module will close right now.`,
+		Doc: `Deprecated. RecoveryStorage no longer persists recovery metadata during close.
+This no-op setting is retained so existing configurations remain loadable.`,
 		DefaultValue: "3s",
 		Export:       true,
 	}

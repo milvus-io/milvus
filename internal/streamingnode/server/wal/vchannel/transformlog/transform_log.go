@@ -379,6 +379,14 @@ func (t *TransformLog) HasDirty() bool {
 	return t.dirty
 }
 
+// PersistedMaterializedTimeTick returns the transform frontier already stored
+// in the recovery catalog.
+func (t *TransformLog) PersistedMaterializedTimeTick() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.persistedMaterialized
+}
+
 func (t *TransformLog) ConsumeDirtyAndGetSnapshot() *streamingpb.VChannelTransformLogMeta {
 	t.mu.Lock()
 	defer t.mu.Unlock()

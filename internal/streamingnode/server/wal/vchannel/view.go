@@ -191,6 +191,23 @@ func (info *VChannelView) HasReadyTombstoneFinalize(dataCheckpointTimeTick uint6
 	return false
 }
 
+// HasCleanupCandidate reports whether the retained replay fence may need a
+// future tombstone transition or catalog cleanup.
+func (info *VChannelView) HasCleanupCandidate() bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if isVChannelClosed(info.meta.GetState()) {
+		return true
+	}
+	for _, partition := range info.meta.GetCollectionInfo().GetPartitions() {
+		if partition.GetState() == streamingpb.PartitionState_PARTITION_STATE_DROPPED ||
+			partition.GetState() == streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED {
+			return true
+		}
+	}
+	return false
+}
+
 func (info *VChannelView) SwitchIntoMetaAndData() {
 	info.mu.Lock()
 	defer info.mu.Unlock()
