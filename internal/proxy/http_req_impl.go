@@ -31,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -41,41 +43,51 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// authenticatedUsernameKey matches the trusted identity populated by the
+// distributed proxy authentication middleware. Keeping the key here avoids an
+// import cycle from internal/proxy back into internal/distributed/proxy.
+const authenticatedUsernameKey = "username"
+
 var (
 	contentType        = "application/json"
 	defaultDB          = "default"
 	httpDBName         = "db_name"
 	HTTPCollectionName = "collection_name"
 	UnknownData        = "unknown"
-	sensitiveMark      = "*****"
-	sensitiveKeys      = []string{
-		"secretaccesskey",
-		"secret_access_key",
-		"password",
-		"apikey",
-		"credentialjson",
-		"credential_json",
-	}
+	sensitiveMark      = config.RedactedValue
 )
 
-func hideSensitive(configs map[string]string) {
-	checkFunc := func(key string) bool {
-		for _, sensitive := range sensitiveKeys {
-			if strings.Contains(strings.ToLower(key), sensitive) {
-				return true
-			}
+func authorizeConfigView() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
+			return
 		}
-		return false
-	}
-	for key := range configs {
-		if checkFunc(key) {
-			configs[key] = sensitiveMark
+
+		usernameValue, ok := c.Get(authenticatedUsernameKey)
+		username, isString := usernameValue.(string)
+		if !ok || !isString || username == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				mhttp.HTTPReturnCode:    merr.Code(merr.ErrNeedAuthenticate),
+				mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error(),
+			})
+			return
+		}
+		if username != util.UserRoot {
+			err := merr.WrapErrPrivilegeNotPermitted("only root user can read configuration views")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				mhttp.HTTPReturnCode:    merr.Code(err),
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
 		}
 	}
 }
 
+// getConfigs serves a configuration map that the caller has already projected
+// through the owning config.Manager. Do not redact here: only that manager
+// knows which of its keys are declared, and the hook table's keys are unknown
+// to the main one.
 func getConfigs(configs map[string]string) gin.HandlerFunc {
-	hideSensitive(configs)
 	return func(c *gin.Context) {
 		bs, err := json.Marshal(configs)
 		if err != nil {

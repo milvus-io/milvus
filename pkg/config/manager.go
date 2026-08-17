@@ -32,7 +32,31 @@ import (
 const (
 	TombValue     = "TOMB_VAULE"
 	RuntimeSource = "RuntimeSource"
+	// RedactedValue replaces values that are unsafe to expose in a configuration projection.
+	RedactedValue = "*****"
 )
+
+// RegisteredConfigKind identifies how a declared external configuration key
+// must be resolved.
+type RegisteredConfigKind int
+
+const (
+	RegisteredConfigUnknown RegisteredConfigKind = iota
+	RegisteredConfigScalar
+	RegisteredConfigGroup
+)
+
+// sensitiveKeyPatterns provides defense in depth for secret-like dynamic and
+// source keys. Reviewed false positives use explicit NonSensitive metadata.
+var sensitiveKeyPatterns = []string{
+	"password",
+	"secret",
+	"token",
+	"credential",
+	"privatekey",
+	"accesskey",
+	"apikey",
+}
 
 type Filter func(key string) (string, bool)
 
@@ -83,12 +107,17 @@ func filterate(key string, filters ...Filter) (string, bool) {
 }
 
 type Manager struct {
-	Dispatcher    *EventDispatcher
-	sources       *typeutil.ConcurrentMap[string, Source]
-	keySourceMap  *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
-	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
-	forbiddenKeys *typeutil.ConcurrentSet[string]
-	immutableKeys *typeutil.ConcurrentSet[string]
+	Dispatcher            *EventDispatcher
+	sources               *typeutil.ConcurrentMap[string, Source]
+	keySourceMap          *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
+	overlays              *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
+	forbiddenKeys         *typeutil.ConcurrentSet[string]
+	immutableKeys         *typeutil.ConcurrentSet[string]
+	sensitiveKeys         *typeutil.ConcurrentSet[string]
+	sensitiveKeyPrefixes  *typeutil.ConcurrentSet[string]
+	nonSensitiveKeys      *typeutil.ConcurrentSet[string]
+	registeredKeys        *typeutil.ConcurrentSet[string]
+	registeredKeyPrefixes *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
 	configCache map[string]any
@@ -97,13 +126,18 @@ type Manager struct {
 
 func NewManager() *Manager {
 	manager := &Manager{
-		Dispatcher:    NewEventDispatcher(),
-		sources:       typeutil.NewConcurrentMap[string, Source](),
-		keySourceMap:  typeutil.NewConcurrentMap[string, string](),
-		overlays:      typeutil.NewConcurrentMap[string, string](),
-		forbiddenKeys: typeutil.NewConcurrentSet[string](),
-		immutableKeys: typeutil.NewConcurrentSet[string](),
-		configCache:   make(map[string]any),
+		Dispatcher:            NewEventDispatcher(),
+		sources:               typeutil.NewConcurrentMap[string, Source](),
+		keySourceMap:          typeutil.NewConcurrentMap[string, string](),
+		overlays:              typeutil.NewConcurrentMap[string, string](),
+		forbiddenKeys:         typeutil.NewConcurrentSet[string](),
+		immutableKeys:         typeutil.NewConcurrentSet[string](),
+		sensitiveKeys:         typeutil.NewConcurrentSet[string](),
+		sensitiveKeyPrefixes:  typeutil.NewConcurrentSet[string](),
+		nonSensitiveKeys:      typeutil.NewConcurrentSet[string](),
+		registeredKeys:        typeutil.NewConcurrentSet[string](),
+		registeredKeyPrefixes: typeutil.NewConcurrentSet[string](),
+		configCache:           make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
 		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
@@ -156,24 +190,74 @@ func (m *Manager) EvictCacheValueByFormat(keys ...string) {
 }
 
 func (m *Manager) GetConfig(key string) (string, string, error) {
-	realKey := formatKey(key)
+	return m.getConfigByRealKey(formatKey(key), key)
+}
+
+func (m *Manager) getConfigByRealKey(realKey, requestedKey string) (string, string, error) {
 	v, ok := m.overlays.Get(realKey)
 	if ok {
 		if v == TombValue {
-			return "", "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found %s", key)
+			return "", "", errors.Wrap(ErrKeyNotFound, requestedKey) // fmt.Errorf("key not found %s", requestedKey)
 		}
 		return RuntimeSource, v, nil
 	}
 	sourceName, ok := m.keySourceMap.Get(realKey)
 	if !ok {
-		return "", "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
+		return "", "", errors.Wrap(ErrKeyNotFound, requestedKey) // fmt.Errorf("key not found: %s", requestedKey)
 	}
 	v, err := m.getConfigValueBySource(realKey, sourceName)
 	return sourceName, v, err
 }
 
-// GetConfigs returns all the key values
+// ResolveRegisteredConfigKey returns the key identity used by externally
+// managed configuration. ParamItems use the historical separator-free lookup
+// key, while ParamGroup members preserve their dotted suffix so an arbitrary
+// environment alias cannot impersonate a dynamic group value.
+func (m *Manager) ResolveRegisteredConfigKey(key string) (string, RegisteredConfigKind) {
+	return m.resolveRegisteredKey(key)
+}
+
+// GetRegisteredConfig resolves and reads only declared ParamItems or
+// ParamGroups. Unlike GetConfig, dynamic group members use their
+// separator-preserving canonical key; this is the safe API for management
+// endpoints that accept a caller-supplied key.
+func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
+	canonical, kind := m.resolveRegisteredKey(key)
+	if kind == RegisteredConfigUnknown {
+		return "", "", errors.Wrap(ErrKeyNotFound, key)
+	}
+	if kind == RegisteredConfigGroup && m.groupHasEnvironmentSource(canonical) {
+		// ParamGroup suffixes are open-ended. Unlike an explicitly registered
+		// ParamItem, neither a dotted environment variable nor its
+		// separator-free alias proves that the value is Milvus configuration;
+		// fail closed rather than exposing an arbitrary process secret.
+		return "", "", errors.Wrap(ErrKeyNotFound, key)
+	}
+	return m.getConfigByRealKey(canonical, key)
+}
+
+func (m *Manager) groupHasEnvironmentSource(canonical string) bool {
+	for _, candidate := range []string{canonical, formatKey(canonical)} {
+		if source, ok := m.keySourceMap.Get(candidate); ok && source == environmentSourceName {
+			return true
+		}
+	}
+	return false
+}
+
+// GetConfigs returns a safe projection of all key values. Sensitive and
+// unregistered values are redacted. Internal code that requires the original
+// values must call GetConfigsRaw explicitly.
 func (m *Manager) GetConfigs() map[string]string {
+	return m.getConfigs(true)
+}
+
+// GetConfigsRaw returns all original key values without redaction.
+func (m *Manager) GetConfigsRaw() map[string]string {
+	return m.getConfigs(false)
+}
+
+func (m *Manager) getConfigs(redact bool) map[string]string {
 	config := make(map[string]string)
 
 	m.keySourceMap.Range(func(key, value string) bool {
@@ -182,24 +266,22 @@ func (m *Manager) GetConfigs() map[string]string {
 			return true
 		}
 
-		config[key] = sValue
+		config[key] = m.projectValue(key, sValue, redact)
 		return true
 	})
 
 	m.overlays.Range(func(key, value string) bool {
-		config[key] = value
+		config[key] = m.projectValue(key, value, redact)
 		return true
 	})
 
 	return config
 }
 
+// GetConfigsView returns a safe projection of all key values annotated with
+// the source that supplied them.
 func (m *Manager) GetConfigsView() map[string]string {
 	config := make(map[string]string)
-
-	valueFmt := func(source, value string) string {
-		return fmt.Sprintf("%s[%s]", value, source)
-	}
 
 	m.keySourceMap.Range(func(key, value string) bool {
 		source, sValue, err := m.GetConfig(key)
@@ -207,12 +289,20 @@ func (m *Manager) GetConfigsView() map[string]string {
 			return true
 		}
 
-		config[key] = valueFmt(source, sValue)
+		if m.ShouldRedact(key) {
+			config[key] = RedactedValue
+		} else {
+			config[key] = fmt.Sprintf("%s[%s]", sValue, source)
+		}
 		return true
 	})
 
 	m.overlays.Range(func(key, value string) bool {
-		config[key] = valueFmt(RuntimeSource, value)
+		if m.ShouldRedact(key) {
+			config[key] = RedactedValue
+		} else {
+			config[key] = fmt.Sprintf("%s[%s]", value, RuntimeSource)
+		}
 		return true
 	})
 
@@ -220,6 +310,15 @@ func (m *Manager) GetConfigsView() map[string]string {
 }
 
 func (m *Manager) GetBy(filters ...Filter) map[string]string {
+	return m.getBy(true, filters...)
+}
+
+// GetByRaw returns matching original values without redaction.
+func (m *Manager) GetByRaw(filters ...Filter) map[string]string {
+	return m.getBy(false, filters...)
+}
+
+func (m *Manager) getBy(redact bool, filters ...Filter) map[string]string {
 	matchedConfig := make(map[string]string)
 
 	m.keySourceMap.Range(func(key string, value string) bool {
@@ -232,7 +331,7 @@ func (m *Manager) GetBy(filters ...Filter) map[string]string {
 			return true
 		}
 
-		matchedConfig[newkey] = sValue
+		matchedConfig[newkey] = m.projectValue(key, sValue, redact)
 		return true
 	})
 
@@ -241,13 +340,14 @@ func (m *Manager) GetBy(filters ...Filter) map[string]string {
 		if !ok {
 			return true
 		}
-		matchedConfig[newkey] = value
+		matchedConfig[newkey] = m.projectValue(key, value, redact)
 		return true
 	})
 
 	return matchedConfig
 }
 
+// FileConfigs returns a safe projection of the file-source values.
 func (m *Manager) FileConfigs() map[string]string {
 	config := make(map[string]string)
 	m.sources.Range(func(key string, value Source) bool {
@@ -257,6 +357,9 @@ func (m *Manager) FileConfigs() map[string]string {
 		}
 		return true
 	})
+	for key, value := range config {
+		config[key] = m.RedactValue(key, value)
+	}
 	return config
 }
 
@@ -320,6 +423,147 @@ func (m *Manager) ImmutableUpdate(key string) {
 // IsImmutable checks if a configuration key is marked as immutable
 func (m *Manager) IsImmutable(key string) bool {
 	return m.immutableKeys.Contain(formatKey(key))
+}
+
+// RegisterConfigKey records a declared configuration key. Config sources may
+// contain arbitrary values, including every process environment variable, so
+// safe projections must distinguish declared Milvus configuration from source
+// implementation details.
+func (m *Manager) RegisterConfigKey(key string) {
+	formattedKey := formatKey(key)
+	if formattedKey != "" {
+		m.registeredKeys.Insert(formattedKey)
+	}
+}
+
+// RegisterConfigPrefix records a declared dynamic configuration prefix.
+//
+// An empty prefix declares every key of this manager to be Milvus
+// configuration. That is correct only for a manager whose sources are all
+// operator-authored — hook.yaml is the one such case. Declaring it on a
+// manager that carries an EnvSource would hand the whole process environment
+// to configuration projections, so ComponentParam is asserted to have no
+// empty-prefix ParamGroup (see TestNoEmptyPrefixParamGroup).
+func (m *Manager) RegisterConfigPrefix(prefix string) {
+	m.registeredKeyPrefixes.Insert(strings.ToLower(prefix))
+}
+
+// RegisterSensitiveKey marks a declared configuration key as sensitive.
+func (m *Manager) RegisterSensitiveKey(key string) {
+	formattedKey := formatKey(key)
+	if formattedKey != "" {
+		m.sensitiveKeys.Insert(formattedKey)
+	}
+}
+
+// RegisterNonSensitiveKey exempts a reviewed, declared key from the
+// secret-name fallback. Use it only for names such as password length or token
+// count whose values are not credentials.
+func (m *Manager) RegisterNonSensitiveKey(key string) {
+	formattedKey := formatKey(key)
+	if formattedKey != "" {
+		m.nonSensitiveKeys.Insert(formattedKey)
+	}
+}
+
+// RegisterSensitivePrefix marks every configuration below a dynamic prefix as
+// sensitive.
+func (m *Manager) RegisterSensitivePrefix(prefix string) {
+	canonicalPrefix := strings.ToLower(prefix)
+	if canonicalPrefix != "" {
+		m.sensitiveKeyPrefixes.Insert(canonicalPrefix)
+	}
+}
+
+func (m *Manager) resolveRegisteredKey(key string) (canonical string, kind RegisteredConfigKind) {
+	formattedKey := formatKey(key)
+	if m.registeredKeys.Contain(formattedKey) {
+		return formattedKey, RegisteredConfigScalar
+	}
+
+	// Prefix registration intentionally uses the canonical, separator-preserving
+	// key. EnvSource also stores separator-free aliases for every process
+	// environment variable, so accepting such aliases here would let an
+	// unrelated key such as PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL masquerade
+	// as a member of proxy.accessLog.formatters.
+	canonicalKey := lowerKey(strings.ReplaceAll(key, "/", "."))
+	m.registeredKeyPrefixes.Range(func(prefix string) bool {
+		if strings.HasPrefix(canonicalKey, prefix) && len(canonicalKey) > len(prefix) {
+			kind = RegisteredConfigGroup
+			return false
+		}
+		return true
+	})
+	return canonicalKey, kind
+}
+
+// IsSensitive reports whether key is explicitly marked sensitive or has a
+// secret-like name. Explicit NonSensitive metadata exempts reviewed false
+// positives without weakening dynamic ParamGroup keys.
+func (m *Manager) IsSensitive(key string) bool {
+	formattedKey := formatKey(key)
+	if m.sensitiveKeys.Contain(formattedKey) {
+		return true
+	}
+
+	canonicalKey := strings.ToLower(strings.ReplaceAll(key, "/", "."))
+	sensitivePrefix := false
+	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
+		if strings.HasPrefix(canonicalKey, prefix) {
+			sensitivePrefix = true
+			return false
+		}
+		return true
+	})
+	if sensitivePrefix {
+		return true
+	}
+	if m.nonSensitiveKeys.Contain(formattedKey) {
+		return false
+	}
+
+	patternKey := strings.NewReplacer("-", "", "_", "", ".", "", "/", "").Replace(strings.ToLower(key))
+	for _, pattern := range sensitiveKeyPatterns {
+		if strings.Contains(patternKey, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldRedact reports whether a key is unsafe for a configuration projection.
+// Unknown keys fail closed because EnvSource imports the whole process
+// environment and plugin sources may define arbitrary keys.
+func (m *Manager) ShouldRedact(key string) bool {
+	canonical, kind := m.resolveRegisteredKey(key)
+	if kind == RegisteredConfigUnknown {
+		return true
+	}
+	if kind == RegisteredConfigGroup && m.groupHasEnvironmentSource(canonical) {
+		return true
+	}
+	return m.IsSensitive(canonical)
+}
+
+// RedactValue returns a projection-safe value for key.
+func (m *Manager) RedactValue(key, value string) string {
+	return m.projectValue(key, value, true)
+}
+
+// RedactValues returns a projection-safe copy without mutating values.
+func (m *Manager) RedactValues(values map[string]string) map[string]string {
+	redacted := make(map[string]string, len(values))
+	for key, value := range values {
+		redacted[key] = m.RedactValue(key, value)
+	}
+	return redacted
+}
+
+func (m *Manager) projectValue(key, value string, redact bool) string {
+	if redact && m.ShouldRedact(key) {
+		return RedactedValue
+	}
+	return value
 }
 
 func (m *Manager) UpdateSourceOptions(opts ...Option) {
@@ -423,7 +667,12 @@ func (m *Manager) updateEvent(e *Event) error {
 	}
 
 	e.HasUpdated = true
-	mlog.Info(context.TODO(), "receive update event", mlog.Any("event", e))
+	mlog.Info(context.TODO(), "receive update event",
+		mlog.String("eventSource", e.EventSource),
+		mlog.String("eventType", e.EventType),
+		mlog.String("key", e.Key),
+		mlog.String("value", m.RedactValue(e.Key, e.Value)),
+		mlog.Bool("hasUpdated", e.HasUpdated))
 	return nil
 }
 
@@ -435,7 +684,13 @@ func (m *Manager) OnEvent(event *Event) {
 	}
 	err := m.updateEvent(event)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed in updating event with error", mlog.Err(err), mlog.Any("event", event))
+		mlog.Warn(context.TODO(), "failed in updating event with error",
+			mlog.Err(err),
+			mlog.String("eventSource", event.EventSource),
+			mlog.String("eventType", event.EventType),
+			mlog.String("key", event.Key),
+			mlog.String("value", m.RedactValue(event.Key, event.Value)),
+			mlog.Bool("hasUpdated", event.HasUpdated))
 		return
 	}
 
@@ -538,21 +793,25 @@ func (m *Manager) ProcessImmutableConfigs(renderers map[string]func(raw string) 
 			if hasRenderer {
 				rendered := render(configValue)
 				mlog.Info(context.TODO(), "rendered immutable config value before persisting",
-					mlog.String("key", key), mlog.String("rawValue", configValue), mlog.String("renderedValue", rendered))
+					mlog.String("key", key), mlog.String("rawValue", m.RedactValue(key, configValue)),
+					mlog.String("renderedValue", m.RedactValue(key, rendered)))
 				configValue = rendered
 			}
 			mlog.Info(context.TODO(), "immutable config not exist in etcd, saving to persistent storage",
-				mlog.String("fromSource", confgSourceName), mlog.String("key", key), mlog.String("value", configValue))
+				mlog.String("fromSource", confgSourceName), mlog.String("key", key),
+				mlog.String("value", m.RedactValue(key, configValue)))
 			if err := m.SaveConfigToEtcd(etcdSourceImpl, key, configValue); err != nil {
 				mlog.Error(context.TODO(), "failed to save immutable config to etcd",
-					mlog.String("key", key), mlog.String("value", configValue), mlog.Err(err))
+					mlog.String("key", key), mlog.String("value", m.RedactValue(key, configValue)), mlog.Err(err))
 				saveErrors = append(saveErrors, err)
 			} else {
-				mlog.Info(context.TODO(), "successfully saved immutable config to etcd", mlog.String("key", key), mlog.String("value", configValue))
+				mlog.Info(context.TODO(), "successfully saved immutable config to etcd",
+					mlog.String("key", key), mlog.String("value", m.RedactValue(key, configValue)))
 				savedConfigs = append(savedConfigs, key)
 			}
 		} else if getFromEtcdErr == nil {
-			mlog.Info(context.TODO(), "immutable config already exists in etcd", mlog.String("key", key), mlog.String("value", configValue))
+			mlog.Info(context.TODO(), "immutable config already exists in etcd",
+				mlog.String("key", key), mlog.String("value", m.RedactValue(key, configValue)))
 		} else {
 			mlog.Warn(context.TODO(), "failed to check config in etcd", mlog.String("key", key), mlog.Err(getFromEtcdErr))
 		}
@@ -590,11 +849,13 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 	}
 	if !resp.Succeeded {
 		mlog.Info(context.TODO(), "config already exists in etcd, skip writing",
-			mlog.String("etcdKey", etcdKey), mlog.String("configKey", key), mlog.String("value", value))
+			mlog.String("etcdKey", etcdKey), mlog.String("configKey", key),
+			mlog.String("value", m.RedactValue(key, value)))
 		return nil
 	}
 	mlog.Info(context.TODO(), "config atomically saved to etcd",
-		mlog.String("etcdKey", etcdKey), mlog.String("configKey", key), mlog.String("value", value))
+		mlog.String("etcdKey", etcdKey), mlog.String("configKey", key),
+		mlog.String("value", m.RedactValue(key, value)))
 
 	return nil
 }
@@ -650,7 +911,7 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 	mlog.Info(context.TODO(), "configs atomically altered in etcd",
 		mlog.Int("updates", len(updates)),
 		mlog.Int("deletes", len(deletes)),
-		mlog.Any("updated", updates),
+		mlog.Any("updated", m.RedactValues(updates)),
 		mlog.Strings("deleted", deletes))
 	return nil
 }

@@ -53,6 +53,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.textEmbedding.providers.",
 		Version:   "2.6.0",
 		Export:    true,
+		Sensitive: true,
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.enable":
@@ -136,6 +137,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.rerank.model.providers.",
 		Version:   "2.6.0",
 		Export:    true,
+		Sensitive: true,
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.credential":
@@ -194,6 +196,7 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.ZillizProviders = ParamGroup{
 		KeyPrefix: "function.models.zilliz.",
 		Version:   "2.6.5",
+		Sensitive: true,
 	}
 	p.ZillizProviders.Init(base.mgr)
 

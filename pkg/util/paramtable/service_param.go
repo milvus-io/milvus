@@ -337,6 +337,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "username for etcd authentication",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
@@ -346,6 +347,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "password for etcd authentication",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
 
@@ -1262,8 +1264,9 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 	p.AuthPlugin.Init(base.mgr)
 
 	p.AuthParams = ParamItem{
-		Key:     "pulsar.authParams",
-		Version: "2.2.0",
+		Key:       "pulsar.authParams",
+		Version:   "2.2.0",
+		Sensitive: true,
 		Formatter: func(authParams string) string {
 			jsonMap := make(map[string]string)
 			params := strings.Split(authParams, ",")
@@ -1349,6 +1352,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	k.SaslUsername.Init(base.mgr)
 
@@ -1357,6 +1361,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	k.SaslPassword.Init(base.mgr)
 
@@ -1410,10 +1415,11 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.KafkaTLSCACert.Init(base.mgr)
 
 	k.KafkaTLSKeyPassword = ParamItem{
-		Key:     "kafka.ssl.tlsKeyPassword",
-		Version: "2.3.11",
-		Doc:     "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
-		Export:  true,
+		Key:       "kafka.ssl.tlsKeyPassword",
+		Version:   "2.3.11",
+		Doc:       "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
+		Export:    true,
+		Sensitive: true,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
 
@@ -1430,12 +1436,14 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ConsumerExtraConfig.Init(base.mgr)
 
 	k.ProducerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.producer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ProducerExtraConfig.Init(base.mgr)
 
@@ -1622,7 +1630,8 @@ Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_ACCESS_KEY_ID, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.AccessKeyID.Init(base.mgr)
 
@@ -1636,7 +1645,8 @@ Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.SecretAccessKey.Init(base.mgr)
 
@@ -1752,7 +1762,8 @@ When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		DefaultValue: "",
 		Doc: `The JSON content contains the gcs service account credentials.
 Used only for the "gcpnative" cloud provider.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.GcpCredentialJSON.Init(base.mgr)
 

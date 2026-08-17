@@ -4,78 +4,137 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestHideSensitive(t *testing.T) {
-	visibleConfigs := map[string]string{
-		"dummy":      "secretAccessKey",
-		"Foo":        "password",
-		"api":        "apikey",
-		"access":     "XXX",
-		"key":        "XXX",
-		"credential": "XXX",
-	}
-	invisibleConfigs := map[string]string{
-		"MyPassword":                          "123456",
-		"your_secret_access_Key":              "ABCD",
-		"SECRETACCESSKEY2":                    "XXX",
-		"minio.secretAccessKey":               "secretAccessKey",
-		"common.security.defaultRootPassword": "milvus",
-		"credentialaksk1secretaccesskey":      "XXX",
-		"credential.aksk1.secret_access_key":  "XXX",
-		"credentialapikey1apikey":             "apikey",
-		"credential.apikey1.apikey":           "apikey",
-		"credentialgcp1credentialjson":        "credential",
-		"credential.gcp1.credentialjson":      "credential",
-	}
-
-	copiedConfigs := make(map[string]string)
-	for k, v := range visibleConfigs {
-		copiedConfigs[k] = v
-	}
-	hideSensitive(copiedConfigs)
-	for k, v := range visibleConfigs {
-		assert.Contains(t, copiedConfigs, k)
-		assert.Equal(t, copiedConfigs[k], v)
-	}
-
-	copiedConfigs = make(map[string]string)
-	for k, v := range invisibleConfigs {
-		copiedConfigs[k] = v
-	}
-	hideSensitive(copiedConfigs)
-	for k := range invisibleConfigs {
-		assert.Contains(t, copiedConfigs, k)
-		assert.Equal(t, copiedConfigs[k], sensitiveMark)
-	}
-}
-
 func TestGetConfigs(t *testing.T) {
+	// getConfigs serves whatever projection the caller passed in; redaction
+	// belongs to the config.Manager that owns the keys.
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	configs := map[string]string{"key": "value"}
-	handler := getConfigs(configs)
-	handler(c)
+	configs := map[string]string{
+		"common.security.authorizationEnabled": "true",
+		"service_token":                        sensitiveMark,
+	}
+	getConfigs(configs)(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "key")
-	assert.Contains(t, w.Body.String(), "value")
+	assert.Contains(t, w.Body.String(), "common.security.authorizationEnabled")
+	assert.Contains(t, w.Body.String(), sensitiveMark)
+}
+
+func TestAuthorizeConfigView(t *testing.T) {
+	params := paramtable.Get()
+	authKey := params.CommonCfg.AuthorizationEnabled.Key
+	defer params.Reset(authKey)
+
+	request := func(username any) int {
+		router := gin.New()
+		if username != nil {
+			router.Use(func(c *gin.Context) {
+				c.Set(authenticatedUsernameKey, username)
+			})
+		}
+		router.GET("/configs", authorizeConfigView(), func(c *gin.Context) {
+			c.Status(http.StatusNoContent)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/configs", nil)
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	require.NoError(t, params.Save(authKey, "false"))
+	assert.Equal(t, http.StatusNoContent, request(nil))
+
+	require.NoError(t, params.Save(authKey, "true"))
+	assert.Equal(t, http.StatusUnauthorized, request(nil))
+	assert.Equal(t, http.StatusUnauthorized, request(123))
+	assert.Equal(t, http.StatusForbidden, request("alice"))
+	assert.Equal(t, http.StatusNoContent, request(util.UserRoot))
+}
+
+func TestConfigRoutesRequireRootWhenAuthorizationEnabled(t *testing.T) {
+	params := paramtable.Get()
+	authKey := params.CommonCfg.AuthorizationEnabled.Key
+	defer params.Reset(authKey)
+	require.NoError(t, params.Save(authKey, "true"))
+
+	for _, tc := range []struct {
+		name       string
+		username   string
+		statusCode int
+	}{
+		{name: "missing user", statusCode: http.StatusUnauthorized},
+		{name: "non-root user", username: "alice", statusCode: http.StatusForbidden},
+		{name: "root user", username: util.UserRoot, statusCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			if tc.username != "" {
+				router.Use(func(c *gin.Context) {
+					c.Set(authenticatedUsernameKey, tc.username)
+				})
+			}
+			(&Proxy{}).RegisterRestRouter(router)
+
+			for _, path := range []string{mhttp.ClusterConfigsPath, mhttp.HookConfigsPath} {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				router.ServeHTTP(w, req)
+				assert.Equal(t, tc.statusCode, w.Code, path)
+			}
+		})
+	}
+}
+
+func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
+	const sentinelValue = "proxy-config-view-sentinel"
+	t.Setenv("MILVUS_CONF_SERVICE_TOKEN", sentinelValue)
+	t.Setenv("DATABASE_URL", sentinelValue)
+
+	base := paramtable.NewBaseTable(paramtable.SkipRemote(true))
+	params := &paramtable.ComponentParam{}
+	params.Init(base)
+
+	// EnvSource imports the whole process environment, so the sentinel really
+	// is in the manager; the view is what must not carry it.
+	foundRaw := false
+	for _, value := range base.Manager().GetConfigsRaw() {
+		if strings.Contains(value, sentinelValue) {
+			foundRaw = true
+			break
+		}
+	}
+	require.True(t, foundRaw, "sentinel was never imported, the test proves nothing")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	getConfigs(params.GetConfigsView())(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), sentinelValue)
+	assert.Contains(t, w.Body.String(), sensitiveMark)
 }
 
 func TestGetClusterInfo(t *testing.T) {

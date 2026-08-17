@@ -968,6 +968,7 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.SuperUsers.Init(base.mgr)
 
@@ -978,6 +979,12 @@ like the old password verification when updating the credential`,
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		// Sensitive but deliberately NOT Immutable: ProcessImmutableConfigs
+		// persists every Immutable key's current value into etcd on first
+		// startup, so marking a credential Immutable would copy it into etcd in
+		// cleartext -- the opposite of what redacting it from a configuration
+		// projection is for. See TestNoCredentialIsImmutable.
+		Sensitive: true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -1768,6 +1775,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
+		Sensitive:    true,
 	}
 	t.OtlpHeaders.Init(base.mgr)
 
@@ -2327,6 +2335,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "6",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
+		NonSensitive: true,
 	}
 	p.MinPasswordLength.Init(base.mgr)
 
@@ -2350,6 +2359,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Key:          "proxy.maxPasswordLength",
 		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		NonSensitive: true,
 		Formatter: func(v string) string {
 			n := getAsInt(v)
 			if n <= 0 || n > 72 {
@@ -6108,6 +6118,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
+		NonSensitive: true,
 	}
 	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
 

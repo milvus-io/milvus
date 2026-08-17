@@ -18,7 +18,10 @@ type hookConfig struct {
 
 func (h *hookConfig) init(base *BaseTable) {
 	h.hookBase = base
-	mlog.Info(context.TODO(), "hook config", mlog.Any("hook", base.FileConfigs()))
+	// Hook configuration may contain plugin credentials. At this point the
+	// ParamItems have not all registered their Sensitive metadata yet, so avoid
+	// logging the raw map altogether.
+	mlog.Info(context.TODO(), "hook config loaded", mlog.Int("entries", len(base.FileConfigs())))
 
 	h.SoPath = ParamItem{
 		Key:          "soPath",

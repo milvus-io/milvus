@@ -49,7 +49,13 @@ type EtcdSource struct {
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	mlog.Debug(context.TODO(), "init etcd source", mlog.Any("etcdInfo", etcdInfo))
+	// Do not log EtcdInfo directly: it contains the etcd username/password and
+	// certificate paths. Keep only non-secret operational shape information.
+	mlog.Debug(context.TODO(), "init etcd source",
+		mlog.Bool("useEmbed", etcdInfo.UseEmbed),
+		mlog.Bool("authEnabled", etcdInfo.EnableAuth),
+		mlog.Bool("tlsEnabled", etcdInfo.UseSSL),
+		mlog.Int("endpointCount", len(etcdInfo.Endpoints)))
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
@@ -182,7 +188,10 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 		key = strings.TrimPrefix(key, prefix+"/")
 		newConfig[key] = string(kv.Value)
 		newConfig[formatKey(key)] = string(kv.Value)
-		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)), mlog.String("value", string(kv.Value)))
+		// Values may be secrets, and this initial refresh can run before ParamItem
+		// metadata has registered sensitive keys. Logging only the key avoids a
+		// startup-order-dependent disclosure.
+		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)))
 	}
 	return es.update(newConfig)
 }
