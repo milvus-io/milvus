@@ -374,7 +374,22 @@ func (s *taskScheduler) run() {
 	}
 
 	workerSlots := s.nodeManager.QuerySlots()
-	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("workerSlots", workerSlots))
+	// Build the node-slot max-heap once per round and reuse it across all picks,
+	// so each task lands on the currently least-loaded DataNode (water-filling).
+	// Entries hold pointers into workerSlots, so hasAvailableSlots on the map
+	// still observes the decrements applied through the heap.
+	slotHeap := newNodeSlotHeap(workerSlots)
+
+	var totalAvailable int64
+	for _, ws := range workerSlots {
+		totalAvailable += ws.AvailableSlots
+	}
+	log.Ctx(s.ctx).Info("task scheduler round starting",
+		zap.Int("pendingTasks", pendingTaskNum),
+		zap.Int("nodes", len(workerSlots)),
+		zap.Int64("totalAvailableSlots", totalAvailable),
+		zap.Any("workerSlots", workerSlots))
+
 	var wg sync.WaitGroup
 	for {
 		if !s.hasAvailableSlots(workerSlots) {
@@ -387,7 +402,7 @@ func (s *taskScheduler) run() {
 		}
 
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(workerSlots, taskSlot)
+		nodeID := s.pickNode(slotHeap, taskSlot)
 
 		wg.Add(1)
 		go func(task Task, nodeID UniqueID) {
@@ -630,29 +645,74 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	return false
 }
 
-func (s *taskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
+// nodeSlotEntry pairs a DataNode ID with a pointer to its live WorkerSlots so
+// that mutations made while an entry sits outside the heap are visible to
+// hasAvailableSlots (which walks the same map).
+type nodeSlotEntry struct {
+	nodeID int64
+	slots  *session.WorkerSlots
+}
+
+// newNodeSlotHeap builds a max-heap ordered by AvailableSlots. The heap MUST
+// NOT be mutated while an entry is still inside it, or heap order will break;
+// callers Pop, mutate, then Push.
+func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*nodeSlotEntry] {
+	entries := make([]*nodeSlotEntry, 0, len(workerSlots))
+	for nodeID, ws := range workerSlots {
+		entries = append(entries, &nodeSlotEntry{nodeID: nodeID, slots: ws})
+	}
+	return typeutil.NewObjectArrayBasedMaximumHeap(entries, func(e *nodeSlotEntry) int64 {
+		return e.slots.AvailableSlots
+	})
+}
+
+// pickNode returns the currently least-loaded DataNode (the one with the most
+// available slots). Always assigning to the most-available node spreads tasks
+// evenly across DataNodes instead of hot-spotting whichever node happened to
+// come first in the previous map-iteration-based first-fit.
+//
+// Fallback behavior when no node fully satisfies taskSlot is preserved: the
+// most-available node is chosen and its remaining slots are drained to 0.
+// Returns -1 when the heap is empty or the top-of-heap has no capacity.
+func (s *taskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
 	s.slotsMutex.Lock()
 	defer s.slotsMutex.Unlock()
 
-	var fallbackNodeID int64 = -1
-	var maxAvailable int64 = -1
-
-	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
-		}
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			fallbackNodeID = nodeID
-		}
+	if slotHeap.Len() == 0 {
+		return -1
 	}
 
-	if fallbackNodeID != -1 {
-		workerSlots[fallbackNodeID].AvailableSlots = 0
-		return fallbackNodeID
+	entry := slotHeap.Pop()
+	before := entry.slots.AvailableSlots
+
+	// Non-positive slot tasks (e.g., cleanup) dispatch without consuming capacity.
+	if taskSlot <= 0 {
+		slotHeap.Push(entry)
+		log.Ctx(s.ctx).Debug("pickNode assigned zero-slot task",
+			zap.Int64("nodeID", entry.nodeID),
+			zap.Int64("availableSlots", entry.slots.AvailableSlots))
+		return entry.nodeID
 	}
-	return -1
+
+	if entry.slots.AvailableSlots <= 0 {
+		slotHeap.Push(entry)
+		return -1
+	}
+
+	if entry.slots.AvailableSlots >= taskSlot {
+		entry.slots.AvailableSlots -= taskSlot
+	} else {
+		// Fallback: drain the most-available node when nothing fully fits.
+		entry.slots.AvailableSlots = 0
+	}
+	slotHeap.Push(entry)
+
+	log.Ctx(s.ctx).Debug("pickNode assigned task",
+		zap.Int64("nodeID", entry.nodeID),
+		zap.Int64("taskSlot", taskSlot),
+		zap.Int64("slotsBefore", before),
+		zap.Int64("slotsAfter", entry.slots.AvailableSlots))
+	return entry.nodeID
 }
 
 func (s *taskScheduler) hasAvailableSlots(workerSlots map[int64]*session.WorkerSlots) bool {

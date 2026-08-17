@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -102,12 +103,27 @@ func (s *importScheduler) process() {
 		return jobs[i].GetJobID() < jobs[j].GetJobID()
 	})
 	nodeSlots := s.peekSlots()
+	// Build a max-heap ordered by available slots once per scheduling round and
+	// reuse it across all picks, so each pending import task lands on the
+	// currently least-loaded DataNode (water-filling) rather than the first
+	// map-iteration hit — which under Go's randomised map order still
+	// consistently hot-spots one DataNode on real clusters.
+	slotHeap := newImportNodeSlotHeap(nodeSlots)
+	var totalAvailable int64
+	for _, slots := range nodeSlots {
+		totalAvailable += slots
+	}
+	log.Ctx(s.ctx).Info("import scheduler round starting",
+		zap.Int("pendingJobs", len(jobs)),
+		zap.Int("nodes", len(nodeSlots)),
+		zap.Int64("totalAvailableSlots", totalAvailable),
+		zap.Any("nodeSlots", nodeSlots))
 	for _, job := range jobs {
 		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
-				nodeID := s.pickNode(task, nodeSlots)
+				nodeID := s.pickNode(task, slotHeap)
 				switch task.GetType() {
 				case PreImportTaskType:
 					s.processPendingPreImport(task, nodeID)
@@ -156,30 +172,72 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 	return nodeSlots
 }
 
-func (s *importScheduler) pickNode(task ImportTask, nodeSlots map[int64]int64) int64 {
-	var (
-		fallbackNodeID    int64 = NullNodeID
-		maxAvailableSlots int64 = -1
-	)
+// importNodeSlot pairs a DataNode ID with its currently available import slots.
+// Unlike task_scheduler's nodeSlotEntry, this holds an int64 by value because
+// peekSlots() returns map[int64]int64 (bare counts, not *WorkerSlots pointers),
+// so there is no shared map to keep in sync — the heap is the single source of
+// truth within one process() round.
+type importNodeSlot struct {
+	nodeID int64
+	slots  int64
+}
+
+// newImportNodeSlotHeap builds a max-heap ordered by available slots. The heap
+// MUST NOT be mutated while an entry is still inside it, or heap order will
+// break; callers Pop, mutate, then Push.
+func newImportNodeSlotHeap(nodeSlots map[int64]int64) typeutil.Heap[*importNodeSlot] {
+	entries := make([]*importNodeSlot, 0, len(nodeSlots))
+	for nodeID, slots := range nodeSlots {
+		entries = append(entries, &importNodeSlot{nodeID: nodeID, slots: slots})
+	}
+	return typeutil.NewObjectArrayBasedMaximumHeap(entries, func(e *importNodeSlot) int64 {
+		return e.slots
+	})
+}
+
+// pickNode returns the currently least-loaded DataNode (the one with the most
+// available import slots). Always assigning to the most-available node spreads
+// import/preimport tasks evenly across DataNodes instead of hot-spotting
+// whichever node happened to come first in the previous map-iteration-based
+// first-fit — the failure mode observed in milvus-io/milvus discussion #50872
+// where one DataNode absorbed ~82% of tasks while three peers idled.
+//
+// Fallback behavior when no node fully satisfies the task requirement is
+// preserved: the most-available node is chosen and its remaining slots are
+// drained to 0. Returns NullNodeID when the heap is empty or the top-of-heap
+// has no capacity.
+//
+// No mutex needed: process() is called serially from a single ticker goroutine,
+// so slotHeap is not touched concurrently.
+func (s *importScheduler) pickNode(task ImportTask, slotHeap typeutil.Heap[*importNodeSlot]) int64 {
+	if slotHeap.Len() == 0 {
+		return NullNodeID
+	}
+
+	entry := slotHeap.Pop()
+	before := entry.slots
 	require := task.GetSlots()
-	for id, availableSlots := range nodeSlots {
-		// if the node has enough slots, assign the task to the node
-		if availableSlots >= require {
-			nodeSlots[id] -= require
-			return id
-		}
-		// find the node with the most available slots
-		if availableSlots > 0 && availableSlots > maxAvailableSlots {
-			fallbackNodeID = id
-			maxAvailableSlots = availableSlots
-		}
+
+	if entry.slots <= 0 {
+		slotHeap.Push(entry)
+		return NullNodeID
 	}
-	if fallbackNodeID != NullNodeID {
-		// if no node has enough slots, assign the task to the node with the most available slots
-		nodeSlots[fallbackNodeID] = 0
-		return fallbackNodeID
+
+	if entry.slots >= require {
+		entry.slots -= require
+	} else {
+		// Fallback: drain the most-available node when nothing fully fits.
+		entry.slots = 0
 	}
-	return NullNodeID
+	slotHeap.Push(entry)
+
+	log.Ctx(s.ctx).Debug("importScheduler pickNode assigned task",
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("nodeID", entry.nodeID),
+		zap.Int64("require", require),
+		zap.Int64("slotsBefore", before),
+		zap.Int64("slotsAfter", entry.slots))
+	return entry.nodeID
 }
 
 func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64) {
