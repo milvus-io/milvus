@@ -235,15 +235,6 @@ func (m *Manager) getConfigByRealKey(realKey, requestedKey string) (string, stri
 	return sourceName, v, err
 }
 
-// HasEnvironmentSource reports whether this manager imports the process
-// environment. Declaring an empty ParamGroup prefix on such a manager hands
-// every variable in the pod to the configuration projections; on a manager
-// whose sources are all operator-authored it is harmless.
-func (m *Manager) HasEnvironmentSource() bool {
-	_, ok := m.sources.Get(environmentSourceName)
-	return ok
-}
-
 // EtcdConfigKey returns the identity a configuration key is stored under in
 // etcd. AlterConfigsInEtcd applies it on the way in, so callers that need to
 // reason about collisions before writing must use the same function.
@@ -687,15 +678,18 @@ func (m *Manager) RegisterConfigKey(key string) {
 // manager that carries an EnvSource would hand the whole process environment
 // to configuration projections, so ComponentParam is asserted to have no
 // empty-prefix ParamGroup (see TestNoEmptyPrefixParamGroup).
+// RegisterConfigPrefix records a declared dynamic configuration prefix.
+//
+// An empty prefix declares every key of this manager to be Milvus
+// configuration, which is correct only for a table whose sources are all
+// operator-authored — hook.yaml is the one such case. It is accepted rather
+// than refused because the refusal could not be made reliable: prefixes and
+// sources are registered in either order, so a check here would fire or not
+// depending on which came first. What actually contains the hazard is
+// groupMemberIsEnvironmentOnly, which refuses a key whose only backing is the
+// environment whatever prefix matched it —
+// TestEmptyPrefixNeverPublishesTheEnvironment is the guarantee.
 func (m *Manager) RegisterConfigPrefix(prefix string) {
-	// An empty prefix declares every key of this manager to be Milvus
-	// configuration. That is correct for a table whose sources are all
-	// operator-authored — hook.yaml is the one such case — and catastrophic for
-	// one that imports the process environment, so refuse exactly that pairing.
-	if prefix == "" && m.HasEnvironmentSource() {
-		panic("an empty config prefix on a manager that imports the process " +
-			"environment would declare every variable in the pod to be Milvus configuration")
-	}
 	m.registeredKeyPrefixes.Insert(strings.ToLower(prefix))
 }
 
@@ -830,6 +824,16 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
 	if m.nonSensitiveKeys.Contain(lookup) {
 		return false
 	}
+
+	// Lower-cased here rather than upstream: lowerKey deliberately leaves
+	// NotFormatPrefix keys alone so knowhere index parameters keep the case
+	// their engine needs. Every rule below matches against lower-case literals,
+	// so without this "knowhere.apiKey" would classify differently from
+	// "knowhere.apikey" — the exact four-spellings-of-one-key problem this file
+	// exists to remove, reintroduced in the one namespace that legitimately
+	// uses mixed case.
+	dotted = strings.ToLower(dotted)
+
 	switch m.matchSensitivePrefix(dotted) {
 	case prefixSensitive:
 		return true

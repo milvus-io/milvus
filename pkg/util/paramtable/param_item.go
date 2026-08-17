@@ -440,8 +440,6 @@ type ParamGroup struct {
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
 	pg.manager = manager
-	// RegisterConfigPrefix rejects an empty prefix on a manager that imports the
-	// process environment.
 	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 	if pg.Sensitive {
 		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)

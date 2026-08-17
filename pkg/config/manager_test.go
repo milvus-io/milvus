@@ -671,21 +671,55 @@ func TestRegisteredGroupMemberMatchesGroupValue(t *testing.T) {
 	assert.Equal(t, group["ipadic"], reported, "the management API must not name a different value")
 }
 
-// The empty prefix is what hookConfig.SoConfig registers, and on a table that
-// imports the environment it would declare every variable in the pod to be
-// Milvus configuration. Refuse the pairing where it is declared rather than
-// trying to filter the consequences afterwards.
-func TestEmptyPrefixRefusedOnEnvironmentBearingManager(t *testing.T) {
+// The empty prefix is what hookConfig.SoConfig registers, and it declares every
+// key of the manager to be configuration. On a table that imports the process
+// environment that must still publish nothing, because the environment guard is
+// what contains the hazard rather than any restriction on the prefix.
+func TestEmptyPrefixNeverPublishesTheEnvironment(t *testing.T) {
 	t.Setenv("PROBESINGLE", "single-token-secret")
+	t.Setenv("probe_lower_case", "lower-case-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
 
-	withEnv, _ := Init(WithEnvSource(formatKey))
-	assert.Panics(t, func() { withEnv.RegisterConfigPrefix("") })
-	assert.NotPanics(t, func() { withEnv.RegisterConfigPrefix("some.prefix.") })
+	// Registered before the source and after it: the guarantee must not depend
+	// on which order they happen in.
+	before := NewManager()
+	before.RegisterConfigPrefix("")
+	require.NoError(t, before.AddSource(NewEnvSource(formatKey)))
 
-	// A file-only table — what NewBaseTableFromYamlOnly builds for hook.yaml —
-	// is the one place the empty prefix is correct.
-	fileOnly := NewManager()
-	assert.NotPanics(t, func() { fileOnly.RegisterConfigPrefix("") })
+	after, _ := Init(WithEnvSource(formatKey))
+	after.RegisterConfigPrefix("")
+
+	for name, mgr := range map[string]*Manager{"prefix first": before, "source first": after} {
+		require.NotEmpty(t, mgr.GetConfigsRaw(), name)
+		assert.Empty(t, mgr.GetConfigs(), name)
+		assert.Empty(t, mgr.GetConfigsView(), name)
+		for _, spelling := range []string{"PROBESINGLE", "probesingle", "probe_lower_case", "AWS_SECRET_ACCESS_KEY"} {
+			_, _, err := mgr.GetRegisteredConfig(spelling)
+			require.ErrorIs(t, err, ErrKeyUnregistered, name+" "+spelling)
+		}
+	}
+}
+
+// Keys below NotFormatPrefix keep their case, so every name-based rule has to
+// fold it explicitly or the same key classifies two ways depending on spelling.
+func TestNameBasedRulesIgnoreCaseUnderNotFormatPrefix(t *testing.T) {
+	patterns := NewManager()
+	patterns.RegisterConfigPrefix(NotFormatPrefix)
+	for _, key := range []string{"knowhere.apiKey", "knowhere.apikey", "knowhere.DISKANN.authToken"} {
+		patterns.SetConfig(key, "secret")
+		assert.True(t, patterns.IsSensitive(key), key)
+		assert.Equal(t, RedactedValue, patterns.GetConfigs()[key], key)
+	}
+
+	exempt := NewManager()
+	exempt.RegisterConfigPrefix(NotFormatPrefix)
+	exempt.RegisterSensitivePrefix(NotFormatPrefix)
+	exempt.RegisterNonSensitiveSuffix(NotFormatPrefix, "enable")
+	for _, key := range []string{"knowhere.Enable", "knowhere.enable"} {
+		exempt.SetConfig(key, "visible")
+		assert.False(t, exempt.IsSensitive(key), key)
+	}
+	assert.True(t, exempt.IsSensitive("knowhere.Secret"))
 }
 
 // Whatever the prefix, a variable whose raw name is ALREADY in canonical form —

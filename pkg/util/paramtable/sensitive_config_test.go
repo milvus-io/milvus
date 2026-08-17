@@ -121,20 +121,6 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 	assert.Equal(t, "configured-secret", raw["miniosecretaccesskey"])
 }
 
-// An empty KeyPrefix declares every key of a manager to be configuration. That
-// is only safe on a table whose sources are all operator-authored, so the check
-// is on the actual hazard — does this manager import the environment — rather
-// than on the shape of the declaration.
-func TestEmptyPrefixParamGroupRefusedOnEnvironmentBearingManager(t *testing.T) {
-	hookLike := config.NewManager() // file-only table, as NewBaseTableFromYamlOnly builds
-	assert.NotPanics(t, func() { (&ParamGroup{KeyPrefix: ""}).Init(hookLike) },
-		"hook.yaml is the one table where an empty prefix is correct")
-
-	mainLike, _ := config.Init(config.WithEnvSource(func(key string) string { return key }))
-	assert.Panics(t, func() { (&ParamGroup{KeyPrefix: ""}).Init(mainLike) })
-	assert.NotPanics(t, func() { (&ParamGroup{KeyPrefix: "some.prefix."}).Init(mainLike) })
-}
-
 func isConfigRegistered(m *config.Manager, key string) bool {
 	_, kind := m.ResolveRegisteredConfigKey(key)
 	return kind != config.RegisteredConfigUnknown

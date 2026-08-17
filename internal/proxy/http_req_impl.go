@@ -90,12 +90,13 @@ func authorizeConfigView() gin.HandlerFunc {
 	}
 }
 
-// Note on why this is root and not common.security.superUsers: superUsers is a
-// declared, non-sensitive, refreshable ParamItem, which makes it writable
-// through /management/config/alter — an endpoint on the metrics port that this
-// change does not authenticate. Using it here would let anyone who can reach
-// that port add themselves to the list and then read the view. An authorization
-// input has to be at least as hard to write as the thing it authorizes.
+// Note on why this is root and not common.security.superUsers: an authorization
+// input has to be at least as hard to write as the thing it authorizes, and
+// superUsers is configuration. /management/config/alter now refuses to touch
+// anything IsSecurityGoverningConfig covers, superUsers included, but that
+// endpoint is on the metrics port and still has no authentication of its own —
+// so the list is only as protected as that one fence. root is an identity, not
+// a config value, and does not depend on the fence holding.
 
 // getConfigs serves a configuration map that the caller has already projected
 // through the owning config.Manager. Do not redact here: only that manager

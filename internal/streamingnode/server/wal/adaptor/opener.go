@@ -144,7 +144,7 @@ func (o *openerAdaptorImpl) determineWALName(ctx context.Context, opt *wal.OpenO
 			mlog.Stringer("checkpoint", checkpoint.MessageID),
 			mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
 			mlog.Stringer("currentWAL", checkpoint.MessageID.WALName()),
-			mlog.Any("AlterWalState", checkpoint.AlterWalState))
+			mlog.Any("AlterWalState", utility.LoggableAlterWALState(checkpoint.AlterWalState)))
 		walName = checkpoint.MessageID.WALName()
 	}
 

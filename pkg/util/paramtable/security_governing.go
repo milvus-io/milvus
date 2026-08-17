@@ -35,6 +35,13 @@ var securityGoverningConfigKeys = []string{
 	// Turning this off stops RBAC checks resolving an alias to its collection,
 	// so a grant on the collection no longer covers access through the alias.
 	"proxy.resolvealiasforprivilege",
+	// Read through base.Get by common.security.enablePublicPrivilege's
+	// Formatter rather than declared as a ParamItem, so nothing else notices
+	// it: not the audit walk, which only sees declarations, and not the
+	// endpoint's undeclared-key check, which only guards writes. Deleting the
+	// etcd entry an operator used to disable public privileges restores the
+	// permissive default.
+	"proxy.enablepublicprivilege",
 }
 
 // IsSecurityGoverningConfig reports whether a key decides authentication or

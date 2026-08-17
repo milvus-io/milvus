@@ -72,10 +72,10 @@ func TestAuthorizeConfigView(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, request("alice"))
 	assert.Equal(t, http.StatusNoContent, request(util.UserRoot))
 
-	// Deliberately NOT superUsers: that list is a declared, non-sensitive,
-	// refreshable ParamItem, so /management/config/alter can write it, and that
-	// endpoint has no authentication. Granting on it would let anyone who can
-	// reach the metrics port add themselves and then read the view.
+	// Deliberately NOT superUsers: it is configuration, and an authorization
+	// input must be at least as hard to write as what it authorizes. The alter
+	// endpoint now fences it, but that endpoint is itself unauthenticated, so
+	// the fence is the only thing in the way.
 	superUserKey := params.CommonCfg.SuperUsers.Key
 	defer params.Reset(superUserKey)
 	require.NoError(t, params.Save(superUserKey, "alice,bob"))

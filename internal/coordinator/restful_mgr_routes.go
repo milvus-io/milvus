@@ -1333,7 +1333,10 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// authorization switch or the superuser list would make every other
 		// check here decorative. Deletes are refused too: dropping an etcd entry
 		// that holds "authorization enabled" is itself a way to turn it off.
-		if paramtable.IsSecurityGoverningConfig(canonicalKey) {
+		// Checked against both identities: an undeclared legacy key resolves to
+		// whatever the caller typed, so only the raw spelling would match the
+		// fence, while a declared key is normalised to its dotted form first.
+		if paramtable.IsSecurityGoverningConfig(canonicalKey) || paramtable.IsSecurityGoverningConfig(config.Key) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
@@ -1358,10 +1361,13 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Writes are constrained; deletes are not. Removing an entry from etcd
-		// can only ever reduce what this endpoint exposes, and refusing it would
-		// strand an operator holding a key an older build wrote — a secret, or a
-		// ParamItem that a later version stopped declaring.
+		// Writes are constrained; deletes are not, beyond the security fence
+		// above. A delete does not simply remove a setting — it restores
+		// whatever the yaml or the compiled default says, which can be the more
+		// permissive of the two, so it is fenced for authorization-deciding keys
+		// exactly like a write. For everything else refusing it would strand an
+		// operator holding a key an older build wrote: a secret, or a ParamItem
+		// that a later version stopped declaring.
 		if config.Value != nil {
 			if registeredKind == pkgconfig.RegisteredConfigUnknown {
 				logger.Info(request.Context(), "HandleAlterConfig attempted to set unregistered config",

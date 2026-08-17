@@ -17,10 +17,15 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"unsafe"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
@@ -281,6 +286,62 @@ func TestSecurityGoverningPrefixCoversTheSecuritySection(t *testing.T) {
 			"them:\n  %s\nDeclare them under %q, or add them to "+
 			"securityGoverningConfigKeys with a reason.",
 			strings.Join(escaped, "\n  "), SecurityGoverningConfigPrefix)
+	}
+}
+
+// TestLegacyFallbackKeysAreDeclaredOrFenced closes the blind spot the audit
+// above has by construction.
+//
+// A key read straight through base.Get is not a ParamItem, so the walk cannot
+// see it, and the alter endpoint's undeclared-key check only guards writes — a
+// DELETE of such a key is accepted, and a delete restores a default that can be
+// more permissive than the value it replaces. That is how
+// proxy.enablePublicPrivilege, the legacy alias behind
+// common.security.enablePublicPrivilege, stayed reachable. So scan the
+// declarations themselves for the pattern and require every such key to be
+// either a declared ParamItem or inside the security fence.
+func TestLegacyFallbackKeysAreDeclaredOrFenced(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+
+	declared := make(map[string]struct{})
+	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
+		declared[strings.ToLower(item.Key)] = struct{}{}
+		for _, fallback := range item.FallbackKeys {
+			declared[strings.ToLower(fallback)] = struct{}{}
+		}
+	})
+
+	sources, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	pattern := regexp.MustCompile(`\b(?:base|bt|p\.base)\.Get\("([^"]+)"\)`)
+
+	unguarded := make([]string, 0)
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(source)
+		require.NoError(t, err)
+		for _, match := range pattern.FindAllStringSubmatch(string(body), -1) {
+			key := strings.ToLower(match[1])
+			if strings.Contains(key, `"+`) || strings.Contains(match[1], "+") {
+				continue // built at runtime, not a fixed key
+			}
+			if _, ok := declared[key]; ok {
+				continue
+			}
+			if IsSecurityGoverningConfig(key) {
+				continue
+			}
+			unguarded = append(unguarded, match[1]+" (read in "+source+")")
+		}
+	}
+
+	if len(unguarded) > 0 {
+		t.Errorf("these keys are read but never declared, so nothing stops the "+
+			"management endpoint deleting them:\n  %s\nDeclare them as ParamItems, "+
+			"or add them to securityGoverningConfigKeys if they decide authorization.",
+			strings.Join(unguarded, "\n  "))
 	}
 }
 
