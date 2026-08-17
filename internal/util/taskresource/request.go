@@ -425,7 +425,7 @@ func LegacySlotToRequirement(slot int64) Requirement {
 		slot = 1
 	}
 	cfg := &paramtable.Get().DataNodeCfg
-	perSlot := cfg.ResourceLegacyMemoryPerSlot.GetAsInt64()
+	perSlot := LegacyMemoryPerSlot()
 	unit := cfg.WorkerSlotUnit.GetAsFloat()
 	if unit <= 0 {
 		unit = 1

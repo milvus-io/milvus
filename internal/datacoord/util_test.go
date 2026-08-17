@@ -23,10 +23,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -130,26 +132,32 @@ func TestMemoryToSlots(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
 
-	t.Run("divides by the configured bytes-per-slot", func(t *testing.T) {
-		pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "1048576") // 1MiB
-		defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
+	// 8GiB / (8192 x 1) = 1MiB raw per slot, x memoryRatio 1.0.
+	oneMiBPerSlot := func(t *testing.T) {
+		t.Helper()
+		pt.Save(pt.DataNodeCfg.WorkerSlotUnit.Key, "8192")
+		t.Cleanup(func() { pt.Reset(pt.DataNodeCfg.WorkerSlotUnit.Key) })
+		pt.Save(pt.DataNodeCfg.ResourceMemoryRatio.Key, "1.0")
+		t.Cleanup(func() { pt.Reset(pt.DataNodeCfg.ResourceMemoryRatio.Key) })
+		require.EqualValues(t, 1024*1024, taskresource.LegacyMemoryPerSlot())
+	}
+
+	t.Run("divides by the derived bytes-per-slot", func(t *testing.T) {
+		oneMiBPerSlot(t)
 
 		assert.EqualValues(t, 10, memoryToSlots(10*1024*1024))
 	})
 
 	t.Run("floors at 1 slot instead of 0", func(t *testing.T) {
-		pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "1048576") // 1MiB
-		defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
+		oneMiBPerSlot(t)
 
 		assert.EqualValues(t, 1, memoryToSlots(0))
 		assert.EqualValues(t, 1, memoryToSlots(1024))
 	})
 
-	t.Run("falls back to the 128MiB default when the config is non-positive", func(t *testing.T) {
-		pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "0")
-		defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
-
-		assert.EqualValues(t, 2, memoryToSlots(256*1024*1024))
+	t.Run("uses the default derived rate when nothing is configured", func(t *testing.T) {
+		// 384MiB per slot at the defaults, so 768MiB is 2 slots.
+		assert.EqualValues(t, 2, memoryToSlots(768*1024*1024))
 	})
 }
 

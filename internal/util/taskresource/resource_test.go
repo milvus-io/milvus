@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestRequirementArithmetic(t *testing.T) {
@@ -81,12 +82,61 @@ func TestRequirementString(t *testing.T) {
 	assert.Equal(t, "{cpu=2.00 mem=3MiB}", r.String())
 }
 
+// The exchange rate is derived from the slot multipliers, not configured, so
+// every term of the derivation has to be exercised -- most of all memoryRatio,
+// which is the one a later simplification is most likely to drop.
 func TestLegacyMemoryPerSlot(t *testing.T) {
 	paramtable.Init()
-
 	pt := paramtable.Get()
-	pt.Save(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key, "134217728")
-	defer pt.Reset(pt.DataNodeCfg.ResourceLegacyMemoryPerSlot.Key)
 
-	assert.Equal(t, int64(134217728), legacyMemoryPerSlot())
+	// Defaults: 8GiB / (16 x 1) = 512MiB of raw memory per slot, of which
+	// memoryRatio 0.75 is budget.
+	assert.Equal(t, int64(384)<<20, LegacyMemoryPerSlot())
+
+	t.Run("memoryRatio scales the raw rate", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.ResourceMemoryRatio.Key, "1.0")
+		defer pt.Reset(pt.DataNodeCfg.ResourceMemoryRatio.Key)
+
+		assert.Equal(t, int64(512)<<20, LegacyMemoryPerSlot())
+	})
+
+	t.Run("both slot multipliers divide the memory unit", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.WorkerSlotUnit.Key, "8")
+		defer pt.Reset(pt.DataNodeCfg.WorkerSlotUnit.Key)
+		pt.Save(pt.DataNodeCfg.BuildParallel.Key, "4")
+		defer pt.Reset(pt.DataNodeCfg.BuildParallel.Key)
+
+		// 8GiB / (8 x 4) = 256MiB raw, x 0.75.
+		assert.EqualValues(t, 32, WorkerSlotsPerMemoryUnit())
+		assert.Equal(t, int64(192)<<20, LegacyMemoryPerSlot())
+	})
+
+	t.Run("standalone slots are worth proportionally more", func(t *testing.T) {
+		// CalculateNodeSlots reports a quarter as many slots in standalone, so
+		// each one stands for four times as much of the same budget.
+		paramtable.SetRole(typeutil.StandaloneRole)
+		defer paramtable.SetRole("")
+
+		assert.EqualValues(t, 4, WorkerSlotsPerMemoryUnit())
+		assert.Equal(t, int64(1536)<<20, LegacyMemoryPerSlot())
+	})
+
+	t.Run("a non-positive multiplier floors at one instead of dividing by zero", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.WorkerSlotUnit.Key, "0")
+		defer pt.Reset(pt.DataNodeCfg.WorkerSlotUnit.Key)
+		pt.Save(pt.DataNodeCfg.BuildParallel.Key, "-3")
+		defer pt.Reset(pt.DataNodeCfg.BuildParallel.Key)
+
+		assert.EqualValues(t, 1, WorkerSlotsPerMemoryUnit())
+		assert.Equal(t, int64(6)<<30, LegacyMemoryPerSlot())
+	})
+
+	t.Run("the rate is never zero, however small the terms", func(t *testing.T) {
+		pt.Save(pt.DataNodeCfg.WorkerSlotUnit.Key, "1099511627776") // 1Ti slots per 8GiB
+		defer pt.Reset(pt.DataNodeCfg.WorkerSlotUnit.Key)
+		pt.Save(pt.DataNodeCfg.ResourceMemoryRatio.Key, "0.0")
+		defer pt.Reset(pt.DataNodeCfg.ResourceMemoryRatio.Key)
+
+		assert.EqualValues(t, 1, LegacyMemoryPerSlot(), "a zero rate would price every task as free")
+	})
 }
