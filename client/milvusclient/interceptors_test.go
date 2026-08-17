@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -155,4 +156,31 @@ func TestExtraInfoInjectsClientRequestID(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, []string{id}, md.Get(ClientRequestIDKey))
 	})
+}
+
+func TestMetadataStreamInterceptor(t *testing.T) {
+	c := &Client{
+		metadataHeaders: map[string]string{
+			authorizationHeader: "base64-token",
+		},
+		currentDB:  "db1",
+		identifier: "ident1",
+	}
+
+	var capturedCtx context.Context
+	mockStreamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		capturedCtx = ctx
+		return nil, nil
+	}
+
+	inter := c.MetadataStreamInterceptor()
+	_, err := inter(context.Background(), &grpc.StreamDesc{}, nil, "method", mockStreamer)
+	require.NoError(t, err)
+
+	md, ok := metadata.FromOutgoingContext(capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, "base64-token", md.Get(authorizationHeader)[0])
+	assert.Equal(t, "db1", md.Get(databaseHeader)[0])
+	assert.Equal(t, "ident1", md.Get(identifierHeader)[0])
+	assert.NotEmpty(t, md.Get(ClientRequestMsecKey)[0])
 }

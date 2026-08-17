@@ -7177,6 +7177,20 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		return err
 	}
 
+	// DumpMessages exposes raw WAL contents; gate it behind admin/root authz.
+	// AuthenticationInterceptor assumes incoming metadata is present and reports
+	// an error otherwise, so only run the authz path when authorization is
+	// enabled (matching the unary interceptor semantics).
+	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		ctx, err := AuthenticationInterceptor(ctx)
+		if err != nil {
+			return err
+		}
+		if err := authorizeWALRead(ctx); err != nil {
+			return err
+		}
+	}
+
 	logger := mlog.With(
 		mlog.String("pchannel", req.GetPchannel()),
 		mlog.Uint64("startTimetick", req.GetStartTimetick()),

@@ -137,6 +137,16 @@ func (c *Client) MetadataUnaryInterceptor() grpc.UnaryClientInterceptor {
 	}
 }
 
+func (c *Client) MetadataStreamInterceptor() grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = c.metadata(ctx)
+		ctx = c.state(ctx)
+		ctx = c.extraInfo(ctx)
+
+		return streamer(ctx, desc, cc, method, opts...)
+	}
+}
+
 func (c *Client) metadata(ctx context.Context) context.Context {
 	for k, v := range c.metadataHeaders {
 		ctx = metadata.AppendToOutgoingContext(ctx, k, v)

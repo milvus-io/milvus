@@ -258,3 +258,34 @@ func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOr
 	}
 	return metaCache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
 }
+
+// authorizeWALRead gates DumpMessages, which exposes raw WAL contents for
+// CDC/data salvage. Reading raw WAL is a cluster-scoped operation, so only
+// root or a user holding the built-in admin role is allowed.
+func authorizeWALRead(ctx context.Context) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return nil
+	}
+	roles, err := GetRole(username)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if role == util.RoleAdmin {
+			return nil
+		}
+	}
+	mlog.Info(ctx, "dump WAL permission deny", mlog.String("username", username))
+	if password == util.PasswordHolder {
+		username = "apikey user"
+	}
+	return status.Error(codes.PermissionDenied,
+		fmt.Sprintf("dump WAL requires admin or root, deny to %s", username))
+}
