@@ -4345,9 +4345,11 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 			State:        info.GetState(),
 			Level:        commonpb.SegmentLevel(info.GetLevel()),
 			IsSorted:     info.GetIsSorted(),
-			InsertLogs:   getLogIDs(info.GetBinlogs()),
-			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
-			StatsLogs:    getLogIDs(info.GetStatslogs()),
+			// V3 segments return empty: insert data is referenced via
+			// manifest, not per-field binlog KVs.
+			InsertLogs: getLogIDs(info.GetBinlogs()),
+			DeltaLogs:  getLogIDs(info.GetDeltalogs()),
+			StatsLogs:  getLogIDs(info.GetStatslogs()),
 		})
 	}
 
