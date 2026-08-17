@@ -28,8 +28,8 @@ namespace schemapb = milvus::proto::schema;
 TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto decimal_fid =
-        schema->AddDebugField("decimal_val", DataType::DECIMAL, true);
+    auto decimal_fid = schema->AddDebugField(
+        "decimal_val", DataType::DECIMAL, /*precision=*/18, /*scale=*/2, true);
     auto vec_fid = schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
     schema->set_primary_field_id(pk_fid);
