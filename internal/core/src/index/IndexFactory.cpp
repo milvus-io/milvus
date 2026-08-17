@@ -195,31 +195,27 @@ ScalarRowMaskResidentBytes(
     const auto is_json_path =
         field_type == DataType::JSON &&
         index_params.find(JSON_PATH) != index_params.end();
-    uint64_t mask_count = 0;
-    uint64_t dense_bitmap_count = 0;
-    if ((index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE) &&
-        (is_json_path || field_nullable.value_or(true))) {
-        // Tantivy does not retain null rows, so the C++ wrapper keeps one
-        // CRoaring row set beside the mmap'd index. JSON path extraction can
-        // produce null rows even when the source JSON field is non-nullable.
-        mask_count = 1;
-    }
+    auto cast_type_it = index_params.find(JSON_CAST_TYPE);
+    const bool is_flat_json =
+        cast_type_it == index_params.end() || cast_type_it->second == "JSON";
+    // Typed JSON path indexes additionally keep the non-existing rows for
+    // EXISTS semantics (plus one dense exists bitmap). NGRAM never applies.
+    const bool typed_json_path =
+        is_json_path && !is_flat_json && index_type != NGRAM_INDEX_TYPE;
 
-    if (is_json_path && index_type != NGRAM_INDEX_TYPE) {
-        // Typed JSON path indexes additionally keep the non-existing rows for
-        // EXISTS semantics. An unresolved HYBRID may select INVERTED, so use
-        // two masks there as a conservative bound.
-        auto cast_type_it = index_params.find(JSON_CAST_TYPE);
-        auto is_flat_json = cast_type_it == index_params.end() ||
-                            cast_type_it->second == "JSON";
-        if (!is_flat_json) {
-            mask_count += 1;
-            dense_bitmap_count = 1;
-            if (index_type == HYBRID_INDEX_TYPE) {
-                mask_count += 1;
-            }
-        }
-    }
+    // Tantivy does not retain null rows, so the wrapper keeps a CRoaring null
+    // offset set beside the mmap'd index. JSON path extraction can produce
+    // null rows even when the source field is non-nullable. An unresolved
+    // HYBRID may select INVERTED, so reserve its null mask conservatively.
+    const bool keeps_null_mask =
+        ((index_type == INVERTED_INDEX_TYPE ||
+          index_type == NGRAM_INDEX_TYPE) &&
+         (is_json_path || field_nullable.value_or(true))) ||
+        (typed_json_path && index_type == HYBRID_INDEX_TYPE);
+
+    const uint64_t mask_count =
+        (keeps_null_mask ? 1 : 0) + (typed_json_path ? 1 : 0);
+    const uint64_t dense_bitmap_count = typed_json_path ? 1 : 0;
 
     // A CRoaring container is at most roughly one dense bitset plus container
     // metadata. Reserve 2x the dense bytes per row set to cover that overhead.
