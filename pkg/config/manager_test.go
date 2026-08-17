@@ -631,6 +631,45 @@ func TestCollapsedMatchIsNotExtendedToTheEnvironment(t *testing.T) {
 	assert.Empty(t, mgr.GetConfigsView())
 }
 
+// The one product of the two mechanisms this change adds: a member of a
+// Sensitive ParamGroup that no ParamItem declares, reached by the collapsed
+// spelling. Nothing normalises such a key — that is what makes it a
+// ParamGroup member rather than a ParamItem — so a sensitivity rule that only
+// consulted the dotted form would classify one spelling of an inline private
+// key secret and the other, the same entry, public. FileSource inserts both
+// spellings of every key it loads, so no attacker input is needed to reach it.
+func TestSensitiveGroupMemberIsRedactedUnderEverySpelling(t *testing.T) {
+	const secret = "-----BEGIN PRIVATE KEY-----"
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile,
+		[]byte("kafka.producer.ssl.key.pem: "+secret+"\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix("kafka.producer.")
+	mgr.RegisterSensitivePrefix("kafka.producer.")
+
+	for _, spelling := range []string{
+		"kafka.producer.ssl.key.pem",
+		"kafka/producer/ssl/key/pem",
+		"kafkaproducersslkeypem",
+		"KAFKA_PRODUCER_SSL_KEY_PEM",
+		"kafka_producer_ssl_key_pem",
+	} {
+		assert.True(t, mgr.IsSensitive(spelling), spelling)
+		_, _, err := mgr.GetRegisteredConfig(spelling)
+		require.ErrorIs(t, err, ErrKeySensitive, spelling)
+	}
+
+	require.Contains(t, mgr.GetConfigsRaw(), "kafkaproducersslkeypem",
+		"FileSource did not insert the collapsed alias, the test proves nothing")
+	for key, value := range mgr.GetConfigs() {
+		assert.NotContains(t, value, secret, key)
+	}
+	for key, value := range mgr.GetConfigsView() {
+		assert.NotContains(t, value, secret, key)
+	}
+}
+
 // A ParamGroup member set through both overlay spellings must be reported as
 // the one ParamGroup.GetValue actually returns.
 func TestRegisteredGroupMemberMatchesGroupValue(t *testing.T) {

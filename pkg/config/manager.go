@@ -811,7 +811,7 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
 	// uses mixed case.
 	dotted = strings.ToLower(dotted)
 
-	switch m.matchSensitivePrefix(dotted) {
+	switch m.matchSensitivePrefix(dotted, lookup) {
 	case prefixSensitive:
 		return true
 	case prefixExempted:
@@ -847,20 +847,36 @@ const (
 	prefixExempted
 )
 
-func (m *Manager) matchSensitivePrefix(canonicalKey string) prefixVerdict {
+// matchSensitivePrefix must try both identities, for the same reason
+// resolveRegisteredKey admits both: a key stored under the collapsed spelling —
+// which is every alter-endpoint write, and the alias FileSource and EnvSource
+// insert beside every key they load — carries no separators to match a dotted
+// prefix against. Asking only the dotted form would classify
+// "kafka.producer.ssl.key.pem" sensitive and "kafkaproducersslkeypem", the same
+// entry, not.
+func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
 	verdict := prefixNoMatch
 	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
-		if !strings.HasPrefix(canonicalKey, prefix) {
-			return true
+		if strings.HasPrefix(dotted, prefix) {
+			if m.suffixExempted(prefix, dotted[len(prefix):]) {
+				// Exempted for this prefix, but a longer sensitive prefix may
+				// still cover the key without exempting it, so keep scanning.
+				verdict = prefixExempted
+				return true
+			}
+			verdict = prefixSensitive
+			return false
 		}
-		if m.suffixExempted(prefix, canonicalKey[len(prefix):]) {
-			// Exempted for this prefix, but a longer sensitive prefix may still
-			// cover the key without exempting it, so keep scanning.
-			verdict = prefixExempted
-			return true
+		// No separators left to locate the leaf with, so a declared suffix
+		// exemption cannot be proven and the group's default stands. That
+		// over-redacts an exempted leaf reached by its collapsed spelling, which
+		// is the safe direction: the dotted spelling of the same entry is
+		// published beside it whenever a config file supplied it.
+		if strings.HasPrefix(lookup, formatKeyUncached(prefix)) {
+			verdict = prefixSensitive
+			return false
 		}
-		verdict = prefixSensitive
-		return false
+		return true
 	})
 	return verdict
 }

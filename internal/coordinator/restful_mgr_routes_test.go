@@ -601,16 +601,19 @@ func TestHandleGetConfig(t *testing.T) {
 	})
 
 	t.Run("sensitive ParamGroup members and undeclared keys are denied", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=credential.aksk1.secret_access_key,kafka.consumer.ssl.key.pem,pulsar.authParams,AWS_SECRET_ACCESS_KEY,function.analyzer.lindera.download_urls.ipadic", nil)
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=credential.aksk1.secret_access_key,kafka.consumer.ssl.key.pem,pulsar.authParams,AWS_SECRET_ACCESS_KEY,function.analyzer.lindera.download_urls.ipadic,kafkaconsumersslkeypem", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		configs := parseResponse(t, w)
-		require.Len(t, configs, 5)
+		require.Len(t, configs, 6)
 		for _, result := range configs[:3] {
 			assert.Contains(t, result.Error, "sensitive")
 		}
+		// The collapsed spelling of a sensitive ParamGroup member addresses the
+		// same entry and must get the same answer.
+		assert.Contains(t, configs[5].Error, "sensitive")
 		assert.Contains(t, configs[3].Error, "unregistered")
 		// A declared, non-credential ParamGroup member stays readable: hiding
 		// infrastructure detail from root is not what this endpoint is for.
