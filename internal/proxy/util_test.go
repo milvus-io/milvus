@@ -17,12 +17,10 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -59,46 +57,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type proxyLogBuffer struct {
-	mu     sync.Mutex
-	buffer bytes.Buffer
-}
-
-func (b *proxyLogBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buffer.Write(p)
-}
-
-func (b *proxyLogBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buffer.String()
-}
-
-func (*proxyLogBuffer) Sync() error {
-	return nil
-}
-
-func captureProxyLogs(t *testing.T) *proxyLogBuffer {
+func captureProxyLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logs := &proxyLogBuffer{}
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
 		Level:             "debug",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, logs)
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, props)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
-	return logs
 }
 
 func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
