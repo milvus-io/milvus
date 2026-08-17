@@ -256,8 +256,10 @@ const (
 // another package -- still less one in another language -- that joins a bare
 // string literal onto the storage root. Every omission found so far came from
 // human review, not from the guard: "wp" (Go, pkg/streaming), "cache" (Go,
-// internal/util/pathutil), and the four C++ segments below (milvus#51894
-// review). A green guard is evidence that this file is self-consistent, NOT
+// internal/util/pathutil), and the four C++ segments (raw_datas, ngram_log, tmp,
+// rtree-index), which turned out to sit under the "cache" subtree rather than at
+// the root -- see LocalCacheRootPath above (milvus#51894 review). A green guard
+// is evidence that this file is self-consistent, NOT
 // that the registry is complete; a new writer under the shared root must add
 // its segment here by hand.
 var InternalStorageRootSegments = []string{
@@ -288,6 +290,15 @@ var InternalStorageRootSegments = []string{
 // Woodpecker is deliberately NOT here: it writes under both minio.rootPath and
 // localStorage.path (pkg/streaming/walimpls/impls/wp/builder.go), so it belongs
 // in the unconditional list above.
+//
+// "mmap" is deliberately NOT here either, even though queryNode.mmap.mmapDirPath
+// formats to {localStorage.path}/mmap by default -- a sibling of "cache". The
+// directory is deprecated and nothing writes it: the value reaches segcore only
+// as CMmapConfig.json_stats_mmap_path (internal/util/initcore/init_core.go), and
+// the terminal consumer JsonKeyStats::Load ignores it, taking the local
+// ChunkManager root instead, i.e. {localStorage.path}/cache/{nodeID}/local_chunk,
+// which the "cache" entry already covers. Registering it would deny a path
+// Milvus never writes.
 var LocalOnlyStorageRootSegments = []string{
 	LocalCacheRootPath,
 }
