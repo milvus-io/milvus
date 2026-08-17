@@ -115,12 +115,13 @@ func (dms *dmlMsgStream) broadcastMark(ctx context.Context, pack *msgstream.MsgP
 
 func (dms *dmlMsgStream) close() {
 	dms.mutex.Lock()
-	defer dms.mutex.Unlock()
-
 	if dms.closed {
+		dms.mutex.Unlock()
 		return
 	}
 	dms.closed = true
+	dms.mutex.Unlock()
+
 	dms.ms.Close()
 }
 
