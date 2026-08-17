@@ -273,9 +273,16 @@ func TestValidateNoDuplicateKeys(t *testing.T) {
 // in proxy PreExecute, ahead of even the collection lookup, on the task pool shared
 // with insert and delete, and again in datacoord.
 //
-// Measured under the -N -l build these tests use: linear ~30ms, pairwise ~28s. The
-// one-second bound therefore leaves ~30x headroom for a slow CI box while still
-// sitting ~28x below what a reintroduced quadratic scan costs.
+// Measured under the -N -l build these tests use: linear ~30ms, pairwise ~28s.
+//
+// The bound is 10s rather than something tight, because this assertion is a
+// complexity gate, not a latency budget: the only regression it exists to catch
+// costs ~28s, so 10s still fails on it. The coverage job adds -race,
+// -covermode=atomic and -coverpkg=./... on top of -N -l (scripts/run_go_codecov.sh)
+// and runs with -p PARALLEL on a contended box, which is roughly a 7x multiplier;
+// a tight bound would turn that into a flake, and -failfast would abort the whole
+// internal run on a failure pointing nowhere near this logic.
+
 func TestValidateNoDuplicateKeys_ScalesLinearly(t *testing.T) {
 	const n = 50000
 	opts := make(Options, 0, n)
@@ -287,6 +294,6 @@ func TestValidateNoDuplicateKeys_ScalesLinearly(t *testing.T) {
 	assert.NoError(t, ValidateNoDuplicateKeys(opts))
 	elapsed := time.Since(start)
 
-	assert.Less(t, elapsed, time.Second,
+	assert.Less(t, elapsed, 10*time.Second,
 		"validating %d options took %s -- a pairwise scan is back", n, elapsed)
 }
