@@ -70,6 +70,12 @@ func arrowExpansion() float64 {
 // estimateStreamingCompaction covers mix compaction on the chunked paths and
 // bump-schema-version compaction.
 //
+// The CPU charge here, and in the sort and L0 estimators below, is the flat
+// nominal core described in cpu.go's NominalCPU: the compaction families are
+// governed by memory, and deriving their CPU request from their exec pool's
+// width would let the CPU arm of the reported utilization bind before the
+// memory arm -- the arm with an incident behind it -- does.
+//
 // Storage v3 is the exception: two independent incidents in issue #52180 show
 // heap growing to roughly the full input (32GiB heap for 36GiB in, 60GiB RSS
 // for 70GiB in). The Go read path is per-batch bounded and does not explain
@@ -148,8 +154,11 @@ func estimateL0Compaction(in CompactionInput) Requirement {
 // memoryRatio budget, so an analyze task is oversized under defaults and does
 // run alone -- 0.3 of the node fits the budget comfortably. On the 16c/64GiB
 // node from issue #52180 the budget is 48GiB and each clustering task is
-// charged 19.2GiB and 8 CPU, so exactly two run concurrently (38.4GiB of 48,
-// 16 of 16 cores) and a third is deferred. That is a real capacity gain over
+// charged 19.2GiB, so exactly two run concurrently (38.4GiB of a 48GiB budget)
+// and a third is deferred on memory grounds. The 8-core CPU request below does
+// not enter that decision -- CPU is a request, not a reservation (see cpu.go)
+// -- but it does reach DataCoord through the reported scalar, where two
+// clustering tasks read as a full node and the third is offered elsewhere. That is a real capacity gain over
 // the sentinel, and it is *accounted for*, which is the whole point of the
 // ledger. Inflating the charge to force exclusivity would trade that gain for a
 // number that merely looked like the old behavior.

@@ -202,8 +202,14 @@ func (g *guard) budgetLocked() taskresource.Capacity {
 // class this whole effort keeps finding, and it also made the rule untestable:
 // a mutation of this function did not reach the queue, so nothing could tell
 // the two definitions apart.
+//
+// Only memory can make a task oversized. A CPU request that exceeds the node
+// says the task will run slower than it would alone, which is a reason to place
+// the next one elsewhere, not a reason to stop the world for this one: making
+// it exclusive would serialize the node over a resource that degrades rather
+// than fails. See taskresource.Requirement.MemoryFitsIn.
 func (g *guard) isOversizedLocked(req taskresource.Requirement) bool {
-	return !req.FitsIn(g.nodeCapacityLocked())
+	return !req.MemoryFitsIn(g.nodeCapacityLocked())
 }
 
 func (g *guard) TryAcquire(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity) {
@@ -226,11 +232,21 @@ func (g *guard) availLocked(budget taskresource.Capacity) taskresource.Capacity 
 
 // tryAcquireLocked decides one admission.
 //
-// Note what is *not* consulted anywhere below: the process's current memory
-// usage. Admission is decided by the ledger of commitments alone, because a
-// task that was admitted a moment ago has not allocated its peak yet. Judging
-// by observation is what let issue #52180 admit eight compactions in a row
-// while every one of them was still downloading.
+// Two things are *not* consulted anywhere below.
+//
+// The first is the process's current memory usage. Admission is decided by the
+// ledger of commitments alone, because a task that was admitted a moment ago
+// has not allocated its peak yet. Judging by observation is what let issue
+// #52180 admit eight compactions in a row while every one of them was still
+// downloading.
+//
+// The second is CPU. Every comparison here is on the memory dimension, because
+// memory is the dimension a task can kill the node by exceeding. The CPU
+// request is carried through the ledger and reported, but it never refuses
+// anyone: see taskresource.Requirement.MemoryFitsIn. That is also what lets
+// classes that share no thread pool backfill each other -- a compaction is
+// admitted alongside a node full of vector index builds if, and only if, the
+// memory is there.
 func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity) {
 	budget := g.budgetLocked()
 
@@ -288,7 +304,7 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 	if g.blockedByHeadOfLineLocked(taskID, budget) {
 		return g.deferLocked(taskType, reasonHeadOfLine, budget)
 	}
-	if !g.reserved.Add(req).FitsIn(budget) {
+	if !g.reserved.Add(req).MemoryFitsIn(budget) {
 		// Nothing else is running, and the request still does not fit. No
 		// future Release can help, because there is nothing left to release:
 		// this is as much budget as the node will ever offer. Deferring again
@@ -387,8 +403,11 @@ func (g *guard) blockedByHeadOfLineLocked(taskID int64, budget taskresource.Capa
 		return false
 	}
 	// The head is waiting because it does not fit yet. Anyone else taking
-	// budget now pushes its admission further away.
-	return !g.reserved.Add(head.req).FitsIn(budget)
+	// budget now pushes its admission further away. Memory only, for the same
+	// reason admission itself is memory-only: a head held up by nothing worse
+	// than CPU contention is not held up at all, and reserving budget for it
+	// would stall tasks that share no thread pool with it.
+	return !g.reserved.Add(head.req).MemoryFitsIn(budget)
 }
 
 // hasOversizedWaiterLocked reports whether anyone other than exceptTaskID is

@@ -7591,7 +7591,7 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Key:          "dataCoord.resource.indexBuildCPU",
 		Version:      "3.0.0",
 		DefaultValue: "1.0",
-		Doc:          "CPU cores charged per index build task; knowhere's build parallelism is fixed by its own pool, so this does not scale with data volume",
+		Doc:          "CPU cores charged per scalar index build, stats sub-job and analyze task; a vector index build instead charges the node's cores divided by dataNode.index.maxVecIndexBuildConcurrency, so a full build pool reads as a full node. CPU is a scheduling request, not a limit: only memory can refuse a task",
 		Export:       true,
 	}
 	p.ResourceIndexBuildCPU.Init(base.mgr)
