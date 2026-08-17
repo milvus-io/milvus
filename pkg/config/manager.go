@@ -330,6 +330,7 @@ func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 		lookup,
 		strippedKey(dotted),
 	}
+	sawEnvironment := false
 	for _, candidate := range candidates {
 		// Overlays are written only through this package's own setters, never
 		// from a config source, so a live one is trusted evidence on its own. A
@@ -337,16 +338,46 @@ func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 		if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
 			return false
 		}
-		if source, ok := m.keySourceMap.Get(candidate); ok && source != environmentSourceName {
+		source, ok := m.keySourceMap.Get(candidate)
+		if !ok {
+			continue
+		}
+		if source != environmentSourceName {
 			return false
 		}
+		sawEnvironment = true
 	}
-	for _, candidate := range candidates {
-		if _, ok := m.keySourceMap.Get(candidate); ok {
-			return true
+	return sawEnvironment
+}
+
+// WriteTakesEffect reports whether persisting key would change what Milvus
+// actually reads.
+//
+// It is false for a ParamGroup member that no source supplies yet, and that is
+// a real limitation rather than a policy: ParamGroup.GetValue selects members by
+// filtering the key space on the group's dotted prefix, while a write reaches
+// etcd under the separator-free identity, which that filter cannot match. So a
+// brand-new member is stored and then never read — whereas overriding a member a
+// config file already declares works, because the file supplied the dotted key
+// the filter needs and the override is found underneath it.
+func (m *Manager) WriteTakesEffect(key string) bool {
+	resolved := m.resolveRegisteredKey(key)
+	switch resolved.kind {
+	case RegisteredConfigScalar:
+		return true
+	case RegisteredConfigGroup:
+		for _, candidate := range [2]string{resolved.dotted, strings.ReplaceAll(resolved.dotted, ".", "/")} {
+			if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
+				return true
+			}
+			if _, ok := m.keySourceMap.Get(candidate); ok {
+				return true
+			}
 		}
+		return false
+	default:
+		return false
 	}
-	return false
 }
 
 // GetConfigs returns a safe projection of all key values: credentials are

@@ -312,10 +312,10 @@ var credentialPatterns = []string{
 // credentialImmutableAllowlist enumerates keys that match a credential pattern
 // but are legitimately Immutable because their value is not itself a secret
 // (e.g. a length bound or a boolean toggle).
-var credentialImmutableAllowlist = map[string]string{
-	"proxy.minpasswordlength": "password length constraint, not a password",
-	"proxy.maxpasswordlength": "password length constraint, not a password",
-}
+// Empty on purpose: nothing credential-named is Immutable today, and an entry
+// here bypasses the invariant, so each one needs a reviewer to agree that the
+// value is not itself a secret.
+var credentialImmutableAllowlist = map[string]string{}
 
 // TestNoCredentialIsImmutable enforces that no credential-bearing ParamItem is
 // marked Immutable.

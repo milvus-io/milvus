@@ -489,6 +489,35 @@ func TestRegisteredGroupMemberLifecycle(t *testing.T) {
 	assert.Equal(t, "kafka.producer.compression.type", canonical)
 }
 
+// A write only counts if Milvus reads it back. ParamGroup.GetValue selects
+// members by the dotted prefix, while a write lands under the separator-free
+// identity, so a brand-new member is stored and then ignored — while overriding
+// one a config file already declares works end to end.
+func TestWriteTakesEffect(t *testing.T) {
+	const declared = "kafka.consumer.fetch.min.bytes"
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile, []byte(declared+": 1\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix("kafka.consumer.")
+	mgr.RegisterConfigKey("querynode.gracefulStopTimeout")
+
+	assert.True(t, mgr.WriteTakesEffect("querynode.gracefulStopTimeout"), "a declared scalar is always read back")
+	assert.True(t, mgr.WriteTakesEffect(declared), "the config file supplied the dotted key the group filter needs")
+	assert.False(t, mgr.WriteTakesEffect("kafka.consumer.brand.new.option"))
+	assert.False(t, mgr.WriteTakesEffect("nothing.declares.this"))
+
+	// And the claim the predicate rests on: an override of the declared member
+	// reaches the group, an invented one does not.
+	etcd := &mapSource{name: "EtcdLikeSource", configs: map[string]string{
+		EtcdConfigKey(declared):                          "42",
+		EtcdConfigKey("kafka.consumer.brand.new.option"): "99",
+	}}
+	require.NoError(t, mgr.AddSource(etcd))
+	group := mgr.GetByRaw(WithPrefix("kafka.consumer."), RemovePrefix("kafka.consumer."))
+	assert.Equal(t, map[string]string{"fetch.min.bytes": "42"}, group)
+}
+
 // The one ambiguous case stays closed: a key whose sole backing is a process
 // environment variable that collapses into the group's separator-free
 // namespace. Everything else below a declared prefix is configuration.

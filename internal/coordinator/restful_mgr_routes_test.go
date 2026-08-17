@@ -291,6 +291,54 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
 	})
 
+	t.Run("kafka producer message max bytes should be immutable", func(t *testing.T) {
+		key := paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key
+		require.True(t, mgr.IsImmutable(key))
+
+		reqBody := map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": key, "value": "20971520"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		coord.HandleAlterConfig(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
+	})
+
+	t.Run("wrong HTTP method should fail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/config/alter", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleAlterConfig(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Contains(t, w.Body.String(), "Method not allowed")
+	})
+
+	t.Run("invalid JSON should fail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader([]byte("invalid json")))
+		w := httptest.NewRecorder()
+
+		coord.HandleAlterConfig(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "Invalid request body")
+	})
+}
+
+// These reject before any etcd access, so they must not sit behind the live-etcd
+// requirement of TestHandleAlterConfig — they are the checks that keep a
+// credential or an undeclared key out of etcd in the first place.
+func TestHandleAlterConfigValidation(t *testing.T) {
+	paramtable.Init()
+	mgr := paramtable.GetBaseTable().Manager()
+	coord := &mixCoordImpl{}
+
 	t.Run("sensitive config should fail before etcd access", func(t *testing.T) {
 		const key = "test.alter.sensitive"
 		mgr.RegisterConfigKey(key)
@@ -332,6 +380,29 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "sensitive configuration")
 	})
 
+	t.Run("a ParamGroup member no config file declares cannot be created", func(t *testing.T) {
+		// Milvus selects group members by their dotted prefix, and a write lands
+		// under the separator-free identity, so such a key would be stored and
+		// then never read. Refusing beats a 200 that does nothing.
+		const key = "function.textEmbedding.providers.brandnewprovider.url"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "https://example.invalid"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "new ParamGroup members")
+
+		// ...while a member the config file does declare stays writable.
+		const declared = "function.textEmbedding.providers.openai.url"
+		reqBody = map[string]interface{}{"configs": []map[string]interface{}{{"key": declared, "value": "https://example.invalid"}}}
+		body, _ = json.Marshal(reqBody)
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w = httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.NotContains(t, w.Body.String(), "new ParamGroup members")
+	})
+
 	t.Run("unregistered config may still be deleted", func(t *testing.T) {
 		// A key an older build wrote must remain removable even though nothing
 		// declares it any more; only setting one is refused.
@@ -353,45 +424,6 @@ func TestHandleAlterConfig(t *testing.T) {
 		coord.HandleAlterConfig(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "unregistered configuration")
-	})
-
-	t.Run("kafka producer message max bytes should be immutable", func(t *testing.T) {
-		key := paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key
-		require.True(t, mgr.IsImmutable(key))
-
-		reqBody := map[string]interface{}{
-			"configs": []map[string]interface{}{
-				{"key": key, "value": "20971520"},
-			},
-		}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-
-		coord.HandleAlterConfig(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
-	})
-
-	t.Run("wrong HTTP method should fail", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/config/alter", nil)
-		w := httptest.NewRecorder()
-
-		coord.HandleAlterConfig(w, req)
-
-		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		assert.Contains(t, w.Body.String(), "Method not allowed")
-	})
-
-	t.Run("invalid JSON should fail", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader([]byte("invalid json")))
-		w := httptest.NewRecorder()
-
-		coord.HandleAlterConfig(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "Invalid request body")
 	})
 }
 
