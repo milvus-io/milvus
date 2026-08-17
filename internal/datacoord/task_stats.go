@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -507,14 +508,38 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	var err error
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
-		err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+		if st.shouldPublishPreparedManifest(ctx, st.GetSegmentID(), result) {
+			err = st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+				SegmentID:        st.GetSegmentID(),
+				ExpectedManifest: result.GetBaseManifest(),
+				Mutation: ManifestMutation{
+					Type:         ManifestMutationNoop,
+					ManifestPath: result.GetManifest(),
+				},
+				CatalogMutation: SegmentCatalogMutation{TextStats: result.GetTextStatsLogs()},
+			})
+		} else {
+			err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+		}
 		if err != nil {
 			mlog.Warn(ctx, "save text index stats result failed", mlog.FieldTaskID(st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
 			break
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
-		err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+		if st.shouldPublishPreparedManifest(ctx, st.GetSegmentID(), result) {
+			err = st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+				SegmentID:        st.GetSegmentID(),
+				ExpectedManifest: result.GetBaseManifest(),
+				Mutation: ManifestMutation{
+					Type:         ManifestMutationNoop,
+					ManifestPath: result.GetManifest(),
+				},
+				CatalogMutation: SegmentCatalogMutation{JSONKeyStats: result.GetJsonKeyStatsLogs()},
+			})
+		} else {
+			err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+		}
 		if err != nil {
 			mlog.Warn(ctx, "save json key index stats result failed", mlog.Int64("taskId", st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
@@ -561,7 +586,20 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
 			segID = st.GetTargetSegmentID()
 		}
-		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
+		var updateErr error
+		if st.shouldPublishPreparedManifest(ctx, segID, result) {
+			updateErr = st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+				SegmentID:        segID,
+				ExpectedManifest: result.GetBaseManifest(),
+				Mutation: ManifestMutation{
+					Type:         ManifestMutationNoop,
+					ManifestPath: manifest,
+				},
+			})
+		} else {
+			updateErr = st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest))
+		}
+		if updateErr != nil {
 			mlog.Warn(ctx, "failed to update manifest after stats task",
 				mlog.FieldTaskID(st.GetTaskID()),
 				mlog.FieldSegmentID(segID),
@@ -576,6 +614,17 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		mlog.Int64("oldSegmentID", st.GetSegmentID()), mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		mlog.String("subJobType", st.GetSubJobType().String()), mlog.String("state", st.GetState().String()))
 	return nil
+}
+
+// shouldPublishPreparedManifest identifies the temporary compatibility path
+// for workers which still return a prepared stats manifest, including the
+// first manifest. The Noop adapter keeps pointer publication serialized while
+// a follow-up changes workers to return structured deltas.
+func (st *statsTask) shouldPublishPreparedManifest(ctx context.Context, segmentID int64, result *workerpb.StatsResult) bool {
+	segment := st.meta.GetSegment(ctx, segmentID)
+	return segment != nil &&
+		segment.GetStorageVersion() == storage.StorageV3 &&
+		result.GetManifest() != ""
 }
 
 func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {
@@ -603,6 +652,10 @@ func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID i
 		manifestChanged := result.GetManifest() != "" && current.GetManifestPath() != result.GetManifest()
 		if !hasTextStats && !hasJSONStats && !manifestChanged {
 			return false
+		}
+		if manifestChanged && current.GetStorageVersion() == storage.StorageV3 {
+			return modPack.fail(merr.WrapErrServiceInternalMsg(
+				"StorageV3 stats manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID))
 		}
 
 		segment := modPack.Get(segmentID)

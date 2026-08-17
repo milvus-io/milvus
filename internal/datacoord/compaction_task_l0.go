@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -466,14 +467,24 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 }
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
+	ctx := t.context()
 	var operators []UpdateOperator
-	storageConfig := compaction.CreateStorageConfig()
 	for _, seg := range outputSegs {
 		if len(seg.GetDeltalogs()) > 0 {
+			// The manifest transaction must run outside UpdateSegmentsInfo: that
+			// method holds segMu, whereas CommitSegmentManifest only holds the
+			// per-segment lock while it performs object-storage I/O.
+			current := t.meta.GetSegment(ctx, seg.GetSegmentID())
+			if current != nil && current.GetStorageVersion() == storage.StorageV3 && current.GetManifestPath() != "" {
+				if err := t.commitL0V3Deltalogs(ctx, seg.GetSegmentID(), seg.GetDeltalogs()); err != nil {
+					return err
+				}
+				continue
+			}
 			operators = append(operators, AddL0DeltalogsAndUpdateManifestOperator(
 				seg.GetSegmentID(),
 				seg.GetDeltalogs(),
-				storageConfig,
+				compaction.CreateStorageConfig(),
 				t.committedV3Manifests,
 			))
 		}
@@ -487,7 +498,59 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
-	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
+	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+}
+
+func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID int64, deltalogs []*datapb.FieldBinlog) error {
+	current := t.meta.GetSegment(ctx, segmentID)
+	if current == nil {
+		return merr.WrapErrSegmentNotFound(segmentID)
+	}
+	if current.GetStorageVersion() != storage.StorageV3 || current.GetManifestPath() == "" {
+		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires a published manifest, segmentID=%d", segmentID)
+	}
+
+	// L0 compaction does not yet return a structured manifest delta.  Until
+	// that producer contract lands, serialize its metadata visibility through
+	// the framework without manufacturing a manifest revision here.
+	manifestPath := t.committedV3Manifests[segmentID]
+	if manifestPath == "" {
+		manifestPath = current.GetManifestPath()
+	}
+
+	manifestMeta, ok := t.meta.(interface {
+		CommitSegmentManifest(context.Context, SegmentManifestCommit) error
+	})
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires DataCoord meta implementation")
+	}
+	if err := manifestMeta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+		SegmentID:        segmentID,
+		ExpectedManifest: current.GetManifestPath(),
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: manifestPath,
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			// Keep the catalog half of L0 exactly on the established L0
+			// mutation path. The Noop only adapts pointer publication until
+			// the compaction producer returns a structured manifest delta.
+			Operators: []UpdateOperator{AddL0DeltalogsOperator(segmentID, deltalogs)},
+		},
+	}); err != nil {
+		return err
+	}
+	t.committedV3Manifests[segmentID] = t.meta.GetSegment(ctx, segmentID).GetManifestPath()
+	return nil
+}
+
+func (t *l0CompactionTask) context() context.Context {
+	if meta, ok := t.meta.(*meta); ok && meta.ctx != nil {
+		return meta.ctx
+	}
+	// Unit-test CompactionMeta implementations do not own the DataCoord
+	// lifecycle context. Production tasks always take the meta context above.
+	return context.Background()
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {
