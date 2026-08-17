@@ -131,7 +131,8 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 			}
 		})
 		if !found {
-			t.Logf("knownSensitive references %q which does not exist in ParamTable; remove from list if intentionally deleted", want)
+			t.Errorf("knownSensitive references %q which no longer exists in ParamTable; "+
+				"delete the entry deliberately rather than letting the audit silently cover less", want)
 		}
 	}
 
@@ -147,7 +148,8 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 			}
 		})
 		if !found {
-			t.Logf("knownSensitiveParamGroupPrefixes references %q which does not exist in ParamTable; remove from list if intentionally deleted", want)
+			t.Errorf("knownSensitiveParamGroupPrefixes references %q which no longer exists in ParamTable; "+
+				"delete the entry deliberately rather than letting the audit silently cover less", want)
 		}
 	}
 
@@ -268,6 +270,11 @@ var credentialPatterns = []string{
 	"accesskey",
 	"credentialjson",
 	"saslusername",
+	"apikey",
+	"privatekey",
+	"authparams",
+	"token",
+	"headers",
 }
 
 // credentialImmutableAllowlist enumerates keys that match a credential pattern

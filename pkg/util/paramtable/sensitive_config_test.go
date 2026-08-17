@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,8 +69,13 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 		"function.models.zilliz.api_key",
 	}
 	for _, key := range sensitiveGroupKeys {
+		// A ParamGroup member exists once something configures it; configure it
+		// here so the assertion covers the whole path a real deployment takes,
+		// from the value entering the manager to the projection hiding it.
+		mgr.SetMapConfig(strings.ToLower(key), "configured-group-secret")
 		assert.True(t, isConfigRegistered(mgr, key), key)
 		assert.True(t, mgr.IsSensitive(key), key)
+		assert.Equal(t, config.RedactedValue, mgr.GetConfigs()[strings.ToLower(key)], key)
 	}
 
 	// Topology stays readable: operators need it, and it is already visible in

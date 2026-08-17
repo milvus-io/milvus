@@ -201,9 +201,10 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.LinderaDownloadUrls.Init(base.mgr)
 
 	p.ZillizProviders = ParamGroup{
-		KeyPrefix: "function.models.zilliz.",
-		Version:   "2.6.5",
-		Sensitive: true,
+		KeyPrefix:            "function.models.zilliz.",
+		Version:              "2.6.5",
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable", "url"},
 	}
 	p.ZillizProviders.Init(base.mgr)
 

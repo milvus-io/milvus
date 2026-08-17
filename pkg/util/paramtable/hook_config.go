@@ -32,10 +32,10 @@ func (h *hookConfig) init(base *BaseTable) {
 	}
 	h.SoConfig.Init(base.mgr)
 
-	// Entry count only: hook.yaml is plugin-defined and may carry credentials
-	// under names the core cannot classify. Logged after SoConfig.Init so the
-	// empty prefix is registered and the projection is not empty.
-	mlog.Info(context.TODO(), "hook config loaded", mlog.Int("entries", len(h.SoConfig.GetValue())))
+	// No values, and no count either: hook.yaml is plugin-defined and may carry
+	// credentials under names the core cannot classify, and every nested key is
+	// stored under two identities so a count would not mean what it reads like.
+	mlog.Info(context.TODO(), "hook config loaded", mlog.String("soPath", h.SoPath.GetValue()))
 }
 
 func (h *hookConfig) WatchHookWithPrefix(ident string, keyPrefix string, onEvent func(*config.Event)) {

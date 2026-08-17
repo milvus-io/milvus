@@ -26,20 +26,17 @@ import (
 )
 
 func TestGetConfigs(t *testing.T) {
-	// getConfigs serves whatever projection the caller passed in; redaction
-	// belongs to the config.Manager that owns the keys.
+	// getConfigs serves whatever projection the caller passed in, verbatim.
+	// Redaction belongs to the config.Manager that owns the keys: only it knows
+	// which are declared, and the hook table's keys are unknown to the main one.
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	configs := map[string]string{
-		"common.security.authorizationEnabled": "true",
-		"service_token":                        sensitiveMark,
-	}
-	getConfigs(configs)(c)
+	getConfigs(map[string]string{"service_token": "handed-to-us-in-the-clear"})(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "common.security.authorizationEnabled")
-	assert.Contains(t, w.Body.String(), sensitiveMark)
+	assert.Contains(t, w.Body.String(), "handed-to-us-in-the-clear",
+		"the handler must not second-guess its caller's projection")
 }
 
 func TestAuthorizeConfigView(t *testing.T) {
@@ -72,6 +69,14 @@ func TestAuthorizeConfigView(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, request(123))
 	assert.Equal(t, http.StatusForbidden, request("alice"))
 	assert.Equal(t, http.StatusNoContent, request(util.UserRoot))
+
+	// A superuser can already reset any account's password, so denying them the
+	// configuration view would be arbitrary.
+	superUserKey := params.CommonCfg.SuperUsers.Key
+	defer params.Reset(superUserKey)
+	require.NoError(t, params.Save(superUserKey, "alice,bob"))
+	assert.Equal(t, http.StatusNoContent, request("alice"))
+	assert.Equal(t, http.StatusForbidden, request("carol"))
 }
 
 func TestConfigRoutesRequireRootWhenAuthorizationEnabled(t *testing.T) {
@@ -134,6 +139,12 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NotContains(t, w.Body.String(), sentinelValue)
+	// Neither the value nor the variable name survives: the list of environment
+	// variables in the pod is itself worth withholding.
+	assert.NotContains(t, w.Body.String(), "DATABASE_URL")
+	assert.NotContains(t, w.Body.String(), "MILVUS_CONF_SERVICE_TOKEN")
+	// Declared credentials are still named, and masked.
+	assert.Contains(t, w.Body.String(), params.MinioCfg.SecretAccessKey.Key)
 	assert.Contains(t, w.Body.String(), sensitiveMark)
 }
 

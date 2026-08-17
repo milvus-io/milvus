@@ -95,6 +95,8 @@ func lowerKey(key string) string {
 	return strings.ToLower(key)
 }
 
+var keyFormatReplacer = strings.NewReplacer("/", "", "_", "", ".", "")
+
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
@@ -103,9 +105,19 @@ func formatKey(key string) string {
 	if ok {
 		return cached
 	}
-	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
+	result := keyFormatReplacer.Replace(strings.ToLower(key))
 	formattedKeys.Insert(key, result)
 	return result
+}
+
+// formatKeyUncached is formatKey without the memo. Use it for keys that arrive
+// from outside the process: formattedKeys is global and unbounded, so caching
+// arbitrary caller input would let a request grow it without limit.
+func formatKeyUncached(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
+	return keyFormatReplacer.Replace(strings.ToLower(key))
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {

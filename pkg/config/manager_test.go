@@ -153,9 +153,14 @@ func TestSensitiveConfigRedaction(t *testing.T) {
 	mgr.RegisterConfigPrefix("credential.")
 	mgr.RegisterSensitiveKey("minio.address")
 	mgr.RegisterSensitivePrefix("credential.")
+	mgr.SetMapConfig("credential.aksk1.secret_access_key", "group-secret")
+
 	assert.True(t, isRegistered(mgr, "querynode.graceful_stop_timeout"))
 	assert.True(t, isRegistered(mgr, "credential.aksk1.secret_access_key"))
 	assert.False(t, isRegistered(mgr, "OPAQUE_RUNTIME_VALUE"))
+	// A prefix match alone does not make a key a group member; some source has
+	// to have supplied it under the group's own dotted namespace.
+	assert.False(t, isRegistered(mgr, "credential.aksk1.never_declared"))
 
 	for _, key := range []string{
 		"minio.address",
@@ -169,18 +174,43 @@ func TestSensitiveConfigRedaction(t *testing.T) {
 	}
 	assert.False(t, mgr.IsSensitive("querynode.gracefulStopTimeout"))
 
-	values := map[string]string{
-		"credential.aksk1.secret_access_key": "group-secret",
-		"AWS_SESSION_TOKEN":                  "env-secret",
-		"OPAQUE_RUNTIME_VALUE":               "opaque-env-secret",
+	for key, want := range map[string]string{
+		"credential.aksk1.secret_access_key": RedactedValue,
+		"AWS_SESSION_TOKEN":                  RedactedValue,
+		"OPAQUE_RUNTIME_VALUE":               RedactedValue,
 		"querynode.gracefulStopTimeout":      "30",
+	} {
+		assert.Equal(t, want, mgr.RedactValue(key, "30"), key)
 	}
-	redacted := mgr.RedactValues(values)
-	assert.Equal(t, RedactedValue, redacted["credential.aksk1.secret_access_key"])
-	assert.Equal(t, RedactedValue, redacted["AWS_SESSION_TOKEN"])
-	assert.Equal(t, RedactedValue, redacted["OPAQUE_RUNTIME_VALUE"])
-	assert.Equal(t, "30", redacted["querynode.gracefulStopTimeout"])
-	assert.Equal(t, "group-secret", values["credential.aksk1.secret_access_key"], "input must not be mutated")
+}
+
+// A declared ParamItem must resolve identically however it is spelled, because
+// sensitivity is decided from prefixes that only the dotted form can match.
+func TestSensitivityIsIndependentOfKeySpelling(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("kafka.producer.")
+	mgr.RegisterSensitivePrefix("kafka.producer.")
+	mgr.RegisterConfigKey("kafka.producer.compression")
+	mgr.SetConfig("kafka.producer.compression", "must-not-leak")
+
+	for _, spelling := range []string{
+		"kafka.producer.compression",
+		"kafka/producer/compression",
+		"KAFKA_PRODUCER_COMPRESSION",
+		formatKey("kafka.producer.compression"),
+	} {
+		assert.True(t, mgr.IsSensitive(spelling), spelling)
+		assert.Equal(t, RedactedValue, mgr.RedactValue(spelling, "must-not-leak"), spelling)
+	}
+
+	assert.Equal(t, RedactedValue, mgr.GetConfigs()[formatKey("kafka.producer.compression")])
+	_, _, err := mgr.GetRegisteredConfig("kafka.producer.compression")
+	require.ErrorIs(t, err, ErrKeySensitive)
+
+	// An explicit NonSensitive declaration still overrides the group default.
+	mgr.RegisterNonSensitiveKey("kafka.producer.compression")
+	assert.False(t, mgr.IsSensitive(formatKey("kafka.producer.compression")))
+	assert.Equal(t, "must-not-leak", mgr.GetConfigs()[formatKey("kafka.producer.compression")])
 }
 
 // syncBuffer adapts a bytes.Buffer to the WriteSyncer the logger expects.
@@ -332,6 +362,7 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 	mgr.SetMapConfig("dynamic.password", "dynamic-secret")
 	mgr.SetMapConfig("sensitive.group.value", "group-secret")
 	mgr.SetMapConfig("sensitive/group/slash", "slash-group-secret")
+	mgr.SetMapConfig("sensitive.group.slash", "slash-group-secret")
 
 	publicKey := formatKey("public.key")
 	opaqueKey := formatKey("opaque.key")
@@ -380,29 +411,80 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 	require.ErrorIs(t, err, ErrKeySensitive)
 }
 
-// A ParamGroup member altered through /management/config/alter lands in etcd
-// under the separator-free identity only. Reading it back by its dotted key
-// must report that value, not the one the yaml still carries.
-func TestRegisteredGroupMemberSeesOverride(t *testing.T) {
+// mapSource is a high-priority source that holds exactly the keys it is given,
+// so a test can reproduce what EtcdSource does: AlterConfigsInEtcd formats the
+// key before writing, so an altered ParamGroup member exists in etcd under the
+// separator-free identity ONLY, while the yaml still carries the dotted one.
+type mapSource struct {
+	name    string
+	configs map[string]string
+}
+
+func (s *mapSource) GetConfigurations() (map[string]string, error) { return s.configs, nil }
+
+func (s *mapSource) GetConfigurationByKey(key string) (string, error) {
+	v, ok := s.configs[key]
+	if !ok {
+		return "", errors.Wrap(ErrKeyNotFound, key)
+	}
+	return v, nil
+}
+
+func (s *mapSource) GetPriority() int           { return HighPriority }
+func (s *mapSource) GetSourceName() string      { return s.name }
+func (*mapSource) SetEventHandler(EventHandler) {}
+func (*mapSource) SetManager(ConfigManager)     {}
+func (*mapSource) UpdateOptions(Options)        {}
+func (*mapSource) Close()                       {}
+
+// Reading a ParamGroup member by its dotted key alone finds the yaml entry and
+// misses the override entirely, which is why the lookup must try the
+// separator-free identity first. Swapping that order makes this test fail.
+func TestRegisteredGroupMemberSeesEtcdOverride(t *testing.T) {
+	const key = "proxy.accessLog.formatters.base.format"
 	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
-	require.NoError(t, os.WriteFile(yamlFile, []byte("proxy.accessLog.formatters.base.format: from-yaml\n"), 0o600))
+	require.NoError(t, os.WriteFile(yamlFile, []byte(key+": from-yaml\n"), 0o600))
 
 	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
 	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
 
-	source, value, err := mgr.GetRegisteredConfig("proxy.accessLog.formatters.base.format")
+	source, value, err := mgr.GetRegisteredConfig(key)
 	require.NoError(t, err)
 	assert.Equal(t, "from-yaml", value)
 	assert.Equal(t, "FileSource", source)
 
-	// AlterConfigsInEtcd formats the key before writing, so the override only
-	// ever exists under the separator-free identity.
-	mgr.SetConfig("proxy.accessLog.formatters.base.format", "from-alter")
+	etcd := &mapSource{name: "EtcdLikeSource", configs: map[string]string{formatKey(key): "from-alter"}}
+	require.NoError(t, mgr.AddSource(etcd))
 
-	source, value, err = mgr.GetRegisteredConfig("proxy.accessLog.formatters.base.format")
+	source, value, err = mgr.GetRegisteredConfig(key)
 	require.NoError(t, err)
-	assert.Equal(t, "from-alter", value)
-	assert.Equal(t, RuntimeSource, source)
+	assert.Equal(t, "from-alter", value, "an etcd override must not be reported as the stale yaml value")
+	assert.Equal(t, etcd.name, source)
+	// The management read must agree with what the process actually uses.
+	_, live, err := mgr.GetConfig(key)
+	require.NoError(t, err)
+	assert.Equal(t, live, value)
+}
+
+// An operator overriding a declared ParamGroup member through the environment
+// must not make it disappear: the value is live, so hiding it would leave a
+// setting that is in force, unreadable, and unalterable.
+func TestRegisteredGroupMemberSeesEnvironmentOverride(t *testing.T) {
+	const key = "proxy.accessLog.formatters.base.format"
+	t.Setenv("PROXY_ACCESSLOG_FORMATTERS_BASE_FORMAT", "from-env")
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile, []byte(key+": from-yaml\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}), WithEnvSource(formatKey))
+	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
+
+	source, value, err := mgr.GetRegisteredConfig(key)
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", value)
+	assert.Equal(t, environmentSourceName, source)
+	assert.Equal(t, "from-env", mgr.GetConfigs()[lowerKey(key)])
+	assert.Equal(t, map[string]string{"base.format": "from-env"},
+		mgr.GetBy(WithPrefix("proxy.accessLog.formatters."), RemovePrefix("proxy.accessLog.formatters.")))
 }
 
 func TestEnvironmentSecretsAreRedacted(t *testing.T) {
@@ -411,24 +493,30 @@ func TestEnvironmentSecretsAreRedacted(t *testing.T) {
 	t.Setenv("AWS_SESSION_TOKEN", sentinelValue)
 	t.Setenv("OPENAI_API_KEY", sentinelValue)
 	t.Setenv("DATABASE_URL", sentinelValue)
+	// The impersonation attempt: an unrelated variable whose formatted alias
+	// lands in a registered group's separator-free namespace. Spelling it with
+	// dots is what would make it match the prefix.
 	t.Setenv("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL", sentinelValue)
-	t.Setenv("proxy.accesslog.formatters.database_url", sentinelValue)
 	t.Setenv("PUBLIC_KEY", "scalar-visible")
 
 	mgr, _ := Init(WithEnvSource(formatKey))
 	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
 	mgr.RegisterConfigKey("public.key")
+
 	canonical, kind := mgr.ResolveRegisteredConfigKey("proxy/accessLog/formatters/DATABASE_URL")
 	assert.Equal(t, "proxy.accesslog.formatters.database_url", canonical)
-	assert.Equal(t, RegisteredConfigGroup, kind)
+	assert.Equal(t, RegisteredConfigUnknown, kind,
+		"a prefix match on a re-spelled environment variable is not a group member")
 	assert.False(t, isRegistered(mgr, "PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL"))
 	assert.False(t, isRegistered(mgr, formatKey("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL")))
-	assert.True(t, isRegistered(mgr, "proxy.accessLog.formatters.DATABASE_URL"))
+	assert.False(t, isRegistered(mgr, "proxy.accessLog.formatters.DATABASE_URL"))
+
 	_, resolved, err := mgr.GetConfig("proxy.accessLog.formatters.DATABASE_URL")
 	require.NoError(t, err)
 	assert.Equal(t, sentinelValue, resolved, "the legacy internal lookup still resolves the ambiguous alias")
 	_, _, err = mgr.GetRegisteredConfig("proxy.accessLog.formatters.DATABASE_URL")
 	require.ErrorIs(t, err, ErrKeyUnregistered)
+
 	_, scalarValue, err := mgr.GetRegisteredConfig("public.key")
 	require.NoError(t, err)
 	assert.Equal(t, "scalar-visible", scalarValue, "explicit ParamItems may still use environment overrides")
@@ -449,6 +537,9 @@ func TestEnvironmentSecretsAreRedacted(t *testing.T) {
 func TestRegisteredConfigKeyResolutionPreservesKnowhereSuffixCase(t *testing.T) {
 	mgr := NewManager()
 	mgr.RegisterConfigPrefix(NotFormatPrefix)
+	// Keys below NotFormatPrefix keep their case in every identity, which is how
+	// FileSource stores them too.
+	mgr.SetConfig("knowhere.DISKANN.build.search_list", "100")
 
 	canonical, kind := mgr.ResolveRegisteredConfigKey("knowhere.DISKANN/build/search_list")
 	assert.Equal(t, "knowhere.DISKANN.build.search_list", canonical)

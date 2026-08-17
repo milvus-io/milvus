@@ -304,6 +304,21 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "sensitive configuration")
 	})
 
+	t.Run("sensitive config may still be deleted", func(t *testing.T) {
+		const key = "test.alter.sensitive.delete"
+		mgr.RegisterConfigKey(key)
+		mgr.RegisterSensitiveKey(key)
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		// Removing a secret someone else wrote into etcd is the opposite of
+		// disclosing one, so validation must let it through. Whether it then
+		// reaches etcd is not this assertion's business.
+		assert.NotContains(t, w.Body.String(), "sensitive configuration")
+	})
+
 	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {
 		const key = "test.alter.unregistered"
 		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "value"}}}
@@ -361,16 +376,38 @@ func TestHandleGetConfig(t *testing.T) {
 
 	coord := &mixCoordImpl{}
 
-	// Seed configs directly via Manager.SetConfig (no etcd needed).
-	mgr.SetConfig("test.getconfig.key1", "val1")
-	mgr.SetConfig("test.getconfig.key2", "val2")
-	mgr.SetConfig("test.getconfig.key3", "val3")
-	mgr.SetConfig("test.getconfig.opaque", "opaque-secret")
-	mgr.SetConfig("credential.aksk1.secret_access_key", "param-group-secret")
-	mgr.SetConfig("kafka.consumer.ssl.key.pem", "inline-private-key")
-	mgr.SetConfig("function.analyzer.lindera.download_urls.ipadic", "https://example.invalid/dict")
-	mgr.SetConfig("pulsar.authParams", "token:broker-secret")
-	mgr.SetConfig("AWS_SECRET_ACCESS_KEY", "environment-secret")
+	// Seed configs directly via Manager (no etcd needed). Scalars go through
+	// SetConfig; ParamGroup members go through SetMapConfig, which keeps the
+	// dotted identity a file or etcd source would have given them.
+	scalars := map[string]string{
+		"test.getconfig.key1":   "val1",
+		"test.getconfig.key2":   "val2",
+		"test.getconfig.key3":   "val3",
+		"test.getconfig.opaque": "opaque-secret",
+		"pulsar.authParams":     "token:broker-secret",
+		"AWS_SECRET_ACCESS_KEY": "environment-secret",
+	}
+	groupMembers := map[string]string{
+		"credential.aksk1.secret_access_key":             "param-group-secret",
+		"kafka.consumer.ssl.key.pem":                     "inline-private-key",
+		"function.analyzer.lindera.download_urls.ipadic": "https://example.invalid/dict",
+	}
+	for key, value := range scalars {
+		mgr.SetConfig(key, value)
+	}
+	for key, value := range groupMembers {
+		mgr.SetMapConfig(key, value)
+	}
+	t.Cleanup(func() {
+		// This manager is the process-global paramtable; leaving these behind
+		// would leak into every other test in the package.
+		for key := range scalars {
+			mgr.ResetConfig(key)
+		}
+		for key := range groupMembers {
+			mgr.ResetConfig(key)
+		}
+	})
 	for _, key := range []string{"test.getconfig.key1", "test.getconfig.key2", "test.getconfig.key3", "test.getconfig.opaque"} {
 		mgr.RegisterConfigKey(key)
 	}

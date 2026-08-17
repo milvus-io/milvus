@@ -126,7 +126,7 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 	logOldValue := pi.configValueForLog(oldValue)
 	logNewValue := pi.configValueForLog(newValue)
 
-	if err := pi.callback(context.TODO(), pi.Key, oldValue, newValue); err != nil {
+	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
 		mlog.Error(context.TODO(), "param change callback failed",
 			mlog.String("key", pi.Key),
 			mlog.String("oldValue", logOldValue),
@@ -143,10 +143,11 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 }
 
 func (pi *ParamItem) configValueForLog(value string) string {
-	if pi.Sensitive || (pi.manager != nil && pi.manager.IsSensitive(pi.Key)) {
+	if pi.manager == nil {
+		// Only reachable before Init; assume the worst.
 		return config.RedactedValue
 	}
-	return value
+	return pi.manager.RedactValue(pi.Key, value)
 }
 
 // Get original value with error

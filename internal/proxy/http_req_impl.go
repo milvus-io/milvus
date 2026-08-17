@@ -72,8 +72,8 @@ func authorizeConfigView() gin.HandlerFunc {
 			})
 			return
 		}
-		if username != util.UserRoot {
-			err := merr.WrapErrPrivilegeNotPermitted("only root user can read configuration views")
+		if !isConfigViewAdmin(username) {
+			err := merr.WrapErrPrivilegeNotPermitted("only root or a superuser can read configuration views")
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				mhttp.HTTPReturnCode:    merr.Code(err),
 				mhttp.HTTPReturnMessage: err.Error(),
@@ -81,6 +81,18 @@ func authorizeConfigView() gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// isConfigViewAdmin reports whether an authenticated identity may read the
+// configuration views. common.security.superUsers is included because a
+// superuser can already reset any account's password without knowing it — a
+// strictly larger capability than reading configuration — and excluding them
+// would break admin identities that are not literally named root.
+func isConfigViewAdmin(username string) bool {
+	if username == util.UserRoot {
+		return true
+	}
+	return lo.Contains(paramtable.Get().CommonCfg.SuperUsers.GetAsStrings(), username)
 }
 
 // getConfigs serves a configuration map that the caller has already projected

@@ -67,7 +67,9 @@ func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerCo
 	// option names without their values: a key-name allowlist cannot safely
 	// classify every librdkafka option, but knowing which options are set is
 	// what makes a broker misconfiguration diagnosable.
+	brokers, _ := config.Get("bootstrap.servers", "")
 	mlog.Info(context.TODO(), "init kafka config",
+		mlog.Any("brokers", brokers),
 		mlog.String("commonConfigKeys", ConfigtoString(config)),
 		mlog.String("extraConsumerConfigKeys", ConfigtoString(extraConsumerConfig)),
 		mlog.String("extraProducerConfigKeys", ConfigtoString(extraProducerConfig)),

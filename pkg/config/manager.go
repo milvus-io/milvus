@@ -113,17 +113,20 @@ func filterate(key string, filters ...Filter) (string, bool) {
 }
 
 type Manager struct {
-	Dispatcher            *EventDispatcher
-	sources               *typeutil.ConcurrentMap[string, Source]
-	keySourceMap          *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
-	overlays              *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
-	forbiddenKeys         *typeutil.ConcurrentSet[string]
-	immutableKeys         *typeutil.ConcurrentSet[string]
-	sensitiveKeys         *typeutil.ConcurrentSet[string]
-	sensitiveKeyPrefixes  *typeutil.ConcurrentSet[string]
-	nonSensitiveKeys      *typeutil.ConcurrentSet[string]
-	nonSensitiveSuffixes  *typeutil.ConcurrentSet[string]
-	registeredKeys        *typeutil.ConcurrentSet[string]
+	Dispatcher           *EventDispatcher
+	sources              *typeutil.ConcurrentMap[string, Source]
+	keySourceMap         *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
+	overlays             *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
+	forbiddenKeys        *typeutil.ConcurrentSet[string]
+	immutableKeys        *typeutil.ConcurrentSet[string]
+	sensitiveKeys        *typeutil.ConcurrentSet[string]
+	sensitiveKeyPrefixes *typeutil.ConcurrentSet[string]
+	nonSensitiveKeys     *typeutil.ConcurrentSet[string]
+	nonSensitiveSuffixes *typeutil.ConcurrentSet[string]
+	// declaredKeys maps a declared ParamItem's separator-free identity to its
+	// dotted spelling, so the structure of the key survives a lookup made under
+	// any of its aliases.
+	declaredKeys          *typeutil.ConcurrentMap[string, string]
 	registeredKeyPrefixes *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
@@ -143,7 +146,7 @@ func NewManager() *Manager {
 		sensitiveKeyPrefixes:  typeutil.NewConcurrentSet[string](),
 		nonSensitiveKeys:      typeutil.NewConcurrentSet[string](),
 		nonSensitiveSuffixes:  typeutil.NewConcurrentSet[string](),
-		registeredKeys:        typeutil.NewConcurrentSet[string](),
+		declaredKeys:          typeutil.NewConcurrentMap[string, string](),
 		registeredKeyPrefixes: typeutil.NewConcurrentSet[string](),
 		configCache:           make(map[string]any),
 	}
@@ -217,12 +220,14 @@ func (m *Manager) getConfigByRealKey(realKey, requestedKey string) (string, stri
 	return sourceName, v, err
 }
 
-// ResolveRegisteredConfigKey returns the key identity used by externally
-// managed configuration. ParamItems use the historical separator-free lookup
-// key, while ParamGroup members preserve their dotted suffix so an arbitrary
-// environment alias cannot impersonate a dynamic group value.
+// ResolveRegisteredConfigKey reports whether a caller-supplied key names
+// declared configuration, and returns the identity to write it under.
+// The identity returned is the dotted one: it is what every later predicate
+// needs (a prefix cannot be matched against a separator-free key), and callers
+// that write it out go through AlterConfigsInEtcd, which formats it anyway.
 func (m *Manager) ResolveRegisteredConfigKey(key string) (string, RegisteredConfigKind) {
-	return m.resolveRegisteredKey(key)
+	resolved := m.resolveRegisteredKey(key)
+	return resolved.dotted, resolved.kind
 }
 
 // GetRegisteredConfig reads a caller-supplied key, and is the only read API
@@ -230,36 +235,30 @@ func (m *Manager) ResolveRegisteredConfigKey(key string) (string, RegisteredConf
 // ParamGroup declares, and refuses credentials. Callers distinguish the two
 // with errors.Is against ErrKeyUnregistered and ErrKeySensitive.
 func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
-	canonical, kind := m.resolveRegisteredKey(key)
-	if kind == RegisteredConfigUnknown {
+	resolved := m.resolveRegisteredKey(key)
+	if resolved.kind == RegisteredConfigUnknown {
 		return "", "", errors.Wrap(ErrKeyUnregistered, key)
 	}
-	if kind == RegisteredConfigGroup && m.groupHasEnvironmentSource(canonical) {
-		// ParamGroup suffixes are open-ended. Unlike an explicitly registered
-		// ParamItem, neither a dotted environment variable nor its
-		// separator-free alias proves that the value is Milvus configuration;
-		// fail closed rather than exposing an arbitrary process secret.
-		return "", "", errors.Wrap(ErrKeyUnregistered, key)
-	}
-	if m.IsSensitive(canonical) {
+	if resolved.isSensitive() {
 		return "", "", errors.Wrap(ErrKeySensitive, key)
 	}
-	return m.getRegisteredValue(canonical, key)
+	return m.readResolved(resolved, key)
 }
 
-// getRegisteredValue reads a declared key that may be stored under either of
-// the two identities a ParamGroup member can take.
+// readResolved reads a declared key under whichever of the two identities its
+// value was stored as.
 //
-// The separator-free form is the one every source agrees on: FileSource and
-// EnvSource insert both forms, and AlterConfigsInEtcd writes only this one — so
-// resolving by the dotted key alone would find the file entry and report a
-// stale value, with the wrong source, after an etcd override. The dotted form
-// is still needed for runtime overlays written through SetMapConfig, which
-// keeps the separators.
-func (m *Manager) getRegisteredValue(canonical, requestedKey string) (string, string, error) {
-	candidates := []string{formatKey(canonical)}
-	if canonical != candidates[0] {
-		candidates = append(candidates, canonical)
+// The separator-free form comes first because it is the one every source agrees
+// on: FileSource inserts both forms, EnvSource inserts the raw variable name
+// and its formatted alias, and AlterConfigsInEtcd writes only the formatted
+// one. Reading a ParamGroup member by its dotted key alone would find the file
+// entry and report a stale value, with the wrong source, after an etcd
+// override. The dotted form is still needed for runtime overlays written
+// through SetMapConfig, which keeps the separators.
+func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (string, string, error) {
+	candidates := []string{resolved.lookup}
+	if resolved.dotted != resolved.lookup {
+		candidates = append(candidates, resolved.dotted)
 	}
 
 	// A runtime overlay outranks every source, whichever identity it was
@@ -281,12 +280,26 @@ func (m *Manager) getRegisteredValue(canonical, requestedKey string) (string, st
 	return "", "", errors.Wrap(ErrKeyNotFound, requestedKey)
 }
 
-func (m *Manager) groupHasEnvironmentSource(canonical string) bool {
-	if source, ok := m.keySourceMap.Get(canonical); ok && source == environmentSourceName {
-		return true
-	}
-	if formatted := formatKey(canonical); formatted != canonical {
-		if source, ok := m.keySourceMap.Get(formatted); ok && source == environmentSourceName {
+// groupMemberDeclared reports whether some source actually supplied a
+// ParamGroup member under the group's own dotted namespace.
+//
+// A prefix match on a caller-supplied key is not enough on its own. The
+// separator-free namespace is shared with every process environment variable —
+// EnvSource stores each one under KeyFormatter(name) — so without this check a
+// caller could reach an arbitrary variable by spelling it with dots until it
+// matched a registered prefix. Requiring the dotted identity closes that,
+// because EnvSource never synthesises a dotted key, and it makes the management
+// read surface exactly what ParamGroup.GetValue itself can see: that lookup
+// filters keySourceMap by the dotted prefix too, so a member this check rejects
+// is a member the group was never reading either.
+func (m *Manager) groupMemberDeclared(dotted string) bool {
+	// EtcdSource keeps whatever separator the stored key used, so accept the
+	// slash spelling of the same namespace as well.
+	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
+		if _, ok := m.overlays.Get(candidate); ok {
+			return true
+		}
+		if _, ok := m.keySourceMap.Get(candidate); ok {
 			return true
 		}
 	}
@@ -297,6 +310,12 @@ func (m *Manager) groupHasEnvironmentSource(canonical string) bool {
 // replaced by RedactedValue, and keys that no ParamItem or ParamGroup declares
 // are omitted entirely. Internal code that requires the original values must
 // call GetConfigsRaw explicitly.
+//
+// The projection is only as complete as the declarations made so far. A Manager
+// whose ParamItems have not been initialised yet declares nothing, so this
+// returns an empty map rather than an error — call it after the owning
+// ParamTable is built, or use GetConfigsRaw if you are not serving the result
+// to anyone.
 func (m *Manager) GetConfigs() map[string]string {
 	return m.getConfigs(true)
 }
@@ -467,9 +486,13 @@ func (m *Manager) DeleteConfig(key string) {
 	m.overlays.Insert(formatKey(key), TombValue)
 }
 
-// Remove the config which set at runtime, use config from sources
+// Remove the config which set at runtime, use config from sources.
+// Both identities are removed: SetConfig writes the separator-free one and
+// SetMapConfig the dotted one, so clearing only the former would leave a group
+// value set by BaseTable.SaveGroup in place forever.
 func (m *Manager) ResetConfig(key string) {
 	m.overlays.Remove(formatKey(key))
+	m.overlays.Remove(lowerKey(strings.ReplaceAll(key, "/", ".")))
 }
 
 // Ignore any of update events, which means the config cannot auto refresh anymore
@@ -494,7 +517,7 @@ func (m *Manager) IsImmutable(key string) bool {
 func (m *Manager) RegisterConfigKey(key string) {
 	formattedKey := formatKey(key)
 	if formattedKey != "" {
-		m.registeredKeys.Insert(formattedKey)
+		m.declaredKeys.Insert(formattedKey, lowerKey(strings.ReplaceAll(key, "/", ".")))
 	}
 }
 
@@ -570,49 +593,77 @@ func leafName(canonicalKey string) string {
 	return canonicalKey
 }
 
-func (m *Manager) resolveRegisteredKey(key string) (canonical string, kind RegisteredConfigKind) {
-	formattedKey := formatKey(key)
-	if m.registeredKeys.Contain(formattedKey) {
-		return formattedKey, RegisteredConfigScalar
+// resolvedKey is one configuration key seen under both identities it can take.
+//
+// lookup is the separator-free form every source agrees on, and is what values,
+// sensitivity marks and immutability are keyed by. dotted is the form that
+// carries the key's structure, and is the only one a prefix can be matched
+// against — "kafkaproducercompression" cannot be tested against the prefix
+// "kafka.producer.", which is why the two must travel together rather than be
+// re-derived from whichever spelling a caller happened to use.
+type resolvedKey struct {
+	m      *Manager
+	lookup string
+	dotted string
+	kind   RegisteredConfigKind
+}
+
+func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
+	dotted := lowerKey(strings.ReplaceAll(key, "/", "."))
+	// Format the dotted form, not the caller's spelling: formatKey leaves keys
+	// below NotFormatPrefix untouched, so "knowhere.X/y" would otherwise keep
+	// its slashes and match nothing. Uncached, because this runs on
+	// caller-supplied keys from an endpoint anyone can reach, and formatKey's
+	// cache is a process-global map that never evicts.
+	formattedKey := formatKeyUncached(dotted)
+	// A declared ParamItem remembers its own dotted spelling, so it resolves the
+	// same way whether the caller used the declared key, its environment alias,
+	// or the separator-free identity the value is stored under.
+	if declared, ok := m.declaredKeys.Get(formattedKey); ok {
+		return resolvedKey{m: m, lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar}
 	}
 
-	// Prefix registration intentionally uses the canonical, separator-preserving
-	// key. EnvSource also stores separator-free aliases for every process
-	// environment variable, so accepting such aliases here would let an
-	// unrelated key such as PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL masquerade
-	// as a member of proxy.accessLog.formatters.
-	canonicalKey := lowerKey(strings.ReplaceAll(key, "/", "."))
+	resolved := resolvedKey{m: m, lookup: formattedKey, dotted: dotted}
 	m.registeredKeyPrefixes.Range(func(prefix string) bool {
-		if strings.HasPrefix(canonicalKey, prefix) && len(canonicalKey) > len(prefix) {
-			kind = RegisteredConfigGroup
+		if strings.HasPrefix(dotted, prefix) && len(dotted) > len(prefix) && m.groupMemberDeclared(dotted) {
+			resolved.kind = RegisteredConfigGroup
 			return false
 		}
 		return true
 	})
-	return canonicalKey, kind
+	return resolved
 }
 
-// IsSensitive reports whether key is a credential.
+func (r resolvedKey) isSensitive() bool {
+	return r.m.isSensitiveResolved(r.lookup, r.dotted)
+}
+
+// IsSensitive reports whether key is a credential. It accepts any spelling of
+// the key — declared, environment alias, or separator-free — because it
+// resolves the key first rather than matching prefixes against whatever form
+// the caller passed.
+func (m *Manager) IsSensitive(key string) bool {
+	return m.resolveRegisteredKey(key).isSensitive()
+}
+
+// isSensitiveResolved decides sensitivity from both identities of one key.
 //
 // Precedence is explicit-before-inferred, and it matters in both directions: a
 // declared NonSensitive ParamItem that happens to sit below a sensitive
 // ParamGroup prefix (kafka.producer.message.max.bytes) must stay readable, and
 // a declared Sensitive key must stay hidden whatever its name looks like.
-func (m *Manager) IsSensitive(key string) bool {
-	formattedKey := formatKey(key)
-	if m.sensitiveKeys.Contain(formattedKey) {
+func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
+	if m.sensitiveKeys.Contain(lookup) {
 		return true
 	}
-	if m.nonSensitiveKeys.Contain(formattedKey) {
+	if m.nonSensitiveKeys.Contain(lookup) {
 		return false
 	}
-
-	canonicalKey := strings.ToLower(strings.ReplaceAll(key, "/", "."))
-	if m.matchesSensitivePrefix(canonicalKey) {
+	if m.matchesSensitivePrefix(dotted) {
 		return true
 	}
 
-	patternKey := sensitivePatternReplacer.Replace(strings.ToLower(key))
+	patternKey := sensitivePatternReplacer.Replace(dotted)
 	for _, pattern := range sensitiveKeyPatterns {
 		if strings.Contains(patternKey, pattern) {
 			return true
@@ -622,13 +673,12 @@ func (m *Manager) IsSensitive(key string) bool {
 }
 
 func (m *Manager) matchesSensitivePrefix(canonicalKey string) bool {
-	leaf := leafName(canonicalKey)
 	matched := false
 	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
 		if !strings.HasPrefix(canonicalKey, prefix) {
 			return true
 		}
-		if m.nonSensitiveSuffixes.Contain(suffixExemption(prefix, leaf)) {
+		if m.suffixExempted(prefix, canonicalKey[len(prefix):]) {
 			// Exempted for this prefix, but another sensitive prefix may still
 			// cover the key, so keep scanning.
 			return true
@@ -637,6 +687,21 @@ func (m *Manager) matchesSensitivePrefix(canonicalKey string) bool {
 		return false
 	})
 	return matched
+}
+
+// suffixExempted reports whether the part of a key below a sensitive prefix is
+// one of the leaves the group declared safe.
+//
+// The exemption is deliberately shallow: it covers "<provider>.enable" and the
+// group's own "enable", but not "<provider>.secret.enable". A group is marked
+// sensitive precisely because its member names are open-ended, so an exemption
+// that matched the last segment at any depth would let an arbitrary subtree out
+// by ending in a safe-looking word.
+func (m *Manager) suffixExempted(prefix, remainder string) bool {
+	if strings.Count(remainder, ".") > 1 {
+		return false
+	}
+	return m.nonSensitiveSuffixes.Contain(suffixExemption(prefix, leafName(remainder)))
 }
 
 // projectionKind is what a configuration projection does with one key.
@@ -656,42 +721,25 @@ const (
 )
 
 func (m *Manager) classify(key string) projectionKind {
-	canonical, kind := m.resolveRegisteredKey(key)
-	if kind == RegisteredConfigUnknown {
+	resolved := m.resolveRegisteredKey(key)
+	switch {
+	case resolved.kind == RegisteredConfigUnknown:
 		return projectionOmit
-	}
-	if kind == RegisteredConfigGroup && m.groupHasEnvironmentSource(canonical) {
-		return projectionOmit
-	}
-	if m.IsSensitive(canonical) {
+	case resolved.isSensitive():
 		return projectionRedact
+	default:
+		return projectionKeep
 	}
-	return projectionKeep
 }
 
-// ShouldRedact reports whether a key's value is unsafe to write out verbatim.
-// Undeclared keys fail closed. Use it for logs, where the key is already known
-// to whoever reads the line; configuration projections use classify instead,
-// because there the set of key names is itself part of what leaks.
-func (m *Manager) ShouldRedact(key string) bool {
-	return m.classify(key) != projectionKeep
-}
-
-// RedactValue returns a log-safe value for key.
+// RedactValue returns a log-safe value for key. Undeclared keys fail closed:
+// a log line names its own key, so masking a value costs nothing there, whereas
+// a configuration projection omits the entry instead — see projectionOmit.
 func (m *Manager) RedactValue(key, value string) string {
-	if m.ShouldRedact(key) {
+	if m.classify(key) != projectionKeep {
 		return RedactedValue
 	}
 	return value
-}
-
-// RedactValues returns a log-safe copy without mutating values.
-func (m *Manager) RedactValues(values map[string]string) map[string]string {
-	redacted := make(map[string]string, len(values))
-	for key, value := range values {
-		redacted[key] = m.RedactValue(key, value)
-	}
-	return redacted
 }
 
 // projectValue returns the value to publish for key and whether to publish the

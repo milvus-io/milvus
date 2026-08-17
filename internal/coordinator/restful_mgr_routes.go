@@ -1345,17 +1345,18 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Never write or delete credentials through the generic config endpoint.
-		// Secrets have their own lifecycle and must not be copied into etcd in
-		// cleartext, even when the caller is root.
-		if paramMgr.IsSensitive(canonicalKey) {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify sensitive config",
-				mlog.String("key", config.Key))
-			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
-			return
-		}
-
 		if config.Value != nil {
+			// Never write a credential through the generic config endpoint:
+			// secrets have their own lifecycle and must not be copied into etcd
+			// in cleartext, even when the caller is root. Deleting one is the
+			// opposite operation and stays allowed — refusing it would strand an
+			// operator who needs to remove a secret an older build wrote there.
+			if paramMgr.IsSensitive(canonicalKey) {
+				logger.Info(request.Context(), "HandleAlterConfig attempted to set sensitive config",
+					mlog.String("key", config.Key))
+				writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+				return
+			}
 			configsToUpdate[canonicalKey] = *config.Value
 		} else {
 			keysToDelete = append(keysToDelete, canonicalKey)
