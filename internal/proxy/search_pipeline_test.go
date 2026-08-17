@@ -3558,6 +3558,95 @@ func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam
 	s.Equal(int64(0), op.(*searchReduceOperator).offset)
 }
 
+func (s *SearchPipelineSuite) TestNewSearchReduceOperator_OrderByOffset() {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 102, Name: "price", DataType: schemapb.DataType_Int64},
+		},
+	})
+
+	// Case 1: orderByFields present, offset = 0 -> topK = topk + 0 = 10
+	taskZeroOffset := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 0,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op1, err := newSearchReduceOperator(taskZeroOffset, nil)
+	s.NoError(err)
+	s.Equal(int64(10), op1.(*searchReduceOperator).topK)
+
+	// Case 2: orderByFields present, offset = 20 -> topK = 10 + 20 = 30
+	taskNonZeroOffset := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 20,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op2, err := newSearchReduceOperator(taskNonZeroOffset, nil)
+	s.NoError(err)
+	s.Equal(int64(30), op2.(*searchReduceOperator).topK)
+
+	// Case 3: orderByFields present, large offset = 1000 -> topK = 10 + 1000 = 1010
+	taskLargeOffset := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 1000,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op3, err := newSearchReduceOperator(taskLargeOffset, nil)
+	s.NoError(err)
+	s.Equal(int64(1010), op3.(*searchReduceOperator).topK)
+
+	// Case 4: orderByFields present, but isAdvanced = true -> topK = 10 (offset not added)
+	taskAdvanced := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:         1,
+			Topk:       10,
+			Offset:     20,
+			IsAdvanced: true,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op4, err := newSearchReduceOperator(taskAdvanced, nil)
+	s.NoError(err)
+	s.Equal(int64(10), op4.(*searchReduceOperator).topK)
+
+	// Case 5: No orderByFields, offset = 20 -> topK = 10
+	taskNoOrderBy := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 20,
+		},
+		schema:     schema,
+		queryInfos: []*planpb.QueryInfo{{}},
+	}
+	op5, err := newSearchReduceOperator(taskNoOrderBy, nil)
+	s.NoError(err)
+	s.Equal(int64(10), op5.(*searchReduceOperator).topK)
+}
+
 func (s *SearchPipelineSuite) TestNewOrderByOperatorUsesPluralGroupByFieldIDs() {
 	task := &searchTask{
 		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
@@ -3674,6 +3763,65 @@ func (s *SearchPipelineSuite) TestOrderByOperatorAppliesOffsetAfterOrderBy() {
 	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	s.Equal([]int64{2}, sliced.GetTopks())
 	s.Equal(int64(2), sliced.GetTopK())
+}
+
+// TestOrderByOperatorTiedScoresKeepsScalarBestOutsideANNLimit covers #49994:
+// when ANN scores are identical, order_by must expand the equal-score set before
+// applying limit so the globally best scalar values are not truncated away.
+func (s *SearchPipelineSuite) TestOrderByOperatorTiedScoresKeepsScalarBestOutsideANNLimit() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}},
+				},
+			},
+			// PK-asc truncation of topK=2 would keep ids 1,2 only and drop id=4.
+			Scores: []float32{1.0, 1.0, 1.0, 1.0, 1.0},
+			TopK:   5,
+			Topks:  []int64{5},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{50, 10, 40, 20, 30}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         0,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{2, 4}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]int64{10, 20}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+}
+
+func (s *SearchPipelineSuite) TestSelectTopByScoreWithTies() {
+	scores := []float32{1.0, 1.0, 1.0, 0.5, 0.4}
+	indices := []int{0, 1, 2, 3, 4}
+
+	got := selectTopByScoreWithTies(scores, indices, 2)
+	s.Equal([]int{0, 1, 2}, got)
+
+	got = selectTopByScoreWithTies(scores, indices, 4)
+	s.Equal([]int{0, 1, 2, 3}, got)
+
+	got = selectTopByScoreWithTies(scores, indices, 0)
+	s.Equal(indices, got)
 }
 
 func (s *SearchPipelineSuite) TestOrderByOperatorSlicesStringIDsAndNonNullableVectorAfterOrderBy() {

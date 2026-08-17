@@ -188,6 +188,13 @@ func newSearchReduceOperator(t *searchTask, params map[string]any) (operator, er
 	if err != nil {
 		return nil, err
 	}
+	topK := t.GetTopk()
+	if len(t.orderByFields) > 0 && !t.GetIsAdvanced() {
+		// ORDER BY is applied after reduction in the proxy pipeline, so the reducer
+		// must preserve the requested window plus the offset to avoid pruning rows
+		// that would otherwise be excluded before sorting.
+		topK += t.GetOffset()
+	}
 	offset := t.GetOffset()
 	if v, ok := params[reduceOffsetParamKey].(int64); ok {
 		offset = v
@@ -196,7 +203,7 @@ func newSearchReduceOperator(t *searchTask, params map[string]any) (operator, er
 		traceCtx:            t.TraceCtx(),
 		primaryFieldSchema:  pkField,
 		nq:                  t.GetNq(),
-		topK:                t.GetTopk(),
+		topK:                topK,
 		offset:              offset,
 		collectionID:        t.GetCollectionID(),
 		partitionIDs:        t.GetPartitionIDs(),
@@ -1878,11 +1885,15 @@ func newOrderByOperator(t *searchTask, _ map[string]any) (operator, error) {
 		}
 		groupSize = queryInfo.GetGroupSize()
 	}
+	limit := t.resultLimit
+	if limit <= 0 {
+		limit = t.GetTopk() - t.GetOffset()
+	}
 	return &orderByOperator{
 		orderByFields:  t.orderByFields,
 		groupByFieldId: groupByFieldId,
 		groupSize:      groupSize,
-		limit:          t.GetTopk() - t.GetOffset(),
+		limit:          limit,
 		offset:         t.GetOffset(),
 	}, nil
 }
@@ -1982,6 +1993,26 @@ func paginateSortedRows(indices []int, offset, limit int64) []int {
 	return indices[start:end]
 }
 
+// selectTopByScoreWithTies keeps the top-k ANN candidates by score (higher is
+// better after reduce) and expands the window to include every row whose score
+// ties the k-th candidate. This lets order_by act as a tie-breaker over the
+// full equal-score set before limit/offset are applied.
+func selectTopByScoreWithTies(scores []float32, indices []int, k int64) []int {
+	if k <= 0 || len(indices) == 0 || int(k) >= len(indices) {
+		return indices
+	}
+	sorted := append([]int(nil), indices...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return scores[sorted[i]] > scores[sorted[j]]
+	})
+	threshold := scores[sorted[k-1]]
+	end := int(k)
+	for end < len(sorted) && scores[sorted[end]] == threshold {
+		end++
+	}
+	return sorted[:end]
+}
+
 // sortQueryResults sorts the given indices slice based on order_by fields.
 // This handles both regular and group-by cases for a single query's results.
 // Returns the sorted and paginated indices, or an error if comparison fails.
@@ -1993,6 +2024,15 @@ func (op *orderByOperator) sortQueryResults(result *milvuspb.SearchResults, indi
 	if op.groupByFieldId >= 0 && op.groupSize > 0 {
 		return op.sortGroupsByOrderByFields(result, indices)
 	}
+
+	// Keep ANN top (limit+offset) by score, expanding equal-score ties so
+	// scalar order_by can see candidates that would otherwise be truncated.
+	candidateCount := op.offset + op.limit
+	if candidateCount <= 0 {
+		candidateCount = op.limit
+	}
+	indices = selectTopByScoreWithTies(result.GetResults().GetScores(), indices, candidateCount)
+
 	if err := op.sortResultsByOrderByFields(result, indices); err != nil {
 		return nil, err
 	}
@@ -3562,7 +3602,10 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 }
 
 // searchWithOrderByPipe: reduce without offset → requery → organize → order_by
-// For common search with order_by_fields
+// For common search with order_by_fields.
+// ANN topK is expanded (see parseSearchInfo) so equal-score candidates outside
+// the user limit can reach order_by; order_by then keeps score topK with ties,
+// sorts by scalar fields, and applies offset/limit.
 var searchWithOrderByPipe = &pipelineDef{
 	name: "searchWithOrderBy",
 	nodes: []*nodeDef{

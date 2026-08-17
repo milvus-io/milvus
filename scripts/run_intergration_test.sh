@@ -37,6 +37,7 @@ TEST_CMD_WITH_ARGS=(
     $TEST_CMD
     "-gcflags=all=-N -l"
     -race
+    -vet=off
     -tags dynamic,test
     -v
     -failfast

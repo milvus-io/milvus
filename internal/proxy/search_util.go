@@ -156,6 +156,7 @@ type OrderByField struct {
 
 type SearchInfo struct {
 	planInfo        *planpb.QueryInfo
+	limit           int64 // user-requested limit (before offset / order_by candidate expansion)
 	offset          int64
 	isIterator      bool
 	collectionID    int64
@@ -646,6 +647,21 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			"order_by is not supported when using search iterator")
 	}
 
+	// 9. order_by reorders ANN candidates, then applies limit/offset.
+	// Expand the ANN window to the topK quota so equal-score (and near-tie)
+	// rows outside the user limit are still available for scalar ordering.
+	// Final pagination still uses the original user limit/offset.
+	userLimit := topK
+	if len(orderByFields) > 0 {
+		topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
+		if largeTopKEnabled {
+			topKLimit = Params.QuotaConfig.LargeTopKLimit.GetAsInt64()
+		}
+		if queryTopK < topKLimit {
+			queryTopK = topKLimit
+		}
+	}
+
 	return &SearchInfo{
 		planInfo: &planpb.QueryInfo{
 			Topk:                 queryTopK,
@@ -662,6 +678,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
 		},
+		limit:           userLimit,
 		offset:          offset,
 		isIterator:      isIterator,
 		collectionID:    collectionId,
