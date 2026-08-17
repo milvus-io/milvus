@@ -65,9 +65,11 @@ func TestEstimateIndexBuildIncident2FitsNode(t *testing.T) {
 	assert.Less(t, got.Memory, nodeMem)
 	assert.GreaterOrEqual(t, got.Memory, fieldSize)
 	// CPU must not scale with data volume: knowhere's build parallelism is
-	// fixed, and scaling CPU is what manufactured the "bigger than the node"
-	// illusion in the scalar scheme.
-	assert.LessOrEqual(t, got.CPU, float64(4))
+	// fixed by its pool, and scaling CPU is what manufactured the "bigger than
+	// the node" illusion in the scalar scheme. HNSW is a vector index, so the
+	// charge is one slot of that pool -- whatever the build host's core count
+	// makes that -- and never a function of the 3.33GiB field.
+	assert.Equal(t, VectorIndexBuildCPU(), got.CPU)
 }
 
 func TestEstimateIndexBuildCPUIsSizeIndependent(t *testing.T) {
@@ -169,7 +171,7 @@ func TestEstimateIndexBuildExactFormula(t *testing.T) {
 
 	want := int64(float64(fieldSize) * IndexBuildMemoryFactor("HNSW"))
 	assert.Equal(t, want, got.Memory)
-	assert.Equal(t, paramtable.Get().DataCoordCfg.ResourceIndexBuildCPU.GetAsFloat(), got.CPU)
+	assert.Equal(t, VectorIndexBuildCPU(), got.CPU)
 }
 
 // TestEstimateIndexBuildTinyFieldHitsFloor proves the 64MiB floor is actually

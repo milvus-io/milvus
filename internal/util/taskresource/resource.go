@@ -25,11 +25,19 @@ import (
 
 // Requirement is the two-dimensional resource footprint of a single task.
 //
-// CPU is the number of cores the task is expected to keep busy; it is a
-// scheduling hint, not a cgroup quota. Memory is the task's expected *peak*
-// resident bytes — peak rather than average, because the ledger that consumes
-// this value charges the full amount at admission time and holds it for the
-// task's whole lifetime.
+// The two dimensions are not the same kind of quantity, and the difference is
+// the reason this type has two fields instead of the single slot it replaces.
+// It is the split Borg and Kubernetes make between INCOMPRESSIBLE and
+// COMPRESSIBLE resources:
+//
+//   - Memory is incompressible. A task that exceeds its estimate does not run
+//     slower, it kills the process. So Memory is a RESERVATION: the task's
+//     expected *peak* resident bytes, charged in full at admission and held for
+//     the task's whole lifetime, and the one dimension admission may refuse on.
+//   - CPU is compressible. Two tasks on one core both finish, just later. So
+//     CPU is a REQUEST, in the Kubernetes sense: nothing enforces it, no task is
+//     ever refused for want of it (see MemoryFitsIn), and it exists to place and
+//     to spread rather than to admit. See cpu.go for what consumes it.
 type Requirement struct {
 	CPU    float64
 	Memory int64
@@ -66,8 +74,31 @@ func (r Requirement) Sub(o Requirement) Requirement {
 	return out
 }
 
+// FitsIn reports whether both dimensions fit. Nothing in the admission path
+// uses it -- see MemoryFitsIn for why -- but the whole-vector comparison is
+// still the right question for a reporting or diagnostic caller asking whether
+// a node is over-committed in any dimension at all.
 func (r Requirement) FitsIn(c Capacity) bool {
 	return r.CPU <= c.CPU && r.Memory <= c.Memory
+}
+
+// MemoryFitsIn reports whether the memory dimension fits. It, and not FitsIn,
+// is what admission asks.
+//
+// Refusing a task because the node's CPU requests are already spoken for would
+// contradict the point of a request: CPU is compressible, so the consequence of
+// running one more task is that everything runs a little slower, not that
+// anything dies. Enforcing it would serialize work the node can perfectly well
+// run concurrently, and it would do so across task classes that do not even
+// contend for the same thread pool -- an L0 compaction blocked behind four
+// vector index builds it shares nothing with.
+//
+// This is also what makes the CPU request safe to set honestly. Once a vector
+// index build charges the several cores it really occupies (see
+// VectorIndexBuildCPU), a charge that large would refuse half the node's work
+// if admission still treated it as a reservation.
+func (r Requirement) MemoryFitsIn(c Capacity) bool {
+	return r.Memory <= c.Memory
 }
 
 func (r Requirement) IsZero() bool {
