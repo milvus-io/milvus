@@ -18,7 +18,6 @@ package interceptor
 
 import (
 	"context"
-	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -37,7 +36,10 @@ func IdempotencyKeyFromContext(ctx context.Context) string {
 	if !ok {
 		return ""
 	}
-	values := md[strings.ToLower(util.HeaderIdempotencyKey)]
+	// util.HeaderIdempotencyKey is already lowercase, which is the form gRPC
+	// normalizes metadata keys to; lowering it again here would only hide a future
+	// edit to the constant that the write side would not survive either.
+	values := md[util.HeaderIdempotencyKey]
 	if len(values) < 1 {
 		return ""
 	}
@@ -52,6 +54,12 @@ func IdempotencyKeyFromContext(ctx context.Context) string {
 // A request without a key is left untouched: every RPC in the cluster goes
 // through this chain, and an empty metadata value is not the same as an absent
 // one for the components that read it.
+//
+// This covers the clients built on grpcclient.ClientBase — the coordinator and
+// node clients. The streaming clients maintain their own interceptor chains and
+// are deliberately not covered: a coordinator reaches the broadcaster in-process,
+// and from there the key travels as the `_ik` message property rather than as
+// metadata.
 func IdempotencyKeyPropagationUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		if key := IdempotencyKeyFromContext(ctx); key != "" {
