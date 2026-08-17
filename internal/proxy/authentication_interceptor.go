@@ -108,3 +108,40 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	}
 	return ctx, nil
 }
+
+// authServerStream re-exposes the authenticated context so the downstream
+// handler reads user info via ss.Context() instead of the raw incoming one.
+type authServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *authServerStream) Context() context.Context { return s.ctx }
+
+// GrpcAuthStreamInterceptor is the streaming counterpart of GrpcAuthInterceptor.
+// The unary chain guards every ordinary SDK request; without this, a stream
+// method on the same listener - milvuspb.MilvusService/CreateReplicateStream -
+// answers an unauthenticated caller even while
+// common.security.authorizationEnabled is on, because an interceptor chain
+// binds to exactly one of gRPC's two call kinds and the external server only
+// installed the unary one. The auth decision itself is authFunc's, gated
+// inside it the same way as on the unary path, so a deployment with
+// authorization off is untouched.
+func GrpcAuthStreamInterceptor(authFunc grpc_auth.AuthFunc) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		var newCtx context.Context
+		var err error
+		if overrideSrv, ok := srv.(grpc_auth.ServiceAuthFuncOverride); ok {
+			newCtx, err = overrideSrv.AuthFuncOverride(ss.Context(), info.FullMethod)
+		} else {
+			newCtx, err = authFunc(ss.Context())
+		}
+		if err != nil {
+			hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
+			return err
+		}
+		return handler(srv, &authServerStream{ServerStream: ss, ctx: newCtx})
+	}
+}
