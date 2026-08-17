@@ -342,6 +342,18 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.NotNil(t, w.rch)
 	})
 
+	t.Run("leader change triggers rewatch instead of close", func(t *testing.T) {
+		rewatched := false
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			rewatched = true
+			return nil
+		})
+		err := w.handleWatchErr(v3rpc.ErrLeaderChanged)
+		assert.NoError(t, err)
+		assert.True(t, rewatched)
+		assert.NotNil(t, w.rch)
+	})
+
 	t.Run("non-retriable error closes channel", func(t *testing.T) {
 		w := getWatcher(s, nil)
 		err := w.handleWatchErr(errors.New("some fatal error"))

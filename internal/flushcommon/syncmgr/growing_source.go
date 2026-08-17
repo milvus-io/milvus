@@ -400,6 +400,7 @@ type GrowingSourceSyncTask struct {
 
 	writeRetryOpts  []retry.Option
 	failureCallback func(error)
+	failureOnce     sync.Once
 	tr              *timerecord.TimeRecorder
 }
 
@@ -593,10 +594,12 @@ func (t *GrowingSourceSyncTask) HandleError(err error) {
 	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 		return
 	}
-	if t.failureCallback != nil {
-		t.failureCallback(err)
-	}
-	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+	t.failureOnce.Do(func() {
+		if t.failureCallback != nil {
+			t.failureCallback(err)
+		}
+		metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+	})
 }
 
 func (t *GrowingSourceSyncTask) ReleaseSource() {
@@ -667,13 +670,13 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if t.source.CurrentOffset() < t.targetOffset {
 			return merr.WrapErrServiceInternalMsg("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
 		}
-		config, err := t.buildFlushConfig(segment, columnGroups)
+		config, err := t.buildFlushConfig(ctx, segment, columnGroups)
 		if err != nil {
 			return err
 		}
 		var insertSummaryLogIDs []int64
 		if t.metaWriter != nil && len(columnGroups) > 0 {
-			insertSummaryLogIDs, err = t.allocLogIDs(len(columnGroups), "growing source insert summary")
+			insertSummaryLogIDs, err = t.allocLogIDs(ctx, len(columnGroups), "growing source insert summary")
 			if err != nil {
 				return err
 			}
@@ -861,7 +864,7 @@ func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.
 	return schemaBasedPattern, nil
 }
 
-func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup) (*GrowingFlushConfig, error) {
+func (t *GrowingSourceSyncTask) buildFlushConfig(ctx context.Context, segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup) (*GrowingFlushConfig, error) {
 	if segment.GetStorageVersion() != storage.StorageV3 {
 		return nil, merr.WrapErrDataIntegrityMsg("growing source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
 			t.segmentID, segment.GetStorageVersion())
@@ -898,7 +901,7 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo,
 	}
 	if len(bm25FieldIDs) > 0 {
 		var err error
-		bm25StatsLogIDs, err = t.allocBM25StatsLogIDs(len(bm25FieldIDs))
+		bm25StatsLogIDs, err = t.allocBM25StatsLogIDs(ctx, len(bm25FieldIDs))
 		if err != nil {
 			return nil, err
 		}
@@ -985,7 +988,7 @@ func (t *GrowingSourceSyncTask) fillPrimaryKeyStatsConfig(ctx context.Context, s
 	if err != nil {
 		return err
 	}
-	logIDs, err := t.allocLogIDs(1, "growing source primary key stats")
+	logIDs, err := t.allocLogIDs(ctx, 1, "growing source primary key stats")
 	if err != nil {
 		return err
 	}
@@ -1059,17 +1062,17 @@ func fieldAllowed(allowed map[int64]struct{}, fieldID int64) bool {
 	return ok
 }
 
-func (t *GrowingSourceSyncTask) allocBM25StatsLogIDs(count int) ([]int64, error) {
-	return t.allocLogIDs(count, "bm25 stats")
+func (t *GrowingSourceSyncTask) allocBM25StatsLogIDs(ctx context.Context, count int) ([]int64, error) {
+	return t.allocLogIDs(ctx, count, "bm25 stats")
 }
 
-func (t *GrowingSourceSyncTask) allocLogIDs(count int, purpose string) ([]int64, error) {
+func (t *GrowingSourceSyncTask) allocLogIDs(ctx context.Context, count int, purpose string) ([]int64, error) {
 	if t.allocator == nil {
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("id allocator is nil when allocating %s ids", purpose))
 	}
 	ids := make([]int64, count)
 	for i := range ids {
-		id, err := t.allocator.AllocOne()
+		id, err := allocOneWithRetry(ctx, t.allocator, t.writeRetryOpts...)
 		if err != nil {
 			return nil, err
 		}

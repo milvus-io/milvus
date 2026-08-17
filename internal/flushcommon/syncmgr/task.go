@@ -156,9 +156,24 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
 		statsWriter = writer
 	case storage.StorageV3:
-		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
-			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		var writer *BulkPackWriterV3
+		write := func() error {
+			// A failed FFI writer is consumed even when Write or Close returns an
+			// error. Recreate the whole writer for every attempt so retry never
+			// reuses partial native state; the manifest is committed only after all
+			// data files have been written successfully.
+			writer = NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
+				packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
+			t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+			return err
+		}
+		if len(t.writeRetryOpts) == 0 {
+			err = write()
+		} else {
+			err = retry.Do(ctx, func() error {
+				return classifyStorageV3Err(write())
+			}, t.writeRetryOpts...)
+		}
 		statsWriter = writer
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)

@@ -133,8 +133,8 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 				panic("stop watching etcd loop due to closed etcd event channel")
 			}
 			if err := event.Err(); err != nil {
-				// Recoverable watch errors (compaction, or auth-token
-				// invalidation when etcd auth is enabled) are handled by
+				// Recoverable watch errors (compaction, leader changes, or
+				// auth-token invalidation when etcd auth is enabled) are handled by
 				// re-establishing the watch instead of crashing. Re-watching
 				// issues a unary request that refreshes the etcd auth token, so
 				// the new watch stream recovers. See etcd.IsRetriableWatchErr.

@@ -40,6 +40,7 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"compacted", rpctypes.ErrCompacted, true},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
 		{"invalid auth token", rpctypes.ErrInvalidAuthToken, true},
 		{"user empty", rpctypes.ErrUserEmpty, true},
 		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
@@ -47,6 +48,7 @@ func TestIsRetriableWatchErr(t *testing.T) {
 		// sentinel is deliberately NOT retriable: we match sentinels only.
 		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
 		{"wrapped invalid auth token", errors.Wrap(rpctypes.ErrInvalidAuthToken, "watch failed"), true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "watch failed"), true},
 		{"permission denied", rpctypes.ErrPermissionDenied, false},
 		{"lease not found", rpctypes.ErrLeaseNotFound, false},
 		{"generic error", errors.New("some other error"), false},

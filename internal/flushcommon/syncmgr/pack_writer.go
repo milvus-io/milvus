@@ -50,6 +50,20 @@ type BulkPackWriter struct {
 	sizeWritten int64
 }
 
+func allocOneWithRetry(ctx context.Context, alloc allocator.Interface, opts ...retry.Option) (int64, error) {
+	if len(opts) == 0 {
+		return alloc.AllocOne()
+	}
+
+	var id int64
+	err := retry.Do(ctx, func() error {
+		var err error
+		id, err = alloc.AllocOne()
+		return err
+	}, opts...)
+	return id, err
+}
+
 func NewBulkPackWriter(metaCache metacache.MetaCache,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
@@ -144,7 +158,7 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range binlogBlobs {
-		id, err := bw.allocator.AllocOne()
+		id, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +195,7 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 
 	pkFieldID := serializer.pkField.GetFieldID()
 	binlogs := make([]*datapb.Binlog, 0)
-	id, err := bw.allocator.AllocOne()
+	id, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +246,7 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range bm25Blobs {
-		id, err := bw.allocator.AllocOne()
+		id, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 		if err != nil {
 			return nil, err
 		}
@@ -288,7 +302,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		return nil, merr.Wrap(err, "primary key field not found")
 	}
 
-	logID, err := bw.allocator.AllocOne()
+	logID, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 	if err != nil {
 		return nil, err
 	}

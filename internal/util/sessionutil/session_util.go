@@ -928,8 +928,8 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 }
 
 func (w *sessionWatcher) handleWatchErr(err error) error {
-	// Only recoverable errors are re-watched. ErrCompacted needs a fresh
-	// revision; auth-token errors (etcd auth enabled) need the watch
+	// Only recoverable errors are re-watched. ErrCompacted and leader changes
+	// need a fresh revision; auth-token errors (etcd auth enabled) need the watch
 	// re-established because clientv3 won't refresh the token on a live watch
 	// stream. Any other error closes the channel. See etcd.IsRetriableWatchErr.
 	if !etcd.IsRetriableWatchErr(err) {

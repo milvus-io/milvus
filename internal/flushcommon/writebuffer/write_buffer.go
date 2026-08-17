@@ -1565,7 +1565,9 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
 			WithAllocator(wb.allocator).
 			WithStorageConfig(packed.CreateStorageConfig()).
-			WithFailureCallback(wb.errHandler).
+			// Growing-source failures are rolled back and rescheduled by
+			// submitSyncTasks; do not route them to the ordinary task's fail-stop
+			// write-buffer error handler.
 			// Same as above: keep the critical write path retrying despite the
 			// retry.Do InputError short-circuit.
 			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),

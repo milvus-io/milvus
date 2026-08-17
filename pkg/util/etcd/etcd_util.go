@@ -44,6 +44,8 @@ import (
 // It returns true for:
 //   - ErrCompacted: the watched revision has been compacted; re-watch from a
 //     fresh revision (pre-existing behavior).
+//   - ErrLeaderChanged: an etcd leader transfer interrupted the runtime watch;
+//     re-list at a fresh revision and establish a new watch stream.
 //   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
 //     with etcd auth enabled, the auth token held by a client can be
 //     invalidated server-side (the default "simple" token is GC'd after idle
@@ -70,6 +72,7 @@ func IsRetriableWatchErr(err error) bool {
 		return false
 	}
 	return errors.Is(err, rpctypes.ErrCompacted) ||
+		errors.Is(err, rpctypes.ErrLeaderChanged) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
 		errors.Is(err, rpctypes.ErrAuthOldRevision)
