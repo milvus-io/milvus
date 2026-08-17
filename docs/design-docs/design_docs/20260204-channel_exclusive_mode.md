@@ -340,14 +340,16 @@ BalanceReplica(ctx, replica)
 3. Channel-Aware Balancing (Exclusive Mode Enabled)
     For each channel:
         ├─ Get channel's exclusive RW nodes
-        ├─ Identify outbound nodes (nodes no longer in RW node list)
-        ├─ If outbound nodes exist:
-        │  ├─ genChannelPlanForOutboundNodes()
+        ├─ Identify channel and segment outbound nodes independently
+        ├─ In streaming mode, leave channel placement to streaming and stopping balance
+        ├─ If channel outbound nodes exist:
+        │  └─ genChannelPlanForOutboundNodes()
+        ├─ If segment outbound nodes exist:
         │  └─ genSegmentPlanForOutboundNodes()
-        └─ If no outbound nodes:
+        └─ If no channel outbound exists and no executable segment outbound plan exists:
            ├─ If AutoBalanceChannel enabled:
            │  └─ genChannelPlan() - balance channel distribution
-           └─ Else:
+           └─ If no channel plan is generated:
               └─ genSegmentPlan() - balance segments within channel nodes
     ↓
 4. Return Plans
@@ -406,7 +408,9 @@ score = α * CPU% + β * Memory% + γ * DelegatorScore
 
 #### 5.3.3 Outbound Node Handling
 
-**Outbound Node**: A node that was previously assigned to a channel but is no longer in the channel's RW node list (due to node removal or rebalancing)
+**Channel Outbound Node**: In legacy mode, a node that holds a channel but is no longer in the channel's exclusive RW node list.
+
+**Segment Outbound Node**: A node that holds a sealed segment but is outside the channel's exclusive RW node list. With Streaming Service enabled, a valid RWSQ channel holder is not a channel outbound node, but any sealed segment on it is still segment outbound workload.
 
 **genChannelPlanForOutboundNodes()** (`channel_level_score_balancer.go:162-176`)
 
