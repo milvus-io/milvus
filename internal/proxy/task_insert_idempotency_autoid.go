@@ -97,10 +97,15 @@ func reassignAutoIDByOffsetChannels(
 	// so a pathological hash distribution cannot spin forever and keep burning the
 	// global id space; fail loudly after a generous cap instead.
 	//
-	// COST (accepted by design): candidates hashing into already-satisfied
-	// buckets are discarded, so this consumes roughly numChannels/(numChannels-?)
-	// times the ids actually used and usually adds one extra allocator round-trip
-	// per idempotent autoID insert. The alternatives do not work: deriving the
+	// COST (accepted by design): a candidate that hashes into an already-satisfied
+	// bucket is discarded, and each top-up round deliberately over-allocates
+	// (missing * numChannels) so that one round almost always suffices. Id
+	// amplification therefore grows with shard count and shrinks with batch size:
+	// ~1.01x for 100k rows over 4 shards, ~1.25x for 10k over 16, but ~21x for a
+	// 100-row insert over 64 shards, where the over-allocation dominates. Rounds
+	// stay at 1 in the common case, far below maxAutoIDStabilizeRounds. The id
+	// space is int64, so even the worst ratio is immaterial in absolute terms:
+	// 21x of a 100-row insert is ~2k ids. The alternatives do not work: deriving the
 	// shard from the row offset directly would break Delete/Upsert, whose
 	// index-based routing hashes the PK against the same channel list (the
 	// insert's row->shard assignment MUST equal hash(assignedPK)%%n), and
