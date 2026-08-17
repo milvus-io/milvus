@@ -486,17 +486,6 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 // The gRPC path redacts expr_template_values the same way, but its helper
 // switches on protobuf request types and so cannot recognize these RESTful
 // shapes; they are handled here instead.
-// hasExprParams reports whether any sub-request binds expression templates, so
-// the common case -- none do -- is logged without copying the request.
-func hasExprParams(subReqs []SubSearchReq) bool {
-	for _, sub := range subReqs {
-		if len(sub.ExprParams) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func redactExprParams(params map[string]json.RawMessage) map[string]json.RawMessage {
 	if len(params) == 0 {
 		return params
@@ -509,6 +498,17 @@ func redactExprParams(params map[string]json.RawMessage) map[string]json.RawMess
 		redacted[name] = marker
 	}
 	return redacted
+}
+
+// hasExprParams reports whether any sub-request binds expression templates, so
+// the common case -- none do -- is logged without copying the request.
+func hasExprParams(subReqs []SubSearchReq) bool {
+	for _, sub := range subReqs {
+		if len(sub.ExprParams) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
