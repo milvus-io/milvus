@@ -22,6 +22,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
 
@@ -226,6 +228,69 @@ func TestDeclaredKeysDoNotCollide(t *testing.T) {
 
 	if len(violations) > 0 {
 		t.Errorf("declared key identity collisions:\n  %s", strings.Join(violations, "\n  "))
+	}
+}
+
+// securityGoverningConfigPrefix mirrors the constant in
+// internal/coordinator, which refuses every alter through the management
+// endpoint below it. Duplicated rather than imported because pkg may not depend
+// on internal.
+const securityGoverningConfigPrefix = "common.security."
+
+// securityGoverningConfigKeys mirrors the companion set in
+// internal/coordinator: authorization-deciding keys that were not declared
+// under the prefix. Compared after ToLower.
+var securityGoverningConfigKeys = []string{
+	"proxy.resolvealiasforprivilege",
+}
+
+// authorizationDeciding names the kinds of key that must sit inside the fenced
+// namespace: anything that decides whether Milvus authenticates, who counts as
+// privileged, or what a role may do.
+var authorizationDeciding = []string{
+	"authorization",
+	"privilege",
+	"superuser",
+	"rootpassword",
+	"authmode",
+	"rbac",
+	"tlsmode",
+}
+
+// TestSecurityGoverningPrefixCoversTheSecuritySection is what keeps the fence in
+// internal/coordinator from rotting into the list of two names it started as.
+// The fence is a prefix, so it stays complete only while every
+// authorization-deciding key is declared underneath it.
+func TestSecurityGoverningPrefixCoversTheSecuritySection(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+
+	escaped := make([]string, 0)
+	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
+		lowerKey := strings.ToLower(item.Key)
+		if strings.HasPrefix(lowerKey, securityGoverningConfigPrefix) {
+			return
+		}
+		if lo.Contains(securityGoverningConfigKeys, lowerKey) {
+			return
+		}
+		// Match within a dotted segment, never across one: "pulsar.backlog..."
+		// spans an accidental "rbac" at the join, and a fence driven by
+		// accidents is a fence nobody trusts.
+		for _, segment := range strings.Split(lowerKey, ".") {
+			segment = strings.NewReplacer("/", "", "_", "").Replace(segment)
+			for _, marker := range authorizationDeciding {
+				if strings.Contains(segment, marker) {
+					escaped = append(escaped, item.Key+" (matches \""+marker+"\")")
+					return
+				}
+			}
+		}
+	})
+
+	if len(escaped) > 0 {
+		t.Errorf("these decide authorization but sit outside %q, so the management "+
+			"endpoint can rewrite them:\n  %s",
+			securityGoverningConfigPrefix, strings.Join(escaped, "\n  "))
 	}
 }
 

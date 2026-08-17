@@ -341,7 +341,19 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 
 	t.Run("security-governing config cannot be altered at all", func(t *testing.T) {
 		params := paramtable.Get()
-		for _, key := range []string{params.CommonCfg.AuthorizationEnabled.Key, params.CommonCfg.SuperUsers.Key} {
+		for _, key := range []string{
+			params.CommonCfg.AuthorizationEnabled.Key,
+			params.CommonCfg.SuperUsers.Key,
+			params.CommonCfg.DefaultRootPassword.Key,
+			// The privilege tables and the /expr switches are the ones the
+			// original two-name fence let through.
+			params.RbacConfig.ClusterAdminPrivileges.Key,
+			params.CommonCfg.EnablePublicPrivilege.Key,
+			params.CommonCfg.ExprEnabled.Key,
+			params.CommonCfg.ExprAuthMode.Key,
+			// Declared outside common.security. but decides RBAC alias handling.
+			params.ProxyCfg.ResolveAliasForPrivilege.Key,
+		} {
 			for _, cfg := range []map[string]interface{}{{"key": key, "value": "false"}, {"key": key}} {
 				reqBody := map[string]interface{}{"configs": []map[string]interface{}{cfg}}
 				body, _ := json.Marshal(reqBody)

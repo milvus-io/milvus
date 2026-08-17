@@ -1184,9 +1184,13 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
+	// Names only: this map is the target broker's own configuration, which is
+	// where kafka.saslPassword / pulsar.authParams style material is supplied,
+	// and it arrives from the request body rather than from the config manager,
+	// so no declared-sensitivity metadata applies to it.
 	logger.Info(req.Context(), "HandleAlterWAL start",
 		mlog.String("targetWAL", requestBody.TargetWALName),
-		mlog.Any("config", requestBody.Config))
+		mlog.Strings("configKeys", lo.Keys(requestBody.Config)))
 
 	if err := s.broadcastAlterWALMessage(req.Context(), commonpb.WALName(targetWAL), requestBody.Config); err != nil {
 		logger.Info(req.Context(), "HandleAlterWAL failed to broadcast AlterWALMessage",
@@ -1259,12 +1263,28 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 //	Batch format: {"configs": [{"key": "k1", "value": "v1"}, {"key": "k2"}]}
 //	Legacy single format: {"key": "config.key", "value": "value"}
 //
-// securityGoverningConfigKeys are the switches that decide whether Milvus
-// authenticates or authorizes at all. They are held by dotted identity, which
-// is what ResolveRegisteredConfigKey returns.
+// securityGoverningConfigPrefix covers everything that decides whether Milvus
+// authenticates, who counts as privileged, and what each role may do — the
+// authorization switch, the superuser list, the root password, the TLS modes and
+// every RBAC privilege table all live under it, and none of them is an
+// operational knob a config endpoint needs to write.
+//
+// Held as a prefix rather than a list of names deliberately: the previous
+// version named two keys, which left the four privilege tables and the /expr
+// switches reachable, and a list has to be remembered every time someone adds a
+// key. TestSecurityGoverningPrefixCoversTheSecuritySection asserts the section
+// stays entirely inside it.
+const securityGoverningConfigPrefix = "common.security."
+
+// securityGoverningConfigKeys are the authorization-deciding keys that were not
+// declared under that prefix. Kept as dotted identities, which is what
+// ResolveRegisteredConfigKey returns.
+// TestSecurityGoverningPrefixCoversTheSecuritySection is what finds entries for
+// this list; do not curate it by hand.
 var securityGoverningConfigKeys = typeutil.NewSet(
-	"common.security.authorizationenabled",
-	"common.security.superusers",
+	// Turning this off stops RBAC checks resolving an alias to its collection,
+	// so a grant on the collection no longer covers access through the alias.
+	"proxy.resolvealiasforprivilege",
 )
 
 func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
@@ -1339,7 +1359,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// authorization switch or the superuser list would make every other
 		// check here decorative. Deletes are refused too: dropping an etcd entry
 		// that holds "authorization enabled" is itself a way to turn it off.
-		if securityGoverningConfigKeys.Contain(canonicalKey) {
+		if strings.HasPrefix(canonicalKey, securityGoverningConfigPrefix) ||
+			securityGoverningConfigKeys.Contain(canonicalKey) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)

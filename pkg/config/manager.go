@@ -287,25 +287,26 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 // override. The dotted form is still needed for runtime overlays written
 // through SetMapConfig, which keeps the separators.
 //
-// One case this does not reconcile: if BOTH overlay spellings of the same group
-// member are populated, this reports the separator-free one while GetByRaw —
-// and therefore ParamGroup.GetValue — reports the dotted one, because its
-// overlay pass runs last and overwrites. Only SetMapConfig writes the dotted
-// overlay and it has no production caller, so the case is latent.
+// Overlays are the other way round for a group member, and deliberately so:
+// getBy runs its overlay pass last and lets the dotted spelling overwrite, so
+// ParamGroup.GetValue reports that one when both are populated — which
+// BaseTable.SaveGroup and BaseTable.Save between them can do. Reporting the
+// other one here would name a value nothing is using.
 func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (string, string, error) {
-	candidates := []string{resolved.lookup}
 	// Only a ParamGroup member can legitimately live under the dotted spelling:
 	// SetMapConfig writes it, and ParamGroup.GetValue reads it. A ParamItem is
 	// resolved by ParamItem.get through Manager.GetConfig, which looks only
-	// under the separator-free identity — so falling back for a scalar would
-	// report a value nothing in the process actually uses.
-	if resolved.kind == RegisteredConfigGroup && resolved.dotted != resolved.lookup {
-		candidates = append(candidates, resolved.dotted)
-	}
+	// under the separator-free identity — so considering the dotted form for a
+	// scalar would report a value nothing in the process actually uses.
+	dottedApplies := resolved.kind == RegisteredConfigGroup && resolved.dotted != resolved.lookup
 
-	// A runtime overlay outranks every source, whichever identity it was
-	// written under.
-	for _, candidate := range candidates {
+	// A runtime overlay outranks every source. Dotted first, because that is the
+	// one ParamGroup.GetValue ends up with when both are set.
+	overlayOrder := []string{resolved.lookup}
+	if dottedApplies {
+		overlayOrder = []string{resolved.dotted, resolved.lookup}
+	}
+	for _, candidate := range overlayOrder {
 		if v, ok := m.overlays.Get(candidate); ok {
 			if v == TombValue {
 				return "", "", errors.Wrap(ErrKeyNotFound, requestedKey)
@@ -313,7 +314,12 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 			return RuntimeSource, v, nil
 		}
 	}
-	for _, candidate := range candidates {
+
+	sourceOrder := []string{resolved.lookup}
+	if dottedApplies {
+		sourceOrder = append(sourceOrder, resolved.dotted)
+	}
+	for _, candidate := range sourceOrder {
 		if sourceName, ok := m.keySourceMap.Get(candidate); ok {
 			v, err := m.getConfigValueBySource(candidate, sourceName)
 			return sourceName, v, err

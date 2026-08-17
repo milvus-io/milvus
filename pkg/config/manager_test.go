@@ -575,6 +575,50 @@ func TestRegisteredGroupMemberRejectsEnvironmentOnlyKey(t *testing.T) {
 	assert.Equal(t, RegisteredConfigGroup, kind)
 }
 
+// formatKey exempts knowhere.* from separator stripping; the EnvSource key
+// formatter BaseTable installs (base_table.go) does not. An environment variable
+// whose name lands in that gap must not be mistaken for a member of the knowhere
+// group, which is what strippedKey exists to prevent.
+func TestKnowherePrefixDoesNotAdmitEnvironmentVariables(t *testing.T) {
+	t.Setenv("KNOWHERE.INJECTED", "must-not-be-published")
+	t.Setenv("knowhere.lowercase", "must-not-be-published")
+
+	// strippedKey is the production formatter's shape: no NotFormatPrefix
+	// exemption. Passing formatKey here instead would hide the very gap the test
+	// is for.
+	mgr, _ := Init(WithEnvSource(strippedKey))
+	mgr.RegisterConfigPrefix(NotFormatPrefix)
+
+	require.NotEmpty(t, mgr.GetConfigsRaw(), "the environment was never imported, the test proves nothing")
+	for _, spelling := range []string{"KNOWHERE.INJECTED", "knowhere.INJECTED", "knowhere.lowercase"} {
+		_, kind := mgr.ResolveRegisteredConfigKey(spelling)
+		assert.Equal(t, RegisteredConfigUnknown, kind, spelling)
+	}
+	for key, value := range mgr.GetConfigsView() {
+		assert.NotContains(t, value, "must-not-be-published", key)
+	}
+}
+
+// A ParamGroup member set through both overlay spellings must be reported as
+// the one ParamGroup.GetValue actually returns.
+func TestRegisteredGroupMemberMatchesGroupValue(t *testing.T) {
+	const key = "function.analyzer.lindera.download_urls.ipadic"
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("function.analyzer.lindera.download_urls.")
+
+	mgr.SetMapConfig(key, "dotted-value") // BaseTable.SaveGroup
+	mgr.SetConfig(key, "stripped-value")  // BaseTable.Save
+
+	group := mgr.GetByRaw(
+		WithPrefix("function.analyzer.lindera.download_urls."),
+		RemovePrefix("function.analyzer.lindera.download_urls."))
+	require.Equal(t, "dotted-value", group["ipadic"], "this is what the ParamGroup consumer sees")
+
+	_, reported, err := mgr.GetRegisteredConfig(key)
+	require.NoError(t, err)
+	assert.Equal(t, group["ipadic"], reported, "the management API must not name a different value")
+}
+
 // The empty prefix is what hookConfig.SoConfig registers, and on a table that
 // imports the environment it would declare every variable in the pod to be
 // Milvus configuration. Refuse the pairing where it is declared rather than
