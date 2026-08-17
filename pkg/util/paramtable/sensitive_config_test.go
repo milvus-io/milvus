@@ -121,6 +121,39 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 	assert.Equal(t, "configured-secret", raw["miniosecretaccesskey"])
 }
 
+// Per-cluster CDC settings are read by exact key through base.Get, not as a
+// group aggregate, and no ParamItem can declare them because the cluster ID is
+// part of the name. They still have to be declared as namespaces: an undeclared
+// key is refused by both management endpoints and dropped from the projections,
+// which would leave cross-cluster TLS unconfigurable through them.
+func TestDynamicClusterNamespacesAreDeclared(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	require.NoError(t, base.Save("localStorage.path", t.TempDir()))
+	params := &ComponentParam{}
+	params.Init(base)
+	mgr := base.Manager()
+
+	for _, key := range []string{
+		"tls.clusters.dc2.caPemPath",
+		"tls.clusters.dc2.clientPemPath",
+		"tls.clusters.dc2.clientKeyPath",
+		"grpc.clusters.dc2.authority",
+	} {
+		assert.True(t, isConfigRegistered(mgr, key), key)
+		// Paths and a hostname, not key material.
+		assert.False(t, mgr.IsSensitive(key), key)
+	}
+
+	// What the endpoint reports must be what the consumer reads.
+	mgr.SetConfig("tls.clusters.dc2.caPemPath", "/certs/ca.pem")
+	mgr.SetConfig("grpc.clusters.dc2.authority", "host.example")
+	caPemPath, _, _ := params.ProxyGrpcClientCfg.GetClusterTLSConfig("dc2")
+	_, reported, err := mgr.GetRegisteredConfig("tls.clusters.dc2.caPemPath")
+	require.NoError(t, err)
+	assert.Equal(t, caPemPath, reported)
+	assert.Equal(t, "host.example", params.ProxyGrpcClientCfg.GetClusterAuthority("dc2"))
+}
+
 // The fence guards keys no ParamItem declares, so nothing normalises their
 // spelling on the way in — it has to compare on the identity the write would
 // address, or one spelling is fenced and the three that reach the same etcd

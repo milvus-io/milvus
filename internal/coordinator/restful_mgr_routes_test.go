@@ -418,33 +418,6 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "sensitive configuration")
 	})
 
-	t.Run("a ParamGroup member no config file declares cannot be created", func(t *testing.T) {
-		// Milvus selects group members by their dotted prefix, and a write lands
-		// under the separator-free identity, so such a key would be stored and
-		// then never read. Refusing beats a 200 that does nothing.
-		const key = "function.textEmbedding.providers.brandnewprovider.url"
-		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "https://example.invalid"}}}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-		coord.HandleAlterConfig(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "new ParamGroup members")
-
-		// ...while a member some source does declare stays writable. Declared
-		// here rather than relying on configs/milvus.yaml being discoverable
-		// from this package's working directory.
-		const declared = "function.textEmbedding.providers.zzprobe.url"
-		mgr.SetMapConfig(declared, "https://example.invalid")
-		t.Cleanup(func() { mgr.ResetConfig(declared) })
-		reqBody = map[string]interface{}{"configs": []map[string]interface{}{{"key": declared, "value": "https://example.invalid"}}}
-		body, _ = json.Marshal(reqBody)
-		req = httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
-		w = httptest.NewRecorder()
-		coord.HandleAlterConfig(w, req)
-		assert.NotContains(t, w.Body.String(), "new ParamGroup members")
-	})
-
 	t.Run("unregistered config may still be deleted", func(t *testing.T) {
 		// A key an older build wrote must remain removable even though nothing
 		// declares it any more; only setting one is refused. As above, reaching

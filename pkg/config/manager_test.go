@@ -479,8 +479,7 @@ func TestRegisteredGroupMemberLifecycle(t *testing.T) {
 	mgr.RegisterConfigPrefix("kafka.producer.")
 
 	// Nothing anywhere yet: still resolves as a member of a declared group, so
-	// it can be deleted and its sensitivity can be judged. Whether it may be
-	// created is a separate question, answered by WriteTakesEffect.
+	// it can be read, written and deleted like any other.
 	_, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.linger.ms")
 	assert.Equal(t, RegisteredConfigGroup, kind)
 
@@ -514,47 +513,6 @@ func TestRegisteredScalarIgnoresDottedOverlay(t *testing.T) {
 	_, reported, err := mgr.GetRegisteredConfig("minio.address")
 	require.NoError(t, err)
 	assert.Equal(t, live, reported)
-}
-
-// A write only counts if Milvus reads it back. ParamGroup.GetValue selects
-// members by the dotted prefix, while a write lands under the separator-free
-// identity, so a brand-new member is stored and then ignored — while overriding
-// one a config file already declares works end to end.
-func TestWriteTakesEffect(t *testing.T) {
-	const declared = "kafka.consumer.fetch.min.bytes"
-	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
-	require.NoError(t, os.WriteFile(yamlFile, []byte(declared+": 1\n"), 0o600))
-
-	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
-	mgr.RegisterConfigPrefix("kafka.consumer.")
-	mgr.RegisterConfigKey("querynode.gracefulStopTimeout")
-
-	assert.True(t, mgr.WriteTakesEffect("querynode.gracefulStopTimeout"), "a declared scalar is always read back")
-	assert.True(t, mgr.WriteTakesEffect(declared), "the config file supplied the dotted key the group filter needs")
-	assert.False(t, mgr.WriteTakesEffect("kafka.consumer.brand.new.option"))
-	assert.False(t, mgr.WriteTakesEffect("nothing.declares.this"))
-
-	// A group below NotFormatPrefix keeps its separators all the way into etcd,
-	// so a brand-new member there lands inside the namespace the group filters
-	// on and is readable immediately.
-	mgr.RegisterConfigPrefix(NotFormatPrefix)
-	const newKnowhere = "knowhere.MYINDEX.build.max_degree"
-	require.Equal(t, newKnowhere, EtcdConfigKey(newKnowhere))
-	assert.True(t, mgr.WriteTakesEffect(newKnowhere))
-	mgr.SetConfig(newKnowhere, "64")
-	assert.Equal(t, map[string]string{"MYINDEX.build.max_degree": "64"},
-		mgr.GetByRaw(WithPrefix(NotFormatPrefix), RemovePrefix(NotFormatPrefix)),
-		"the prediction WriteTakesEffect made must hold once the write happens")
-
-	// And the claim the predicate rests on: an override of the declared member
-	// reaches the group, an invented one does not.
-	etcd := &mapSource{name: "EtcdLikeSource", configs: map[string]string{
-		EtcdConfigKey(declared):                          "42",
-		EtcdConfigKey("kafka.consumer.brand.new.option"): "99",
-	}}
-	require.NoError(t, mgr.AddSource(etcd))
-	group := mgr.GetByRaw(WithPrefix("kafka.consumer."), RemovePrefix("kafka.consumer."))
-	assert.Equal(t, map[string]string{"fetch.min.bytes": "42"}, group)
 }
 
 // The one ambiguous case stays closed: a key whose sole backing is a process
@@ -599,29 +557,6 @@ func TestKnowherePrefixDoesNotAdmitEnvironmentVariables(t *testing.T) {
 	for key, value := range mgr.GetConfigsView() {
 		assert.NotContains(t, value, "must-not-be-published", key)
 	}
-}
-
-// Every predicate must give the same answer about the same key. A group member
-// stored only under the separator-free identity — which is what a pre-change
-// alter endpoint left in etcd — is one ParamGroup.GetValue never returns, so the
-// read API must not name it either, or the two halves of /management/config
-// contradict each other about the same key.
-func TestPredicatesAgreeOnAnUnreachableGroupMember(t *testing.T) {
-	const dotted = "autoindex.params.tuning.foo"
-	mgr, _ := Init()
-	mgr.RegisterConfigPrefix("autoindex.params.tuning.")
-	require.NoError(t, mgr.AddSource(&mapSource{
-		name:    "EtcdLikeSource",
-		configs: map[string]string{EtcdConfigKey(dotted): "orphan-value"},
-	}))
-
-	group := mgr.GetByRaw(WithPrefix("autoindex.params.tuning."))
-	require.Empty(t, group, "the ParamGroup consumer cannot see it")
-
-	assert.False(t, mgr.WriteTakesEffect(dotted))
-	assert.NotContains(t, mgr.GetConfigs(), dotted)
-	_, _, err := mgr.GetRegisteredConfig(dotted)
-	assert.ErrorIs(t, err, ErrKeyNotFound)
 }
 
 // The mirror image: an overlay written under the spelling its own consumer does

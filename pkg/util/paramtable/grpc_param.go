@@ -77,6 +77,14 @@ type grpcConfig struct {
 	ServerKeyPath ParamItem `refreshable:"false"`
 	CaPemPath     ParamItem `refreshable:"false"`
 
+	// Per-cluster CDC settings, keyed by cluster ID and so read by exact key
+	// through base.Get rather than as a group. Declared anyway: a namespace
+	// nothing declares is invisible to the configuration projections and
+	// refused by the management endpoints, which would leave cross-cluster TLS
+	// unconfigurable through them.
+	ClusterTLS       ParamGroup `refreshable:"false"`
+	ClusterAuthority ParamGroup `refreshable:"false"`
+
 	base *BaseTable // stored for dynamic per-cluster TLS lookups
 }
 
@@ -136,6 +144,21 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
+
+	// Paths, not key material: the files they point at are the secret, and
+	// hiding the paths would only cost operators the ability to see how CDC is
+	// wired. GetClusterTLSConfig reads these.
+	p.ClusterTLS = ParamGroup{
+		KeyPrefix: "tls.clusters.",
+		Version:   "2.6.0",
+	}
+	p.ClusterTLS.Init(base.mgr)
+
+	p.ClusterAuthority = ParamGroup{
+		KeyPrefix: "grpc.clusters.",
+		Version:   "2.6.0",
+	}
+	p.ClusterAuthority.Init(base.mgr)
 }
 
 // GetClusterTLSConfig returns per-cluster outbound TLS cert paths for CDC connections.

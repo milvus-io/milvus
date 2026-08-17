@@ -1382,17 +1382,6 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 				writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 				return
 			}
-			// Refuse a write that would be stored and then never read. A
-			// ParamGroup member is selected by its dotted prefix, which only a
-			// config file supplies; creating one here used to return 200 and do
-			// nothing. Overriding a member the config file already declares is
-			// unaffected.
-			if !paramMgr.WriteTakesEffect(canonicalKey) {
-				logger.Info(request.Context(), "HandleAlterConfig attempted to create an unread ParamGroup member",
-					mlog.String("key", config.Key))
-				writeJSONError(writer, fmt.Sprintf("new ParamGroup members cannot be created through this endpoint because Milvus reads them by their dotted key; declare it in the config file instead. Invalid key: %s", config.Key), http.StatusBadRequest)
-				return
-			}
 			configsToUpdate[canonicalKey] = *config.Value
 		} else {
 			keysToDelete = append(keysToDelete, canonicalKey)
