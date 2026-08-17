@@ -8,6 +8,13 @@ import (
 )
 
 func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.GenericValue) error {
+	return fillExpressionValue(expr, templateValues)
+}
+
+func fillExpressionValue(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+) error {
 	if !expr.GetIsTemplate() {
 		return nil
 	}
@@ -16,12 +23,12 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	case *planpb.Expr_TermExpr:
 		return FillTermExpressionValue(e.TermExpr, templateValues)
 	case *planpb.Expr_UnaryExpr:
-		return FillExpressionValue(e.UnaryExpr.GetChild(), templateValues)
+		return fillExpressionValue(e.UnaryExpr.GetChild(), templateValues)
 	case *planpb.Expr_BinaryExpr:
-		if err := FillExpressionValue(e.BinaryExpr.GetLeft(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryExpr.GetLeft(), templateValues); err != nil {
 			return err
 		}
-		if err := FillExpressionValue(e.BinaryExpr.GetRight(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryExpr.GetRight(), templateValues); err != nil {
 			return err
 		}
 		switch e.BinaryExpr.GetOp() {
@@ -42,32 +49,35 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
 		return FillBinaryArithOpEvalRangeExpressionValue(e.BinaryArithOpEvalRangeExpr, templateValues)
 	case *planpb.Expr_BinaryArithExpr:
-		if err := FillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues); err != nil {
 			return err
 		}
-		return FillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues)
+		return fillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues)
 	case *planpb.Expr_JsonContainsExpr:
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
 	case *planpb.Expr_RandomSampleExpr:
-		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
+		return fillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
 	case *planpb.Expr_GisfunctionFilterExpr:
 		return FillGISFunctionFilterExpressionValue(e.GisfunctionFilterExpr, templateValues)
 	case *planpb.Expr_ElementFilterExpr:
-		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
+		if err := fillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
 			return err
 		}
 		if e.ElementFilterExpr.GetPredicate() != nil {
-			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
+			return fillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
 		}
 		return nil
 	case *planpb.Expr_MatchExpr:
-		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
+		return fillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
 	case *planpb.Expr_CallExpr:
-		// Only a deferred bloom_match call carries IsTemplate today; once the
-		// template value is known, its client-built blob is validated and the
-		// call is materialized into a BloomFilterExpr here.
+		// Only the deferred membership-filter calls carry IsTemplate today; once
+		// the template value is known, the client-built blob is validated and the
+		// call is materialized into its dedicated plan node here.
 		if e.CallExpr.GetFunctionName() == BloomMatchFunctionName {
 			return FillBloomMatchExpressionValue(expr, e.CallExpr, templateValues)
+		}
+		if e.CallExpr.GetFunctionName() == RoaringMatchFunctionName {
+			return FillRoaringMatchExpressionValue(expr, e.CallExpr, templateValues)
 		}
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	default:
@@ -310,6 +320,27 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		castedOperand, err := castArithFillOperand(expr.GetArithOp(), dataType, operand)
 		if err != nil {
 			return err
+		}
+
+		// Validate divisor for division/modulo operations
+		if expr.ArithOp == planpb.ArithOpType_Div || expr.ArithOp == planpb.ArithOpType_Mod {
+			if (IsInteger(castedOperand) && castedOperand.GetInt64Val() == 0) ||
+				(IsFloating(castedOperand) && castedOperand.GetFloatVal() == 0) {
+				return merr.WrapErrQueryPlanMsg("division or modulus by zero")
+			}
+		}
+
+		// Validate the shift amount for shift operations. A templated amount
+		// skips the plan-time [0, 64) guard in combineBinaryArithExpr (its value
+		// is unknown at parse time), so it must be re-checked here once filled.
+		// A negative or >= 64 amount is undefined behavior in the C++ executor.
+		if expr.ArithOp == planpb.ArithOpType_Shl || expr.ArithOp == planpb.ArithOpType_Shr {
+			if !IsInteger(castedOperand) || castedOperand.GetInt64Val() < 0 || castedOperand.GetInt64Val() >= 64 {
+				// The amount is not echoed: it arrived through a template,
+				// and a resolved template value must not reach an error.
+				return merr.WrapErrQueryPlanMsg(
+					"shift amount from an expression template must be an integer in range [0, 64)")
+			}
 		}
 
 		expr.RightOperand = castedOperand

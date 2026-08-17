@@ -211,7 +211,7 @@ three ops besides SET:
   the first match lives in the base or in the appended suffix is unknowable
   without reading the base.
 
-**Folding — which forms are base-free (property-tested).** Two op families
+**Folding — which forms are base-free.** Two op families
 fold to an exact, base-free floor (no base read below `safe_ts`): a run of
 scalar INCRs sums, and any interleaving of APPEND/REMOVE folds to
 `(remove_set R, surviving suffix S)` — remove-all-occurrences has no
@@ -221,9 +221,9 @@ underflow, so `R` applies to base only at read.
 or a no-op on an already-empty list depends on `len(base)`, which is not
 available during base-free folding, so the tempting `(pop_count k, suffix S)`
 closed form is **wrong** — it miscounts pops-on-empty and lets a later
-APPEND's element be dropped. A property test over 200k random APPEND/POP
-sequences fails ~12% on exactly this (e.g. `base=[]`, ops `POP, APPEND(7)`:
-naive `[7]`, `(k,S)` gives `[]`). POP_FRONT is therefore kept as a
+APPEND's element be dropped. For example, with `base=[]` and operations
+`POP, APPEND(7)`, direct evaluation produces `[7]` while `(k,S)` produces
+`[]`. POP_FRONT is therefore kept as a
 **coalesced symbolic op-chain** (consecutive APPENDs merge) and resolved
 against base where base is in hand: at read, at column folding, and — to
 keep memory bounded — at overlay **pruning**, which for a POP-containing row
@@ -231,9 +231,8 @@ materializes the chain against the locally-available base into a floor list.
 Pruning runs on the writer thread *off* the per-patch apply path, so reading
 base there is allowed (the no-base-read rule governs the apply hot path, not
 background pruning). POP×REMOVE mixes are symbolic-until-materialize the same
-way. Correctness holds in every case; the exact base-free floors are only
-the two above (scalar SET/INCR, INCR-watermark, and APPEND/REMOVE `(R,S)`
-each pass 200k property-test cases).
+way. The exact base-free floors are only the two above: scalar SET/INCR with
+an INCR watermark, and APPEND/REMOVE `(R,S)`.
 
 **What an array patch actually stores:** an op's operand is only its
 arguments — APPEND stores just the appended elements, REMOVE stores one
@@ -915,17 +914,6 @@ part of the segment's file set and are reloaded with the segment (see
 ## Validation Status
 
 Stated explicitly so a reviewer can see the confidence level of each claim.
-Prototypes live in `mutable-columns-prototype/`.
-
-**Validated by standalone prototype (executable evidence):**
-
-- Read-path performance: clean-chunk zero-overhead, the dense-chunk cost
-  curve, and the **refutation of materialize-then-scan** (`patch_bench.cpp`).
-  The design was corrected as a result.
-- Folding algebra + MVCC correctness for scalar SET/INCR, the `fold_ts`
-  watermark, and array APPEND/REMOVE `(R,S)` — 200k property-test cases each
-  (`fold_correctness.cpp`). This pass **refuted the original
-  APPEND/POP_FRONT `(k,S)` claim** and the design was corrected.
 
 **Asserted from code/doc reading, not build-verified:**
 
@@ -934,9 +922,6 @@ Prototypes live in `mutable-columns-prototype/`.
 - Streaming integration: the new codegen message type, PK→channel affinity,
   L0 routing, and CDC/recovery reuse (checked against the streaming-system
   docs, not a build).
-- Bit-packed `TargetBitmap` makes the clean scan cheaper than the prototype's
-  `uint8` buffer — which makes the dense-chunk multipliers *larger* than
-  reported (the prototype numbers are conservative).
 - PK→offset apply cost is delete-equivalent.
 
 **To validate during implementation (Phase-1 gates, in priority order):**
@@ -944,10 +929,12 @@ Prototypes live in `mutable-columns-prototype/`.
 1. **Overlay concurrency (I1–I5) under TSan** with concurrent readers +
    writer + pruner + an in-flight fold. Highest-risk unproven piece; the
    model is designed but not stress-tested.
-2. **POP_FRONT prune-materialization** end-to-end: prune collapses the chain
-   to a floor list at `safe_ts`, later ops still materialize correctly.
-   Extend `fold_correctness.cpp` to cover it.
-3. **Overlay memory and PK-apply throughput** at the target write rate,
+2. **Folding algebra and MVCC correctness** with implementation-level
+   property tests covering scalar SET/INCR, the `fold_ts` watermark, array
+   APPEND/REMOVE, and POP_FRONT prune-materialization end to end.
+3. **Read-path performance** in the production segcore path: clean-chunk
+   overhead, patched-row fix-up cost across densities, and fold thresholds.
+4. **Overlay memory and PK-apply throughput** at the target write rate,
    benchmarked against the delete-path baseline; ARRAY arena memory density
    separately.
 
@@ -992,18 +979,16 @@ Scope: additive on Phase 1; no write-path or format changes.
 
 - Overlay arena for variable-length values; op-chain version nodes with
   `(R, S)` exact folding for APPEND/REMOVE and the base-materialized
-  coalesced symbolic chain for POP_FRONT (no base-free closed form —
-  established by the folding property test, see prototype).
+  coalesced symbolic chain for POP_FRONT (which has no base-free closed form).
 - Prune-materializes-against-base path for POP-containing rows (keeps
   overlay memory ∝ distinct rows); proxy validation for array ops;
   max_capacity clamping at materialization; NULL-base semantics; array
   predicate fix-up (`array_contains`, `array_length`) through
   PatchedColumnView.
 
-Exit criteria: the folding property test (already green for scalar SET/INCR,
-watermark, and `(R,S)`) extended to cover the POP prune-materialization path
-under all op interleavings; hot-row read cost within the pruning window
-benchmarked.
+Exit criteria: property tests cover scalar SET/INCR, the watermark, `(R,S)`,
+and the POP prune-materialization path under all op interleavings; hot-row read
+cost within the pruning window is benchmarked.
 
 ### Phase 3 — Index support via result correction
 

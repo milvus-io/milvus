@@ -8,7 +8,7 @@ classification, masked codes, broken `errors.Is` chains — see
 [error_handling_casebook.md](./error_handling_casebook.md). For
 the canonical numeric code list, see the sentinel definitions in
 [`pkg/util/merr/errors.go`](../../pkg/util/merr/errors.go). (The
-[appendix_d_error_code.md](../developer_guides/appendix_d_error_code.md)
+[appendix_d_error_code.md](../archive/milvus-2.0/developer_guides/appendix_d_error_code.md)
 appendix predates merr and lists the **deprecated** `commonpb.ErrorCode` enum,
 not the merr codes.)
 
