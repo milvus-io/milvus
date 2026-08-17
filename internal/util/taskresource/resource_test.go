@@ -50,6 +50,13 @@ func TestRequirementFitsIn(t *testing.T) {
 	assert.True(t, Requirement{CPU: 4, Memory: 1000}.FitsIn(c))
 	assert.False(t, Requirement{CPU: 4.1, Memory: 1000}.FitsIn(c))
 	assert.False(t, Requirement{CPU: 4, Memory: 1001}.FitsIn(c))
+
+	// MemoryFitsIn is the admission question, and it is blind to CPU: a
+	// requirement for a hundred times the node's cores still "fits" as long as
+	// its memory does. If these two ever agreed on the CPU-heavy case, the
+	// guard would be back to refusing tasks over a compressible resource.
+	assert.True(t, Requirement{CPU: 400, Memory: 1000}.MemoryFitsIn(c))
+	assert.False(t, Requirement{CPU: 0, Memory: 1001}.MemoryFitsIn(c))
 }
 
 func TestRequirementIsZero(t *testing.T) {

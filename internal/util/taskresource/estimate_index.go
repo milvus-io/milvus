@@ -74,6 +74,15 @@ type IndexInput struct {
 // is fixed by its own pool, so scaling CPU with size does not reflect any real
 // consumption; the previous scalar scheme did scale it, which is how a 3.33GiB
 // field became "384 slots" on a 128-slot node (issue #52180 incident 2).
+//
+// It does, however, depend on the index TYPE, because the two kinds of build
+// are scheduled differently on the worker. A vector build takes a slot of the
+// bounded vector-index build pool; a scalar build runs inline on the
+// scheduler's goroutine with no bound at all
+// (internal/datanode/index/scheduler.go). Charging both a flat core said those
+// were the same thing, and let a coordinator stack vector builds onto one
+// worker where they divide a single knowhere thread pool and slow each other
+// down. See cpu.go.
 func EstimateIndexBuild(in IndexInput) Requirement {
 	cfg := &paramtable.Get().DataCoordCfg
 
@@ -85,8 +94,13 @@ func EstimateIndexBuild(in IndexInput) Requirement {
 		mem += cfg.ResourceIndexDecodeWindow.GetAsInt64()
 	}
 
+	cpu := NominalCPU()
+	if IsVectorIndexType(in.IndexType) {
+		cpu = VectorIndexBuildCPU()
+	}
+
 	return Requirement{
-		CPU:    cfg.ResourceIndexBuildCPU.GetAsFloat(),
+		CPU:    cpu,
 		Memory: atLeast(mem, 64*mib),
 	}
 }
@@ -136,10 +150,12 @@ func EstimateStats(in StatsInput) Requirement {
 	}
 
 	mem := int64(float64(in.FieldMemorySize) * factor)
-	// CPU is a flat charge, not yet read from config: EstimateStats and
-	// EstimateAnalyze do not have a dedicated CPU config key in the current
-	// config table (see the field/key/default table for this task).
-	return Requirement{CPU: 1.0, Memory: atLeast(mem, 64*mib)}
+	// A stats sub-job is not routed through the vector-index build pool --
+	// statsTask.IsVectorIndex is a literal false
+	// (internal/datanode/index/task_stats.go) -- so it belongs to the unbounded
+	// class and takes the nominal charge. See NominalCPU for why that class is
+	// not given a pool-derived one.
+	return Requirement{CPU: NominalCPU(), Memory: atLeast(mem, 64*mib)}
 }
 
 // EstimateAnalyze sizes the kmeans training set.
@@ -190,6 +206,10 @@ func EstimateAnalyze(totalMemorySize int64, trainSizeRatio float64) Requirement 
 		mem = allocated
 	}
 
-	// CPU is a flat charge, not yet read from config; see EstimateStats.
-	return Requirement{CPU: 1.0, Memory: atLeast(mem, 64*mib)}
+	// analyzeTask.IsVectorIndex is a literal false
+	// (internal/datanode/index/task_analyze.go), so kmeans training does not
+	// take a vector-build pool slot either; nominal charge, as for stats. Its
+	// concurrency is governed by memory in any case -- the grant above is large
+	// enough that the guard runs analyze exclusively.
+	return Requirement{CPU: NominalCPU(), Memory: atLeast(mem, 64*mib)}
 }

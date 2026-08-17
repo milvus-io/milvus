@@ -137,22 +137,83 @@ func TestReleaseIsIdempotent(t *testing.T) {
 	assert.False(t, ok, "releasing three times must not have widened the budget")
 }
 
-// A request beyond the node in the CPU dimension is oversized too: the node is
-// two-dimensional, and either dimension alone makes a task unable to share it.
-func TestOversizednessIsJudgedOnBothDimensions(t *testing.T) {
+// Oversizedness is judged on memory alone. A task asking for more cores than
+// the node has is asking to run slower, not asking for the node to itself; if
+// CPU could make a task exclusive, one vector index build on a small node would
+// serialize every compaction behind it.
+func TestOversizednessIsJudgedOnMemoryOnly(t *testing.T) {
 	g := newTestGuard(t, 8, 100)
 
 	ok, _ := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 10})
 	require.True(t, ok)
 
-	// Memory fits easily; the core count does not.
+	// Twice the node's cores, a byte of memory. It shares the node.
 	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 16, Memory: 1})
-	assert.False(t, ok, "a task beyond the node's cores must wait for it to drain")
+	require.True(t, ok, "a CPU request beyond the node must not make a task exclusive")
+	assert.Equal(t, int64(0), g.Snapshot().ExclusiveTaskID)
 
+	// And the node keeps taking work while it is over-committed on cores.
+	ok, _ = g.TryAcquire(3, taskcommon.Compaction, taskresource.Requirement{CPU: 4, Memory: 10})
+	assert.True(t, ok, "an exhausted CPU dimension must not refuse anyone")
+
+	// Memory is still the dimension that does make a task exclusive.
+	ok, _ = g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 200})
+	assert.False(t, ok, "a task beyond the node's memory must wait for it to drain")
 	g.Release(1)
-	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 16, Memory: 1})
+	g.Release(2)
+	g.Release(3)
+	ok, _ = g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 200})
 	require.True(t, ok)
-	assert.Equal(t, int64(2), g.Snapshot().ExclusiveTaskID, "and then runs alone")
+	assert.Equal(t, int64(4), g.Snapshot().ExclusiveTaskID, "and then runs alone")
+}
+
+// Backfill: classes that share no thread pool must not block each other. A node
+// whose vector-index build pool is saturated -- four builds each charging a
+// quarter of its cores -- still admits compaction work, because compaction is
+// bounded by memory and by its own pool, and nothing about the builds makes the
+// memory unavailable.
+//
+// The CPU total is still charged and still reported: it is what tells DataCoord
+// to place the fifth build elsewhere. It just does not refuse anybody here.
+func TestSaturatedCPUStillAdmitsOtherClasses(t *testing.T) {
+	g := newTestGuard(t, 16, 1000)
+
+	// Four vector index builds at 16/4 cores apiece: the pool, and the CPU
+	// dimension with it, is exactly full.
+	for i := int64(1); i <= 4; i++ {
+		mustAcquire(t, g, i, taskcommon.Index, taskresource.Requirement{CPU: 4, Memory: 10})
+	}
+	require.Equal(t, float64(16), g.Snapshot().Reserved.CPU)
+
+	ok, _ := g.TryAcquire(10, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 100})
+	assert.True(t, ok, "a compaction must not be refused because the build pool is full")
+
+	// Memory, in contrast, does still refuse.
+	ok, _ = g.TryAcquire(11, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 900})
+	assert.False(t, ok, "memory is the dimension that refuses")
+}
+
+// The head-of-line reservation holds budget back for a waiter that does not fit
+// yet. "Fit" is memory: a head whose only unmet dimension is CPU is not waiting
+// on anything a later task could give it, so reserving for it would stall the
+// node over nothing.
+func TestHeadOfLineReservationIgnoresCPU(t *testing.T) {
+	g := newTestGuard(t, 2, 1000)
+
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 100})
+
+	// A queued head asking for fifty times the node's cores, but for memory
+	// that is plainly there.
+	head := &waiter{taskID: 2, req: taskresource.Requirement{CPU: 100, Memory: 100}, ch: make(chan struct{}, 1)}
+	g.mu.Lock()
+	g.waiters = append(g.waiters, head)
+	blocked := g.blockedByHeadOfLineLocked(3, g.budgetLocked())
+	g.mu.Unlock()
+
+	assert.False(t, blocked, "a head short only of cores must not hold the line")
+
+	ok, _ := g.TryAcquire(3, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 100})
+	assert.True(t, ok)
 }
 
 func TestAcquireBlocksUntilRelease(t *testing.T) {
