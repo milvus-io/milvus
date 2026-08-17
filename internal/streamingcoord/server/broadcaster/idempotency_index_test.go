@@ -540,3 +540,52 @@ func TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit(t *testing.T) {
 	_, err := api.Broadcast(context.Background(), newImportMsgWithKey(atLimit+"k"))
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
+
+// createBroadcastTaskProtoFromMessage builds a recovery proto for an arbitrary
+// broadcast message, so a test can drive the dedup path with a message type other
+// than import.
+func createBroadcastTaskProtoFromMessage(
+	msg message.BroadcastMutableMessage,
+	broadcastID uint64,
+	state streamingpb.BroadcastTaskState,
+	bitmap []byte,
+	rks ...message.ResourceKey,
+) *streamingpb.BroadcastTask {
+	if len(rks) == 0 {
+		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
+	}
+	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(broadcastID, rks...), state, bitmap)
+}
+
+// TestNonImportBroadcastIsDeduplicated is the acceptance test for this mechanism
+// being generic rather than import-specific.
+//
+// Every other dedup test here drives an import message, so all of them would still
+// pass if the machinery had grown an import-shaped assumption somewhere. This one
+// takes a broadcast type that knows nothing about idempotency, has no proto field
+// for a key, and whose coordinator never reads one, and shows that carrying the key
+// is the ONLY thing required: it deduplicates, reports the original broadcast, and
+// replays the original's per-vchannel results.
+func TestNonImportBroadcastIsDeduplicated(t *testing.T) {
+	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
+	// A tombstoned original with its single vchannel acked, exactly as the import
+	// case sets up — only the message type differs.
+	bm := newBroadcastTaskManagerForTest(t,
+		createBroadcastTaskProtoFromMessage(
+			newCreateCollectionMsgWithKey("run-1"), 100,
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{0x01}, collKey))
+
+	result := broadcastForTest(t, bm, 999, newCreateCollectionMsgWithKey("run-1"), collKey)
+
+	require.NotNil(t, result.Duplicated, "a keyed non-import broadcast must deduplicate too")
+	require.Equal(t, uint64(100), result.BroadcastID)
+	require.Equal(t, message.MessageTypeCreateCollection, result.Duplicated.MessageType())
+
+	// The replayed results are what make a duplicate indistinguishable from a fresh
+	// broadcast for a caller that only reads append results — which is most of the
+	// broadcast call sites in the repo.
+	require.Len(t, result.AppendResults, 1)
+	appendResult := result.AppendResults["v1"]
+	require.NotNil(t, appendResult)
+	require.Equal(t, uint64(1), appendResult.TimeTick)
+}
