@@ -29,6 +29,9 @@ SegcoreSetChunkRows(const int64_t);
 void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
+CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
+
 void
 SegcoreSetStorageV3Enabled(const bool);
 

@@ -189,7 +189,7 @@ INSTANTIATE_TEST_SUITE_P(
                         knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
                         "FLOAT16")));
 
-TEST(GrowingIndexVersionTest, SupportsSindiWithKnowhereMaximumVersion) {
+TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
     constexpr int64_t dim = kTestSparseDim;
     constexpr int64_t row_count = 100;
     auto schema = std::make_shared<Schema>();
@@ -215,6 +215,8 @@ TEST(GrowingIndexVersionTest, SupportsSindiWithKnowhereMaximumVersion) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     InterimIndexConfigForTest interim_config;
+    interim_config.target_index_version =
+        knowhere::Version::GetMaximumVersion().VersionNumber();
     interim_config.chunk_rows = 16;
     interim_config.nlist = 1;
     ApplyInterimIndexConfigForTest(interim_config, config);
