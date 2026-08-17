@@ -908,6 +908,10 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}, nil
 			},
 		}
+		// Growing-source tasks no longer wire wb.errHandler as their
+		// failureCallback (see getGrowingSourceSyncTask), so this handler is
+		// never invoked for growing-source failures; kept here only to prove
+		// that a customized handler still stays untouched.
 		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
@@ -951,7 +955,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
 		firstTask := <-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1010)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -967,13 +971,92 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Require().Len(futures, 1)
 		s.NoError(conc.AwaitAll(futures...))
 		secondTask := <-done
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		s.EqualValues(10, secondTask.BatchRows())
 		segment, ok = metacache.GetSegmentByID(1010)
 		s.True(ok)
 		s.EqualValues(10, segment.FlushedRows())
 		s.EqualValues(0, segment.SyncingRows())
 		s.Equal("manifest-retry", segment.ManifestPath())
+	})
+
+	s.Run("source_task_error_with_default_handler_reaches_retry_callback", func() {
+		textSchema := s.textSchema()
+		metacache := s.newTextRealMetaCache(textSchema)
+		flushCalls := 0
+		source := fakeGrowingFlushSource{
+			flushFunc: func(_ context.Context, _, _ int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+				flushCalls++
+				return nil, fmt.Errorf("mock growing source flush error")
+			},
+		}
+		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+			idAllocator:                s.allocator,
+			growingSourceRetryInterval: time.Hour,
+			// Mirrors defaultWBOption's default error handler, which panics on
+			// any error. GrowingSourceSyncTask must not wire this as its
+			// failureCallback, or Run's own defer would panic before the
+			// writebuffer recovery callback below runs.
+			errorHandler: func(err error) {
+				panic(err)
+			},
+			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				return source, syncmgr.GrowingSourceUsable
+			},
+		})
+		s.NoError(err)
+
+		done := make(chan struct{})
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.AnythingOfType("*syncmgr.GrowingSourceSyncTask"), mock.Anything).
+			RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+				textTask := task.(*syncmgr.GrowingSourceSyncTask)
+				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
+				return conc.Go(func() (struct{}, error) {
+					defer close(done)
+					err := textTask.Run(ctx)
+					for _, callback := range callbacks {
+						if cbErr := callback(err); cbErr != nil {
+							return struct{}{}, cbErr
+						}
+					}
+					return struct{}{}, err
+				}), nil
+			}).Once()
+
+		_, msg := s.composeTextInsertMsg(1015, 10)
+		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+		s.NoError(err)
+		l0wb := wb.(*l0WriteBuffer)
+
+		// If the default (panicking) error handler is still wired as the
+		// growing-source task's failureCallback, GrowingSourceSyncTask.Run's
+		// own defer panics here -- inside the background goroutine spawned by
+		// the mocked SyncData -- before the writebuffer recovery callback
+		// below ever runs. conc.Go does not recover panics, so that would
+		// crash this test binary outright rather than merely fail an
+		// assertion.
+		futures := l0wb.syncSegments(context.Background(), []int64{1015})
+		s.Require().Len(futures, 1)
+		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
+		<-done
+
+		// The default (panicking) error handler must not preempt the
+		// writebuffer recovery callback: rollback and retry scheduling must
+		// still have run.
+		progress, ok := l0wb.growingSourceProgress[int64(1015)]
+		s.True(ok)
+		s.EqualValues(1, progress.failureCount)
+		s.Contains(progress.lastFailure, "mock growing source flush error")
+		s.True(l0wb.growingSourceRetryScheduled)
+
+		segment, ok := metacache.GetSegmentByID(1015)
+		s.True(ok)
+		s.EqualValues(0, segment.FlushedRows())
+		s.EqualValues(0, segment.SyncingRows())
+		s.EqualValues(10, segment.BufferRows())
+		s.EqualValues(1, flushCalls)
 	})
 
 	s.Run("source_task_layout_mismatch_is_non_retryable", func() {
@@ -984,6 +1067,10 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				return nil, fmt.Errorf("Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")
 			},
 		}
+		// Growing-source tasks no longer wire wb.errHandler as their
+		// failureCallback (see getGrowingSourceSyncTask), so this handler is
+		// never invoked for growing-source failures; kept here only to prove
+		// that a customized handler still stays untouched.
 		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
@@ -1025,7 +1112,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "Column group size mismatch")
 		<-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1014)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -1057,6 +1144,10 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
+		// Growing-source tasks no longer wire wb.errHandler as their
+		// failureCallback (see getGrowingSourceSyncTask), so this handler is
+		// never invoked for growing-source failures; kept here only to prove
+		// that a customized handler still stays untouched.
 		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
@@ -1099,7 +1190,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "row count mismatch")
 		<-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1011)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
