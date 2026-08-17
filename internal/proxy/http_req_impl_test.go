@@ -121,6 +121,11 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 	base := paramtable.NewBaseTable(paramtable.SkipRemote(true))
 	params := &paramtable.ComponentParam{}
 	params.Init(base)
+	// Set it here rather than relying on a milvus.yaml being discoverable from
+	// this package's working directory; otherwise the assertions below would
+	// pass or fail for reasons unrelated to the projection.
+	const declaredSecret = "declared-credential-sentinel"
+	require.NoError(t, params.Save(params.MinioCfg.SecretAccessKey.Key, declaredSecret))
 
 	// EnvSource imports the whole process environment, so the sentinel really
 	// is in the manager; the view is what must not carry it.
@@ -145,6 +150,7 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "MILVUS_CONF_SERVICE_TOKEN")
 	// Declared credentials are still named, and masked. Sources lowercase every
 	// key, so the projection carries the lowered spelling, not the declared one.
+	assert.NotContains(t, w.Body.String(), declaredSecret)
 	assert.Contains(t, w.Body.String(), strings.ToLower(params.MinioCfg.SecretAccessKey.Key))
 	assert.Contains(t, w.Body.String(), sensitiveMark)
 }

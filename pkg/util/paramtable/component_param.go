@@ -970,9 +970,13 @@ like the old password verification when updating the credential`,
 		Export:       true,
 		// A list of user names, not a credential: knowing who the superusers are
 		// does not let anyone authenticate as one. Marking it Sensitive would
-		// also freeze it, because the alter endpoint refuses sensitive keys and
-		// this item is refreshable — so the redaction would cost a live
+		// also freeze it, because the alter endpoint refuses to set sensitive
+		// keys and this item is refreshable — so the redaction would cost a live
 		// operational lever and buy nothing.
+		//
+		// The flag is what records that decision for TestSensitiveParamItemsMarked,
+		// whose pattern list is deliberately wider than the runtime one; no
+		// runtime pattern matches this key, so it changes nothing by itself.
 		NonSensitive: true,
 	}
 	p.SuperUsers.Init(base.mgr)

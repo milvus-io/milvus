@@ -319,6 +319,19 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.NotContains(t, w.Body.String(), "sensitive configuration")
 	})
 
+	t.Run("sensitive ParamGroup member cannot be set", func(t *testing.T) {
+		// credential.* is a declared, sensitive ParamGroup: a member of it needs
+		// no prior registration to resolve, and must still be refused.
+		const key = "credential.aksk1.secret_access_key"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "s3cret"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "sensitive configuration")
+	})
+
 	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {
 		const key = "test.alter.unregistered"
 		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "value"}}}

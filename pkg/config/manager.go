@@ -291,25 +291,33 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 // registered prefix — PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL asked for as
 // proxy.accessLog.formatters.DATABASE_URL.
 //
-// Anything supplied under the group's own dotted namespace is configuration by
-// construction, because EnvSource never synthesises a dotted key. Everything
-// else is judged by where the separator-free identity came from: an etcd entry
-// written by /management/config/alter is legitimate, and a key that exists
-// nowhere yet is a member waiting to be created. Only the environment is
-// ambiguous, and only the environment is refused.
+// A key counts as configuration when some source other than the environment
+// supplied it, under either the group's dotted namespace or the separator-free
+// identity: an etcd entry written by /management/config/alter is legitimate,
+// and a key that exists nowhere yet is a member waiting to be created. Only the
+// environment is ambiguous, and only the environment is refused.
+//
+// The source has to be checked, not merely the presence of the key. EnvSource
+// stores each variable under its RAW name as well as the formatted alias
+// (env_source.go), and a raw name is frequently already in canonical form —
+// PATH, HOSTNAME, http_proxy. Treating "the dotted spelling exists" as proof of
+// configuration would hand every such variable to a group whose prefix they
+// happen to match, which for the empty prefix is all of them.
 func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	// EtcdSource keeps whatever separator the stored key used, so accept the
 	// slash spelling of the same namespace as well.
-	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
+	for _, candidate := range [3]string{dotted, strings.ReplaceAll(dotted, ".", "/"), lookup} {
+		// Overlays are written only through this package's own setters, never
+		// from a config source, so they are trusted evidence on their own.
 		if _, ok := m.overlays.Get(candidate); ok {
 			return false
 		}
-		if _, ok := m.keySourceMap.Get(candidate); ok {
+		if source, ok := m.keySourceMap.Get(candidate); ok && source != environmentSourceName {
 			return false
 		}
 	}
-	source, ok := m.keySourceMap.Get(lookup)
-	return ok && source == environmentSourceName
+	_, fromEnvironment := m.keySourceMap.Get(lookup)
+	return fromEnvironment
 }
 
 // GetConfigs returns a safe projection of all key values: credentials are
@@ -439,22 +447,23 @@ func (m *Manager) getBy(redact bool, filters ...Filter) map[string]string {
 
 // FileConfigs returns a safe projection of the file-source values.
 func (m *Manager) FileConfigs() map[string]string {
-	config := make(map[string]string)
+	var fileConfigs map[string]string
 	m.sources.Range(func(key string, value Source) bool {
 		if s, ok := value.(*FileSource); ok {
-			config, _ = s.GetConfigurations()
+			fileConfigs, _ = s.GetConfigurations()
 			return false
 		}
 		return true
 	})
-	for key, value := range config {
-		if projected, include := m.projectValue(key, value, true); include {
-			config[key] = projected
-		} else {
-			delete(config, key)
+	// Project into a fresh map rather than editing fileConfigs in place: it is
+	// the FileSource's answer, and today it happens to be a copy.
+	projected := make(map[string]string, len(fileConfigs))
+	for key, value := range fileConfigs {
+		if value, include := m.projectValue(key, value, true); include {
+			projected[key] = value
 		}
 	}
-	return config
+	return projected
 }
 
 func (m *Manager) Close() {
@@ -669,8 +678,15 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
 	if m.nonSensitiveKeys.Contain(lookup) {
 		return false
 	}
-	if m.matchesSensitivePrefix(dotted) {
+	switch m.matchSensitivePrefix(dotted) {
+	case prefixSensitive:
 		return true
+	case prefixExempted:
+		// A declared suffix exemption is explicit metadata, so it wins over the
+		// name-pattern guess below — otherwise the exemption would be undone by
+		// the prefix it sits under: "credential.foo.enable" collapses to
+		// "credentialfooenable", which contains "credential".
+		return false
 	}
 
 	patternKey := sensitivePatternReplacer.Replace(dotted)
@@ -682,21 +698,35 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
 	return false
 }
 
-func (m *Manager) matchesSensitivePrefix(canonicalKey string) bool {
-	matched := false
+// prefixVerdict is what the registered sensitive prefixes say about one key.
+type prefixVerdict int
+
+const (
+	// prefixNoMatch: no sensitive prefix covers the key.
+	prefixNoMatch prefixVerdict = iota
+	// prefixSensitive: a sensitive prefix covers it and nothing exempts it.
+	prefixSensitive
+	// prefixExempted: every sensitive prefix that covers it declared this leaf
+	// safe.
+	prefixExempted
+)
+
+func (m *Manager) matchSensitivePrefix(canonicalKey string) prefixVerdict {
+	verdict := prefixNoMatch
 	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
 		if !strings.HasPrefix(canonicalKey, prefix) {
 			return true
 		}
 		if m.suffixExempted(prefix, canonicalKey[len(prefix):]) {
-			// Exempted for this prefix, but another sensitive prefix may still
-			// cover the key, so keep scanning.
+			// Exempted for this prefix, but a longer sensitive prefix may still
+			// cover the key without exempting it, so keep scanning.
+			verdict = prefixExempted
 			return true
 		}
-		matched = true
+		verdict = prefixSensitive
 		return false
 	})
-	return matched
+	return verdict
 }
 
 // suffixExempted reports whether the part of a key below a sensitive prefix is

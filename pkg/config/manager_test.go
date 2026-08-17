@@ -509,6 +509,64 @@ func TestRegisteredGroupMemberRejectsEnvironmentOnlyKey(t *testing.T) {
 	assert.Equal(t, RegisteredConfigGroup, kind)
 }
 
+// The variables that matter are the ones whose raw name is ALREADY in canonical
+// form — PATH, HOSTNAME, http_proxy. EnvSource stores the raw name as a key, so
+// a check that only asked whether the dotted spelling exists would take that raw
+// entry as proof of configuration and publish the whole environment. The empty
+// prefix is the worst case, and the one hookConfig.SoConfig actually registers.
+func TestEmptyPrefixGroupNeverPublishesTheEnvironment(t *testing.T) {
+	t.Setenv("PROBESINGLE", "single-token-secret")
+	t.Setenv("probe_lower_case", "lower-case-secret")
+	t.Setenv("PROBE_MULTI_TOKEN", "multi-token-secret")
+
+	mgr, _ := Init(WithEnvSource(formatKey))
+	mgr.RegisterConfigPrefix("")
+
+	require.NotEmpty(t, mgr.GetConfigsRaw(), "the environment was never imported, the test proves nothing")
+	assert.Empty(t, mgr.GetConfigs())
+	assert.Empty(t, mgr.GetConfigsView())
+	for _, spelling := range []string{"PROBESINGLE", "probesingle", "probe_lower_case", "PROBE_MULTI_TOKEN"} {
+		_, _, err := mgr.GetRegisteredConfig(spelling)
+		require.ErrorIs(t, err, ErrKeyUnregistered, spelling)
+	}
+}
+
+// NonSensitiveSuffixes is the only new redaction-policy mechanism in this
+// change, so pin every edge of it: the exemption applies at the depth the group
+// defines, it survives a prefix whose own name matches a secret pattern, and it
+// does not rescue a leaf that was never exempted.
+func TestNonSensitiveSuffixExemption(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("credential.")
+	mgr.RegisterSensitivePrefix("credential.")
+	mgr.RegisterNonSensitiveSuffix("credential.", "enable")
+	mgr.RegisterNonSensitiveSuffix("credential.", "url")
+
+	for key, want := range map[string]string{
+		// Exempted, even though the key collapses to "credentialaksk1enable",
+		// which contains the "credential" pattern: an explicit declaration wins
+		// over the name-shape guess.
+		"credential.aksk1.enable": "visible",
+		"credential.enable":       "visible",
+		"credential.aksk1.url":    "visible",
+		// Not exempted.
+		"credential.aksk1.secret_access_key": RedactedValue,
+		"credential.aksk1.apikey":            RedactedValue,
+		// Exempted leaf name, but deeper than the group defines: a sensitive
+		// group must not be escapable by ending an arbitrary subtree in "url".
+		"credential.aksk1.inner.url": RedactedValue,
+	} {
+		mgr.SetMapConfig(key, "visible")
+		assert.Equal(t, want, mgr.GetConfigs()[key], key)
+	}
+
+	// The exemption is scoped to the prefix that declared it.
+	mgr.RegisterConfigPrefix("other.")
+	mgr.RegisterSensitivePrefix("other.")
+	mgr.SetMapConfig("other.aksk1.enable", "visible")
+	assert.Equal(t, RedactedValue, mgr.GetConfigs()["other.aksk1.enable"])
+}
+
 // A key deleted at runtime must disappear from the projections, not surface as
 // a key whose value is the literal tombstone marker.
 func TestTombstonedKeysAreNotProjected(t *testing.T) {

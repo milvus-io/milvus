@@ -202,6 +202,38 @@ func TestSensitiveCipherParamItemsMarked(t *testing.T) {
 	}
 }
 
+// TestDeclaredKeysDoNotCollide guards the assumption Manager.declaredKeys rests
+// on: it is keyed by the separator-free identity, so two ParamItems whose keys
+// differ only in where the separators fall ("a.bc" and "ab.c") would share one
+// entry. Whichever registered second would then decide the other's dotted
+// spelling, and with it its sensitivity, its prefix membership, and the
+// identity the alter endpoint deduplicates and writes under.
+func TestDeclaredKeysDoNotCollide(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+
+	byIdentity := make(map[string]string)
+	violations := make([]string, 0)
+	record := func(key string) {
+		identity := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
+		dotted := strings.ToLower(key)
+		if seen, ok := byIdentity[identity]; ok && seen != dotted {
+			violations = append(violations, seen+" and "+key+" both collapse to "+identity)
+			return
+		}
+		byIdentity[identity] = dotted
+	}
+	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
+		record(item.Key)
+		for _, fallback := range item.FallbackKeys {
+			record(fallback)
+		}
+	})
+
+	if len(violations) > 0 {
+		t.Errorf("declared key identity collisions:\n  %s", strings.Join(violations, "\n  "))
+	}
+}
+
 // walkParamItems recursively visits every ParamItem inside the given struct.
 // The callback receives a pointer because ParamItem contains atomic state and
 // must not be copied by value.
