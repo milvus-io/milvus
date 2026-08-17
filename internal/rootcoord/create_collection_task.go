@@ -713,7 +713,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
-	return nil
+	return validateCollectionSchemaPayloadSize(t.body.CollectionSchema)
 }
 
 func (t *createCollectionTask) assignCollectionID() error {

@@ -18,6 +18,8 @@ package rootcoord
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -37,8 +39,249 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestValidateCollectionSchemaPayloadSize(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:        "collection",
+		Description: strings.Repeat("collection description", 256),
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:        "text",
+				Description: strings.Repeat("field description", 256),
+				DataType:    schemapb.DataType_VarChar,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: strings.Repeat("default value", 256)},
+				},
+			},
+		},
+	}
+	actual := proto.Size(schema)
+
+	tests := []struct {
+		name    string
+		limit   int
+		wantErr bool
+	}{
+		{name: "below limit", limit: actual + 1},
+		{name: "equal to limit", limit: actual, wantErr: true},
+		{name: "above limit", limit: actual - 1, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(test.limit))
+			defer paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old)
+
+			err := validateCollectionSchemaPayloadSize(schema)
+			if !test.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+			require.Contains(t, err.Error(), strconv.Itoa(actual))
+			require.Contains(t, err.Error(), strconv.Itoa(test.limit))
+		})
+	}
+}
+
+func TestValidateCollectionSchemaPayloadSizeCumulativeGrowth(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "collection"}
+	for i := 0; i < 4; i++ {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:        "field_" + strconv.Itoa(i),
+			Description: strings.Repeat("d", 1024),
+			DataType:    schemapb.DataType_VarChar,
+		})
+	}
+
+	limit := proto.Size(schema) + 1
+	old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(limit))
+	defer paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old)
+	require.NoError(t, validateCollectionSchemaPayloadSize(schema))
+
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name:     "field_with_default",
+		DataType: schemapb.DataType_VarChar,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: strings.Repeat("d", 2048)},
+		},
+	})
+	require.ErrorIs(t, validateCollectionSchemaPayloadSize(schema), merr.ErrParameterTooLarge)
+}
+
+func TestDDLCallbacksSchemaPayloadRejectsAddCollectionFieldBeforeBroadcast(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	storedSchema := coll.ToCollectionSchemaPB()
+	limit := proto.Size(storedSchema) + 1024
+	old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(limit))
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old) })
+
+	field := &schemapb.FieldSchema{
+		Name:        "large_default",
+		Description: strings.Repeat("field description", 256),
+		DataType:    schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "65535"},
+		},
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: strings.Repeat("default value", 256)},
+		},
+	}
+	mutatedSchema := proto.Clone(storedSchema).(*schemapb.CollectionSchema)
+	mutatedField := proto.Clone(field).(*schemapb.FieldSchema)
+	mutatedField.FieldID = maxAssignedFieldIDFromSchema(mutatedSchema) + 1
+	mutatedSchema.Version = coll.SchemaVersion + 1
+	mutatedSchema.Fields = append(mutatedSchema.Fields, mutatedField)
+	mutatedSchema.Properties = updateMaxFieldIDProperty(coll.Properties, mutatedField.GetFieldID())
+	require.Less(t, proto.Size(storedSchema), limit)
+	require.GreaterOrEqual(t, proto.Size(mutatedSchema), limit)
+
+	broadcasts := 0
+	mockBroadcastAPI := mock_broadcaster.NewMockBroadcastAPI(t)
+	mockBroadcastAPI.EXPECT().Close().Return().Maybe()
+	mockBroadcastAPI.EXPECT().Broadcast(mock.Anything, mock.Anything).Run(func(context.Context, message.BroadcastMutableMessage) {
+		broadcasts++
+	}).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcastAPI, nil).Build()
+	t.Cleanup(func() { lockMocker.UnPatch() })
+
+	schemaBytes, err := proto.Marshal(field)
+	require.NoError(t, err)
+	resp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterTooLarge)
+	require.Zero(t, broadcasts, "schema payload validation must reject before broadcast")
+}
+
+func TestDDLCallbacksSchemaEvolutionPayloadSizeMutationShapes(t *testing.T) {
+	newCollection := func() *model.Collection {
+		return &model.Collection{
+			Name:          "collection",
+			Description:   strings.Repeat("collection description", 256),
+			SchemaVersion: 7,
+			Fields: []*model.Field{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:    101,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}},
+					Nullable:   true,
+				},
+			},
+			Properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "101"}},
+		}
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*schemapb.CollectionSchema)
+	}{
+		{
+			name: "add struct field",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.StructArrayFields = append(schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+					FieldID:  102,
+					Name:     "profile",
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxCapacityKey, Value: "16"},
+					},
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     103,
+							Name:        "profile[values]",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int64,
+							Nullable:    true,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.MaxCapacityKey, Value: "16"},
+							},
+						},
+					},
+				})
+				schema.Properties = updateMaxFieldIDProperty(schema.Properties, 103)
+			},
+		},
+		{
+			name: "alter schema add field",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID:  102,
+					Name:     "added",
+					DataType: schemapb.DataType_Int64,
+					Nullable: true,
+				})
+				schema.Properties = updateMaxFieldIDProperty(schema.Properties, 102)
+			},
+		},
+		{
+			name: "enable dynamic field",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.EnableDynamicField = true
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID:   102,
+					Name:      common.MetaFieldName,
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+					Nullable:  true,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BytesData{BytesData: []byte("{}")},
+					},
+				})
+				schema.Properties = updateMaxFieldIDProperty(schema.Properties, 102)
+			},
+		},
+		{
+			name: "alter field description",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				for _, field := range schema.GetFields() {
+					if field.GetFieldID() == 101 {
+						field.Description = strings.Repeat("updated description", 64)
+						return
+					}
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			oldColl := newCollection()
+			schema := proto.Clone(oldColl.ToCollectionSchemaPB()).(*schemapb.CollectionSchema)
+			schema.Version = oldColl.SchemaVersion + 1
+			test.mutate(schema)
+			actual := proto.Size(schema)
+			require.Less(t, proto.Size(oldColl.ToCollectionSchemaPB()), actual)
+
+			old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(actual + 1))
+			t.Cleanup(func() { paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old) })
+			require.NoError(t, validateSchemaEvolution(oldColl, schema), "mutation must be semantically valid")
+
+			paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(actual))
+			require.ErrorIs(t, validateSchemaEvolution(oldColl, schema), merr.ErrParameterTooLarge)
+		})
+	}
+}
 
 func TestDDLCallbacksSchemaEvolutionRejectsUnsafeAddCollectionFieldBeforeSideEffects(t *testing.T) {
 	tests := []struct {
