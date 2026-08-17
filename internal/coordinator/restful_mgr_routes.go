@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // this file contains proxy management restful API handler
@@ -1262,31 +1261,6 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 //
 //	Batch format: {"configs": [{"key": "k1", "value": "v1"}, {"key": "k2"}]}
 //	Legacy single format: {"key": "config.key", "value": "value"}
-//
-// securityGoverningConfigPrefix covers everything that decides whether Milvus
-// authenticates, who counts as privileged, and what each role may do — the
-// authorization switch, the superuser list, the root password, the TLS modes and
-// every RBAC privilege table all live under it, and none of them is an
-// operational knob a config endpoint needs to write.
-//
-// Held as a prefix rather than a list of names deliberately: the previous
-// version named two keys, which left the four privilege tables and the /expr
-// switches reachable, and a list has to be remembered every time someone adds a
-// key. TestSecurityGoverningPrefixCoversTheSecuritySection asserts the section
-// stays entirely inside it.
-const securityGoverningConfigPrefix = "common.security."
-
-// securityGoverningConfigKeys are the authorization-deciding keys that were not
-// declared under that prefix. Kept as dotted identities, which is what
-// ResolveRegisteredConfigKey returns.
-// TestSecurityGoverningPrefixCoversTheSecuritySection is what finds entries for
-// this list; do not curate it by hand.
-var securityGoverningConfigKeys = typeutil.NewSet(
-	// Turning this off stops RBAC checks resolving an alias to its collection,
-	// so a grant on the collection no longer covers access through the alias.
-	"proxy.resolvealiasforprivilege",
-)
-
 func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		writeJSONError(writer, "Method not allowed, use POST", http.StatusMethodNotAllowed)
@@ -1359,8 +1333,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// authorization switch or the superuser list would make every other
 		// check here decorative. Deletes are refused too: dropping an etcd entry
 		// that holds "authorization enabled" is itself a way to turn it off.
-		if strings.HasPrefix(canonicalKey, securityGoverningConfigPrefix) ||
-			securityGoverningConfigKeys.Contain(canonicalKey) {
+		if paramtable.IsSecurityGoverningConfig(canonicalKey) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)

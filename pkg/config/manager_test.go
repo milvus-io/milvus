@@ -478,9 +478,11 @@ func TestRegisteredGroupMemberLifecycle(t *testing.T) {
 	mgr := NewManager()
 	mgr.RegisterConfigPrefix("kafka.producer.")
 
-	// Nothing anywhere yet: still a legal member of a declared group.
+	// Nothing anywhere yet: still resolves as a member of a declared group, so
+	// it can be deleted and its sensitivity can be judged. Whether it may be
+	// created is a separate question, answered by WriteTakesEffect.
 	_, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.linger.ms")
-	assert.Equal(t, RegisteredConfigGroup, kind, "a member that does not exist yet must still be creatable")
+	assert.Equal(t, RegisteredConfigGroup, kind)
 
 	// What an alter call leaves behind.
 	mgr.SetConfig("kafka.producer.compression.type", "zstd")
@@ -597,6 +599,56 @@ func TestKnowherePrefixDoesNotAdmitEnvironmentVariables(t *testing.T) {
 	for key, value := range mgr.GetConfigsView() {
 		assert.NotContains(t, value, "must-not-be-published", key)
 	}
+}
+
+// Every predicate must give the same answer about the same key. A group member
+// stored only under the separator-free identity — which is what a pre-change
+// alter endpoint left in etcd — is one ParamGroup.GetValue never returns, so the
+// read API must not name it either, or the two halves of /management/config
+// contradict each other about the same key.
+func TestPredicatesAgreeOnAnUnreachableGroupMember(t *testing.T) {
+	const dotted = "autoindex.params.tuning.foo"
+	mgr, _ := Init()
+	mgr.RegisterConfigPrefix("autoindex.params.tuning.")
+	require.NoError(t, mgr.AddSource(&mapSource{
+		name:    "EtcdLikeSource",
+		configs: map[string]string{EtcdConfigKey(dotted): "orphan-value"},
+	}))
+
+	group := mgr.GetByRaw(WithPrefix("autoindex.params.tuning."))
+	require.Empty(t, group, "the ParamGroup consumer cannot see it")
+
+	assert.False(t, mgr.WriteTakesEffect(dotted))
+	assert.NotContains(t, mgr.GetConfigs(), dotted)
+	_, _, err := mgr.GetRegisteredConfig(dotted)
+	assert.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+// The mirror image: an overlay written under the spelling its own consumer does
+// not read is inert, so the projection must not advertise it.
+func TestProjectionsOmitInertOverlays(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigKey("some.declared.key")
+	mgr.RegisterConfigPrefix("some.group.")
+
+	// SetMapConfig on a scalar: ParamItem.get resolves the separator-free
+	// identity and never sees this.
+	mgr.SetMapConfig("some.declared.key", "inert-dotted")
+	_, _, err := mgr.GetConfig("some.declared.key")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+	assert.NotContains(t, mgr.GetConfigs(), "some.declared.key")
+	assert.NotContains(t, mgr.GetConfigsView(), "some.declared.key")
+
+	// SetConfig on a group member: getBy's dotted prefix filter never sees this.
+	mgr.SetConfig("some.group.member", "inert-stripped")
+	require.Empty(t, mgr.GetByRaw(WithPrefix("some.group.")))
+	assert.NotContains(t, mgr.GetConfigs(), formatKey("some.group.member"))
+
+	// And the authoritative spellings still come through.
+	mgr.SetConfig("some.declared.key", "live")
+	mgr.SetMapConfig("some.group.member", "live-group")
+	assert.Equal(t, "live", mgr.GetConfigs()[formatKey("some.declared.key")])
+	assert.Equal(t, "live-group", mgr.GetConfigs()["some.group.member"])
 }
 
 // A ParamGroup member set through both overlay spellings must be reported as

@@ -22,8 +22,6 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
 
@@ -231,19 +229,6 @@ func TestDeclaredKeysDoNotCollide(t *testing.T) {
 	}
 }
 
-// securityGoverningConfigPrefix mirrors the constant in
-// internal/coordinator, which refuses every alter through the management
-// endpoint below it. Duplicated rather than imported because pkg may not depend
-// on internal.
-const securityGoverningConfigPrefix = "common.security."
-
-// securityGoverningConfigKeys mirrors the companion set in
-// internal/coordinator: authorization-deciding keys that were not declared
-// under the prefix. Compared after ToLower.
-var securityGoverningConfigKeys = []string{
-	"proxy.resolvealiasforprivilege",
-}
-
 // authorizationDeciding names the kinds of key that must sit inside the fenced
 // namespace: anything that decides whether Milvus authenticates, who counts as
 // privileged, or what a role may do.
@@ -257,20 +242,23 @@ var authorizationDeciding = []string{
 	"tlsmode",
 }
 
-// TestSecurityGoverningPrefixCoversTheSecuritySection is what keeps the fence in
-// internal/coordinator from rotting into the list of two names it started as.
-// The fence is a prefix, so it stays complete only while every
-// authorization-deciding key is declared underneath it.
+// TestSecurityGoverningPrefixCoversTheSecuritySection is what keeps the fence
+// from rotting into the list of two names it started as: the fence is a prefix,
+// so it stays complete only while every authorization-deciding key is declared
+// underneath it.
+//
+// It walks ParamItems, so a legacy key read straight through base.Get rather
+// than declared as one is invisible to it — common.security.enablePublicPrivilege's
+// Formatter reads proxy.enablePublicPrivilege that way. Those are unwritable
+// today only because the endpoint refuses undeclared keys, which is a second
+// mechanism rather than this fence.
 func TestSecurityGoverningPrefixCoversTheSecuritySection(t *testing.T) {
 	params := newSensitiveAuditParams(t)
 
 	escaped := make([]string, 0)
 	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
 		lowerKey := strings.ToLower(item.Key)
-		if strings.HasPrefix(lowerKey, securityGoverningConfigPrefix) {
-			return
-		}
-		if lo.Contains(securityGoverningConfigKeys, lowerKey) {
+		if IsSecurityGoverningConfig(lowerKey) {
 			return
 		}
 		// Match within a dotted segment, never across one: "pulsar.backlog..."
@@ -288,9 +276,11 @@ func TestSecurityGoverningPrefixCoversTheSecuritySection(t *testing.T) {
 	})
 
 	if len(escaped) > 0 {
-		t.Errorf("these decide authorization but sit outside %q, so the management "+
-			"endpoint can rewrite them:\n  %s",
-			securityGoverningConfigPrefix, strings.Join(escaped, "\n  "))
+		t.Errorf("these decide authorization but IsSecurityGoverningConfig does not "+
+			"cover them, so an endpoint that does not authenticate can rewrite "+
+			"them:\n  %s\nDeclare them under %q, or add them to "+
+			"securityGoverningConfigKeys with a reason.",
+			strings.Join(escaped, "\n  "), SecurityGoverningConfigPrefix)
 	}
 }
 

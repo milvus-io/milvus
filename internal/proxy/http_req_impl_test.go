@@ -122,6 +122,7 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", sentinelValue)
 
 	base := paramtable.NewBaseTable(paramtable.SkipRemote(true))
+	require.NoError(t, base.Save("localStorage.path", t.TempDir()))
 	params := &paramtable.ComponentParam{}
 	params.Init(base)
 	// Set it here rather than relying on a milvus.yaml being discoverable from

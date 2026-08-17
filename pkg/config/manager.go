@@ -273,6 +273,13 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 	if m.isSensitiveResolved(resolved.lookup, resolved.dotted) {
 		return "", "", errors.Wrap(ErrKeySensitive, key)
 	}
+	if resolved.kind == RegisteredConfigGroup && !m.groupMemberVisible(resolved.dotted, resolved.lookup) {
+		// Stored, but under an identity the group's prefix filter cannot reach —
+		// a member an older build wrote through the alter endpoint. Reporting it
+		// would name a setting that is not in force, and the same endpoint now
+		// refuses to create one, so the two halves would contradict each other.
+		return "", "", errors.Wrap(ErrKeyNotFound, key)
+	}
 	return m.readResolved(resolved, key)
 }
 
@@ -382,6 +389,27 @@ func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	return sawEnvironment
 }
 
+// groupMemberVisible reports whether ParamGroup.GetValue can see a member.
+//
+// That lookup filters the key space on the group's dotted prefix, so it only
+// ever finds a member some source stored under the dotted spelling. Where
+// EtcdConfigKey leaves separators alone (NotFormatPrefix) the two identities
+// coincide and the question is moot.
+func (m *Manager) groupMemberVisible(dotted, lookup string) bool {
+	if dotted == lookup {
+		return true
+	}
+	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
+		if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
+			return true
+		}
+		if _, ok := m.keySourceMap.Get(candidate); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // WriteTakesEffect reports whether persisting key would change what Milvus
 // actually reads.
 //
@@ -400,18 +428,13 @@ func (m *Manager) WriteTakesEffect(key string) bool {
 	case RegisteredConfigScalar:
 		return true
 	case RegisteredConfigGroup:
+		// A prefix EtcdConfigKey leaves alone stores inside the namespace the
+		// group filters on, so even a member that does not exist yet is readable
+		// the moment it lands.
 		if EtcdConfigKey(resolved.dotted) == resolved.dotted {
 			return true
 		}
-		for _, candidate := range [2]string{resolved.dotted, strings.ReplaceAll(resolved.dotted, ".", "/")} {
-			if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
-				return true
-			}
-			if _, ok := m.keySourceMap.Get(candidate); ok {
-				return true
-			}
-		}
-		return false
+		return m.groupMemberVisible(resolved.dotted, resolved.lookup)
 	default:
 		return false
 	}
@@ -457,6 +480,9 @@ func (m *Manager) getConfigs(redact bool) map[string]string {
 			// "TOMB_VAULE", which is what publishing it would claim.
 			return true
 		}
+		if redact && !m.overlayIsAuthoritative(key) {
+			return true
+		}
 		if projected, include := m.projectValue(key, value, redact); include {
 			config[key] = projected
 		}
@@ -495,7 +521,7 @@ func (m *Manager) GetConfigsView() map[string]string {
 	})
 
 	m.overlays.Range(func(key, value string) bool {
-		if value != TombValue {
+		if value != TombValue && m.overlayIsAuthoritative(key) {
 			annotate(key, value, RuntimeSource)
 		}
 		return true
@@ -535,6 +561,9 @@ func (m *Manager) getBy(redact bool, filters ...Filter) map[string]string {
 	m.overlays.Range(func(key, value string) bool {
 		newkey, ok := filterate(key, filters...)
 		if !ok || value == TombValue {
+			return true
+		}
+		if redact && !m.overlayIsAuthoritative(key) {
 			return true
 		}
 		if projected, include := m.projectValue(key, value, redact); include {
@@ -885,6 +914,25 @@ const (
 	// of every environment variable in the pod is a disclosure of its own.
 	projectionOmit
 )
+
+// overlayIsAuthoritative reports whether a runtime overlay stored under this
+// exact spelling is the one its consumer reads. A ParamItem is resolved through
+// Manager.GetConfig, which looks only under the separator-free identity; a
+// ParamGroup member is picked up by getBy's dotted prefix filter. An overlay
+// written under the other spelling — SetMapConfig on a scalar key, SetConfig on
+// a group key — is inert, and a projection that named it would be advertising a
+// value nothing uses.
+func (m *Manager) overlayIsAuthoritative(storedKey string) bool {
+	resolved := m.resolveRegisteredKey(storedKey)
+	switch resolved.kind {
+	case RegisteredConfigScalar:
+		return storedKey == resolved.lookup
+	case RegisteredConfigGroup:
+		return storedKey == resolved.dotted || storedKey == strings.ReplaceAll(resolved.dotted, ".", "/")
+	default:
+		return false
+	}
+}
 
 func (m *Manager) classify(key string) projectionKind {
 	resolved := m.resolveRegisteredKey(key)
