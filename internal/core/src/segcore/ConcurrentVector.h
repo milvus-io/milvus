@@ -122,6 +122,17 @@ class ThreadSafeValidData {
         }
     }
 
+    void
+    bulk_is_valid_range(int64_t start, int64_t count, bool* out) const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        for (int64_t i = 0; i < count; ++i) {
+            const auto offset = start + i;
+            out[i] = offset >= 0 && static_cast<size_t>(offset) < length_ &&
+                     chunks_[offset / spc][offset % spc];
+        }
+    }
+
     // WARNING: materializes a flat copy of the WHOLE bitmap (O(segment rows))
     // — avoid on hot paths. Prefer empty() for emptiness checks,
     // is_valid()/bulk_is_valid() for point/batch lookups, or get_chunk_data()
@@ -289,6 +300,18 @@ class VectorBase {
     virtual FixedVector<bool>
     get_valid_data() const {
         return FixedVector<bool>{};
+    }
+
+    // Copy a bounded logical validity range without materializing the whole
+    // segment bitmap. Non-mapping storage has no null rows, so its default is
+    // an all-valid range.
+    virtual void
+    copy_valid_data(int64_t start, int64_t count, bool* out) const {
+        AssertInfo(start >= 0 && count >= 0,
+                   "invalid validity range: start={}, count={}",
+                   start,
+                   count);
+        std::fill_n(out, count, true);
     }
 
     virtual const OffsetMapping&
@@ -546,6 +569,19 @@ class ConcurrentVectorImpl : public VectorBase {
             return valid_data_ptr_->get_data();
         }
         return FixedVector<bool>{};
+    }
+
+    void
+    copy_valid_data(int64_t start, int64_t count, bool* out) const override {
+        AssertInfo(start >= 0 && count >= 0,
+                   "invalid validity range: start={}, count={}",
+                   start,
+                   count);
+        if (valid_data_ptr_ != nullptr) {
+            valid_data_ptr_->bulk_is_valid_range(start, count, out);
+            return;
+        }
+        std::fill_n(out, count, true);
     }
 
  private:
