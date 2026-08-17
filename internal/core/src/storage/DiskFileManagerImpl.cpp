@@ -1036,7 +1036,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                     field_meta_,
                                                     data_type,
                                                     dim,
-                                                    element_type);
+                                                    element_type,
+                                                    0,
+                                                    0,
+                                                    GetStorageColumnMapping(GetFieldDataMeta().field_id));
         }
     } else {
         for (auto& remote_files_group : all_remote_files) {
@@ -1049,9 +1052,24 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                     std::vector<std::string> vector_file;
                     vector_file.push_back(remote_file);
                     current_files.push_back(vector_file);
-                    size_t max_rows = 1000000, offset = 0;
+                    // Size the page by bytes, not a fixed row count, so the
+                    // memory budget holds regardless of dim and element size.
+                    size_t bytes_per_row =
+                        GetDataTypeSize(data_type.value(), dim);
+                    size_t max_rows =
+                        bytes_per_row > 0
+                            ? static_cast<size_t>(
+                                  DEFAULT_FIELD_MAX_MEMORY_LIMIT) /
+                                  bytes_per_row
+                            : 1000000;
+                    // Guarantee at least one row per page to avoid infinite
+                    // loops when a single row exceeds the budget.
+                    if (max_rows == 0) {
+                        max_rows = 1;
+                    }
+                    size_t offset = 0;
                     while (true) {
-                        // limit download to 1000000 rows to avoid high memory consumption
+                        // limit download to max_rows per page to bound memory
                         auto part_field_datas =
                             manifest_path_str == ""
                                 ? GetFieldDatasFromStorageV2(
@@ -1071,7 +1089,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                       dim,
                                       element_type,
                                       max_rows,
-                                      offset);
+                                      offset,
+                                      GetStorageColumnMapping(GetFieldDataMeta().field_id));
                         if (part_field_datas.empty()) {
                             break;
                         }

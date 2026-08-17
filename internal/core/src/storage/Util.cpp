@@ -1592,6 +1592,13 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                 }
             }
             if (is_full) {
+                // The background load task captures locals by reference and
+                // may still be pushing into the bounded channel. Drain and
+                // join before leaving scope to avoid use-after-free (#46958).
+                std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                while (field_data_info.arrow_reader_channel->pop(discard)) {
+                }
+                DrainFuture(load_future);
                 break;
             }
         } catch (...) {
@@ -2042,7 +2049,7 @@ IterateFieldDataFromManifest(
             auto field_data =
                 CreateFieldData(data_type_v,
                                 element_type_v,
-                                batch->schema()->field(0)->nullable(),
+                                nullable,
                                 dim,
                                 num_rows);
             field_data->FillFieldData(chunked_array);
