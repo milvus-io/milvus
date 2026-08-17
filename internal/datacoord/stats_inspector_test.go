@@ -653,8 +653,8 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 
 	// the json key index task drops the pk column out of its estimation, while
 	// the sort task still reads the whole segment
-	residual := groupSize/numRows - 8
-	s.Equal(calculateStatsTaskSlot(residual*numRows*2), slots[indexpb.StatsSubJob_JsonKeyIndexJob])
+	residualBytes := groupSize - 8*numRows
+	s.Equal(calculateStatsTaskSlot(residualBytes*2), slots[indexpb.StatsSubJob_JsonKeyIndexJob])
 	s.Equal(calculateStatsTaskSlot(segment.getSegmentSize()), slots[indexpb.StatsSubJob_Sort])
 	s.Less(slots[indexpb.StatsSubJob_JsonKeyIndexJob], calculateStatsTaskSlot(segment.getSegmentSize()*2))
 }
@@ -880,9 +880,9 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 	// both variable width columns of the group, only used to assert the
 	// estimation is not the raw schema guess
 	schemaGuess := perRecord(schema.Fields[1]) + perRecord(schema.Fields[2])
-	// bytes the two variable width columns really take per row
-	residual := wholeRowSize/numRows - pkSize
-	s.Greater(residual, schemaGuess)
+	// bytes the two variable width columns really take in total
+	residualBytes := wholeRowSize - pkSize*numRows
+	s.Greater(residualBytes, schemaGuess*numRows)
 
 	newSegment := func(collID UniqueID) *SegmentInfo {
 		return &SegmentInfo{
@@ -916,14 +916,14 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 		// the json column is charged the whole measured residual of the group,
 		// i.e. everything but the pk, doubled for the index it writes
 		segment := newSegment(collectionID)
-		expected := residual * numRows * 2
+		expected := residualBytes * 2
 		s.Equal(expected, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 		s.Less(expected, segment.getSegmentSize()*2)
 	})
 
 	s.Run("text job is not doubled", func() {
 		segment := newSegment(collectionID)
-		expected := residual * numRows
+		expected := residualBytes
 		s.Equal(expected, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_TextIndexJob))
 		s.Less(expected, segment.getSegmentSize())
 	})

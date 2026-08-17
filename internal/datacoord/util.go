@@ -597,6 +597,12 @@ func isFixedWidthType(dataType schemapb.DataType) bool {
 
 // fieldSizePerRecord returns the per row size of a field derived from the
 // schema, together with whether that size is exact.
+//
+// A nullable field is never exact, whatever its data type: rows holding null
+// store less than the full width (nullable vectors are even stored with a
+// variable length encoding, see CreateArrowSchema in
+// internal/core/src/storage/Util.cpp), so its real size is data dependent and
+// must come from the measured residual instead.
 func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (int64, bool, error) {
 	field := typeutil.GetFieldByID(schema, fieldID)
 	if field == nil {
@@ -614,7 +620,8 @@ func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (int64
 		return 0, false, merr.WrapErrParameterInvalidMsg("cannot estimate size of field %d with data type %s",
 			fieldID, field.GetDataType().String())
 	}
-	return int64(sizePerRecord), isFixedWidthType(field.GetDataType()), nil
+	exact := isFixedWidthType(field.GetDataType()) && !field.GetNullable()
+	return int64(sizePerRecord), exact, nil
 }
 
 // columnGroup is a set of fields stored together, which is what a binlog entry
@@ -773,24 +780,27 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 		hasVariableField = true
 	}
 
-	// bytes the variable length fields of this group take per row, measured
-	residualPerRecord := group.size/numRows - fixedPerRecord
-	if residualPerRecord < 0 || !hasVariableField {
+	// bytes the variable length fields of this group take in total, measured.
+	// Kept in whole bytes rather than per record: a per record truncation
+	// could lose up to numRows bytes and drop the estimate into a lower slot
+	// bucket.
+	residualBytes := group.size - fixedPerRecord*numRows
+	if residualBytes < 0 || !hasVariableField {
 		// the schema does not add up to the measured data, e.g. because some
 		// field of the group is not materialized in it. Fall back to the schema
 		// estimation alone, still bounded by the group size.
-		residualPerRecord = 0
+		residualBytes = 0
 	}
 
 	var total int64
 	var residualCharged bool
 	for _, fieldID := range fieldIDs {
 		estimate := estimates[fieldID]
-		if !estimate.exact && residualPerRecord > 0 {
+		if !estimate.exact && residualBytes > 0 {
 			// every variable length field of the group shares the same residual,
 			// so it is charged once no matter how many of them are requested
 			if !residualCharged {
-				total += residualPerRecord * numRows
+				total += residualBytes
 				residualCharged = true
 			}
 			continue
