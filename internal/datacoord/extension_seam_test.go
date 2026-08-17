@@ -33,10 +33,12 @@ import (
 type answeringDrainer struct {
 	allow             bool
 	seenCollectionIDs []int64
+	seenIndexNames    []string
 }
 
-func (d *answeringDrainer) AllowVectorIndexDropWhileLoaded(_ context.Context, collectionID int64) bool {
+func (d *answeringDrainer) AllowVectorIndexDropWhileLoaded(_ context.Context, collectionID int64, indexName string) bool {
 	d.seenCollectionIDs = append(d.seenCollectionIDs, collectionID)
+	d.seenIndexNames = append(d.seenIndexNames, indexName)
 	return d.allow
 }
 
@@ -181,6 +183,8 @@ func TestDropVectorIndexOnLoadedProceedsWhenDrainerAllows(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status), "the drainer took the drop over, so it must not be refused")
 	assert.Equal(t, []int64{req.GetCollectionID()}, drainer.seenCollectionIDs)
+	assert.Equal(t, []string{req.GetIndexName()}, drainer.seenIndexNames,
+		"the check must carry the request's index name: it is how a drainer mid-drain tells this drop from a concurrent second one")
 
 	assert.Empty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
 		"an allowed drop must actually remove the index, not just skip the refusal")

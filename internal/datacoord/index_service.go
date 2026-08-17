@@ -981,7 +981,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 			}
 			// Extension seam, see extension_seam.go: with none installed the
 			// second call answers false and the refusal below stands.
-			if typeutil.IsVectorType(field.GetDataType()) && !vectorIndexDropWhileLoadedAllowed(ctx, req.GetCollectionID()) {
+			if typeutil.IsVectorType(field.GetDataType()) && !vectorIndexDropWhileLoadedAllowed(ctx, req.GetCollectionID(), req.GetIndexName()) {
 				mlog.Warn(context.TODO(), "vector index cannot be dropped on loaded collection", mlog.String("indexName", req.IndexName), mlog.Int64("collectionID", req.GetCollectionID()), mlog.Int64("fieldID", index.FieldID))
 				return merr.Status(merr.WrapErrParameterInvalidMsg("vector index cannot be dropped on loaded collection: %d", req.GetCollectionID())), nil
 			}

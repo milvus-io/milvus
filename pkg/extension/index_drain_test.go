@@ -14,7 +14,7 @@ import (
 // the seams call it.
 type stubIndexDrainer struct{ answer bool }
 
-func (s stubIndexDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64) bool {
+func (s stubIndexDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64, string) bool {
 	return s.answer
 }
 

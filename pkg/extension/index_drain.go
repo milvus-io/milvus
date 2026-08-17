@@ -49,7 +49,14 @@ type IndexDrainer interface {
 	// implementation that cannot take the collection out of service must
 	// answer: the refusal is a working state, a dropped index with a loaded
 	// collection behind it is not.
-	AllowVectorIndexDropWhileLoaded(ctx context.Context, collectionID int64) bool
+	//
+	// indexName identifies WHICH drop is asking, and matters because this is
+	// consulted mid-drop, after BeginDropIndex already ran: an implementation
+	// that refuses concurrent drops while one is draining needs to tell the
+	// drop that opened the drain (allowed - it is the one being asked about)
+	// from a second drop arriving during it (refused). It is the raw name off
+	// the request, empty when the request named none.
+	AllowVectorIndexDropWhileLoaded(ctx context.Context, collectionID int64, indexName string) bool
 
 	// BeginDropIndex runs before milvus performs a drop, and reports whether
 	// AfterDropIndex must run if the drop succeeds.

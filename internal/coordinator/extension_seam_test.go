@@ -60,7 +60,9 @@ type recordingDrainer struct {
 	seenAbortDrop []*indexpb.DropIndexRequest
 }
 
-func (d *recordingDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64) bool { return true }
+func (d *recordingDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64, string) bool {
+	return true
+}
 
 func (d *recordingDrainer) BeginDropIndex(_ context.Context, req *indexpb.DropIndexRequest) bool {
 	d.seenBegin = append(d.seenBegin, req)

@@ -17,12 +17,12 @@ import (
 // takes over datacoord's refusal to drop a vector index on a loaded
 // collection. Only an extension that drains queries off the collection first
 // can answer true; nothing installed means the refusal stands.
-func vectorIndexDropWhileLoadedAllowed(ctx context.Context, collectionID int64) bool {
+func vectorIndexDropWhileLoadedAllowed(ctx context.Context, collectionID int64, indexName string) bool {
 	drainer := extension.Caps().IndexDrain
 	if drainer == nil {
 		return false
 	}
-	return drainer.AllowVectorIndexDropWhileLoaded(ctx, collectionID)
+	return drainer.AllowVectorIndexDropWhileLoaded(ctx, collectionID, indexName)
 }
 
 // The functions below are datacoord's seam for the scale-to-zero reading of an
