@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -358,9 +359,11 @@ func newDuplicatedImportBroadcastResult(originalJobID int64, originalPaths ...st
 }
 
 // setupImportV2DuplicateBroadcast wires the mocks ImportV2 needs so that the broadcast
-// comes back deduplicated, and returns the server under test. importMeta is supplied by
-// the caller so it can decide whether the original job still exists.
-func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64, originalPaths ...string) *Server {
+// comes back deduplicated, and returns the server under test together with the
+// broadcast mock, so a caller can inspect the message that was actually broadcast.
+// importMeta is supplied by the caller so it can decide whether the original job still
+// exists.
+func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64, originalPaths ...string) (*Server, *mockBroadcastAPIImpl) {
 	mockBalancerInst := &mockBalancerImpl{}
 	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
 		return mockBalancerInst, nil
@@ -398,7 +401,7 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
 	server.allocator = mockAllocator
-	return server
+	return server, mockBroadcastAPI
 }
 
 func newImportV2IdempotentRequest() *internalpb.ImportRequestInternal {
@@ -432,7 +435,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 		ImportJob: &datapb.ImportJob{JobID: 4242},
 	})
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
@@ -454,7 +457,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 		ImportJob: &datapb.ImportJob{JobID: 0},
 	})
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 0, importV2RequestFilePath)
+	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 0, importV2RequestFilePath)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
@@ -474,7 +477,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError()
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil)
 
-	server := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
@@ -485,6 +488,39 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError()
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportSysFailed))
 	s.Contains(resp.GetStatus().GetReason(), "past its retention")
 	s.Empty(resp.GetJobID())
+}
+
+// The client key must reach the broadcaster byte for byte. Proxy.ImportV2 admits a raw
+// key of up to streaming.idempotency.maxKeyLength bytes and the broadcaster enforces the
+// same bound on whatever it receives, so anything DataCoord prepends here turns a key the
+// proxy just accepted into one the broadcaster rejects. This test sits on that exact
+// boundary; a short key would pass either way.
+func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtTheLimit() {
+	ctx := context.Background()
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
+		ImportJob: &datapb.ImportJob{JobID: 4242},
+	})
+
+	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+
+	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+	s.Equal(256, limit, "this test asserts the boundary of the DEFAULT limit, the one the proxy advertises")
+	atLimit := strings.Repeat("k", limit)
+
+	req := newImportV2IdempotentRequest()
+	req.IdempotencyKey = atLimit
+	resp, err := server.ImportV2(ctx, req)
+
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+
+	s.Require().NotNil(broadcastAPI.capturedMsg)
+	forwarded := message.IdempotencyKeyOf(broadcastAPI.capturedMsg)
+	s.Equal(atLimit, forwarded)
+	s.LessOrEqual(len(forwarded), limit, "DataCoord inflated the key past the bound the broadcaster enforces")
 }
 
 func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
