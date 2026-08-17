@@ -107,9 +107,12 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 		}
 
 		// 1. Pattern-based check: if the key name matches a sensitive pattern,
-		//    Sensitive must be true.
+		//    Sensitive must be true. Normalised the way the runtime classifier
+		//    normalises, or this tripwire is narrower than the thing it guards:
+		//    "x.api_key" matches at runtime and would slip past a raw Contains.
+		patternKey := strings.NewReplacer("-", "", "_", "", ".", "", "/", "").Replace(lowerKey)
 		for _, pat := range sensitivePatterns {
-			if strings.Contains(lowerKey, pat) && !item.Sensitive {
+			if strings.Contains(patternKey, pat) && !item.Sensitive {
 				violations = append(violations, item.Key+
 					" (matches sensitive pattern \""+pat+
 					"\" but Sensitive: false; either mark Sensitive: true or add to sensitiveAuditAllowlist with a reason)")

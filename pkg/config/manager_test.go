@@ -719,6 +719,29 @@ func TestEmptyPrefixNeverPublishesTheEnvironment(t *testing.T) {
 	}
 }
 
+// SetMapConfig has to store a key under the identity its readers use. Keys below
+// NotFormatPrefix keep their case everywhere else — FileSource stores them that
+// way and formatKey leaves them alone — so folding the case here would make
+// BaseTable.SaveGroup add a second, differently-cased member beside the file's
+// instead of overriding it, and lose the case the index engine needs.
+func TestSetMapConfigKeepsCaseUnderNotFormatPrefix(t *testing.T) {
+	const key = "knowhere.DISKANN.search_list"
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix(NotFormatPrefix)
+	mgr.SetMapConfig(key, "56")
+
+	// The exact-key reader, which is how ParamItem.get and BaseTable.Get resolve.
+	_, value, err := mgr.GetConfig(key)
+	require.NoError(t, err, "stored under an identity GetConfig cannot reach")
+	assert.Equal(t, "56", value)
+
+	// The group reader, which is how ParamGroup.GetValue resolves.
+	assert.Equal(t,
+		map[string]string{"DISKANN.search_list": "56"},
+		mgr.GetByRaw(WithPrefix(NotFormatPrefix), RemovePrefix(NotFormatPrefix)),
+		"the suffix must keep the case the index engine needs")
+}
+
 // SetMapConfig, ResetConfig and DeleteConfig must agree on the identity a group
 // overlay lives under. They previously diverged for keys below NotFormatPrefix,
 // whose case one preserves and the other folds, and for keys spelled with

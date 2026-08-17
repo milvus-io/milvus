@@ -584,18 +584,20 @@ func mapConfigKey(key string) string {
 }
 
 // Delete config at runtime, which has the highest priority to override all other sources.
-// Both identities are tombstoned for the same reason ResetConfig clears both:
-// SetMapConfig writes the dotted one, so covering only the separator-free
-// spelling would leave a ParamGroup member in force after it was deleted.
+// Tombstones the identity SetMapConfig writes as well as the formatted one,
+// because covering only the latter would leave a ParamGroup member in force
+// after it was deleted. The two coincide for keys that have no separators left
+// and for everything under NotFormatPrefix, in which case this writes one entry.
 func (m *Manager) DeleteConfig(key string) {
 	m.overlays.Insert(formatKey(key), TombValue)
 	m.overlays.Insert(mapConfigKey(key), TombValue)
 }
 
 // Remove the config which set at runtime, use config from sources.
-// Both identities are removed: SetConfig writes the separator-free one and
-// SetMapConfig the dotted one, so clearing only the former would leave a group
-// value set by BaseTable.SaveGroup in place forever.
+// Clears the identity SetMapConfig writes as well as the one SetConfig writes,
+// because clearing only the latter would leave a group value set by
+// BaseTable.SaveGroup in place forever. The two coincide for keys that have no
+// separators left and for everything under NotFormatPrefix.
 func (m *Manager) ResetConfig(key string) {
 	m.overlays.Remove(formatKey(key))
 	m.overlays.Remove(mapConfigKey(key))
@@ -935,11 +937,10 @@ const (
 )
 
 // overlayIsAuthoritative reports whether a runtime overlay stored under this
-// exact spelling is the one its consumer reads. A ParamItem is resolved through
-// Manager.GetConfig, which looks only under the separator-free identity; a
-// ParamItem is resolved only through Manager.GetConfig, so an overlay written
-// under the dotted spelling is read by nothing, and a projection that named it
-// would be advertising a value nothing uses.
+// exact spelling is the one its consumer reads. A ParamItem is resolved only
+// through Manager.GetConfig, which looks under the separator-free identity, so
+// an overlay written under the dotted spelling is read by nothing and a
+// projection that named it would be advertising a value nothing uses.
 func (m *Manager) overlayIsAuthoritative(storedKey string) bool {
 	resolved := m.resolveRegisteredKey(storedKey)
 	switch resolved.kind {
