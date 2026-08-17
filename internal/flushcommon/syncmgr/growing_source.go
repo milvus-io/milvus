@@ -400,7 +400,7 @@ type GrowingSourceSyncTask struct {
 
 	writeRetryOpts  []retry.Option
 	failureCallback func(error)
-	failureOnce     sync.Once
+	errorHandled    bool
 	tr              *timerecord.TimeRecorder
 }
 
@@ -594,12 +594,16 @@ func (t *GrowingSourceSyncTask) HandleError(err error) {
 	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 		return
 	}
-	t.failureOnce.Do(func() {
-		if t.failureCallback != nil {
-			t.failureCallback(err)
-		}
-		metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
-	})
+	// Run's defer and syncManager.submit's handler both call HandleError for the
+	// same failure; keep the callback and the failure metric single-shot.
+	if t.errorHandled {
+		return
+	}
+	t.errorHandled = true
+	if t.failureCallback != nil {
+		t.failureCallback(err)
+	}
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
 }
 
 func (t *GrowingSourceSyncTask) ReleaseSource() {

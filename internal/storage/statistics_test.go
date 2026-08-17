@@ -520,3 +520,78 @@ func TestStatisticsCollector_RestoreThenDigest_Accumulates(t *testing.T) {
 func TestStatisticsCollector_RestoreFromNil_Empty(t *testing.T) {
 	assert.Nil(t, NewStatisticsCollectorFromStats(nil, 0).Publish())
 }
+
+func TestBuildStatsFromFieldBinlogs_Formats(t *testing.T) {
+	t.Run("single format", func(t *testing.T) {
+		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
+			{FieldID: 0, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
+			{FieldID: 1, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 200}}},
+		}, nil, nil, nil)
+		assert.Equal(t, []string{"parquet"}, s.GetFormats())
+	})
+	t.Run("mixed formats sorted", func(t *testing.T) {
+		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
+			{FieldID: 0, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
+			{FieldID: 1, Format: "lance", Binlogs: []*datapb.Binlog{{MemorySize: 200}}},
+		}, nil, nil, nil)
+		assert.Equal(t, []string{"lance", "parquet"}, s.GetFormats())
+	})
+	t.Run("empty format ignored", func(t *testing.T) {
+		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
+			{FieldID: 0, Format: "", Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
+			{FieldID: 1, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 200}}},
+		}, nil, nil, nil)
+		assert.Equal(t, []string{"parquet"}, s.GetFormats())
+	})
+	t.Run("no format at all", func(t *testing.T) {
+		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
+			{FieldID: 0, Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
+		}, nil, nil, nil)
+		assert.Empty(t, s.GetFormats())
+	})
+	t.Run("format collected even with empty binlogs", func(t *testing.T) {
+		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
+			{FieldID: 0, Format: "parquet"},
+		}, nil, nil, nil)
+		assert.Equal(t, []string{"parquet"}, s.GetFormats())
+	})
+}
+
+func TestStatisticsCollector_FormatsDigestPublishCloneRestore(t *testing.T) {
+	c := NewStatisticsCollector()
+
+	fb1 := map[int64]*datapb.FieldBinlog{
+		0: {FieldID: 0, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 100, EntriesNum: 10, TimestampFrom: 1, TimestampTo: 10}}},
+	}
+	fb2 := map[int64]*datapb.FieldBinlog{
+		1: {FieldID: 1, Format: "lance", Binlogs: []*datapb.Binlog{{MemorySize: 200, EntriesNum: 20, TimestampFrom: 11, TimestampTo: 20}}},
+	}
+
+	c.Digest(fb1, nil, 0, 10, 1, 10)
+	c.Digest(fb2, nil, 0, 20, 11, 20)
+
+	s := c.Publish()
+	assert.Equal(t, []string{"lance", "parquet"}, s.GetFormats())
+
+	// Clone is independent
+	cloned := c.Clone()
+	s2 := cloned.Publish()
+	assert.Equal(t, []string{"lance", "parquet"}, s2.GetFormats())
+
+	// Mutating clone doesn't affect original
+	fb3 := map[int64]*datapb.FieldBinlog{
+		2: {FieldID: 2, Format: "orc", Binlogs: []*datapb.Binlog{{MemorySize: 300, EntriesNum: 30, TimestampFrom: 21, TimestampTo: 30}}},
+	}
+	cloned.Digest(fb3, nil, 0, 30, 21, 30)
+	assert.Equal(t, []string{"lance", "orc", "parquet"}, cloned.Publish().GetFormats())
+	assert.Equal(t, []string{"lance", "parquet"}, c.Publish().GetFormats())
+
+	// Restore from published stats
+	restored := NewStatisticsCollectorFromStats(s, 30)
+	sr := restored.Publish()
+	assert.Equal(t, []string{"lance", "parquet"}, sr.GetFormats())
+
+	// Restore accumulates new formats
+	restored.Digest(fb3, nil, 0, 30, 21, 30)
+	assert.Equal(t, []string{"lance", "orc", "parquet"}, restored.Publish().GetFormats())
+}

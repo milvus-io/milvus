@@ -145,18 +145,29 @@ func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(
 	}
 }
 
-func TestGrowingSourceSyncTaskHandleErrorOnlyOnce(t *testing.T) {
+// GrowingSourceSyncTask.Run calls HandleError from its own defer and
+// syncManager.submit's handler calls it again for the same failure, so the
+// failure callback would otherwise run twice.
+func TestGrowingSourceSyncTaskHandleErrorIsIdempotent(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
+	metrics.DataNodeFlushBufferCount.Reset()
 
-	callbackCalls := 0
-	task := NewGrowingSourceSyncTask().WithFailureCallback(func(error) {
-		callbackCalls++
-	})
-	err := merr.WrapErrServiceUnavailableMsg("transient dependency failure")
+	callbackCount := 0
+	task := NewGrowingSourceSyncTask().
+		WithFailureCallback(func(error) {
+			callbackCount++
+		})
 
+	err := merr.WrapErrServiceInternalMsg("flush growing source data failed")
 	task.HandleError(err)
 	task.HandleError(err)
-	require.Equal(t, 1, callbackCalls)
+
+	require.Equal(t, 1, callbackCount)
+	require.EqualValues(t, 1, testutil.ToFloat64(metrics.DataNodeFlushBufferCount.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		metrics.FailLabel,
+		task.level.String(),
+	)))
 }
 
 func pkStatsAsOracle(stats *storage.PrimaryKeyStats) *storage.PkStatistics {
