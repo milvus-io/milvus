@@ -145,6 +145,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	dit.metaCache = mockCache
 	mockCache.On("GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),

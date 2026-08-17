@@ -373,6 +373,7 @@ func (s *ImportTaskSuite) TestExecute_DataTimestampIsAlwaysZero() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.metaCache = mockCache
 
 	task.Execute(ctx)
 

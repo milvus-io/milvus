@@ -2207,6 +2207,7 @@ func TestHasCollectionTask(t *testing.T) {
 
 	// CreateCollection
 	task := &hasCollectionTask{
+		baseTask:  baseTask{metaCache: cache},
 		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -4769,6 +4770,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 
 		createPartitionTask := &createPartitionTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			CreatePartitionRequest: &milvuspb.CreatePartitionRequest{
 				Base: &commonpb.MsgBase{
@@ -4786,6 +4788,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 
 		dropPartitionTask := &dropPartitionTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			DropPartitionRequest: &milvuspb.DropPartitionRequest{
 				Base: &commonpb.MsgBase{
@@ -4803,6 +4806,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 
 		loadPartitionTask := &loadPartitionsTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
 				Base: &commonpb.MsgBase{
@@ -4819,6 +4823,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 
 		releasePartitionsTask := &releasePartitionsTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
 				Base: &commonpb.MsgBase{
@@ -4922,6 +4927,7 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("Insert", func(t *testing.T) {
 		it := &insertTask{
+			baseTask: baseTask{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
@@ -4971,6 +4977,7 @@ func TestPartitionKey(t *testing.T) {
 	t.Run("Upsert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
+			baseTask:  baseTask{metaCache: cache},
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 			baseMsg: msgstream.BaseMsg{
@@ -5010,6 +5017,7 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		dt := &deleteTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			req: &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
@@ -5034,7 +5042,8 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("search", func(t *testing.T) {
 		searchTask := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{},
 			},
@@ -5054,7 +5063,8 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		queryTask := &queryTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
 				Base:       &commonpb.MsgBase{},
@@ -5148,6 +5158,7 @@ func TestDefaultPartition(t *testing.T) {
 
 	t.Run("Insert", func(t *testing.T) {
 		it := &insertTask{
+			baseTask: baseTask{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
@@ -5193,6 +5204,7 @@ func TestDefaultPartition(t *testing.T) {
 	t.Run("Upsert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
+			baseTask:  baseTask{metaCache: cache},
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 			baseMsg: msgstream.BaseMsg{
@@ -5228,6 +5240,7 @@ func TestDefaultPartition(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		dt := &deleteTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			req: &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
@@ -5531,7 +5544,7 @@ func TestClusteringKey(t *testing.T) {
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
-	_, err := initMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
 	collectionName := "test_alter_collection_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
@@ -5560,6 +5573,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	}
 
 	task := &alterCollectionTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -5574,7 +5588,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	_, err := initMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	createCollectionWithProps := func(colName string, props []*commonpb.KeyValuePair) {
@@ -5606,6 +5620,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_seconds_then_field_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5622,6 +5637,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_field_then_seconds_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5638,6 +5654,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_field_invalid_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, nil)
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5653,6 +5670,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_field_invalid_type_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, nil)
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5668,6 +5686,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_delete_ttl_seconds_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5683,6 +5702,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_delete_ttl_field_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5698,7 +5718,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 func TestAlterCollectionTaskValidateDescription(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	_, err := initMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	maxLen := Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()
@@ -5736,6 +5756,7 @@ func TestAlterCollectionTaskValidateDescription(t *testing.T) {
 
 	runAlter := func(collectionName string, properties []*commonpb.KeyValuePair) error {
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: collectionName,
@@ -5823,7 +5844,7 @@ func mockVectorIndexForCollection(t *testing.T, ctx context.Context, qc *MixCoor
 func TestTaskPartitionKeyIsolation(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	_, err := initMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestPartitionKeyIsolation"
@@ -5909,6 +5930,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		}
 
 		return &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -5977,6 +5999,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		colName := collectionName + "AlterNoIso"
 		createIsoCollection(colName, true, false, true)
 		alterTask := alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6021,6 +6044,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		createIsoCollection(colName, true, true, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6037,6 +6061,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		colName := collectionName + "DeleteIsoNoIdx"
 		createIsoCollection(colName, true, true, false)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6055,6 +6080,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		createIsoCollection(colName, true, true, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6070,7 +6096,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 func TestAlterCollectionQueryMode(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	_, err := initMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 	prefix := "TestQueryMode"
 
@@ -6110,6 +6136,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6125,6 +6152,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6141,6 +6169,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		createCollection(colName, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6158,6 +6187,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6174,6 +6204,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6190,6 +6221,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6308,7 +6340,7 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 
 func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
-	_, err := initMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
 	collectionName := "test_alter_collection_field_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
@@ -6336,6 +6368,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	// update property "mmap.enabled" but the collection is loaded
 	task := &alterCollectionFieldTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -6348,6 +6381,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	// delete property "mmap.enabled" but the collection is loaded
 	task = &alterCollectionFieldTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -6363,7 +6397,7 @@ func TestAlterCollectionField(t *testing.T) {
 	paramtable.Init()
 
 	qc := NewMixCoordMock()
-	_, err := initMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
 	collectionName := "test_alter_collection_field"
 
@@ -6670,6 +6704,7 @@ func TestAlterCollectionField(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			task := &alterCollectionFieldTask{
+				baseTask: baseTask{metaCache: cache},
 				AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 					Base:           &commonpb.MsgBase{},
 					CollectionName: collectionName,
@@ -6698,6 +6733,7 @@ func TestAlterCollectionField(t *testing.T) {
 		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key)
 
 		task := &alterCollectionFieldTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: collectionName,
@@ -7126,7 +7162,7 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 
 func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc := NewMixCoordMock()
-	_, err := initMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
 	ctx := context.Background()
 	collectionName := "test_alter_allow_insert_autoid_autoid_false"
@@ -7149,6 +7185,7 @@ func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc.CreateCollection(ctx, createColReq)
 
 	task := &alterCollectionTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,

@@ -152,6 +152,7 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 			Value: "Asia/Shanghai",
 		})
 		task := &searchTask{
+			baseTask:      baseTask{metaCache: &MetaCache{}},
 			Condition:     NewTaskCondition(context.Background()),
 			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 			ctx:           context.Background(),
@@ -1479,7 +1480,6 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	require.NoError(t, err)
 	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	getSearchTask := func(t *testing.T, collName string, data []string, withRerank bool) *searchTask {
 		placeholderValue := &commonpb.PlaceholderValue{

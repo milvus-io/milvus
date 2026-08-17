@@ -855,6 +855,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		dr := deleteRunner{
 			idAllocator:     idAllocator,
 			tsoAllocatorIns: tsoAllocator,
+			metaCache:       metaCache,
 			queue:           queue.dmQueue,
 			chMgr:           mockMgr,
 			schema:          schema,
@@ -925,6 +926,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		dr := deleteRunner{
 			queue:           queue.dmQueue,
+			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -992,6 +994,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		dr := deleteRunner{
 			chMgr:           mockMgr,
 			queue:           queue.dmQueue,
+			metaCache:       metaCache,
 			schema:          schema,
 			collectionID:    collectionID,
 			partitionIDs:    []int64{partitionID},
@@ -1055,6 +1058,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		dr := deleteRunner{
 			chMgr:           mockMgr,
 			queue:           queue.dmQueue,
+			metaCache:       metaCache,
 			schema:          schema,
 			collectionID:    collectionID,
 			partitionIDs:    []int64{partitionID},
@@ -1118,6 +1122,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		dr := deleteRunner{
 			queue:           queue.dmQueue,
+			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,

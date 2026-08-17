@@ -4717,7 +4717,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{100},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo", Base: &commonpb.MsgBase{}})
@@ -4752,7 +4752,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{50},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4786,7 +4786,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status: merr.Status(mockErr),
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})

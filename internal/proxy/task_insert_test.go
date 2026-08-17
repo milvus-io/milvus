@@ -97,6 +97,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 			},
 		},
 	}
+	task.metaCache = cache
 
 	err := task.PreExecute(context.Background())
 	assert.Error(t, err)
@@ -487,6 +488,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(&collectionInfo{Schema: info}, nil)
+	task.metaCache = cache
 	err = task.PreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -662,6 +664,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 				},
 			}),
 		}, nil)
+		it.metaCache = mockCache
 		err := it.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
@@ -731,6 +734,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
+			baseTask:    baseTask{metaCache: cache},
 			schema:      schemaWithNamespaceEnabled,
 			idAllocator: idAllocator,
 		}
@@ -749,6 +753,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				},
 			},
 			idAllocator: idAllocator,
+			baseTask:    baseTask{metaCache: cache},
 		}
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -776,6 +781,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
+			baseTask:    baseTask{metaCache: cache},
 			schema:      schemaWithNamespaceDisabled,
 			idAllocator: idAllocator,
 		}
@@ -795,6 +801,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				},
 			},
 			idAllocator: idAllocator,
+			baseTask:    baseTask{metaCache: cache},
 		}
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)
