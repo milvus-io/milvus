@@ -94,6 +94,41 @@ func TestCommitManifestUpdates_StatsOnly(t *testing.T) {
 	require.Equal(t, "10", stats["bloom_filter.100"].Metadata["memory_size"])
 }
 
+// TestStatsBinlogSizeFromManifest verifies the aggregate sums bloom-filter and
+// BM25 memory_size while excluding text/JSON index stats.
+func TestStatsBinlogSizeFromManifest(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := "files/stats_binlog_size/seg1"
+
+	bloomPath := path.Join(cfg.RootPath, basePath, "_stats/bloom_filter.100/1")
+	bm25Path := path.Join(cfg.RootPath, basePath, "_stats/bm25.101/1")
+	textPath := path.Join(cfg.RootPath, basePath, "_stats/text.102/1")
+	require.NoError(t, WriteFile(cfg, bloomPath, []byte("bloom-blob")))
+	require.NoError(t, WriteFile(cfg, bm25Path, []byte("bm25-blob")))
+	require.NoError(t, WriteFile(cfg, textPath, []byte("text-blob")))
+
+	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+		Stats: []StatEntry{
+			{Key: "bloom_filter.100", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "10"}},
+			{Key: "bm25.101", Files: []string{bm25Path}, Metadata: map[string]string{"memory_size": "20"}},
+			// text index stats must NOT count toward StatsBinlogSize.
+			{Key: "text.102", Files: []string{textPath}, Metadata: map[string]string{"memory_size": "5"}},
+		},
+	})
+	require.NoError(t, err)
+
+	size, err := StatsBinlogSizeFromManifest(got, cfg)
+	require.NoError(t, err)
+	require.Equal(t, int64(30), size, "should sum bloom_filter(10)+bm25(20), excluding text(5)")
+}
+
+// TestStatsBinlogSizeFromManifest_ReadError returns an error on an unreadable manifest.
+func TestStatsBinlogSizeFromManifest_ReadError(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	_, err := StatsBinlogSizeFromManifest("not-a-manifest-path", cfg)
+	require.Error(t, err)
+}
+
 // TestCommitManifestUpdates_DeltaOnly exercises the delta-only path.
 func TestCommitManifestUpdates_DeltaOnly(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
