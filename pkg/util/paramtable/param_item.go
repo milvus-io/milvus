@@ -431,13 +431,6 @@ type ParamGroup struct {
 	// an endpoint URL. Only meaningful together with Sensitive; every other leaf
 	// below the prefix still fails closed.
 	NonSensitiveSuffixes []string
-	// AllowEmptyPrefix permits KeyPrefix to be "", which declares every key of
-	// the owning manager to be Milvus configuration. That is only ever correct
-	// for a manager whose sources are all operator-authored: on a table that
-	// carries an EnvSource it would hand the whole process environment to the
-	// configuration projections. hook.yaml is the one such table, and it is
-	// built with SkipEnv.
-	AllowEmptyPrefix bool
 
 	GetFunc func() map[string]string
 	DocFunc func(string) string
@@ -446,10 +439,15 @@ type ParamGroup struct {
 }
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
-	if pg.KeyPrefix == "" && !pg.AllowEmptyPrefix {
-		panic("ParamGroup with an empty KeyPrefix declares every source key, " +
-			"including every process environment variable, as registered " +
-			"configuration; set AllowEmptyPrefix if that is really intended")
+	// An empty prefix declares every key of the manager to be Milvus
+	// configuration. That is correct for a table whose sources are all
+	// operator-authored — hook.yaml is the one such case — and catastrophic for
+	// one that imports the process environment, so refuse exactly that pairing
+	// rather than the shape that merely resembles it.
+	if pg.KeyPrefix == "" && manager.HasEnvironmentSource() {
+		panic("ParamGroup with an empty KeyPrefix on a config manager that imports " +
+			"the process environment would declare every variable in the pod to be " +
+			"Milvus configuration")
 	}
 	pg.manager = manager
 	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)

@@ -1308,25 +1308,20 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Resolve the external key before any mutation. ParamItems use their
-		// historical separator-free identity; ParamGroup members retain dots so
-		// they remain visible to prefix readers and cannot collide with env
-		// aliases. Alias-equivalent request keys must count as duplicates.
+		// Resolve the external key before any mutation, so every check below sees
+		// one identity regardless of how the caller spelled it.
 		canonicalKey, registeredKind := paramMgr.ResolveRegisteredConfigKey(config.Key)
-		if registeredKind == pkgconfig.RegisteredConfigUnknown {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify unregistered config",
-				mlog.String("key", config.Key))
-			writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
-			return
-		}
 
-		// Check for duplicate keys after canonicalization.
-		if _, exists := seen[canonicalKey]; exists {
+		// Deduplicate on the identity the write actually lands under, not the
+		// caller's spelling: AlterConfigsInEtcd strips separators, so
+		// "kafka.consumer.a.b" and "kafka.consumer.ab" address one etcd key and
+		// would otherwise reach the same transaction twice.
+		if _, exists := seen[pkgconfig.EtcdConfigKey(canonicalKey)]; exists {
 			logger.Info(request.Context(), "HandleAlterConfig duplicate key found", mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
-		seen[canonicalKey] = struct{}{}
+		seen[pkgconfig.EtcdConfigKey(canonicalKey)] = struct{}{}
 
 		// Check if it's mqtype configuration
 		normalizedKey := strings.ToLower(strings.ReplaceAll(canonicalKey, "/", "."))
@@ -1345,12 +1340,20 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
+		// Writes are constrained; deletes are not. Removing an entry from etcd
+		// can only ever reduce what this endpoint exposes, and refusing it would
+		// strand an operator holding a key an older build wrote — a secret, or a
+		// ParamItem that a later version stopped declaring.
 		if config.Value != nil {
+			if registeredKind == pkgconfig.RegisteredConfigUnknown {
+				logger.Info(request.Context(), "HandleAlterConfig attempted to set unregistered config",
+					mlog.String("key", config.Key))
+				writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+				return
+			}
 			// Never write a credential through the generic config endpoint:
 			// secrets have their own lifecycle and must not be copied into etcd
-			// in cleartext, even when the caller is root. Deleting one is the
-			// opposite operation and stays allowed — refusing it would strand an
-			// operator who needs to remove a secret an older build wrote there.
+			// in cleartext, even when the caller is root.
 			if paramMgr.IsSensitive(canonicalKey) {
 				logger.Info(request.Context(), "HandleAlterConfig attempted to set sensitive config",
 					mlog.String("key", config.Key))

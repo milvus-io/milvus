@@ -107,8 +107,11 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 		assert.Equal(t, "visible", mgr.RedactValue(key, "visible"), key)
 	}
 
-	// The name-pattern fallback still covers undeclared and dynamic keys.
+	// An environment alias of a declared ParamItem resolves to that item...
 	assert.True(t, isConfigRegistered(mgr, "MINIO_SECRET_ACCESS_KEY"))
+	assert.True(t, mgr.IsSensitive("MINIO_SECRET_ACCESS_KEY"))
+	// ...while the name-pattern fallback is what covers a key nothing declares.
+	assert.False(t, isConfigRegistered(mgr, "OPENAI_API_KEY"))
 	assert.True(t, mgr.IsSensitive("OPENAI_API_KEY"))
 
 	require.NoError(t, params.Save(params.MinioCfg.SecretAccessKey.Key, "configured-secret"))
@@ -116,6 +119,20 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 	assert.Equal(t, config.RedactedValue, projected["miniosecretaccesskey"])
 	raw := mgr.GetByRaw(config.WithSubstr("secretaccesskey"))
 	assert.Equal(t, "configured-secret", raw["miniosecretaccesskey"])
+}
+
+// An empty KeyPrefix declares every key of a manager to be configuration. That
+// is only safe on a table whose sources are all operator-authored, so the check
+// is on the actual hazard — does this manager import the environment — rather
+// than on the shape of the declaration.
+func TestEmptyPrefixParamGroupRefusedOnEnvironmentBearingManager(t *testing.T) {
+	hookLike := config.NewManager() // file-only table, as NewBaseTableFromYamlOnly builds
+	assert.NotPanics(t, func() { (&ParamGroup{KeyPrefix: ""}).Init(hookLike) },
+		"hook.yaml is the one table where an empty prefix is correct")
+
+	mainLike, _ := config.Init(config.WithEnvSource(func(key string) string { return key }))
+	assert.Panics(t, func() { (&ParamGroup{KeyPrefix: ""}).Init(mainLike) })
+	assert.NotPanics(t, func() { (&ParamGroup{KeyPrefix: "some.prefix."}).Init(mainLike) })
 }
 
 func isConfigRegistered(m *config.Manager, key string) bool {

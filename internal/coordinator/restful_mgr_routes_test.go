@@ -332,6 +332,18 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "sensitive configuration")
 	})
 
+	t.Run("unregistered config may still be deleted", func(t *testing.T) {
+		// A key an older build wrote must remain removable even though nothing
+		// declares it any more; only setting one is refused.
+		const key = "test.alter.no.longer.declared"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.NotContains(t, w.Body.String(), "unregistered configuration")
+	})
+
 	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {
 		const key = "test.alter.unregistered"
 		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "value"}}}
@@ -539,7 +551,7 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.NotContains(t, w.Body.String(), "opaque-secret")
 	})
 
-	t.Run("sensitive ParamGroup and unknown environment keys are denied", func(t *testing.T) {
+	t.Run("sensitive ParamGroup members and undeclared keys are denied", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=credential.aksk1.secret_access_key,kafka.consumer.ssl.key.pem,pulsar.authParams,AWS_SECRET_ACCESS_KEY,function.analyzer.lindera.download_urls.ipadic", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)

@@ -220,6 +220,22 @@ func (m *Manager) getConfigByRealKey(realKey, requestedKey string) (string, stri
 	return sourceName, v, err
 }
 
+// HasEnvironmentSource reports whether this manager imports the process
+// environment. Declaring an empty ParamGroup prefix on such a manager hands
+// every variable in the pod to the configuration projections; on a manager
+// whose sources are all operator-authored it is harmless.
+func (m *Manager) HasEnvironmentSource() bool {
+	_, ok := m.sources.Get(environmentSourceName)
+	return ok
+}
+
+// EtcdConfigKey returns the identity a configuration key is stored under in
+// etcd. AlterConfigsInEtcd applies it on the way in, so callers that need to
+// reason about collisions before writing must use the same function.
+func EtcdConfigKey(key string) string {
+	return formatKeyUncached(key)
+}
+
 // ResolveRegisteredConfigKey reports whether a caller-supplied key names
 // declared configuration, and returns the identity to write it under.
 // The identity returned is the dotted one: it is what every later predicate
@@ -316,8 +332,9 @@ func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	}
 	for _, candidate := range candidates {
 		// Overlays are written only through this package's own setters, never
-		// from a config source, so they are trusted evidence on their own.
-		if _, ok := m.overlays.Get(candidate); ok {
+		// from a config source, so a live one is trusted evidence on its own. A
+		// tombstone is not: it records that the key was deleted.
+		if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
 			return false
 		}
 		if source, ok := m.keySourceMap.Get(candidate); ok && source != environmentSourceName {
@@ -663,9 +680,17 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	}
 
 	resolved := resolvedKey{lookup: formattedKey, dotted: dotted}
+	var environmentOnly *bool
 	m.registeredKeyPrefixes.Range(func(prefix string) bool {
-		if strings.HasPrefix(dotted, prefix) && len(dotted) > len(prefix) &&
-			!m.groupMemberIsEnvironmentOnly(dotted, formattedKey) {
+		if !strings.HasPrefix(dotted, prefix) || len(dotted) <= len(prefix) {
+			return true
+		}
+		// Computed lazily and at most once: only a prefix hit needs it.
+		if environmentOnly == nil {
+			verdict := m.groupMemberIsEnvironmentOnly(dotted, formattedKey)
+			environmentOnly = &verdict
+		}
+		if !*environmentOnly {
 			resolved.kind = RegisteredConfigGroup
 			return false
 		}
@@ -701,9 +726,12 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
 		return true
 	case prefixExempted:
 		// A declared suffix exemption is explicit metadata, so it wins over the
-		// name-pattern guess below — otherwise the exemption would be undone by
-		// the prefix it sits under: "credential.foo.enable" collapses to
-		// "credentialfooenable", which contains "credential".
+		// name-pattern guess below. No group shipped today both declares an
+		// exemption and has a prefix that matches a pattern, so this branch
+		// changes no current verdict; it exists so that the next one behaves as
+		// declared rather than being silently undone by its own prefix —
+		// "credential.foo.enable" collapses to "credentialfooenable", which
+		// contains "credential". TestNonSensitiveSuffixExemption pins it.
 		return false
 	}
 
@@ -1130,12 +1158,12 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 	// Build transaction operations
 	ops := make([]clientv3.Op, 0, len(updates)+len(deletes))
 	for key, value := range updates {
-		fmtKey := formatKeyUncached(key)
+		fmtKey := EtcdConfigKey(key)
 		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
 		ops = append(ops, clientv3.OpPut(etcdKey, value))
 	}
 	for _, key := range deletes {
-		fmtKey := formatKeyUncached(key)
+		fmtKey := EtcdConfigKey(key)
 		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
 		ops = append(ops, clientv3.OpDelete(etcdKey))
 	}

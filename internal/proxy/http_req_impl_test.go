@@ -70,13 +70,14 @@ func TestAuthorizeConfigView(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, request("alice"))
 	assert.Equal(t, http.StatusNoContent, request(util.UserRoot))
 
-	// A superuser can already reset any account's password, so denying them the
-	// configuration view would be arbitrary.
+	// Deliberately NOT superUsers: that list is a declared, non-sensitive,
+	// refreshable ParamItem, so /management/config/alter can write it, and that
+	// endpoint has no authentication. Granting on it would let anyone who can
+	// reach the metrics port add themselves and then read the view.
 	superUserKey := params.CommonCfg.SuperUsers.Key
 	defer params.Reset(superUserKey)
 	require.NoError(t, params.Save(superUserKey, "alice,bob"))
-	assert.Equal(t, http.StatusNoContent, request("alice"))
-	assert.Equal(t, http.StatusForbidden, request("carol"))
+	assert.Equal(t, http.StatusForbidden, request("alice"))
 }
 
 func TestConfigRoutesRequireRootWhenAuthorizationEnabled(t *testing.T) {

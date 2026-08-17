@@ -79,8 +79,8 @@ func authorizeConfigView() gin.HandlerFunc {
 			})
 			return
 		}
-		if !isConfigViewAdmin(username) {
-			err := merr.WrapErrPrivilegeNotPermitted("only root or a superuser can read configuration views")
+		if username != util.UserRoot {
+			err := merr.WrapErrPrivilegeNotPermitted("only root user can read configuration views")
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				mhttp.HTTPReturnCode:    merr.Code(err),
 				mhttp.HTTPReturnMessage: err.Error(),
@@ -90,17 +90,12 @@ func authorizeConfigView() gin.HandlerFunc {
 	}
 }
 
-// isConfigViewAdmin reports whether an authenticated identity may read the
-// configuration views. common.security.superUsers is included because a
-// superuser can already reset any account's password without knowing it — a
-// strictly larger capability than reading configuration — and excluding them
-// would break admin identities that are not literally named root.
-func isConfigViewAdmin(username string) bool {
-	if username == util.UserRoot {
-		return true
-	}
-	return lo.Contains(paramtable.Get().CommonCfg.SuperUsers.GetAsStrings(), username)
-}
+// Note on why this is root and not common.security.superUsers: superUsers is a
+// declared, non-sensitive, refreshable ParamItem, which makes it writable
+// through /management/config/alter — an endpoint on the metrics port that this
+// change does not authenticate. Using it here would let anyone who can reach
+// that port add themselves to the list and then read the view. An authorization
+// input has to be at least as hard to write as the thing it authorizes.
 
 // getConfigs serves a configuration map that the caller has already projected
 // through the owning config.Manager. Do not redact here: only that manager
