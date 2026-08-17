@@ -4479,7 +4479,7 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	}
 
 	metaCache := getProxyMetaCache(pxy)
-	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache, request)
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
 		return nil, err
 	}

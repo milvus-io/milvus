@@ -290,9 +290,18 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	}
 	mlog.Debug(context.TODO(), "Get proxy rate limiter done")
 
-	var metaCache proxy.Cache
-	if metaCacheProvider, ok := s.proxy.(interface{ GetMetaCache() proxy.Cache }); ok {
-		metaCache = metaCacheProvider.GetMetaCache()
+	// The meta cache is initialized in Proxy.Init(), which runs after this interceptor
+	// chain is constructed. Resolve it per request so rate limiting / privilege checks
+	// observe the live cache instead of a construction-time nil snapshot.
+	var metaCacheProvider interface{ GetMetaCache() proxy.Cache }
+	if provider, ok := s.proxy.(interface{ GetMetaCache() proxy.Cache }); ok {
+		metaCacheProvider = provider
+	}
+	getMetaCache := func() proxy.Cache {
+		if metaCacheProvider == nil {
+			return nil
+		}
+		return metaCacheProvider.GetMetaCache()
 	}
 
 	var unaryServerOption grpc.ServerOption
@@ -303,10 +312,10 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(metaCache)),
+			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache)),
 			proxy.UnaryServerHookInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptorWithMetaCache(metaCache, limiter),
+			proxy.RateLimitInterceptorWithMetaCache(getMetaCache, limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,

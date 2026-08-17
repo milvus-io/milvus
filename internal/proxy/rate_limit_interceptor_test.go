@@ -408,7 +408,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockFullMethod"}
 
 		limiter.limit = true
-		interceptorFun := RateLimitInterceptorWithMetaCache(mockCache, &limiter)
+		interceptorFun := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err := interceptorFun(context.Background(), &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
@@ -418,7 +418,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 
 		limiter.limit = false
-		interceptorFun = RateLimitInterceptorWithMetaCache(mockCache, &limiter)
+		interceptorFun = RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err = interceptorFun(context.Background(), &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
@@ -429,7 +429,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 		// test 0 rate, force deny
 		limiter.rate = 0
-		interceptorFun = RateLimitInterceptorWithMetaCache(mockCache, &limiter)
+		interceptorFun = RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err = interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_ForceDeny, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
@@ -447,7 +447,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockFullMethod"}
 
 		limiter.limit = true
-		interceptorFun := RateLimitInterceptorWithMetaCache(mockCache, &limiter)
+		interceptorFun := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err := interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)

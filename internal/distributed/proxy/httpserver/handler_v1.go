@@ -64,7 +64,7 @@ type RestRequestInterceptor func(ctx context.Context, ginCtx *gin.Context, req a
 // HandlersV1 handles http requests
 type HandlersV1 struct {
 	proxy        types.ProxyComponent
-	metaCache    proxy.Cache
+	metaCache    func() proxy.Cache
 	interceptors []RestRequestInterceptor
 }
 
@@ -113,7 +113,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 	if dbName == DefaultDbName {
 		return nil
 	}
-	if proxy.CheckDatabase(ctx, h.metaCache, dbName) {
+	if proxy.CheckDatabase(ctx, h.metaCache(), dbName) {
 		return nil
 	}
 	response, err := h.proxy.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
@@ -137,7 +137,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 }
 
 func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache, dbName, collectionName)
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache(), dbName, collectionName)
 	if err == nil {
 		return collSchema.CollectionSchema, nil
 	}

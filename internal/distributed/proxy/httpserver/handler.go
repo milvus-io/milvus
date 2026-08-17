@@ -29,7 +29,7 @@ import (
 // Handlers handles http requests
 type Handlers struct {
 	proxy     types.ProxyComponent
-	metaCache proxy.Cache
+	metaCache func() proxy.Cache
 }
 
 // NewHandlers creates a new Handlers
@@ -40,11 +40,12 @@ func NewHandlers(proxyComponent types.ProxyComponent) *Handlers {
 	}
 }
 
-func getProxyMetaCache(proxyComponent types.ProxyComponent) proxy.Cache {
+func getProxyMetaCache(proxyComponent types.ProxyComponent) func() proxy.Cache {
 	if metaCacheProvider, ok := proxyComponent.(interface{ GetMetaCache() proxy.Cache }); ok {
-		return metaCacheProvider.GetMetaCache()
+		// Resolve lazily so handlers observe the cache initialized by the proxy after startup.
+		return func() proxy.Cache { return metaCacheProvider.GetMetaCache() }
 	}
-	return nil
+	return func() proxy.Cache { return nil }
 }
 
 // RegisterRouters registers routes to given router

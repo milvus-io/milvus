@@ -37,16 +37,19 @@ import (
 
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
-	return RateLimitInterceptorWithMetaCache(nil, limiter)
+	return RateLimitInterceptorWithMetaCache(func() Cache { return nil }, limiter)
 }
 
-func RateLimitInterceptorWithMetaCache(metaCache Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
+// RateLimitInterceptorWithMetaCache returns a new unary server interceptor that performs
+// request rate limiting. getMetaCache is resolved per request so the interceptor observes
+// the meta cache initialized by the proxy after startup instead of a construction-time snapshot.
+func RateLimitInterceptorWithMetaCache(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
-		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, metaCache, request)
+		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, getMetaCache(), request)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)

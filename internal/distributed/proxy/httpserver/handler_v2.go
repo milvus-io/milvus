@@ -63,7 +63,7 @@ import (
 
 type HandlersV2 struct {
 	proxy     types.ProxyComponent
-	metaCache proxy.Cache
+	metaCache func() proxy.Cache
 	checkAuth bool
 }
 
@@ -734,7 +734,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	getter, _ := anyReq.(requestutil.CollectionNameGetter)
 	collectionName := getter.GetCollectionName()
-	_, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache, dbName, collectionName)
+	_, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache(), dbName, collectionName)
 	has := true
 	if err != nil {
 		req := &milvuspb.HasCollectionRequest{
@@ -4366,7 +4366,7 @@ func refreshExternalCollectionJobInfoToMap(jobInfo *milvuspb.RefreshExternalColl
 }
 
 func (h *HandlersV2) GetCollectionSchema(ctx context.Context, c *gin.Context, dbName, collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache, dbName, collectionName)
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache(), dbName, collectionName)
 	if err == nil {
 		return collSchema.CollectionSchema, nil
 	}
