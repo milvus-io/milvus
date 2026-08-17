@@ -18,14 +18,18 @@ package accesslog
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestJoin(t *testing.T) {
@@ -85,4 +89,44 @@ func TestConsistencyLevelHelperQueryRequestCarrier(t *testing.T) {
 	req := &milvuspb.QueryRequest{ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}
 	helper := NewConsistencyLevelHelper(context.Background(), req)
 	assert.Equal(t, "REQ-"+commonpb.ConsistencyLevel_Eventually.String(), helper.String())
+}
+
+func newRESTTestContext(t *testing.T) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	paramtable.Init()
+	if _globalL == nil {
+		_globalL = NewAccessLogger()
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/search", nil)
+	c.Keys = make(map[any]any)
+	AccessLogMiddleware(c)
+	return c
+}
+
+func TestAccessLogMiddlewareBridgesAccessKey(t *testing.T) {
+	c := newRESTTestContext(t)
+
+	v, ok := c.Request.Context().Value(AccessKey{}).(info.AccessInfo)
+	assert.True(t, ok)
+	assert.NotNil(t, v)
+	got, _ := c.Get(ContextLogKey)
+	assert.Equal(t, got, v)
+}
+
+func TestConsistencyLevelHelperRESTPath(t *testing.T) {
+	// REST request relying on the default consistency: the protobuf field is
+	// the zero value (Strong), while the collection default resolves to Bounded.
+	req := &milvuspb.SearchRequest{
+		ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+		UseDefaultConsistency: true,
+	}
+	c := newRESTTestContext(t)
+
+	// task PreExecute resolves the actual level and records it on the REST access info
+	SetActualConsistencyLevel(c.Request.Context(), commonpb.ConsistencyLevel_Bounded)
+
+	helper := NewConsistencyLevelHelper(c.Request.Context(), req)
+	assert.Equal(t, "ACT-"+commonpb.ConsistencyLevel_Bounded.String(), helper.String())
+	assert.NotEqual(t, "REQ-"+commonpb.ConsistencyLevel_Strong.String(), helper.String())
 }

@@ -54,6 +54,15 @@ func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *
 func AccessLogMiddleware(ctx *gin.Context) {
 	accessInfo := info.NewRestfulInfo(ctx)
 	ctx.Set(ContextLogKey, accessInfo)
+	// Bridge the access info into the standard request context. The gRPC
+	// interceptor injects the same AccessKey value for grpc traffic; without
+	// this, REST handlers reach the Proxy through the hook interceptor with a
+	// context lacking AccessKey, so task PreExecute (SetActualConsistencyLevel)
+	// and slow logs fall back to the raw request consistency level.
+	if ctx.Request != nil {
+		reqCtx := context.WithValue(ctx.Request.Context(), AccessKey{}, accessInfo)
+		ctx.Request = ctx.Request.WithContext(reqCtx)
+	}
 	ctx.Next()
 	accessInfo.InitReq()
 	_globalL.Write(accessInfo)
