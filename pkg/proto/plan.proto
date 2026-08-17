@@ -307,6 +307,15 @@ message BloomFilterExpr {
   bytes filter_blob = 2;
 }
 
+message RoaringFilterExpr {
+  ColumnInfo column_info = 1;
+  // MRB1-enveloped portable Roaring64 bitmap for exact signed-integer
+  // membership (see design doc 20260714). Unlike bloom_filter_expr this is
+  // exact: it has no false positives, and its size follows the value
+  // distribution rather than the member count alone.
+  bytes bitmap_blob = 2;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -330,6 +339,7 @@ message Expr {
     ElementFilterExpr element_filter_expr = 19;
     MatchExpr match_expr = 21;
     BloomFilterExpr bloom_filter_expr = 22;
+    RoaringFilterExpr roaring_filter_expr = 23;
   };
   bool is_template = 20;
 }

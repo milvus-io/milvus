@@ -51,10 +51,15 @@ type BloomFilterBlob []byte
 // resulting blob is reproducible in other languages from the same spec
 // (docs/design-docs/design_docs/20260707-bloom-filter-expression.md).
 //
-// The blob must fit the proxy's gRPC receive limit
-// (proxy.grpc.serverMaxRecvSize, 64 MiB by default) alongside the rest of the
-// request; use sbbf.EstimateMarshalSize(n, fpr) to check the exact blob size
-// for a planned member count before building the filter.
+// The blob body must fit proxy.maxMembershipFilterSize (64 MiB by default),
+// all membership-filter-bearing plans in the request must fit
+// proxy.maxMembershipFilterPlanSize (128 MiB by default), and the complete
+// request must fit proxy.grpc.serverMaxRecvSize. Use
+// sbbf.EstimateMarshalSize(n, fpr) to check the exact blob size for a planned
+// member count before building the filter. Bodies are powers of two, so a
+// count just past a tier boundary doubles the blob and a slightly higher fpr
+// usually brings it back under; a rejection from the proxy reports the
+// smallest fpr that would have fit.
 func NewBloomFilterBlob(members any, fpr float64) (BloomFilterBlob, error) {
 	// One switch per member type: it both sizes the builder and inserts, so a
 	// future member type cannot be added to one dispatch and forgotten in the

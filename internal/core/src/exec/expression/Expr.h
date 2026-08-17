@@ -714,8 +714,9 @@ class SegmentExpr : public Expr {
     // Candidate evaluator contract:
     // - every logical candidate position advances the evaluator exactly once;
     // - data == nullptr means the reader already decided the candidate result
-    //   (for example SkipIndex pruning or a NULL reverse lookup), so the
-    //   evaluator must only advance position-indexed state by size and return;
+    //   (for example candidate-mask/SkipIndex pruning or a NULL reverse
+    //   lookup), so the evaluator must only advance position-indexed state by
+    //   size and return;
     // - result and validity for a null batch are owned by the reader.
     //
     // This contract keeps callback-local bitmap_input cursors aligned across
@@ -729,6 +730,33 @@ class SegmentExpr : public Expr {
                                 TargetBitmapView res,
                                 TargetBitmapView valid_res,
                                 const ValTypes&... values) {
+        return ProcessIndexLookupByOffsetsImpl<T>(
+            evaluate_batch, input, res, valid_res, nullptr, values...);
+    }
+
+    // Same reverse-lookup path, but candidates cleared by candidate_mask are
+    // left untouched and never sent to Reverse_Lookup. The mask is indexed by
+    // candidate position, not segment offset.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupByOffsetsWithMask(BatchEvaluator evaluate_batch,
+                                        OffsetVector* input,
+                                        TargetBitmapView res,
+                                        TargetBitmapView valid_res,
+                                        const TargetBitmap& candidate_mask,
+                                        const ValTypes&... values) {
+        return ProcessIndexLookupByOffsetsImpl<T>(
+            evaluate_batch, input, res, valid_res, &candidate_mask, values...);
+    }
+
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupByOffsetsImpl(BatchEvaluator evaluate_batch,
+                                    OffsetVector* input,
+                                    TargetBitmapView res,
+                                    TargetBitmapView valid_res,
+                                    const TargetBitmap* candidate_mask,
+                                    const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -738,6 +766,12 @@ class SegmentExpr : public Expr {
         const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
         const bool all_valid = cached_index_all_valid_;
         auto batch_size = input->size();
+        const bool has_candidate_mask =
+            candidate_mask != nullptr && !candidate_mask->empty();
+        AssertInfo(!has_candidate_mask || candidate_mask->size() == batch_size,
+                   "candidate mask size {} does not match offset batch size {}",
+                   candidate_mask == nullptr ? 0 : candidate_mask->size(),
+                   batch_size);
 
         // A scalar index is one logical index chunk for the whole segment,
         // while SkipIndex statistics remain partitioned by the original data
@@ -746,6 +780,19 @@ class SegmentExpr : public Expr {
         // the whole candidate batch is incorrect. Reverse lookup is already
         // candidate-local; evaluate every offset instead.
         for (auto i = 0; i < batch_size; ++i) {
+            if (has_candidate_mask && !(*candidate_mask)[i]) {
+                // Preserve the evaluator's candidate-position cursor without
+                // reading or changing this already-excluded row.
+                evaluate_batch.template operator()<FilterType::random>(
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+                continue;
+            }
             auto offset = (*input)[i];
             auto raw = index_ptr->Reverse_Lookup(offset);
             if (!raw.has_value()) {
@@ -786,13 +833,58 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
+        return ProcessDataByOffsetsImpl<T>(evaluate_batch,
+                                           skip_func,
+                                           input,
+                                           res,
+                                           valid_res,
+                                           nullptr,
+                                           values...);
+    }
+
+    // Candidate-mask-aware entry point for expressions whose index-only path
+    // must prune before Reverse_Lookup. Raw-data callbacks still own their
+    // per-row mask checks.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsetsWithMask(
+        BatchEvaluator evaluate_batch,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const TargetBitmap& candidate_mask,
+        const ValTypes&... values) {
+        return ProcessDataByOffsetsImpl<T>(evaluate_batch,
+                                           skip_func,
+                                           input,
+                                           res,
+                                           valid_res,
+                                           &candidate_mask,
+                                           values...);
+    }
+
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsetsImpl(
+        BatchEvaluator evaluate_batch,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const TargetBitmap* candidate_mask,
+        const ValTypes&... values) {
         int64_t processed_size = 0;
 
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
-                return ProcessIndexLookupByOffsets<T>(
-                    evaluate_batch, input, res, valid_res, values...);
+                return ProcessIndexLookupByOffsetsImpl<T>(evaluate_batch,
+                                                          input,
+                                                          res,
+                                                          valid_res,
+                                                          candidate_mask,
+                                                          values...);
             }
         }
 

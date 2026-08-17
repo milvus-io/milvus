@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/roaringfilter"
 	"github.com/milvus-io/milvus/client/v3/sbbf"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -882,6 +883,35 @@ func TestDeleteRunner_Run(t *testing.T) {
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+	})
+
+	t.Run("complex delete budgets and marshals before shard fanout", func(t *testing.T) {
+		blob, err := roaringfilter.Build([]int64{1, 2, 3})
+		require.NoError(t, err)
+		plan, err := planparserv2.CreateRetrievePlan(
+			schema.SchemaHelper,
+			"roaring_match(pk, {rb})",
+			map[string]*schemapb.TemplateValue{
+				"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+			})
+		require.NoError(t, err)
+
+		pt := paramtable.Get()
+		pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, "1")
+		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
+		dr := deleteRunner{
+			schema:       schema,
+			collectionID: collectionID,
+			lb:           shardclient.NewMockLBPolicy(t),
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				DbName:         dbName,
+			},
+		}
+		err = dr.complexDelete(ctx, plan)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.NotEmpty(t, plan.GetOutputFieldIds(),
+			"output fields must be finalized before the one-time marshal")
 	})
 
 	t.Run("complex delete query failed", func(t *testing.T) {

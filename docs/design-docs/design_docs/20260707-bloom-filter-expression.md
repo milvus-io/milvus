@@ -67,13 +67,19 @@ value with **no base64 inflation**. Because the SBBF body is rounded **up to a p
 usable capacity comes in size tiers, so the practical ceilings under the default FPR (0.5%,
 ~11 bits/member) are:
 
-- **32 MiB blob → ~24 M members**, the largest tier that fits comfortably under the default
-  64 MiB recv limit. This is the effective out-of-the-box cap.
-- **64 MiB blob → ~48 M members**, but a 64 MiB body plus envelope and request framing
-  exceeds the default limit, so this tier requires **raising `serverMaxRecvSize`**.
-- **128 MiB blob → ~97 M members**, the C++ prober's hard cap on a single blob.
+- **32 MiB body → ~24.3 M members.**
+- **64 MiB body → ~48.6 M members**, the effective out-of-the-box cap: it is the default
+  `proxy.maxMembershipFilterSize`, and a 64 MiB body plus envelope and framing fits the default
+  128 MiB `serverMaxRecvSize`.
+- **128 MiB body → ~97 M members**, the MBF1 format cap on a single blob. Reaching it needs
+  both limits raised.
 
-Coarsening the FPR shifts every tier up (e.g. a 32 MiB blob holds ~39 M members at the 5%
+Because bodies are powers of two, a member count just past a tier boundary doubles the blob.
+50M members at the default FPR want 65.77 MiB of bits, which rounds up to a 128 MiB body and
+is rejected; fpr >= ~0.0058 keeps the same 50M inside 64 MiB. A rejection reports that bound,
+so callers do not have to rediscover it.
+
+Coarsening the FPR shifts every tier up (e.g. a 64 MiB body holds ~78 M members at the 5%
 maximum FPR). Beyond these, callers raise the recv limit, coarsen the FPR, or post-filter
 through an external KV / a future registered-filter handle (Future Work). The design does not
 chase absolute maximum sizing — solid support into the tens of millions is the goal.
@@ -451,23 +457,29 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
 
 ### Resource protection
 
-- **`proxy.maxBloomFilterSize`** (default 32 MiB, refreshable): operator-tunable **per-blob**
-  cap on the SBBF **body**, enforced in `validateBloomFilterBlob`, so an oversized blob is
-  rejected at the proxy rather than fanned out to QueryNodes. The fixed 32-byte MBF1 header is
-  allowed on top of the budget: the SBBF body is always a power of two, so budgeting the whole
-  blob at exactly 32 MiB would reject a full 32 MiB body (32 MiB + 32 B) and silently halve the
-  usable ceiling to a 16 MiB body (~12M members instead of ~24M). Budgeting the body keeps the
-  default a clean power of two and admits a full 32 MiB body (~24M int64 members at the default
-  FPR). The 128 MiB MBF1 num_blocks format cap remains the hard per-blob ceiling on both sides.
-- **`proxy.maxBloomFilterPlanSize`** (default 128 MiB, refreshable): request-wide cap on the
-  serialized size of every bloom-bearing plan, enforced with `proto.Size(plan)` before
-  `proto.Marshal`. Reusing one `{bf}` in multiple expressions therefore consumes the budget for
-  every embedded copy. Hybrid search accumulates all bloom-bearing sub-plans against the same
-  request budget, and scorer filters are included. Exceeding the cap returns
+- **`proxy.maxMembershipFilterSize`** (default 64 MiB, refreshable): operator-tunable
+  **per-blob** cap shared by `bloom_match` and `roaring_match`. For Bloom it caps the SBBF
+  **body**, enforced in `validateBloomFilterBlob`, so an oversized blob is rejected at the
+  proxy rather than fanned out to QueryNodes. The fixed 32-byte MBF1 header is allowed on top
+  of the budget (`len(blob) > maxSize + kHeaderSize`), so a full 64 MiB body passes exactly.
+  Budgeting the body rather than the whole blob keeps the limit a clean power of two: a
+  whole-blob cap of exactly 64 MiB would reject a 64 MiB body (64 MiB + 32 B) and silently
+  halve the usable ceiling to a 32 MiB body. Since SBBF bodies are powers of two, every value
+  in [64 MiB, 128 MiB) admits the same Bloom filters, so the default is set to the smallest
+  of them and states the real ceiling. The 128 MiB MBF1 num_blocks format cap remains the
+  hard Bloom per-blob ceiling. The legacy `proxy.maxBloomFilterSize` key remains a fallback.
+- **`proxy.maxMembershipFilterPlanSize`** (default 128 MiB, refreshable): request-wide cap
+  on the serialized size of every membership-filter-bearing plan, enforced with
+  `proto.Size(plan)` before `proto.Marshal`. Reusing one template in multiple expressions
+  therefore consumes the budget for every embedded copy. Hybrid search accumulates all
+  membership-filter-bearing sub-plans against the same request budget, and scorer filters are
+  included: a membership expression is allowed in a scorer filter and its blob is charged to
+  the same budget.
+  Exceeding the cap returns
   `ErrParameterTooLarge` (1102, InputError, non-retriable) at the proxy, before QueryNode routing,
   so an over-budget Bloom request cannot turn into a gRPC `ResourceExhausted` or blacklist a
   healthy QueryNode. Invalid, zero, negative, or integer-overflowing configuration values fall
-  back to 128 MiB.
+  back to 128 MiB. The legacy `proxy.maxBloomFilterPlanSize` key remains a fallback.
 - **Log redaction is copy-free**: when a bloom-bearing plan is debug-logged, the blob byte
   slices are temporarily swapped for a `{N bytes}` marker (pointer assignment, no
   duplication of the up-to-tens-of-MiB body), stringified, then restored — never `proto.Clone`d.

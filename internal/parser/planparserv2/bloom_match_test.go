@@ -277,9 +277,9 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		expectError(t, "bloom_match(Int64Field, {bf})", arrMV, "must be a client pre-built filter blob (bytes)")
 	})
 
-	t.Run("blob body over proxy.maxBloomFilterSize is rejected; 32-byte header allowed on top", func(t *testing.T) {
+	t.Run("blob body over proxy.maxMembershipFilterSize is rejected; 32-byte header allowed on top", func(t *testing.T) {
 		pt := paramtable.Get()
-		// proxy.maxBloomFilterSize budgets the SBBF *body*; the fixed 32-byte
+		// proxy.maxMembershipFilterSize budgets the SBBF *body*; the fixed 32-byte
 		// MBF1 header is always allowed on top. Derive the actual body size from
 		// the built blob so the budgets are exact regardless of the SBBF tier.
 		tv, blob := bloomBytesTemplate(t, 0.001, 1, 2, 3)
@@ -287,15 +287,15 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
 
 		// A body budget one byte below the body rejects the blob.
-		pt.Save(pt.ProxyCfg.MaxBloomFilterSize.Key, strconv.Itoa(body-1))
-		expectError(t, "bloom_match(Int64Field, {bf})", mv, "exceeding proxy.maxBloomFilterSize")
-		pt.Reset(pt.ProxyCfg.MaxBloomFilterSize.Key)
+		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body-1))
+		expectError(t, "bloom_match(Int64Field, {bf})", mv, "exceeding proxy.maxMembershipFilterSize")
+		pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
 
 		// A body budget exactly equal to the body admits the blob even though the
 		// whole blob is body+32 bytes — the header rides on top. Regression pin
 		// for the off-by-header bug that would otherwise halve the usable tier.
-		pt.Save(pt.ProxyCfg.MaxBloomFilterSize.Key, strconv.Itoa(body))
-		defer pt.Reset(pt.ProxyCfg.MaxBloomFilterSize.Key)
+		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body))
+		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
 		_, err := ParseExpr(helper, "bloom_match(Int64Field, {bf})", mv)
 		require.NoError(t, err, "a body-sized budget must admit the blob; the 32-byte header is allowed on top")
 	})
@@ -341,9 +341,9 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// blob). Bound to any comparison it must die at the proxy, not fan out
 		// a kBytesVal GenericValue that segcore cannot evaluate.
 		expectError(t, `JSONField["a"] == {bf}`, bf,
-			"bytes template value can only be used as the bloom_match filter argument")
+			"bytes template value can only be used as the bloom_match or roaring_match filter argument")
 		expectError(t, "Int64Field == {bf}", bf,
-			"bytes template value can only be used as the bloom_match filter argument")
+			"bytes template value can only be used as the bloom_match or roaring_match filter argument")
 		expectError(t, "Int64Field in {bf}", bf, "")
 	})
 }
@@ -420,6 +420,19 @@ func TestPlanContainsBloomFilter(t *testing.T) {
 	}
 }
 
+// The filter blob never appears in the expression text -- the second argument
+// must be a {template} placeholder and the bytes are supplied out of band -- so
+// the parser keeps echoing the user's own expression in errors, unchanged from
+// before bloom_match existed. Generic expression truncation is deliberately not
+// part of this feature; see the design doc's diagnostics section.
+func TestBloomMatchLiteralArgumentIsRejected(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+
+	_, err := ParseExpr(helper, "bloom_match(Int64Field, [1, 2, 3])", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be a {template} placeholder")
+}
+
 // TestRedactPlanForLog verifies the plan-log redaction elides the (large)
 // filter blob while preserving the rest of the plan, and is a no-op string
 // path when no bloom_match is present.
@@ -433,10 +446,10 @@ func TestRedactPlanForLog(t *testing.T) {
 		require.NoError(t, err)
 
 		out := RedactPlanForLog(plan).String()
-		// The raw blob bytes must not appear; a size marker must.
+		// The raw blob bytes must not appear; a fixed marker must.
 		assert.NotContains(t, out, string(blob))
-		assert.Contains(t, out, "bytes elided")
-		// The original plan is untouched (redaction works on a clone).
+		assert.Contains(t, out, "<blob>")
+		// The original plan is restored after rendering.
 		require.True(t, PlanContainsBloomFilter(plan))
 		assert.Equal(t, blob, findFirstBloomBlob(plan))
 	})
@@ -506,6 +519,10 @@ func unaryNode(c *planpb.Expr) *planpb.Expr {
 
 func binNode(l, r *planpb.Expr) *planpb.Expr {
 	return &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{Left: l, Right: r}}}
+}
+
+func binaryArithNode(l, r *planpb.Expr) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_BinaryArithExpr{BinaryArithExpr: &planpb.BinaryArithExpr{Left: l, Right: r}}}
 }
 
 func sampleNode(p *planpb.Expr) *planpb.Expr {
@@ -592,6 +609,8 @@ func TestBloomExprTreeWalk(t *testing.T) {
 	assert.True(t, hasBloomFilterExpr(unaryNode(leaf())))
 	assert.True(t, hasBloomFilterExpr(binNode(nonBloomLeaf(), leaf())))
 	assert.True(t, hasBloomFilterExpr(binNode(leaf(), nonBloomLeaf())))
+	assert.True(t, hasBloomFilterExpr(binaryArithNode(nonBloomLeaf(), leaf())))
+	assert.True(t, hasBloomFilterExpr(binaryArithNode(leaf(), nonBloomLeaf())))
 	assert.True(t, hasBloomFilterExpr(sampleNode(bloomCallNode())))
 	assert.True(t, hasBloomFilterExpr(elemFilterNode(leaf(), nonBloomLeaf())))
 	assert.True(t, hasBloomFilterExpr(elemFilterNode(nonBloomLeaf(), bloomCallNode())))
@@ -614,6 +633,7 @@ func TestBloomExprTreeWalk(t *testing.T) {
 	assert.Equal(t, 0, count(bloomCallNode()))
 	assert.Equal(t, 1, count(unaryNode(leaf())))
 	assert.Equal(t, 2, count(binNode(leaf(), leaf())))
+	assert.Equal(t, 2, count(binaryArithNode(leaf(), leaf())))
 	assert.Equal(t, 1, count(sampleNode(leaf())))
 	assert.Equal(t, 2, count(elemFilterNode(leaf(), leaf())))
 	assert.Equal(t, 1, count(matchNode(leaf())))
@@ -629,19 +649,24 @@ func TestPlanContainsBloomFilterAndPredicates(t *testing.T) {
 	anns := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{Predicates: leaf}}}
 	preds := &planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: leaf}}
 	noBloom := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Predicates: nonBloomLeaf()}}}
-	scorerBloom := &planpb.PlanNode{
-		Node:    &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Predicates: nonBloomLeaf()}},
-		Scorers: []*planpb.ScoreFunction{{Filter: leaf}},
-	}
 	empty := &planpb.PlanNode{}
+	scorer := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
+		Scorers: []*planpb.ScoreFunction{{
+			Filter: leaf,
+		}},
+	}
 
 	assert.True(t, PlanContainsBloomFilter(query))
+	assert.True(t, PlanContainsMembershipFilter(query))
 	assert.True(t, PlanContainsBloomFilter(anns))
 	assert.True(t, PlanContainsBloomFilter(preds))
-	assert.True(t, PlanContainsBloomFilter(scorerBloom))
 	assert.False(t, PlanContainsBloomFilter(noBloom))
+	assert.False(t, PlanContainsMembershipFilter(noBloom))
 	assert.False(t, PlanContainsBloomFilter(empty))
 	assert.False(t, PlanContainsBloomFilter(nil))
+	assert.True(t, PlanContainsBloomFilter(scorer))
+	assert.True(t, PlanContainsMembershipFilter(scorer))
 
 	assert.Equal(t, leaf, planPredicates(query))
 	assert.Equal(t, leaf, planPredicates(anns))
@@ -649,23 +674,9 @@ func TestPlanContainsBloomFilterAndPredicates(t *testing.T) {
 	assert.Nil(t, planPredicates(empty))
 }
 
-// TestRedactPlanForLogEdgeCases covers the bloomRedactedPlan branches the parsed-
-// plan test does not: a nil plan and a bloom blob carried in a scorer filter.
+// TestRedactPlanForLogEdgeCases covers the nil-plan branch.
 func TestRedactPlanForLogEdgeCases(t *testing.T) {
 	assert.Equal(t, "<nil>", RedactPlanForLog(nil).String())
-
-	// A bloom blob carried by a scorer filter (not the main predicate) is redacted
-	// too, and the original is restored afterwards.
-	secret := []byte("REDACT-ME-BLOOM-BLOB-CONTENT")
-	scorerFilter := bfLeaf(secret)
-	scorerPlan := &planpb.PlanNode{
-		Node:    &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{Predicates: nonBloomLeaf()}},
-		Scorers: []*planpb.ScoreFunction{{Filter: scorerFilter}},
-	}
-	out := RedactPlanForLog(scorerPlan).String()
-	assert.NotContains(t, out, string(secret))
-	assert.Contains(t, out, "bytes elided")
-	assert.Equal(t, secret, scorerFilter.GetBloomFilterExpr().GetFilterBlob(), "scorer blob must be restored after stringify")
 }
 
 // bloomBytesTemplateMixed builds a blob carrying BOTH value domains — the

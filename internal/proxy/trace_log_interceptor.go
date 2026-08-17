@@ -143,11 +143,11 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 	}
 	// expression-template values are user-supplied data (and a bloom_match
 	// filter blob can be tens of MiB) — never log them verbatim. Wrap the
-	// request in a lazy Stringer that elides every template value at log time,
+	// request in a lazy Stringer that redacts every template value at log time,
 	// with NO clone of the (up-to-tens-of-MiB) request. Covers every carrier /
 	// nesting: Search (+ sub_reqs), Query, Delete, HybridSearch. Requests with
 	// no template value are logged as-is.
-	if wrapped, ok := elideRequestForLog(req); ok {
+	if wrapped, ok := redactedReqStringer(req); ok {
 		return mlog.Stringer("request", wrapped)
 	}
 	return mlog.Any("request", req)
@@ -186,27 +186,21 @@ func redactCreateCollectionRequestForLog(req *milvuspb.CreateCollectionRequest) 
 	return redactedReq
 }
 
-// RedactReqForLog returns req wrapped so its String() elides every
-// expression-template value, or req unchanged when it carries none. For call
-// sites that log the raw request outside the trace interceptor (e.g. hook
-// before/after errors).
-func RedactReqForLog(req interface{}) interface{} {
-	if wrapped, ok := elideRequestForLog(req); ok {
-		return wrapped
-	}
-	return req
+// RedactedValue is the marker substituted for a user-supplied value that must
+// not reach a log. Shared with the RESTful trace log, which redacts the
+// equivalent exprParams map.
+const RedactedValue = "<redacted>"
+
+// redactedTemplateValue is the shared read-only marker swapped in for a
+// template value during logging.
+var redactedTemplateValue = &schemapb.TemplateValue{
+	Val: &schemapb.TemplateValue_StringVal{StringVal: RedactedValue},
 }
 
-// elidedTemplateValue is the shared read-only marker swapped in for a template
-// value during logging.
-var elidedTemplateValue = &schemapb.TemplateValue{
-	Val: &schemapb.TemplateValue_StringVal{StringVal: "<elided>"},
-}
-
-// elideRequestForLog wraps req in a lazy Stringer that elides its
+// redactedReqStringer wraps req in a lazy Stringer that redacts its
 // expression-template values, or returns (nil, false) when the request carries
 // none (so the caller logs it as-is). No clone is made.
-func elideRequestForLog(req interface{}) (fmt.Stringer, bool) {
+func redactedReqStringer(req interface{}) (fmt.Stringer, bool) {
 	// Generated proto request messages implement fmt.Stringer; that String() is
 	// what a logged request renders through, so wrap it.
 	sr, ok := req.(fmt.Stringer)
@@ -217,7 +211,7 @@ func elideRequestForLog(req interface{}) (fmt.Stringer, bool) {
 	if len(maps) == 0 {
 		return nil, false
 	}
-	return elidedRequest{req: sr, maps: maps}, true
+	return redactedRequest{req: sr, maps: maps}, true
 }
 
 // requestTemplateMaps returns every non-empty expr_template_values map carried
@@ -257,17 +251,17 @@ func nonEmptyTemplateMap(m map[string]*schemapb.TemplateValue) []map[string]*sch
 	return []map[string]*schemapb.TemplateValue{m}
 }
 
-// elidedRequest lazily stringifies req with every expression-template value
-// swapped in place for an {elided} marker, restoring the originals afterwards —
-// no clone of the request. Safe because zap evaluates a Stringer field
-// synchronously in the logging goroutine, before the request reaches the
+// redactedRequest lazily stringifies req with every expression-template value
+// swapped in place for the RedactedValue marker, restoring the originals
+// afterwards — no clone of the request. Safe because zap evaluates a Stringer
+// field synchronously in the logging goroutine, before the request reaches the
 // handler, so no other reader observes the temporary state.
-type elidedRequest struct {
+type redactedRequest struct {
 	req  fmt.Stringer
 	maps []map[string]*schemapb.TemplateValue
 }
 
-func (e elidedRequest) String() string {
+func (e redactedRequest) String() string {
 	type savedEntry struct {
 		m map[string]*schemapb.TemplateValue
 		k string
@@ -277,11 +271,15 @@ func (e elidedRequest) String() string {
 	for _, m := range e.maps {
 		for k, v := range m {
 			back = append(back, savedEntry{m, k, v})
-			m[k] = elidedTemplateValue
+			m[k] = redactedTemplateValue
 		}
 	}
 	defer func() {
-		for _, s := range back {
+		// A nested request may reuse the same template map. Restore in reverse
+		// order so the earliest saved entry (the real value) wins over later
+		// entries that observed the temporary redaction marker.
+		for i := len(back) - 1; i >= 0; i-- {
+			s := back[i]
 			s.m[s.k] = s.v
 		}
 	}()
