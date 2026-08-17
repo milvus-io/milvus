@@ -3,6 +3,7 @@ package broadcaster
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -506,4 +507,36 @@ func TestBroadcastRejectsOversizedIdempotencyKey(t *testing.T) {
 	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("0")
 	require.Error(t, broadcast(newImportMsgWithKey("1")))
 	require.NoError(t, broadcast(newImportMsgWithKey("")))
+}
+
+// TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit guards the length budget at
+// its real boundary, with the real default limit. Proxy.ImportV2 admits a raw client
+// key of up to streaming.idempotency.maxKeyLength bytes, so anything that inflates the
+// key on its way here — a scoping prefix, an encoding — makes the broadcaster reject a
+// key the user was told is legal. A short-key test cannot catch that; only a key
+// sitting exactly on the limit can.
+func TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit(t *testing.T) {
+	bm := newBroadcastTaskManagerForTest(t)
+	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
+
+	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+	require.Equal(t, 256, limit, "this test asserts the boundary of the DEFAULT limit, the one the proxy advertises")
+
+	atLimit := strings.Repeat("k", limit)
+	first := broadcastForTest(t, bm, 1, newImportMsgWithKey(atLimit), collKey)
+	require.Nil(t, first.Duplicated)
+	require.Equal(t, uint64(1), first.BroadcastID)
+
+	// The key survived at full length: a retry of it still deduplicates, which is only
+	// possible if the broadcaster indexed the whole key rather than rejecting it.
+	dup := broadcastForTest(t, bm, 2, newImportMsgWithKey(atLimit), collKey)
+	require.NotNil(t, dup.Duplicated)
+	require.Equal(t, uint64(1), dup.BroadcastID)
+	require.Equal(t, atLimit, message.IdempotencyKeyOf(dup.Duplicated))
+
+	// One byte past the limit is where rejection starts.
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 3, guards: bm.resourceKeyLocker.Lock(collKey)}
+	defer api.Close()
+	_, err := api.Broadcast(context.Background(), newImportMsgWithKey(atLimit+"k"))
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
