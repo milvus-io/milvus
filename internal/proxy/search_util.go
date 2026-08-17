@@ -1107,7 +1107,7 @@ func getMetricType(toReduceResults []*internalpb.SearchResults) string {
 
 func validateSparseFloatVectorPlaceholderGroup(placeholderGroup []byte) error {
 	if len(placeholderGroup) == 0 {
-		return nil
+		return merr.WrapErrParameterInvalidMsg("placeholder group is empty")
 	}
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(placeholderGroup, pb); err != nil {
