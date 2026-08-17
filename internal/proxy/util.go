@@ -1534,24 +1534,6 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
-// GetIdempotencyKeyFromContext returns the client-supplied idempotency key carried
-// in the gRPC incoming metadata, or "" when the request carries none.
-//
-// Read here rather than in a dedicated interceptor, matching how the db name is
-// handled: the RPC entrypoint already owns the incoming metadata, so an extra
-// interceptor would only add a hop.
-func GetIdempotencyKeyFromContext(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
-	values := md[strings.ToLower(util.HeaderIdempotencyKey)]
-	if len(values) < 1 {
-		return ""
-	}
-	return values[0]
-}
-
 // validateIdempotencyKeyLength rejects an oversized key at the proxy. The key
 // travels in the message properties of the write it guards and is retained in the
 // broadcaster's in-memory dedup index for the whole idempotency window, so its

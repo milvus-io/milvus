@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
@@ -1812,7 +1813,11 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.ErrorIs(t, merr.Error(rsp.GetStatus()), merr.ErrParameterInvalid)
 	})
 
-	t.Run("ImportV2 forwards the idempotency key to datacoord", func(t *testing.T) {
+	// The key travels to DataCoord in the gRPC metadata, so what the proxy owes the
+	// hop is a context that still carries it when the coordinator client is called:
+	// that is what the client interceptor copies onto the outgoing call. It survives
+	// the scheduler queue, which runs the task on a context derived from this one.
+	t.Run("ImportV2 hands datacoord a context still carrying the idempotency key", func(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		node, err := NewProxy(ctx, factory)
 		assert.NoError(t, err)
@@ -1838,11 +1843,11 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 1}, nil)
 		globalMetaCache = mc
 
-		var capturedReq *internalpb.ImportRequestInternal
+		capturedKey := make(chan string, 1)
 		mixCoord := mocks.NewMockMixCoordClient(t)
 		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, req *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
-				capturedReq = req
+				capturedKey <- interceptor.IdempotencyKeyFromContext(ctx)
 				return &internalpb.ImportResponse{
 					Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					JobID:  "123456789",
@@ -1860,8 +1865,12 @@ func TestProxy_ImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
-		assert.NotNil(t, capturedReq)
-		assert.Equal(t, "run-1-batch-1", capturedReq.GetIdempotencyKey())
+		select {
+		case key := <-capturedKey:
+			assert.Equal(t, "run-1-batch-1", key)
+		default:
+			t.Fatal("mixCoord.ImportV2 was never called")
+		}
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {

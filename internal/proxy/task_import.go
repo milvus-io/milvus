@@ -50,8 +50,6 @@ type importTask struct {
 	collectionID UniqueID
 	schema       *schemaInfo
 	resp         *internalpb.ImportResponse
-
-	idempotencyKey string
 }
 
 func (it *importTask) TraceCtx() context.Context {
@@ -222,6 +220,8 @@ func (it *importTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// The idempotency key is not part of this request: the client interceptor copies
+	// it from the incoming metadata of ctx onto the outgoing call to DataCoord.
 	importReq := &internalpb.ImportRequestInternal{
 		DbID:           dbInfo.DBID,
 		CollectionID:   it.collectionID,
@@ -233,8 +233,9 @@ func (it *importTask) Execute(ctx context.Context) error {
 		Options:        it.req.GetOptions(),
 		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback
 		JobID:          0, // Let DataCoord allocate
-		IdempotencyKey: it.idempotencyKey,
 	}
+	// The idempotency key is not part of the request: the client interceptor copies
+	// it from the incoming metadata of ctx onto the outgoing call.
 
 	resp, err := it.mixCoord.ImportV2(ctx, importReq)
 	if err != nil {

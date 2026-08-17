@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -420,14 +422,20 @@ func newImportV2IdempotentRequest() *internalpb.ImportRequestInternal {
 		Options: []*commonpb.KeyValuePair{
 			{Key: "timeout", Value: "300s"},
 		},
-		IdempotencyKey: "run-1",
 	}
+}
+
+// newImportV2IdempotentContext carries the client key the way a real call does:
+// in the gRPC incoming metadata, not in the request body.
+func newImportV2IdempotentContext(key string) context.Context {
+	return metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs(util.HeaderIdempotencyKey, key))
 }
 
 // A retry whose idempotency key still resolves must get the ORIGINAL jobID back,
 // not the freshly allocated one (1000 here, which stays unused).
 func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
-	ctx := context.Background()
+	ctx := newImportV2IdempotentContext("run-1")
 
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
@@ -449,7 +457,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 // duplicated broadcast carrying jobID 0 must still take the duplicate branch and let
 // the job-existence check decide — not fall through to the freshly allocated 1000.
 func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate() {
-	ctx := context.Background()
+	ctx := newImportV2IdempotentContext("run-1")
 
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
@@ -471,7 +479,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 // The key outlived its job, so returning the original jobID would hand the client an
 // id GetImportProgress cannot resolve; ImportV2 must fail instead of returning a jobID.
 func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError() {
-	ctx := context.Background()
+	ctx := newImportV2IdempotentContext("run-1")
 
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
@@ -496,8 +504,6 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError()
 // proxy just accepted into one the broadcaster rejects. This test sits on that exact
 // boundary; a short key would pass either way.
 func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtTheLimit() {
-	ctx := context.Background()
-
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
@@ -510,9 +516,8 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 	s.Equal(256, limit, "this test asserts the boundary of the DEFAULT limit, the one the proxy advertises")
 	atLimit := strings.Repeat("k", limit)
 
-	req := newImportV2IdempotentRequest()
-	req.IdempotencyKey = atLimit
-	resp, err := server.ImportV2(ctx, req)
+	ctx := newImportV2IdempotentContext(atLimit)
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
 
 	s.NoError(err)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
