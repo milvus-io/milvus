@@ -46,6 +46,7 @@ func TestConsistencyLevelHelperFallbackToCarrier(t *testing.T) {
 	assert.Equal(t, want, helper.String())
 
 	// nil ctx
+	//nolint:staticcheck // exercising the nil-context fallback path
 	helper = NewConsistencyLevelHelper(nil, carrier)
 	assert.Equal(t, want, helper.String())
 
