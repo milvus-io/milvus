@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -797,20 +798,19 @@ func (node *DataNode) queuedSlots() (indexStats, compaction, imports int64) {
 //   - indexStatsUsed and importUsed are on the CalculateNodeSlots scale, the
 //     same scale legacyTotal is on. Their fraction is used/legacyTotal.
 //   - compactionUsed is not. Under this branch DataCoord prices a mix or sort
-//     compaction with memoryToSlots(bytes) = bytes / legacyMemoryPerSlot, so
-//     the counter is denominated in 128MiB units of memory. legacyTotal x
-//     128MiB is 16GiB on the 16c/64GiB node from issue #52180, against a ledger
-//     budget of 48GiB -- so measuring it against legacyTotal saturates at a
-//     third of the node's real capacity, and the node would report itself full
-//     after about three 4.5GiB compactions where the ledger has room for ten.
-//     That is the same throughput collapse dataCoord.resource.
-//     enableCompactionEstimate exists to let an operator escape during a skew
-//     window, except self-inflicted, permanent, and in a fully upgraded
-//     cluster.
+//     compaction with memoryToSlots(bytes) = bytes /
+//     taskresource.LegacyMemoryPerSlot(), so the counter is denominated in
+//     units of memory, not in slots of this node. The two denominators
+//     coincide only on a node whose ledger budget happens to be exactly
+//     legacyTotal x LegacyMemoryPerSlot() -- which is what the derived rate
+//     buys on a memory-bound node at full budget, but not on a CPU-bound one,
+//     and not once the guard has subtracted non-task memory from the budget.
+//     Dividing by legacyTotal in those cases makes the node report itself full
+//     before its budget is, a throughput cut with nothing behind it.
 //
 // So the compaction arm is converted back into the currency it came from --
-// slots x legacyMemoryPerSlot recovers the memory memoryToSlots divided -- and
-// measured against the ledger's own budget. memoryToSlots floors, so the
+// slots x LegacyMemoryPerSlot() recovers the memory memoryToSlots divided --
+// and measured against the ledger's own budget. memoryToSlots floors, so the
 // reconstruction understates by up to one slot per task; that direction makes
 // this arm slightly less binding, which is the safe way round for a backstop.
 //
@@ -832,12 +832,11 @@ func queueUtilization(snap resource.Snapshot, legacyTotal, indexStatsUsed, compa
 		return util
 	}
 
-	perSlot := paramtable.Get().DataNodeCfg.ResourceLegacyMemoryPerSlot.GetAsInt64()
-	if perSlot <= 0 || snap.Total.Memory <= 0 {
-		// No budget to measure against (an unconfigured exchange rate, or a
-		// guard that has not reported one). Fall back to the legacy scale: it
-		// is the wrong unit, but it is the only one available and it errs
-		// towards reporting the node busier.
+	perSlot := taskresource.LegacyMemoryPerSlot()
+	if snap.Total.Memory <= 0 {
+		// No budget to measure against (a guard that has not reported one).
+		// Fall back to the legacy scale: it is the wrong unit, but it is the
+		// only one available and it errs towards reporting the node busier.
 		if legacyTotal > 0 {
 			if u := float64(compactionUsed) / float64(legacyTotal); u > util {
 				util = u
