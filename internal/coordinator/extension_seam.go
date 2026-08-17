@@ -80,6 +80,21 @@ func beforeDropIndex(ctx context.Context, req *indexpb.DropIndexRequest) bool {
 	return drainer.BeginDropIndex(ctx, req)
 }
 
+// afterCreateIndex reports a committed CreateIndex to the drainer. Only a
+// create that really committed is reported: a drainer waking parked queries
+// for an index that was never created would wake them into the very refusal
+// they were parked to avoid.
+func afterCreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest, status *commonpb.Status, err error) {
+	if err != nil || !merr.Ok(status) {
+		return
+	}
+	drainer := indexDrainer()
+	if drainer == nil {
+		return
+	}
+	drainer.AfterCreateIndex(ctx, req)
+}
+
 // afterDropIndex reports a committed drop to the drainer, but only for a drop
 // beforeDropIndex asked about and only when the coordinator really performed
 // it: a drainer that started draining for an index still in place would take a

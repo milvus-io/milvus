@@ -1215,7 +1215,11 @@ func (s *mixCoordImpl) GcConfirm(ctx context.Context, req *datapb.GcConfirmReque
 }
 
 func (s *mixCoordImpl) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.datacoordServer.CreateIndex(ctx, req)
+	status, err := s.datacoordServer.CreateIndex(ctx, req)
+	// Extension seam, see extension_seam.go: with none installed the report
+	// goes nowhere and nothing changes.
+	afterCreateIndex(ctx, req, status, err)
+	return status, err
 }
 
 func (s *mixCoordImpl) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {

@@ -55,9 +55,10 @@ func (i *recordingInterceptor) BeforeDropResourceGroup(_ context.Context, req *m
 type recordingDrainer struct {
 	beginAnswer bool
 
-	seenBegin     []*indexpb.DropIndexRequest
-	seenAfterDrop []*indexpb.DropIndexRequest
-	seenAbortDrop []*indexpb.DropIndexRequest
+	seenBegin       []*indexpb.DropIndexRequest
+	seenAfterDrop   []*indexpb.DropIndexRequest
+	seenAbortDrop   []*indexpb.DropIndexRequest
+	seenAfterCreate []*indexpb.CreateIndexRequest
 }
 
 func (d *recordingDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64, string) bool {
@@ -76,6 +77,12 @@ func (d *recordingDrainer) AfterDropIndex(_ context.Context, req *indexpb.DropIn
 func (d *recordingDrainer) AbortDropIndex(_ context.Context, req *indexpb.DropIndexRequest) {
 	d.seenAbortDrop = append(d.seenAbortDrop, req)
 }
+
+func (d *recordingDrainer) AfterCreateIndex(_ context.Context, req *indexpb.CreateIndexRequest) {
+	d.seenAfterCreate = append(d.seenAfterCreate, req)
+}
+
+func (d *recordingDrainer) CollectionDraining(context.Context, int64) bool { return false }
 
 // forbiddenInterceptor fails the test if the coordinator consults it at all.
 // It stands in for "the capability is installed but this request must not
@@ -442,6 +449,49 @@ func TestDropIndexDoesNotArmDrainOnFailure(t *testing.T) {
 		assert.Empty(t, drainer.seenAfterDrop, "a drop whose outcome is unknown must not be reported as committed")
 		require.Len(t, drainer.seenAbortDrop, 1,
 			"an errored drop is reported aborted; if it did commit after all, the divergence reconcile heals it")
+	})
+}
+
+// A committed CreateIndex is reported to the drainer - it may be the rebuild
+// a drain's parked queries are waiting on - and a create that did not commit
+// is not, because waking parked queries for an index that was never created
+// would wake them into the very refusal they were parked to avoid.
+func TestCreateIndexReportsOnlyCommittedCreates(t *testing.T) {
+	mockey.PatchConvey("the create commits", t, func() {
+		drainer := &recordingDrainer{}
+		installDrainer(t, drainer)
+		mockey.Mock((*datacoord.Server).CreateIndex).Return(merr.Success(), nil).Build()
+
+		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
+		req := &indexpb.CreateIndexRequest{CollectionID: 7, FieldID: 101}
+		_, err := s.CreateIndex(context.Background(), req)
+		require.NoError(t, err)
+		require.Len(t, drainer.seenAfterCreate, 1)
+		assert.Same(t, req, drainer.seenAfterCreate[0])
+	})
+
+	mockey.PatchConvey("the create is refused", t, func() {
+		drainer := &recordingDrainer{}
+		installDrainer(t, drainer)
+		mockey.Mock((*datacoord.Server).CreateIndex).Return(
+			merr.Status(merr.WrapErrServiceInternal("create refused")), nil,
+		).Build()
+
+		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
+		_, err := s.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{CollectionID: 7})
+		require.NoError(t, err)
+		assert.Empty(t, drainer.seenAfterCreate,
+			"an uncommitted create must not be reported as the rebuild")
+	})
+
+	mockey.PatchConvey("no provider installed", t, func() {
+		extension.ResetForTest()
+		t.Cleanup(extension.ResetForTest)
+		mockey.Mock((*datacoord.Server).CreateIndex).Return(merr.Success(), nil).Build()
+
+		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
+		_, err := s.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{CollectionID: 7})
+		require.NoError(t, err)
 	})
 }
 

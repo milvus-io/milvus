@@ -46,6 +46,14 @@ func (d *answeringDrainer) AbortDropIndex(context.Context, *indexpb.DropIndexReq
 	panic("datacoord must never reach AbortDropIndex")
 }
 
+func (d *answeringDrainer) AfterCreateIndex(context.Context, *indexpb.CreateIndexRequest) {
+	panic("datacoord must never reach AfterCreateIndex")
+}
+
+func (d *answeringDrainer) CollectionDraining(context.Context, int64) bool {
+	panic("datacoord must never reach CollectionDraining")
+}
+
 func (d *answeringDrainer) BeginDropIndex(context.Context, *indexpb.DropIndexRequest) bool {
 	panic("datacoord must not classify drops itself")
 }

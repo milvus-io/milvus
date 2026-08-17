@@ -26,6 +26,10 @@ func (stubIndexDrainer) AfterDropIndex(context.Context, *indexpb.DropIndexReques
 
 func (stubIndexDrainer) AbortDropIndex(context.Context, *indexpb.DropIndexRequest) {}
 
+func (stubIndexDrainer) AfterCreateIndex(context.Context, *indexpb.CreateIndexRequest) {}
+
+func (s stubIndexDrainer) CollectionDraining(context.Context, int64) bool { return s.answer }
+
 func TestIndexDrainerAbsentWithoutProvider(t *testing.T) {
 	ResetForTest()
 	assert.Nil(t, Caps().IndexDrain,

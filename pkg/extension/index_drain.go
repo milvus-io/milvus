@@ -82,4 +82,24 @@ type IndexDrainer interface {
 	// only reports success. Exactly one of AfterDropIndex and AbortDropIndex
 	// follows a BeginDropIndex that returned true.
 	AbortDropIndex(ctx context.Context, req *indexpb.DropIndexRequest)
+
+	// AfterCreateIndex runs once a CreateIndex committed. It exists for the
+	// re-create that follows a drained drop: an implementation that parks
+	// queries while the dropped index is absent needs to know the moment a
+	// replacement index is a fact, and only the coordinator sees that moment.
+	// Observe-only: milvus's create is already done, and every create is
+	// reported - scalar, vector, mid-drain or not - because only the
+	// implementation knows which ones matter to it.
+	AfterCreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest)
+
+	// CollectionDraining reports whether the implementation is mid-drain for
+	// this collection - the window between an allowed vector-index drop and
+	// the last resource group's release. The query coordinator's index
+	// checker consults it to leave a draining collection's segments alone:
+	// mid-drain the collection is loaded while its vector index is deleted,
+	// and a segment update issued then would reopen the segment against the
+	// current index set, tearing the still-serving index out from under the
+	// drain's own in-flight queries. False whenever no drain is open, which
+	// with no provider installed is always.
+	CollectionDraining(ctx context.Context, collectionID int64) bool
 }
