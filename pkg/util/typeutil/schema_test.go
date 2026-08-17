@@ -5944,3 +5944,35 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
 }
+
+func TestGetFieldByID_StructArraySubField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 101,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     102,
+						Name:        "vector_array",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_Float16Vector,
+					},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, "pk", GetFieldByID(schema, 100).GetName())
+
+	subField := GetFieldByID(schema, 102)
+	assert.NotNil(t, subField)
+	assert.Equal(t, "vector_array", subField.GetName())
+	assert.Equal(t, schemapb.DataType_ArrayOfVector, subField.GetDataType())
+	assert.Equal(t, schemapb.DataType_Float16Vector, subField.GetElementType())
+
+	assert.Nil(t, GetFieldByID(schema, 999))
+}

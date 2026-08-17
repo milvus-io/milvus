@@ -452,3 +452,62 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 		assert.Equal(t, phgBytes, convertedBytes) // Should be unchanged
 	})
 }
+
+// TestConvertPlaceholderIfNeededArrayOfVectorSubField enters through the real
+// search-task call path instead of calling ConvertPlaceholderGroup directly, so
+// it also covers the field lookup. An ArrayOfVector field only ever lives inside
+// a struct array field, so its ID is absent from schema.Fields.
+func TestConvertPlaceholderIfNeededArrayOfVectorSubField(t *testing.T) {
+	const subFieldID = int64(102)
+
+	for _, tt := range []struct {
+		name            string
+		elementType     schemapb.DataType
+		placeholderType commonpb.PlaceholderType
+	}{
+		{
+			name:            "float16 element",
+			elementType:     schemapb.DataType_Float16Vector,
+			placeholderType: commonpb.PlaceholderType_Float16Vector,
+		},
+		{
+			name:            "bfloat16 element",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			placeholderType: commonpb.PlaceholderType_BFloat16Vector,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{
+				Name: "test_struct_array_search",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						FieldID: 101,
+						Name:    "struct_array",
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:     subFieldID,
+								Name:        "vector_array",
+								DataType:    schemapb.DataType_ArrayOfVector,
+								ElementType: tt.elementType,
+							},
+						},
+					},
+				},
+			}
+
+			vectors := [][]float32{{0.1, 0.2, 0.3, 0.4}}
+			task := &searchTask{schema: newSchemaInfo(schema)}
+
+			convertedBytes, err := task.convertPlaceholderIfNeeded(createFloat32PlaceholderGroup(vectors), subFieldID)
+			assert.NoError(t, err)
+
+			var resultPhg commonpb.PlaceholderGroup
+			err = proto.Unmarshal(convertedBytes, &resultPhg)
+			assert.NoError(t, err)
+			assertPlaceholderVectorsMatchFloat32(t, tt.placeholderType, tt.elementType, resultPhg.Placeholders, vectors)
+		})
+	}
+}
