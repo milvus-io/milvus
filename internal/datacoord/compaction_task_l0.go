@@ -413,6 +413,21 @@ func (t *l0CompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
 }
 
+// hasImportProducedInput reports whether any input L0 segment carries a commit timestamp,
+// which only an import job's segments do.
+func (t *l0CompactionTask) hasImportProducedInput() bool {
+	for _, segID := range t.GetTaskProto().GetInputSegments() {
+		segment := t.meta.GetSegment(context.TODO(), segID)
+		if segment == nil {
+			continue
+		}
+		if segment.GetCommitTimestamp() != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *l0CompactionTask) hasAssignedWorker() bool {
 	return t.GetTaskProto().GetNodeID() != 0 && t.GetTaskProto().GetNodeID() != NullNodeID
 }

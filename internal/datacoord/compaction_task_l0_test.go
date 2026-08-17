@@ -801,3 +801,71 @@ func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
 		assert.Equal(t, int64(777), selected[0].GetID())
 	})
 }
+
+// TestL0CompactionTask_HasImportProducedInput verifies that hasImportProducedInput
+// distinguishes import-produced L0 segments (non-zero CommitTimestamp, stamped by
+// HandleCommitVchannel) from streaming-produced L0 segments (CommitTimestamp == 0).
+func TestL0CompactionTask_HasImportProducedInput(t *testing.T) {
+	streamingL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              100,
+		Level:           datapb.SegmentLevel_L0,
+		CommitTimestamp: 0,
+	}}
+	importL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              101,
+		Level:           datapb.SegmentLevel_L0,
+		CommitTimestamp: 5000,
+	}}
+	droppedImportL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              102,
+		Level:           datapb.SegmentLevel_L0,
+		State:           commonpb.SegmentState_Dropped,
+		CommitTimestamp: 5000,
+	}}
+	segments := map[int64]*SegmentInfo{
+		100: streamingL0,
+		101: importL0,
+		102: droppedImportL0,
+	}
+
+	makeTask := func(inputSegments []int64) *l0CompactionTask {
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetSegment(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, segID int64) *SegmentInfo {
+				return segments[segID]
+			},
+		).Maybe()
+		return newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     19530,
+			CollectionID:  1,
+			PartitionID:   10,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			State:         datapb.CompactionTaskState_executing,
+			InputSegments: inputSegments,
+		}, nil, mockMeta)
+	}
+
+	t.Run("streaming only", func(t *testing.T) {
+		task := makeTask([]int64{100})
+		assert.False(t, task.hasImportProducedInput())
+	})
+
+	t.Run("contains an import L0", func(t *testing.T) {
+		task := makeTask([]int64{100, 101})
+		assert.True(t, task.hasImportProducedInput())
+	})
+
+	t.Run("missing segment", func(t *testing.T) {
+		task := makeTask([]int64{999})
+		assert.False(t, task.hasImportProducedInput())
+	})
+
+	t.Run("dropped but import-produced", func(t *testing.T) {
+		// The predicate must recognize an import-produced L0 even after
+		// saveSegmentMeta has marked it Dropped, since that is the state
+		// it will actually observe when called post-compaction.
+		task := makeTask([]int64{102})
+		assert.True(t, task.hasImportProducedInput())
+	})
+}
