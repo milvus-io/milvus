@@ -101,7 +101,8 @@ TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     EXPECT_EQ(result_bytes[1], "");
     EXPECT_EQ(result_bytes[2], EncodeDecimalBytes(-50));
 
-    EXPECT_TRUE(field_data->valid_data(0));
-    EXPECT_FALSE(field_data->valid_data(1));
-    EXPECT_TRUE(field_data->valid_data(2));
+    ASSERT_EQ(field_data->scalars().valid_data_size(), num_rows);
+    EXPECT_TRUE(field_data->scalars().valid_data(0));
+    EXPECT_FALSE(field_data->scalars().valid_data(1));
+    EXPECT_TRUE(field_data->scalars().valid_data(2));
 }
