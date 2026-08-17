@@ -30,9 +30,14 @@ import (
 // ResourceKey.Shared is deliberately left out. The set of resource keys may hold
 // the same (domain, key) twice with different Shared flags, and uniqueSortResourceKeys
 // does not order by Shared — including the flag would make the encoding depend on an
-// unspecified sort order. Dropping it keeps the encoding deterministic, and the two
-// entries then encode identically, which at most merges two scopes that already share
-// message type, objects and client key.
+// unspecified sort order. Dropping it keeps the encoding deterministic, at the cost of
+// merging scopes that differ only in lock mode. The concrete case is the cluster key:
+// NewSharedClusterResourceKey and NewExclusiveClusterResourceKey are both
+// (ResourceDomainCluster, ""), so a broadcast started through WithResourceKeys, which
+// auto-appends the shared cluster key, encodes the same as one started through
+// WithSecondaryClusterResourceKey. That is harmless today — neither carries an
+// idempotency key, and the lock mode is fixed per message type — but a future caller
+// that gives those two paths the same client key would see them share one scope.
 func idempotencyScope(msgType message.MessageType, resourceKeys []message.ResourceKey, clientKey string) string {
 	if clientKey == "" {
 		return ""
@@ -54,8 +59,16 @@ func idempotencyScope(msgType message.MessageType, resourceKeys []message.Resour
 // Only valid once the header carries the resource keys of the broadcast, which is true
 // for every message that reached a broadcast task (OverwriteBroadcastHeader stamps them
 // before the task is created) and therefore for every recovered message.
+//
+// The empty-key case returns before touching the header on purpose: BroadcastHeader()
+// is uncached, decoding a proto and rebuilding a Set on every call, and most broadcasts
+// carry no idempotency key at all.
 func idempotencyScopeOfMessage(msg message.BroadcastMutableMessage) string {
-	return idempotencyScope(msg.MessageType(), msg.BroadcastHeader().ResourceKeys.Collect(), message.IdempotencyKeyOf(msg))
+	clientKey := message.IdempotencyKeyOf(msg)
+	if clientKey == "" {
+		return ""
+	}
+	return idempotencyScope(msg.MessageType(), msg.BroadcastHeader().ResourceKeys.Collect(), clientKey)
 }
 
 func writeLengthPrefixed(b *strings.Builder, s string) {
