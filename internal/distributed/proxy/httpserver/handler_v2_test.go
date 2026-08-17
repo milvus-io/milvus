@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -820,6 +821,40 @@ func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
 	value, ok = ctx.Get(HTTPReturnMessage)
 	assert.True(t, ok)
 	assert.Equal(t, "request timeout", value)
+}
+
+func TestAccessLogConsistencyLevelAfterTimeout(t *testing.T) {
+	// enable access log with a formatter that reads $consistency_level so the
+	// write path formats the resolved consistency level
+	paramtable.Get().Save(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key, "10")
+	paramtable.Get().Save("proxy.accessLog.enable", "true")
+	paramtable.Get().Save("proxy.accessLog.formatters.base.format", "$consistency_level")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key)
+		paramtable.Get().Reset("proxy.accessLog.enable")
+		paramtable.Get().Reset("proxy.accessLog.formatters.base.format")
+	})
+	accesslog.InitAccessLogger(paramtable.Get())
+
+	ginHandler := gin.New()
+	path := "/middleware/accesslog-timeout"
+	ginHandler.Use(accesslog.AccessLogMiddleware)
+	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		// late task PreExecute: keep resolving the consistency level after the
+		// client has already seen the timeout response. The access log is
+		// written concurrently by AccessLogMiddleware, so actualConsistencyLevel
+		// must be read/written in a race-free way.
+		<-c.Request.Context().Done()
+		for i := 0; i < 50; i++ {
+			accesslog.SetActualConsistencyLevel(c.Request.Context(), commonpb.ConsistencyLevel_Bounded)
+		}
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestTimeout, w.Code)
 }
 
 func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
