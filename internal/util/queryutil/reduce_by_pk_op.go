@@ -294,7 +294,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		}
 
 		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
-			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+			return nil, NewQueryResultSizeLimitExceededError(retSize, op.maxOutputSize)
 		}
 
 		// Early termination when limit reached

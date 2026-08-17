@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestReduceByPKOperator_Name(t *testing.T) {
@@ -912,5 +913,8 @@ func TestReduceByPKWithTimestampOperator_MaxOutputSize_Exceeded(t *testing.T) {
 	}
 	_, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{r})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "maxOutputSize")
+	assert.Contains(t, err.Error(), "estimated: 24 bytes, maximum: 23 bytes")
+	assert.Contains(t, err.Error(), "separate from the query row limit")
+	assert.Contains(t, err.Error(), "Request fewer output fields")
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }

@@ -276,7 +276,7 @@ func NewFetchFieldsDataOperator(
 			segmentResOffset[sel.SegmentIndex]++
 
 			if retSize > maxOutputSize {
-				return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, queryutil.NewQueryResultSizeLimitExceededError(retSize, maxOutputSize)
 			}
 		}
 
