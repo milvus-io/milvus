@@ -45,13 +45,21 @@ LoadLegacyOffsets(roaring::Roaring& offsets, const uint8_t* data, size_t size) {
 
     offsets = roaring::Roaring();
     const auto count = size / sizeof(size_t);
+    // Legacy payload is a sorted size_t[] on disk; roaring stores uint32_t, so
+    // convert once into a dense buffer and bulk-insert with addMany instead of
+    // per-element Roaring::add (each add does a container lookup).
+    std::vector<uint32_t> buf;
+    buf.reserve(count);
     for (size_t i = 0; i < count; ++i) {
         size_t offset;
         std::memcpy(&offset, data + i * sizeof(size_t), sizeof(size_t));
         AssertInfo(offset <= std::numeric_limits<uint32_t>::max(),
                    "row offset {} exceeds uint32 range",
                    offset);
-        offsets.add(static_cast<uint32_t>(offset));
+        buf.push_back(static_cast<uint32_t>(offset));
+    }
+    if (!buf.empty()) {
+        offsets.addMany(buf.size(), buf.data());
     }
     offsets.runOptimize();
     offsets.shrinkToFit();
