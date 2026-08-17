@@ -1375,7 +1375,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
 		logger.Info(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
-			mlog.Any("updates", paramMgr.RedactValues(configsToUpdate)),
+			mlog.Strings("updates", lo.Keys(configsToUpdate)),
 			mlog.Strings("deletes", keysToDelete),
 			mlog.Err(err))
 		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
@@ -1385,7 +1385,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	logger.Info(request.Context(), "HandleAlterConfig success",
 		mlog.Int("updates", len(configsToUpdate)),
 		mlog.Int("deletes", len(keysToDelete)),
-		mlog.Any("updated", paramMgr.RedactValues(configsToUpdate)),
+		mlog.Strings("updated", lo.Keys(configsToUpdate)),
 		mlog.Strings("deleted", keysToDelete))
 
 	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
@@ -1427,19 +1427,15 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		canonicalKey, registeredKind := paramMgr.ResolveRegisteredConfigKey(key)
-		if registeredKind == pkgconfig.RegisteredConfigUnknown {
+		source, value, err := paramMgr.GetRegisteredConfig(key)
+		switch {
+		case errors.Is(err, pkgconfig.ErrKeyUnregistered):
 			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
-			continue
-		}
-		if paramMgr.IsSensitive(canonicalKey) {
+		case errors.Is(err, pkgconfig.ErrKeySensitive):
 			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
-			continue
-		}
-		source, value, err := paramMgr.GetRegisteredConfig(canonicalKey)
-		if err != nil {
+		case err != nil:
 			results = append(results, configResult{Key: key, Error: err.Error()})
-		} else {
+		default:
 			results = append(results, configResult{Key: key, Value: value, Source: source})
 		}
 	}

@@ -421,8 +421,15 @@ type ParamGroup struct {
 	Version   string
 	Doc       string
 	Export    bool
-	// Sensitive marks every value below KeyPrefix as sensitive.
+	// Sensitive marks every value below KeyPrefix as sensitive. Use it when the
+	// members are provider- or plugin-defined, so the core cannot enumerate
+	// which of them carry credentials.
 	Sensitive bool
+	// NonSensitiveSuffixes lists the leaf names below KeyPrefix that the group
+	// itself defines and that are known not to be credentials — an enable flag,
+	// an endpoint URL. Only meaningful together with Sensitive; every other leaf
+	// below the prefix still fails closed.
+	NonSensitiveSuffixes []string
 
 	GetFunc func() map[string]string
 	DocFunc func(string) string
@@ -435,6 +442,9 @@ func (pg *ParamGroup) Init(manager *config.Manager) {
 	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 	if pg.Sensitive {
 		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)
+		for _, suffix := range pg.NonSensitiveSuffixes {
+			pg.manager.RegisterNonSensitiveSuffix(pg.KeyPrefix, suffix)
+		}
 	}
 }
 

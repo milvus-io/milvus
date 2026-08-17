@@ -34,6 +34,14 @@ var (
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
 
+	// ErrKeyUnregistered marks a key that no ParamItem or ParamGroup declares.
+	// Config sources carry more than Milvus configuration — EnvSource imports
+	// the whole process environment — so an undeclared key is not something a
+	// caller-supplied lookup may reach.
+	ErrKeyUnregistered = errors.New("unregistered config key")
+	// ErrKeySensitive marks a declared key whose value is a credential.
+	ErrKeySensitive = errors.New("sensitive config key")
+
 	// config source management
 	ErrSourceDuplicate = errors.New("duplicate config source")
 	ErrSourceInvalid   = errors.New("invalid config source or source not added")

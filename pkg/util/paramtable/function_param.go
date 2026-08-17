@@ -53,7 +53,13 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.textEmbedding.providers.",
 		Version:   "2.6.0",
 		Export:    true,
-		Sensitive: true,
+		// Provider entries are open-ended, so the group defaults to sensitive.
+		// The three leaves the group itself defines are not credentials: hiding
+		// whether a provider is enabled, or which endpoint it points at, is the
+		// same over-reach as hiding minio.address, and it would make them
+		// unalterable too. Only <provider>.credential stays hidden.
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable", "url", "resource_name"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.enable":
@@ -134,10 +140,11 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.TextEmbeddingProviders.Init(base.mgr)
 
 	p.RerankModelProviders = ParamGroup{
-		KeyPrefix: "function.rerank.model.providers.",
-		Version:   "2.6.0",
-		Export:    true,
-		Sensitive: true,
+		KeyPrefix:            "function.rerank.model.providers.",
+		Version:              "2.6.0",
+		Export:               true,
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable", "url"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.credential":

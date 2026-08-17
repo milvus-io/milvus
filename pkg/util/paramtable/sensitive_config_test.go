@@ -38,7 +38,6 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 	// etcd.endpoints, common.security.tlsMode) is deliberately NOT here: see the
 	// policy note in sensitive_audit_test.go.
 	sensitiveKeys := []string{
-		params.CommonCfg.SuperUsers.Key,
 		params.CommonCfg.DefaultRootPassword.Key,
 		params.EtcdCfg.EtcdAuthUserName.Key,
 		params.EtcdCfg.EtcdAuthPassword.Key,
@@ -77,6 +76,19 @@ func TestSensitiveConfigMetadata(t *testing.T) {
 	// every deployment manifest.
 	visibleKeys := []string{
 		params.CommonCfg.AuthorizationEnabled.Key,
+		// A list of user names, not a credential -- and refreshable, so hiding
+		// it would also make it unalterable.
+		params.CommonCfg.SuperUsers.Key,
+		// Declared leaves of a sensitive ParamGroup: whether a provider is on
+		// and where it points are infrastructure detail, like minio.address.
+		"function.textEmbedding.providers.openai.enable",
+		"function.textEmbedding.providers.openai.url",
+		"function.textEmbedding.providers.azure_openai.resource_name",
+		"function.rerank.model.providers.cohere.enable",
+		"function.rerank.model.providers.cohere.url",
+		// A size bound that happens to sit below the sensitive kafka.producer.
+		// prefix; the explicit NonSensitive declaration wins.
+		params.KafkaCfg.ProducerMessageMaxBytes.Key,
 		params.MinioCfg.Address.Key,
 		params.MinioCfg.BucketName.Key,
 		params.EtcdCfg.Endpoints.Key,

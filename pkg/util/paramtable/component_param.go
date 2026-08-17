@@ -968,7 +968,12 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
-		Sensitive:    true,
+		// A list of user names, not a credential: knowing who the superusers are
+		// does not let anyone authenticate as one. Marking it Sensitive would
+		// also freeze it, because the alter endpoint refuses sensitive keys and
+		// this item is refreshable — so the redaction would cost a live
+		// operational lever and buy nothing.
+		NonSensitive: true,
 	}
 	p.SuperUsers.Init(base.mgr)
 

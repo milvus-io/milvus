@@ -18,10 +18,6 @@ type hookConfig struct {
 
 func (h *hookConfig) init(base *BaseTable) {
 	h.hookBase = base
-	// Hook configuration may contain plugin credentials. At this point the
-	// ParamItems have not all registered their Sensitive metadata yet, so avoid
-	// logging the raw map altogether.
-	mlog.Info(context.TODO(), "hook config loaded", mlog.Int("entries", len(base.FileConfigs())))
 
 	h.SoPath = ParamItem{
 		Key:          "soPath",
@@ -35,6 +31,11 @@ func (h *hookConfig) init(base *BaseTable) {
 		Version:   "2.2.0",
 	}
 	h.SoConfig.Init(base.mgr)
+
+	// Entry count only: hook.yaml is plugin-defined and may carry credentials
+	// under names the core cannot classify. Logged after SoConfig.Init so the
+	// empty prefix is registered and the projection is not empty.
+	mlog.Info(context.TODO(), "hook config loaded", mlog.Int("entries", len(h.SoConfig.GetValue())))
 }
 
 func (h *hookConfig) WatchHookWithPrefix(ident string, keyPrefix string, onEvent func(*config.Event)) {

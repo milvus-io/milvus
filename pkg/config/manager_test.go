@@ -40,15 +40,27 @@ func TestAllConfigFromManager(t *testing.T) {
 	all := mgr.GetConfigs()
 	assert.Equal(t, 0, len(all))
 
+	t.Setenv("MILVUS_CONF_PUBLIC_KEY", "declared-value")
 	mgr, _ = Init(WithEnvSource(formatKey))
 	raw := mgr.GetConfigsRaw()
 	assert.Less(t, 0, len(raw))
 
+	// Nothing is declared yet, so the safe projection is empty: the process
+	// environment that EnvSource imported is not Milvus configuration, and
+	// publishing the names of every variable in the pod is a disclosure of its
+	// own even with the values masked.
 	all = mgr.GetConfigs()
-	assert.Equal(t, len(raw), len(all))
-	for _, value := range all {
-		assert.Equal(t, RedactedValue, value)
-	}
+	assert.Equal(t, 0, len(all))
+
+	// Declaring one key publishes that key — under both the canonical identity
+	// and the environment alias EnvSource stored it as, since both resolve to
+	// the same declared ParamItem — and nothing else.
+	mgr.RegisterConfigKey("public.key")
+	all = mgr.GetConfigs()
+	assert.Equal(t, map[string]string{
+		formatKey("public.key"): "declared-value",
+		"PUBLIC_KEY":            "declared-value",
+	}, all)
 }
 
 func TestConfigChangeEvent(t *testing.T) {
@@ -332,11 +344,12 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 	safe := mgr.GetConfigs()
 	assert.Equal(t, "visible", safe[publicKey])
 	assert.Equal(t, RedactedValue, safe[opaqueKey])
-	assert.Equal(t, RedactedValue, safe[unknownKey])
 	assert.Equal(t, "dynamic-value", safe[dynamicKey])
 	assert.Equal(t, RedactedValue, safe[dynamicSecretKey])
 	assert.Equal(t, RedactedValue, safe[groupKey])
 	assert.Equal(t, RedactedValue, safe[slashGroupKey])
+	// A declared key is named and masked; an undeclared one is not named at all.
+	assert.NotContains(t, safe, unknownKey)
 
 	raw := mgr.GetConfigsRaw()
 	assert.Equal(t, "opaque-secret", raw[opaqueKey])
@@ -348,7 +361,7 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 	safeView := mgr.GetConfigsView()
 	assert.Contains(t, safeView[publicKey], RuntimeSource)
 	assert.Equal(t, RedactedValue, safeView[opaqueKey])
-	assert.Equal(t, RedactedValue, safeView[unknownKey])
+	assert.NotContains(t, safeView, unknownKey)
 
 	assert.Equal(t, "dynamic-value", mgr.GetBy(WithPrefix("dynamic"))[dynamicKey])
 	assert.Equal(t, RedactedValue, mgr.GetBy(WithPrefix("dynamic"))[dynamicSecretKey])
@@ -358,6 +371,38 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, RuntimeSource, source)
 	assert.Equal(t, "dynamic-value", value)
+
+	_, _, err = mgr.GetRegisteredConfig("unknown.key")
+	require.ErrorIs(t, err, ErrKeyUnregistered)
+	_, _, err = mgr.GetRegisteredConfig("opaque.key")
+	require.ErrorIs(t, err, ErrKeySensitive)
+	_, _, err = mgr.GetRegisteredConfig("sensitive.group.value")
+	require.ErrorIs(t, err, ErrKeySensitive)
+}
+
+// A ParamGroup member altered through /management/config/alter lands in etcd
+// under the separator-free identity only. Reading it back by its dotted key
+// must report that value, not the one the yaml still carries.
+func TestRegisteredGroupMemberSeesOverride(t *testing.T) {
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile, []byte("proxy.accessLog.formatters.base.format: from-yaml\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
+
+	source, value, err := mgr.GetRegisteredConfig("proxy.accessLog.formatters.base.format")
+	require.NoError(t, err)
+	assert.Equal(t, "from-yaml", value)
+	assert.Equal(t, "FileSource", source)
+
+	// AlterConfigsInEtcd formats the key before writing, so the override only
+	// ever exists under the separator-free identity.
+	mgr.SetConfig("proxy.accessLog.formatters.base.format", "from-alter")
+
+	source, value, err = mgr.GetRegisteredConfig("proxy.accessLog.formatters.base.format")
+	require.NoError(t, err)
+	assert.Equal(t, "from-alter", value)
+	assert.Equal(t, RuntimeSource, source)
 }
 
 func TestEnvironmentSecretsAreRedacted(t *testing.T) {
@@ -383,7 +428,7 @@ func TestEnvironmentSecretsAreRedacted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, sentinelValue, resolved, "the legacy internal lookup still resolves the ambiguous alias")
 	_, _, err = mgr.GetRegisteredConfig("proxy.accessLog.formatters.DATABASE_URL")
-	require.ErrorIs(t, err, ErrKeyNotFound)
+	require.ErrorIs(t, err, ErrKeyUnregistered)
 	_, scalarValue, err := mgr.GetRegisteredConfig("public.key")
 	require.NoError(t, err)
 	assert.Equal(t, "scalar-visible", scalarValue, "explicit ParamItems may still use environment overrides")
@@ -440,7 +485,7 @@ func TestFileConfigProjectionRedactsByDefault(t *testing.T) {
 	safe := mgr.FileConfigs()
 	assert.Equal(t, "visible", safe["public.key"])
 	assert.Equal(t, RedactedValue, safe["opaque.key"])
-	assert.Equal(t, RedactedValue, safe["unknown.key"])
+	assert.NotContains(t, safe, "unknown.key")
 
 	raw := mgr.GetConfigsRaw()
 	assert.Equal(t, "opaque-secret", raw["opaque.key"])

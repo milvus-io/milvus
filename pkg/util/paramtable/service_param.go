@@ -1430,6 +1430,10 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.",
 		Export:       true,
 		Immutable:    true,
+		// A size bound that happens to live below the kafka.producer. prefix,
+		// which is sensitive because librdkafka options are arbitrary. This one
+		// is declared here, so it is not arbitrary.
+		NonSensitive: true,
 	}
 	k.ProducerMessageMaxBytes.Init(base.mgr)
 

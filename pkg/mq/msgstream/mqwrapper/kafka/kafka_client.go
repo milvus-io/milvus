@@ -63,12 +63,14 @@ func NewKafkaClientInstance(address string) *kafkaClient {
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
 	// Kafka extra configs may contain arbitrary authentication material (for
-	// example ssl.key.pem or sasl.jaas.config). Log only their shape; key-name
-	// allowlists cannot safely classify every librdkafka option.
+	// example ssl.key.pem or sasl.jaas.config), so ConfigtoString prints the
+	// option names without their values: a key-name allowlist cannot safely
+	// classify every librdkafka option, but knowing which options are set is
+	// what makes a broker misconfiguration diagnosable.
 	mlog.Info(context.TODO(), "init kafka config",
-		mlog.Int("commonConfigEntries", len(config)),
-		mlog.Int("extraConsumerConfigEntries", len(extraConsumerConfig)),
-		mlog.Int("extraProducerConfigEntries", len(extraProducerConfig)),
+		mlog.String("commonConfigKeys", ConfigtoString(config)),
+		mlog.String("extraConsumerConfigKeys", ConfigtoString(extraConsumerConfig)),
+		mlog.String("extraProducerConfigKeys", ConfigtoString(extraProducerConfig)),
 	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
