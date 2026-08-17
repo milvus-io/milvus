@@ -738,8 +738,8 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().QueryNodeCfg.TakeForOutputTopKLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			SyncTakeForOutputTopKLimit(paramtable.Get())
+		paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			SyncTakeForOutputResultCountLimit(paramtable.Get())
 			return nil
 		})
 

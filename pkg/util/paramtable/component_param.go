@@ -62,14 +62,15 @@ const (
 	// placeholders and the rest of the internal request retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
-	MaxClusterIDBits                = 3
+	DefaultMaxDegree                     = 56
+	DefaultSearchListSize                = 100
+	DefaultPQCodeBudgetGBRatio           = 0.125
+	DefaultBuildNumThreadsRatio          = 1.0
+	DefaultSearchCacheBudgetGBRatio      = 0.10
+	DefaultLoadNumThreadRatio            = 8.0
+	DefaultBeamWidthRatio                = 4.0
+	MaxClusterIDBits                     = 3
+	defaultTakeForOutputResultCountLimit = "10000"
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -3946,7 +3947,7 @@ type queryNodeConfig struct {
 	// output fields take
 	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
-	TakeForOutputTopKLimit             ParamItem `refreshable:"true"`
+	TakeForOutputResultCountLimit      ParamItem `refreshable:"true"`
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
@@ -5396,23 +5397,24 @@ user-task-polling:
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
 
-	p.TakeForOutputTopKLimit = ParamItem{
-		Key:          "queryNode.takeForOutput.topKLimit",
+	p.TakeForOutputResultCountLimit = ParamItem{
+		Key:          "queryNode.takeForOutput.resultCountLimit",
 		Version:      "3.0.0",
-		DefaultValue: "10000",
-		Doc:          `Maximum search topK that can use take() for output fields. Set to 0 to disable the limit`,
+		DefaultValue: defaultTakeForOutputResultCountLimit,
+		Doc:          `Maximum search topK, unique search offset count, or retrieve result row count that can use take() for output fields. Set to 0 to disable the limit`,
 		Export:       false,
 		Formatter: func(v string) string {
 			limit, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || limit < 0 {
-				mlog.Warn(context.TODO(), "queryNode.takeForOutput.topKLimit must be non-negative, using default 10000",
-					mlog.String("configured", v))
-				return "10000"
+				mlog.Warn(context.TODO(), "queryNode.takeForOutput.resultCountLimit must be non-negative, using default",
+					mlog.String("configured", v),
+					mlog.String("default", defaultTakeForOutputResultCountLimit))
+				return defaultTakeForOutputResultCountLimit
 			}
 			return v
 		},
 	}
-	p.TakeForOutputTopKLimit.Init(base.mgr)
+	p.TakeForOutputResultCountLimit.Init(base.mgr)
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",
