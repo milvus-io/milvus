@@ -68,12 +68,23 @@ func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
 	}, "buffer stale")
 }
 
+// GetSealedSegmentsPolicy selects everything that owes a flush: segments whose
+// flush is already claimed (Flushing) ahead of the ones still waiting to be
+// claimed (Sealed).
+//
+// It only SELECTS. Claiming here would mean claiming blind — selection cannot
+// know whether the segment's data source can produce the flush yet — so it would
+// have to be undone on failure, and an undoable claim is one another path can
+// observe half-done. The claim happens where the flush content is fixed, in
+// getSyncTask.
+//
+// Selecting Flushing is what lets the claim be one-way: a claimed flush that did
+// not complete stays claimed and is picked up again here, instead of having to
+// be pushed back into Sealed to become visible.
 func GetSealedSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
 	return wrapSelectSegmentFuncPolicy(func(_ []*segmentBuffer, _ typeutil.Timestamp) []int64 {
-		ids := meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Sealed))
-		meta.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
-			metacache.WithSegmentIDs(ids...), metacache.WithSegmentState(commonpb.SegmentState_Sealed))
-		return ids
+		claimed := meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Flushing))
+		return append(claimed, meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Sealed))...)
 	}, "segment flushing")
 }
 

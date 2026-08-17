@@ -117,7 +117,11 @@ func (n *noopLocal) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel 
 	return 0, errors.New("not implemented")
 }
 
-func (n *noopLocal) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+func (n *noopLocal) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) error {
+	return getExpectErr()
+}
+
+func (n *noopLocal) PrepareReleaseSegmentsIfLocal(ctx context.Context, collectionID int64, vchannel string, segmentIDs []int64) (bool, error) {
 	return false, getExpectErr()
 }
 

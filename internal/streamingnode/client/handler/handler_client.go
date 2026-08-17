@@ -87,8 +87,14 @@ type HandlerClient interface {
 	GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error)
 
 	// PrepareReleaseManualFlushIfLocal prepares process-local release handoff.
-	// If the wal is located at remote, it will return false, error.
-	PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
+	// If the wal is located at remote, it returns an error.
+	PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) error
+
+	// PrepareReleaseSegmentsIfLocal reports whether the local write buffer still
+	// owes a growing-source flush for the given segments, nudging those flushes
+	// forward when it does. It never blocks on the drain.
+	// If the wal is located at remote, it returns an error.
+	PrepareReleaseSegmentsIfLocal(ctx context.Context, collectionID int64, vchannel string, segmentIDs []int64) (bool, error)
 
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.

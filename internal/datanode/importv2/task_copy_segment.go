@@ -256,7 +256,8 @@ func (t *CopySegmentTask) GetSegmentResults() map[int64]*datapb.CopySegmentResul
 // Parameters: None (uses task's internal request)
 //
 // Returns:
-//   - []*conc.Future[any]: A task-level finalizer future (nil if validation fails)
+//   - []*conc.Future[any]: A task-level finalizer future (a pre-failed future
+//     if validation fails, so the scheduler observes the failure)
 func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	mlog.Info(t.ctx, "start copy segment task", WrapLogFields(t)...)
 
@@ -267,16 +268,24 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	targets := t.req.GetTargets()
 
 	// Step 2: Validate input
+	// Setup failures flow through a failed future instead of writing Failed
+	// here. The scheduler is the ONLY publisher of terminal states, and it
+	// publishes Completed whenever BlockOnAll returns nil — a worker-written
+	// Failed alongside empty futures was silently overwritten into Completed.
 	if len(sources) == 0 {
 		reason := "no source segments to copy"
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
-		return nil
+		t.manager.Update(t.GetTaskID(), UpdateReason(reason))
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			return nil, merr.WrapErrParameterInvalidMsg(reason)
+		})}
 	}
 	if len(sources) != len(targets) {
 		reason := fmt.Sprintf("source segments count (%d) does not match target segments count (%d)",
 			len(sources), len(targets))
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
-		return nil
+		t.manager.Update(t.GetTaskID(), UpdateReason(reason))
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			return nil, merr.WrapErrParameterInvalidMsg(reason)
+		})}
 	}
 
 	// Step 3: Submit all segment pairs to the execution pool. Workers publish

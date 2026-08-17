@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -235,27 +236,33 @@ func TestWaitOrPanic(t *testing.T) {
 		l := NewLoadStateLock(LoadStateDataLoaded)
 		executed := false
 
-		assert.NotPanics(t, func() {
-			l.waitOrPanic(func(state loadStateEnum) bool {
-				return state == LoadStateDataLoaded
-			}, func() { executed = true })
-		})
+		l.waitOrPanic(func(state loadStateEnum) bool {
+			return state == LoadStateDataLoaded
+		}, func() { executed = true })
 
 		assert.True(t, executed)
 	})
 
+	// The watchdog timeout must not end the wait: then() has to run eventually,
+	// because a caller that gave up would proceed with a nil guard and skip the
+	// native cleanup.
 	t.Run("timeout_keeps_waiting", func(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "0.05")
 		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
 
 		l := NewLoadStateLock(LoadStateOnlyMeta)
+		var mu sync.Mutex
 		executed := false
 		ch := make(chan struct{})
 
 		go func() {
 			l.waitOrPanic(func(state loadStateEnum) bool {
 				return state == LoadStateDataLoaded
-			}, func() { executed = true })
+			}, func() {
+				mu.Lock()
+				defer mu.Unlock()
+				executed = true
+			})
 			close(ch)
 		}()
 
@@ -264,7 +271,9 @@ func TestWaitOrPanic(t *testing.T) {
 			t.Fatal("waitOrPanic returned before the predicate became ready")
 		case <-time.After(200 * time.Millisecond):
 		}
+		mu.Lock()
 		assert.False(t, executed)
+		mu.Unlock()
 
 		g, err := l.StartLoadData()
 		assert.NoError(t, err)
@@ -276,8 +285,53 @@ func TestWaitOrPanic(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 			t.Fatal("waitOrPanic did not return after the predicate became ready")
 		}
+		mu.Lock()
 		assert.True(t, executed)
+		mu.Unlock()
 	})
+}
+
+// Data-scope release honours the pin for the same reason StartReleaseAll does:
+// a pin means someone holds a pointer into this segment's data (a search, or a
+// growing-source flush reading rows), and freeing it underneath them is a
+// use-after-free. It must block until the pin drops, never hand back a guard --
+// and never hand back a nil guard either, which LocalSegment.Release would read
+// as "already released" and skip C.DeleteSegment, leaking the C++ segment.
+func TestStartReleaseDataWaitsWhilePinned(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "0.05")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
+
+	l := NewLoadStateLock(LoadStateDataLoaded)
+	assert.True(t, l.PinIfNotReleased())
+
+	ch := make(chan LoadStateLockGuard, 1)
+	go func() {
+		ch <- l.StartReleaseData()
+	}()
+
+	// Must still be waiting well past the watchdog timeout.
+	select {
+	case g := <-ch:
+		if g != nil {
+			g.Done(nil)
+		}
+		l.Unpin()
+		t.Fatal("StartReleaseData returned while the segment was still pinned")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	l.Unpin()
+
+	select {
+	case g := <-ch:
+		assert.NotNil(t, g)
+		g.Done(nil)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("StartReleaseData did not return after the pin dropped")
+	}
+
+	assert.Equal(t, LoadStateOnlyMeta, l.state)
 }
 
 func TestPinIf(t *testing.T) {

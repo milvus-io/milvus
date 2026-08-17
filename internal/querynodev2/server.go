@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
@@ -113,8 +114,14 @@ type QueryNode struct {
 	pipelineManager       pipeline.Manager
 	subscribingChannels   *typeutil.ConcurrentSet[string]
 	unsubscribingChannels *typeutil.ConcurrentSet[string]
-	delegators            *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
-	serverID              int64
+	// channelOpLock serializes WatchDmChannels and UnsubDmChannel per channel.
+	// The two sets above only fast-reject; without mutual exclusion an unsub
+	// could remove and close the delegator a concurrent watch had just
+	// inserted, and the watch would then activate a provider whose delegator
+	// is already dead. One channel, one lifecycle operation at a time.
+	channelOpLock *lock.KeyLock[string]
+	delegators    *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	serverID      int64
 
 	// segment loader
 	loader segments.Loader
@@ -406,6 +413,7 @@ func (node *QueryNode) Init() error {
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
+		node.channelOpLock = lock.NewKeyLock[string]()
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
@@ -499,6 +507,7 @@ func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
+		stopStart := time.Now()
 		mlog.Info(node.ctx, "Query node stop...")
 		err := node.session.GoingStop()
 		if err != nil {
@@ -588,11 +597,30 @@ func (node *QueryNode) Stop() error {
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
+
+		// Last chance to flush the rows that live ONLY here. Must run while the
+		// pipeline is still consuming — see the function comment.
+		node.drainGrowingSourceFlushBeforeDestroy(stopStart)
+
 		if node.scheduler != nil {
 			node.scheduler.Stop()
 		}
 		if node.pipelineManager != nil {
 			node.pipelineManager.Close()
+		}
+
+		// Close the delegators before the segment manager is cleared. Nothing
+		// else unregisters their growing-source providers: UnsubDmChannel is the
+		// only other path that does, and a forced stop never runs it. A leaked
+		// provider keeps answering from a dead delegator — with a frozen TSafe,
+		// so it answers Pending — and keeps its registry token alive, which the
+		// write buffer reads as "this channel still has a live local source".
+		if node.delegators != nil {
+			node.delegators.Range(func(channel string, sd delegator.ShardDelegator) bool {
+				node.delegators.GetAndRemove(channel)
+				sd.Close()
+				return true
+			})
 		}
 
 		if node.session != nil {
@@ -611,6 +639,147 @@ func (node *QueryNode) Stop() error {
 		node.cancel()
 	})
 	return nil
+}
+
+const (
+	// minStopGrowingFlushDrainTimeout / maxStopGrowingFlushDrainTimeout bound the
+	// best-effort growing-source drain done on Stop.
+	//
+	// The max exists because the node's own graceful-stop budget
+	// (QueryNodeCfg.GracefulStopTimeout, 1800s by default) is not a usable bound
+	// here: the drain talks to object storage, and an unbounded (or 30-minute)
+	// wait would hang Stop, and with it every caller queued behind it.
+	//
+	// The min exists because the branch that needs this most — the migrate
+	// timeout / no-other-query-node fallback — reaches the drain with the
+	// graceful budget already fully spent. A zero budget there would make the
+	// step dead code exactly where it matters, so a short attempt is still made.
+	minStopGrowingFlushDrainTimeout = 5 * time.Second
+	maxStopGrowingFlushDrainTimeout = time.Minute
+)
+
+// stopGrowingSourceFlushDrainTimeout returns the drain bound: whatever is left
+// of the graceful-stop budget, clamped into [min, max].
+func stopGrowingSourceFlushDrainTimeout(stopStart time.Time) time.Duration {
+	remaining := paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second) - time.Since(stopStart)
+	if remaining > maxStopGrowingFlushDrainTimeout {
+		remaining = maxStopGrowingFlushDrainTimeout
+	}
+	if remaining < minStopGrowingFlushDrainTimeout {
+		remaining = minStopGrowingFlushDrainTimeout
+	}
+	return remaining
+}
+
+// drainGrowingSourceFlushBeforeDestroy runs, best effort and bounded, the same
+// fence -> ManualFlush -> drain that UnsubDmChannel performs, for every
+// delegator channel that still has a growing-source provider registered.
+//
+// Why it exists: with growing-source flush the rows of a growing segment live
+// only in this node's segment plus the WAL — the write buffer keeps a progress
+// ledger, not a copy. Stop() has fallback branches (migrate timeout, standalone
+// with no other query node) that skip the graceful handoff entirely and go
+// straight to closing the delegators and clearing the segment manager, so
+// nothing else performs that drain. A local write buffer left owing a flush
+// then retries forever against a source that will never return.
+//
+// Why HERE and not just before the delegator-close loop: the fence appends a
+// ManualFlush record whose timestamp is later than every prior write, and the
+// growing source only reports those rows flushable once this node has consumed
+// up to that record (delegatorGrowingSourceProvider.behindEndPos and
+// GrowingFlushSource.TSafe both read the delegator's TSafe, which only the
+// pipeline advances). Once pipelineManager.Close() runs, TSafe freezes, the
+// source answers Pending forever, and a drain placed after it would burn the
+// whole budget and flush nothing.
+//
+// Why bounded: the drain writes to object storage; an unbounded wait would hang
+// Stop (and lifetime.Wait / the process shutdown queued behind it).
+//
+// Why destroying anyway is still safe when the drain fails: the rows are in the
+// WAL and the channel checkpoint stays pinned behind them by the growing-source
+// progress entry, so a restart replays them. What a failed drain loses is the
+// chance to flush them NOW, not the data.
+func (node *QueryNode) drainGrowingSourceFlushBeforeDestroy(stopStart time.Time) {
+	if node.delegators == nil || node.manager == nil {
+		return
+	}
+
+	type drainTarget struct {
+		channel      string
+		collectionID int64
+		segmentIDs   []int64
+	}
+	targets := make([]drainTarget, 0)
+	node.delegators.Range(func(channel string, sd delegator.ShardDelegator) bool {
+		// A registered growing-source provider is the signal that a local write
+		// buffer may owe a growing-source flush here — the same guard
+		// UnsubDmChannel uses. The local growing-segment snapshot is deliberately
+		// NOT trusted for "nothing owed": the provider answers
+		// GrowingSourcePending for a segment this node has not materialized yet,
+		// and the write buffer treats Pending as "choose growing source" —
+		// stickily — so it can already own ref-payload debt for segments
+		// localGrowingSegmentIDs does not see. Skipping such a channel would
+		// close the pipeline, freeze TSafe, and leave Pending unable to ever
+		// become Usable — the debt would wait for a restart. Conversely, no
+		// provider means no local write buffer ever chose growing source on this
+		// channel, so nothing can be owed: skip it and spend no budget.
+		if syncmgr.DefaultGrowingSourceRegistry().ProviderCount(channel) == 0 {
+			return true
+		}
+		// The snapshot only seeds the prepare with ids; empty is fine — the
+		// preparer's drain unions all tracked ref payloads of the channel and
+		// still fences.
+		targets = append(targets, drainTarget{
+			channel:      channel,
+			collectionID: sd.Collection(),
+			segmentIDs:   node.localGrowingSegmentIDs(channel, nil),
+		})
+		return true
+	})
+	if len(targets) == 0 {
+		return
+	}
+
+	timeout := stopGrowingSourceFlushDrainTimeout(stopStart)
+	// node.ctx is deliberately cancelled at the very END of Stop, so it is alive
+	// here. Guard anyway: deriving from an already-cancelled ctx would turn the
+	// drain into a silent no-op instead of a bounded attempt.
+	baseCtx := node.ctx
+	if baseCtx == nil || baseCtx.Err() != nil {
+		mlog.Warn(context.Background(), "query node ctx already done on stop, drain growing-source flush on a detached context")
+		baseCtx = context.Background()
+	}
+	// One deadline for ALL channels: the budget is what the node has left to
+	// stop in, not a per-channel allowance.
+	ctx, cancel := context.WithTimeout(baseCtx, timeout)
+	defer cancel()
+
+	for _, target := range targets {
+		err := node.prepareReleaseManualFlush(ctx, target.collectionID, target.channel, target.segmentIDs)
+		switch {
+		case err == nil:
+			mlog.Info(ctx, "drained growing-source flush before stop",
+				mlog.String("channel", target.channel),
+				mlog.Int64s("segmentIDs", target.segmentIDs))
+		case isReleaseManualFlushPrepareStructurallyUnavailable(err):
+			// No local write buffer can owe a flush for this channel (no local
+			// streaming node, channel served elsewhere, WAL shutting down), so
+			// there is nothing to drain. Expected on non-streaming deployments.
+			mlog.Info(ctx, "growing-source flush drain not applicable before stop",
+				mlog.String("channel", target.channel),
+				mlog.Err(err))
+		default:
+			// Best effort: we gave up. Never fail or hang Stop for this.
+			mlog.Warn(ctx, "failed to drain growing-source flush before stop, destroying anyway",
+				mlog.String("channel", target.channel),
+				mlog.Int64s("segmentIDs", target.segmentIDs),
+				mlog.Err(err))
+		}
+		if ctx.Err() != nil {
+			// Budget spent; the remaining channels get no attempt.
+			break
+		}
+	}
 }
 
 // UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal

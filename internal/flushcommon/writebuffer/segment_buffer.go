@@ -9,11 +9,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// segmentBuffer is one segment's unflushed data. The insert side lives behind
+// the segmentPayload interface — the one axis on which flush modes differ —
+// while the delta side is always owned Go memory (deletes are local on every
+// path; the L0 machinery is untouched by payload modes).
+//
+// Unlike the pre-payload design, a segmentBuffer PERSISTS across flush rounds:
+// Snapshot moves rows out of the payload instead of the buffer leaving the
+// map, so the payload's in-flight floors stay reachable for GetCheckpoint. The
+// buffer leaves wb.buffers only when its segment's final (flush/drop) task
+// commits.
 type segmentBuffer struct {
 	segmentID int64
 
-	insertBuffer *InsertBuffer
-	deltaBuffer  *DeltaBuffer
+	payload     segmentPayload
+	deltaBuffer *DeltaBuffer
 }
 
 func newSegmentBuffer(segmentID int64, collSchema *schemapb.CollectionSchema) (*segmentBuffer, error) {
@@ -22,26 +32,51 @@ func newSegmentBuffer(segmentID int64, collSchema *schemapb.CollectionSchema) (*
 		return nil, err
 	}
 	return &segmentBuffer{
-		segmentID:    segmentID,
-		insertBuffer: insertBuffer,
-		deltaBuffer:  NewDeltaBuffer(),
+		segmentID:   segmentID,
+		payload:     newOwnedPayload(insertBuffer),
+		deltaBuffer: NewDeltaBuffer(),
 	}, nil
 }
 
-func (buf *segmentBuffer) IsFull() bool {
-	return buf.insertBuffer.IsFull() || buf.deltaBuffer.IsFull()
+// newSegmentBufferWithPayload builds a segmentBuffer around an already-chosen
+// payload implementation (the ref path; the owned path keeps newSegmentBuffer).
+func newSegmentBufferWithPayload(segmentID int64, payload segmentPayload) *segmentBuffer {
+	return &segmentBuffer{
+		segmentID:   segmentID,
+		payload:     payload,
+		deltaBuffer: NewDeltaBuffer(),
+	}
 }
 
-func (buf *segmentBuffer) Yield() (insert []*storage.InsertData, bm25stats map[int64]*storage.BM25Stats, delete *storage.DeleteData, schema *schemapb.CollectionSchema) {
-	insert = buf.insertBuffer.Yield()
-	bm25stats = buf.insertBuffer.YieldStats()
-	delete = buf.deltaBuffer.Yield()
-	schema = buf.insertBuffer.collSchema
-	return
+func (buf *segmentBuffer) IsFull() bool {
+	return buf.payload.IsFull() || buf.deltaBuffer.IsFull()
+}
+
+// IsEmpty reports whether this buffer holds no BUFFERED data at all. In-flight
+// floors do not count: they pin the checkpoint (EarliestPosition), but an
+// empty buffer must not be selected by sync policies.
+func (buf *segmentBuffer) IsEmpty() bool {
+	payloadEmpty := buf.payload == nil ||
+		(buf.payload.UnflushedRows() == 0 && buf.payload.UnflushedBytes() == 0 &&
+			buf.payload.MinTimestamp() == math.MaxUint64)
+	deltaEmpty := buf.deltaBuffer == nil ||
+		(buf.deltaBuffer.IsEmpty() && buf.deltaBuffer.startPos == nil)
+	return payloadEmpty && deltaEmpty
+}
+
+// yieldDelta moves the buffered delete data out and resets the delta buffer
+// for the next round. It returns the yielded data together with the time range
+// and start position it was buffered under (both read BEFORE the reset).
+func (buf *segmentBuffer) yieldDelta() (*storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
+	delta := buf.deltaBuffer.Yield()
+	timeRange := buf.deltaBuffer.GetTimeRange()
+	startPos := buf.deltaBuffer.startPos
+	buf.deltaBuffer = NewDeltaBuffer()
+	return delta, timeRange, startPos
 }
 
 func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
-	insertTs := buf.insertBuffer.MinTimestamp()
+	insertTs := buf.payload.MinTimestamp()
 	deltaTs := buf.deltaBuffer.MinTimestamp()
 
 	if insertTs < deltaTs {
@@ -50,28 +85,17 @@ func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
 	return deltaTs
 }
 
+// EarliestPosition is the replay origin of everything this segment has not yet
+// flush-committed: buffered inserts and deletes, plus the payload's in-flight
+// snapshot floors.
 func (buf *segmentBuffer) EarliestPosition() *msgpb.MsgPosition {
-	return getEarliestCheckpoint(buf.insertBuffer.startPos, buf.deltaBuffer.startPos)
+	return getEarliestCheckpoint(buf.payload.EarliestPosition(), buf.deltaBuffer.startPos)
 }
 
-func (buf *segmentBuffer) GetTimeRange() *TimeRange {
-	result := &TimeRange{
-		timestampMin: math.MaxUint64,
-		timestampMax: 0,
-	}
-	if buf.insertBuffer != nil {
-		result.Merge(buf.insertBuffer.GetTimeRange())
-	}
-	if buf.deltaBuffer != nil {
-		result.Merge(buf.deltaBuffer.GetTimeRange())
-	}
-
-	return result
-}
-
-// MemorySize returns total memory size of insert buffer & delta buffer.
+// MemorySize returns total resident memory of the buffered (not in-flight)
+// insert payload & delta buffer.
 func (buf *segmentBuffer) MemorySize() int64 {
-	return buf.insertBuffer.size + buf.deltaBuffer.size
+	return buf.payload.UnflushedBytes() + buf.deltaBuffer.size
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

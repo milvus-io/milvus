@@ -376,12 +376,21 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
+		// Setup failures flow through a FAILED FUTURE, not a worker-written
+		// state: the scheduler is the only terminal-state publisher, and it
+		// publishes Completed whenever BlockOnAll returns nil — so an empty
+		// future list here used to turn this validation failure into Completed.
 		futures := task.Execute()
-		assert.Nil(t, futures)
+		assert.Len(t, futures, 1)
+		err := conc.BlockOnAll(futures...)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no source segments")
 
-		// Verify task state is Failed
+		// The worker records only the reason; the state must stay exactly
+		// InProgress (set at Execute start) — the scheduler is the sole
+		// terminal-state publisher.
 		updatedTask := mockManager.Get(task.GetTaskID())
-		assert.Equal(t, datapb.ImportTaskStateV2_Failed, updatedTask.GetState())
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, updatedTask.GetState())
 		assert.Contains(t, updatedTask.GetReason(), "no source segments")
 	})
 
@@ -403,11 +412,15 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 		mockManager.Add(task)
 
 		futures := task.Execute()
-		assert.Nil(t, futures)
+		assert.Len(t, futures, 1)
+		err := conc.BlockOnAll(futures...)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match")
 
-		// Verify task state is Failed
+		// Same contract: the worker records the reason but leaves the state at
+		// the InProgress it set on entry; only the scheduler publishes terminal.
 		updatedTask := mockManager.Get(task.GetTaskID())
-		assert.Equal(t, datapb.ImportTaskStateV2_Failed, updatedTask.GetState())
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, updatedTask.GetState())
 		assert.Contains(t, updatedTask.GetReason(), "does not match")
 	})
 
@@ -1609,4 +1622,58 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, latest.GetState())
 		assert.Empty(t, latest.GetReason())
 	})
+}
+
+// Regression: Remove() cancels the manager's stored clone. With a child context
+// per clone, that cancellation never reached the worker's instance, so a
+// dropped import kept reading, writing and retrying forever. ctx/cancel must be
+// lifecycle objects shared by every clone.
+func TestImportTaskCancelPropagatesAcrossClones(t *testing.T) {
+	for name, task := range map[string]Task{
+		"import": &ImportTask{
+			ImportTaskV2: &datapb.ImportTaskV2{TaskID: 9200},
+			req:          &datapb.ImportRequest{},
+		},
+		"l0_import": &L0ImportTask{
+			ImportTaskV2: &datapb.ImportTaskV2{TaskID: 9201},
+			req:          &datapb.ImportRequest{},
+		},
+		"preimport": &PreImportTask{
+			PreImportTask: &datapb.PreImportTask{TaskID: 9202},
+			req:           &datapb.PreImportRequest{},
+		},
+		"l0_preimport": &L0PreImportTask{
+			PreImportTask: &datapb.PreImportTask{TaskID: 9203},
+			req:           &datapb.PreImportRequest{},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			// Remove() is what must call cancel; the deferred call only
+			// silences vet and is idempotent.
+			defer cancel()
+			switch v := task.(type) {
+			case *ImportTask:
+				v.ctx, v.cancel = ctx, cancel
+			case *L0ImportTask:
+				v.ctx, v.cancel = ctx, cancel
+			case *PreImportTask:
+				v.ctx, v.cancel = ctx, cancel
+			case *L0PreImportTask:
+				v.ctx, v.cancel = ctx, cancel
+			}
+
+			manager := NewTaskManager()
+			manager.Add(task)
+			// Two updates → the manager now holds a clone of a clone.
+			manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+			manager.Update(task.GetTaskID(), UpdateReason("x"))
+
+			// Remove cancels the manager's instance; the WORKER's ctx (the
+			// original) must observe it.
+			manager.Remove(task.GetTaskID())
+			assert.Error(t, ctx.Err(),
+				"cancel must reach the instance the workers captured")
+		})
+	}
 }

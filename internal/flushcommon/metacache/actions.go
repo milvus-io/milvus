@@ -130,14 +130,6 @@ func WithNoSyncingTask() SegmentFilter {
 
 type SegmentAction func(info *SegmentInfo)
 
-func SegmentActions(actions ...SegmentAction) SegmentAction {
-	return func(info *SegmentInfo) {
-		for _, act := range actions {
-			act(info)
-		}
-	}
-}
-
 func UpdateBinlogs(binlogs []*datapb.FieldBinlog) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.binlogs = binlogs
@@ -239,6 +231,16 @@ func AbortSyncing(batchSize int64) SegmentAction {
 	}
 }
 
+// DiscardSyncing removes a task's syncing ownership without pretending that
+// its payload was restored to the write buffer. Use AbortSyncing only when the
+// exact batch is actually put back into a buffer.
+func DiscardSyncing(batchSize int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.syncingRows -= batchSize
+		info.syncingTasks--
+	}
+}
+
 func FinishSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows += batchSize
@@ -247,9 +249,53 @@ func FinishSyncing(batchSize int64) SegmentAction {
 	}
 }
 
+// SetLastFlushPosition records how far this segment has been flushed, as a WAL
+// position. Applied in the same commit transaction that publishes the flush, so
+// the fence advances only once the data it names is durable.
+func SetLastFlushPosition(position *msgpb.MsgPosition) SegmentAction {
+	return func(info *SegmentInfo) {
+		if position == nil {
+			return
+		}
+		if info.lastFlushPosition == nil || position.GetTimestamp() > info.lastFlushPosition.GetTimestamp() {
+			info.lastFlushPosition = position
+		}
+	}
+}
+
+// SetPendingFlushCheckpointIfNil records the WAL position a replay must resume
+// from to regenerate this segment's outstanding flush obligation. Applied when
+// the segment is sealed, so the channel checkpoint cannot advance past the fence
+// that sealed it before the resulting flush is committed.
+//
+// Set-if-nil, NOT max: a re-seal of an already sealed segment must never push
+// the pin later. The earliest un-committed fence is the one recovery needs.
+func SetPendingFlushCheckpointIfNil(position *msgpb.MsgPosition) SegmentAction {
+	return func(info *SegmentInfo) {
+		if position == nil {
+			return
+		}
+		if info.pendingFlushCheckpoint == nil {
+			info.pendingFlushCheckpoint = position
+		}
+	}
+}
+
 func UpdateCurrentSplit(split []storagecommon.ColumnGroup) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.currentSplit = split
+	}
+}
+
+// SetCurrentSplitIfNil fixes a segment's physical column layout before
+// concurrent storage prepares start. The split is derived state: installing it
+// early does not advance the segment checkpoint, and a WAL replay can derive it
+// again if the process exits before metadata commit.
+func SetCurrentSplitIfNil(split []storagecommon.ColumnGroup) SegmentAction {
+	return func(info *SegmentInfo) {
+		if info.currentSplit == nil {
+			info.currentSplit = split
+		}
 	}
 }
 

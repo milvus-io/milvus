@@ -7318,6 +7318,7 @@ type dataNodeConfig struct {
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
 	MemoryCheckInterval       ParamItem `refreshable:"true"`
+	FlushRetryInterval        ParamItem `refreshable:"true"`
 	MemoryForceSyncWatermark  ParamItem `refreshable:"true"`
 
 	// DataNode send timetick interval per collection
@@ -7498,6 +7499,18 @@ Setting this parameter too small causes the system to store a small amount of da
 		Export:       true,
 	}
 	p.MemoryCheckInterval.Init(base.mgr)
+
+	p.FlushRetryInterval = ParamItem{
+		Key:          "dataNode.flushRetryInterval",
+		Version:      "2.7.0",
+		DefaultValue: "3000", // milliseconds
+		Doc: `The minimum interval between two flush attempts for one segment, in milliseconds.
+A failed flush keeps its buffered data and its position in the segment's queue; the next
+timetick that arrives after this interval re-drives it, starting from the oldest pending
+batch. This is the only place the flush path retries a whole task.`,
+		Export: true,
+	}
+	p.FlushRetryInterval.Init(base.mgr)
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		p.MemoryForceSyncWatermark = ParamItem{

@@ -64,7 +64,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "write_data_count",
-			Help:      "byte size of datanode write to object storage, including flushed size",
+			Help:      "number of records written by datanode to object storage",
 		}, []string{
 			nodeIDLabelName,
 			dataSourceLabelName,
@@ -122,7 +122,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "save_latency",
-			Help:      "latency of saving flush data to storage",
+			Help:      "latency in milliseconds of saving flush data to storage",
 			Buckets:   []float64{0, 10, 100, 200, 400, 1000, 10000},
 		}, []string{
 			nodeIDLabelName,
@@ -146,7 +146,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "growing_source_sync_failure_count",
-			Help:      "consecutive failure count of growing-source source sync",
+			Help:      "maximum consecutive growing-source sync failures among segments on the channel",
 		}, []string{
 			nodeIDLabelName,
 			collectionIDLabelName,
@@ -223,7 +223,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "fg_buffer_size",
-			Help:      "the buffered data size of flow graph",
+			Help:      "bytes owned by write buffers, including buffered data and in-flight flush payloads",
 		}, []string{
 			nodeIDLabelName,
 			collectionIDLabelName,
@@ -422,6 +422,28 @@ func (c *dataNodePoolMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 
 var registerDNOnce sync.Once
 
+type dataNodeCollectionMetricKey struct {
+	nodeID       int64
+	collectionID int64
+}
+
+var dataNodeCollectionMetricRefs = struct {
+	sync.Mutex
+	refs map[dataNodeCollectionMetricKey]int
+}{
+	refs: make(map[dataNodeCollectionMetricKey]int),
+}
+
+// AcquireDataNodeCollectionMetrics records one live flowgraph for the
+// collection-scoped DDNode counters. Several vchannels of one collection can
+// coexist on a node, so closing one channel must not reset counters still used
+// by the others.
+func AcquireDataNodeCollectionMetrics(nodeID int64, collectionID int64) {
+	dataNodeCollectionMetricRefs.Lock()
+	defer dataNodeCollectionMetricRefs.Unlock()
+	dataNodeCollectionMetricRefs.refs[dataNodeCollectionMetricKey{nodeID: nodeID, collectionID: collectionID}]++
+}
+
 // RegisterDataNode registers DataNode metrics
 func RegisterDataNode(registry *prometheus.Registry) {
 	registerDNOnce.Do(func() {
@@ -449,6 +471,18 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeFlushedSize)
 	registry.MustRegister(DataNodeFlushedRows)
 	registry.MustRegister(DataNodeWriteDataCount)
+	// SyncManager is shared by standalone DataNode and StreamingNode. Register
+	// its collectors here because RegisterStreamingNode also calls
+	// RegisterDataNode; keeping one registration owner avoids duplicate
+	// registration while exposing the metrics in both roles.
+	registry.MustRegister(WALFlusherSyncDispatcherPendingTasks)
+	registry.MustRegister(WALFlusherSyncDispatcherTaskTotal)
+	registry.MustRegister(WALFlusherSyncDispatcherQueueDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherPrepareQueueDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherPrepareDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherExecuteDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherCommitWaitDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherCommitDuration)
 	// compaction related
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
@@ -474,7 +508,25 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	RegisterLoggingMetrics(registry)
 }
 
-func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
+func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, _ string) {
+	// These DDNode counters are shared by every vchannel of the collection.
+	// Delete them only after the last registered flowgraph closes.
+	key := dataNodeCollectionMetricKey{nodeID: nodeID, collectionID: collectionID}
+	dataNodeCollectionMetricRefs.Lock()
+	refs := dataNodeCollectionMetricRefs.refs[key]
+	if refs > 1 {
+		dataNodeCollectionMetricRefs.refs[key] = refs - 1
+		dataNodeCollectionMetricRefs.Unlock()
+		return
+	}
+	if refs == 1 {
+		delete(dataNodeCollectionMetricRefs.refs, key)
+	}
+	// Keep the lifecycle lock through deletion. Otherwise a replacement
+	// channel could Acquire between the decrement and the deletes, then have
+	// its freshly-created series removed by this closing channel.
+	defer dataNodeCollectionMetricRefs.Unlock()
+
 	// The InputNode owns the collection-level AllLabel metrics. They are
 	// deleted when the last InputNode using the cached handles is closed.
 	for _, label := range []string{DeleteLabel, InsertLabel} {
@@ -486,23 +538,6 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 					collectionIDLabelName: fmt.Sprint(collectionID),
 				})
 	}
-
-	DataNodeFlowGraphBufferDataSize.Delete(prometheus.Labels{
-		nodeIDLabelName:       fmt.Sprint(nodeID),
-		collectionIDLabelName: fmt.Sprint(collectionID),
-	})
-
-	DataNodeCompactionDeleteCount.Delete(prometheus.Labels{
-		collectionIDLabelName: fmt.Sprint(collectionID),
-	})
-
-	DataNodeCompactionMissingDeleteCount.Delete(prometheus.Labels{
-		collectionIDLabelName: fmt.Sprint(collectionID),
-	})
-
-	DataNodeWriteDataCount.Delete(prometheus.Labels{
-		collectionIDLabelName: fmt.Sprint(collectionID),
-	})
 }
 
 func CleanupDataNodeCompactionMetrics(nodeID int64) {

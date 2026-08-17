@@ -19,24 +19,309 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestNewSyncTaskConcurrentSameSegmentPreservesInitializedMetadata(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.CommonCfg.Stv2SplitByAvgSize.Key, "true"))
+	defer params.Reset(params.CommonCfg.Stv2SplitByAvgSize.Key)
+	require.NoError(t, params.Save(params.CommonCfg.Stv2SplitAvgSizeThreshold.Key, "64"))
+	defer params.Reset(params.CommonCfg.Stv2SplitAvgSizeThreshold.Key)
+
+	const (
+		collectionID = int64(10)
+		partitionID  = int64(20)
+		segmentID    = int64(30)
+		channel      = "by-dev-rootcoord-dml_0_10v0"
+	)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+		{FieldID: 101, Name: "left", DataType: schemapb.DataType_VarChar},
+		{FieldID: 102, Name: "right", DataType: schemapb.DataType_VarChar},
+	}}
+	req := &datapb.ImportRequest{
+		CollectionID: collectionID,
+		PartitionIDs: []int64{partitionID},
+		Vchannels:    []string{channel},
+		Schema:       schema,
+		IDRange:      &datapb.IDRange{Begin: 1, End: 1000},
+		RequestSegments: []*datapb.ImportRequestSegment{{
+			SegmentID: segmentID, PartitionID: partitionID, Vchannel: channel,
+		}},
+		StorageVersion: storage.StorageV2,
+		StorageConfig:  &indexpb.StorageConfig{},
+	}
+	newTask := func() *ImportTask {
+		return NewImportTask(typeutil.Clone(req), NewTaskManager(), nil, nil).(*ImportTask)
+	}
+	newData := func(wideField int64) *storage.InsertData {
+		value := func(fieldID int64) string {
+			if fieldID == wideField {
+				return strings.Repeat("x", 128)
+			}
+			return "x"
+		}
+		return &storage.InsertData{Data: map[int64]storage.FieldData{
+			100: &storage.StringFieldData{Data: []string{"pk"}, DataType: schemapb.DataType_VarChar},
+			101: &storage.StringFieldData{Data: []string{value(101)}, DataType: schemapb.DataType_VarChar},
+			102: &storage.StringFieldData{Data: []string{value(102)}, DataType: schemapb.DataType_VarChar},
+		}}
+	}
+	leftWide, rightWide := newData(101), newData(102)
+
+	resolveInIsolation := func(data *storage.InsertData) []storagecommon.ColumnGroup {
+		task := newTask()
+		_, err := NewSyncTask(task.allocator, task.metaCaches,
+			segmentID, partitionID, collectionID, channel, data, nil, nil, req.GetStorageConfig())
+		require.NoError(t, err)
+		segment, ok := task.metaCaches[channel].GetSegmentByID(segmentID)
+		require.True(t, ok)
+		return segment.GetCurrentSplit()
+	}
+	leftLayout := resolveInIsolation(leftWide)
+	rightLayout := resolveInIsolation(rightWide)
+	require.NotEqual(t, leftLayout, rightLayout, "the two batches must propose distinct layouts")
+
+	shared := newTask()
+	cache := shared.metaCaches[channel]
+	cache.UpdateSegments(metacache.MergeSegmentAction(
+		metacache.UpdateNumOfRows(37),
+		metacache.UpdateManifestPath("preserved-manifest"),
+	), metacache.WithSegmentIDs(segmentID))
+	before, ok := cache.GetSegmentByID(segmentID)
+	require.True(t, ok)
+	stats := before.Statistics()
+
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, data := range []*storage.InsertData{leftWide, rightWide} {
+		data := data
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := NewSyncTask(shared.allocator, shared.metaCaches,
+				segmentID, partitionID, collectionID, channel, data, nil, nil, req.GetStorageConfig())
+			errCh <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	after, ok := cache.GetSegmentByID(segmentID)
+	require.True(t, ok)
+	assert.Equal(t, int64(37), after.FlushedRows())
+	assert.Equal(t, "preserved-manifest", after.ManifestPath())
+	assert.Same(t, stats, after.Statistics())
+	assert.True(t,
+		assert.ObjectsAreEqual(leftLayout, after.GetCurrentSplit()) || assert.ObjectsAreEqual(rightLayout, after.GetCurrentSplit()),
+		"the shared segment must keep exactly one proposed layout",
+	)
+}
+
+// releaseOnDone must settle the task's resources (via Abandon) on BOTH the
+// success and the error path, and must pass the callback's error through
+// unchanged. The payload-accounting hook is the counting fake: it fires exactly
+// once, from Abandon's release path.
+func TestReleaseOnDoneSettlesResourcesOnBothPaths(t *testing.T) {
+	syncErr := errors.New("sync failed")
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success", err: nil},
+		{name: "error", err: syncErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			releaseCount := 0
+			releasedBytes := int64(0)
+			task := syncmgr.NewSyncTask().WithPayloadAccounting(128, 64, func(released int64) {
+				releaseCount++
+				releasedBytes += released
+			})
+			callback := releaseOnDone(task)
+			got := callback(tc.err)
+			if tc.err == nil {
+				assert.NoError(t, got)
+			} else {
+				assert.ErrorIs(t, got, syncErr, "the callback must pass the error through unchanged")
+			}
+			assert.Equal(t, 1, releaseCount, "resources must be settled exactly once")
+			assert.Equal(t, int64(192), releasedBytes, "the full payload must be released")
+
+			// Running the callback again must not release anything more —
+			// Abandon is idempotent.
+			_ = callback(tc.err)
+			assert.Equal(t, 1, releaseCount)
+		})
+	}
+}
+
+// NewSyncTask must refuse to build a task for a segment the metacache never
+// initialized: lazy initialization would race with a concurrent file targeting
+// the same segment (see initImportSegments).
+func TestNewSyncTaskUninitializedSegmentReturnsSegmentNotFound(t *testing.T) {
+	paramtable.Init()
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(2)
+		segmentID    = int64(3)
+		channel      = "ch-0"
+	)
+	req := &datapb.ImportRequest{
+		CollectionID: collectionID,
+		PartitionIDs: []int64{partitionID},
+		Vchannels:    []string{channel},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+		}},
+	}
+	metaCaches := NewMetaCache(req)
+	// No initImportSegments: the segment is absent from the metacache.
+	_, err := NewSyncTask(allocator.NewLocalAllocator(1, 100), metaCaches,
+		segmentID, partitionID, collectionID, channel, nil, nil, nil, nil)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrSegmentNotFound),
+		"expected ErrSegmentNotFound wrap, got: %v", err)
+}
+
+// Interaction pair: a request segment whose vchannel is missing from metaCaches
+// is silently skipped by initImportSegments, so a later NewSyncTask for that
+// segment (under any valid channel) fails with ErrSegmentNotFound instead of
+// lazily creating it.
+func TestInitImportSegmentsSkipsUnknownVchannelThenNewSyncTaskFails(t *testing.T) {
+	paramtable.Init()
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(2)
+		segmentID    = int64(3)
+		channel      = "ch-0"
+	)
+	req := &datapb.ImportRequest{
+		CollectionID: collectionID,
+		PartitionIDs: []int64{partitionID},
+		Vchannels:    []string{channel},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+		}},
+		RequestSegments: []*datapb.ImportRequestSegment{{
+			// Vchannel does not match any entry of req.Vchannels.
+			SegmentID: segmentID, PartitionID: partitionID, Vchannel: "ch-unknown",
+		}},
+	}
+	metaCaches := NewMetaCache(req)
+	initImportSegments(metaCaches, req, storage.StorageV2, false)
+
+	// The segment was silently skipped — no cache holds it.
+	_, ok := metaCaches[channel].GetSegmentByID(segmentID)
+	assert.False(t, ok, "a segment under an unknown vchannel must not be initialized")
+
+	_, err := NewSyncTask(allocator.NewLocalAllocator(1, 100), metaCaches,
+		segmentID, partitionID, collectionID, channel, nil, nil, nil, nil)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrSegmentNotFound),
+		"expected ErrSegmentNotFound wrap, got: %v", err)
+}
+
+// syncTaskIORetryPolicy reads syncmgr.SyncTask's unexported ioRetry policy.
+// SyncTask lives in another package and deliberately exposes no getter, so the
+// test reaches through reflection; it fails loudly if the field is ever renamed.
+func syncTaskIORetryPolicy(t *testing.T, task *syncmgr.SyncTask) (uint, time.Duration, time.Duration) {
+	policy := reflect.ValueOf(task).Elem().FieldByName("ioRetry")
+	require.True(t, policy.IsValid(), "syncmgr.SyncTask no longer has an ioRetry field")
+	read := func(name string) reflect.Value {
+		f := policy.FieldByName(name)
+		require.True(t, f.IsValid(), "syncmgr ioRetryPolicy no longer has a %s field", name)
+		return reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+	}
+	return uint(read("attempts").Uint()),
+		time.Duration(read("initialInterval").Int()),
+		time.Duration(read("maxInterval").Int())
+}
+
+// Import raises BOTH halves of the sync writer's retry policy — the attempt
+// budget and the backoff schedule — because a failed import re-reads and
+// re-parses the whole file. Verify the task built by NewSyncTask actually
+// carries all three configured values.
+func TestNewSyncTaskCarriesImportIORetryBudget(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	// Values distinct from both the syncmgr defaults and the param defaults, so
+	// equality below proves the wiring rather than a coincidence.
+	require.NoError(t, params.Save(params.DataNodeCfg.ImportMaxWriteRetryAttempts.Key, "7"))
+	defer params.Reset(params.DataNodeCfg.ImportMaxWriteRetryAttempts.Key)
+	require.NoError(t, params.Save(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key, "3"))
+	defer params.Reset(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key)
+	require.NoError(t, params.Save(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key, "90"))
+	defer params.Reset(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key)
+
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(2)
+		segmentID    = int64(3)
+		channel      = "ch-0"
+	)
+	req := &datapb.ImportRequest{
+		CollectionID: collectionID,
+		PartitionIDs: []int64{partitionID},
+		Vchannels:    []string{channel},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+		}},
+		RequestSegments: []*datapb.ImportRequestSegment{{
+			SegmentID: segmentID, PartitionID: partitionID, Vchannel: channel,
+		}},
+		StorageVersion: storage.StorageV2,
+		StorageConfig:  &indexpb.StorageConfig{},
+	}
+	metaCaches := NewMetaCache(req)
+	initImportSegments(metaCaches, req, storage.StorageV2, false)
+	data := &storage.InsertData{Data: map[int64]storage.FieldData{
+		100: &storage.StringFieldData{Data: []string{"pk"}, DataType: schemapb.DataType_VarChar},
+	}}
+	task, err := NewSyncTask(allocator.NewLocalAllocator(1, 100), metaCaches,
+		segmentID, partitionID, collectionID, channel, data, nil, nil, req.GetStorageConfig())
+	require.NoError(t, err)
+	attempts, initialInterval, maxInterval := syncTaskIORetryPolicy(t, task)
+	assert.Equal(t, uint(7), attempts,
+		"NewSyncTask must carry dataNode.import.maxWriteRetryAttempts")
+	assert.Equal(t, 3*time.Second, initialInterval,
+		"NewSyncTask must carry dataNode.import.writeRetryInitialInterval")
+	assert.Equal(t, 90*time.Second, maxInterval,
+		"NewSyncTask must carry dataNode.import.writeRetryMaxInterval")
+}
 
 func Test_AppendSystemFieldsData(t *testing.T) {
 	const count = 100
@@ -1058,14 +1343,22 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
 }
 
-func TestNewWriteRetryOptions(t *testing.T) {
+func TestImportWriteRetryPolicy(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	// A failing write under the shipped defaults must back off, not spin: the first
+	// The shipped defaults: unlimited attempts with a 1s -> 60s backoff.
+	attempts, initialInterval, maxInterval := importWriteRetryPolicy()
+	assert.Equal(t, uint(0), attempts, "0 = unlimited, preserved on purpose")
+	assert.Equal(t, time.Second, initialInterval)
+	assert.Equal(t, 60*time.Second, maxInterval)
+
+	// A failing write under those defaults must back off, not spin: the first
 	// sleep is writeRetryInitialInterval (1s), so a ctx canceled well before that
-	// lets exactly one attempt through.
+	// lets exactly one attempt through. The option order mirrors syncmgr's
+	// ioRetryOptions, which is where these three values are actually applied.
 	runUntilCancel := func() int {
+		attempts, initialInterval, maxInterval := importWriteRetryPolicy()
 		// Mirror the import task ctx (task_import.go): cancellable but without a
 		// deadline, so retry.Do's deadline escape hatch cannot end the loop.
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1075,7 +1368,7 @@ func TestNewWriteRetryOptions(t *testing.T) {
 		err := retry.Do(ctx, func() error {
 			calls++
 			return errors.New("write failed")
-		}, newWriteRetryOptions()...)
+		}, retry.Attempts(attempts), retry.Sleep(initialInterval), retry.MaxSleepTime(maxInterval))
 		assert.Error(t, err)
 		return calls
 	}
@@ -1083,10 +1376,14 @@ func TestNewWriteRetryOptions(t *testing.T) {
 
 	// A non-positive interval is rejected by the paramtable formatter, so it cannot
 	// degenerate into retry.Sleep(0) — which, combined with the default
-	// maxWriteRetryAttempts=0 (unlimited), would spin with zero delay.
+	// maxWriteRetryAttempts=0 (unlimited), would spin with zero delay. syncmgr's
+	// ioRetryPolicy.normalized() is the second line of defense for the same case.
 	params.Save(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key, "0")
 	params.Save(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key, "0")
 	defer params.Reset(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key)
 	defer params.Reset(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key)
+	_, initialInterval, maxInterval = importWriteRetryPolicy()
+	assert.Positive(t, initialInterval)
+	assert.Positive(t, maxInterval)
 	assert.LessOrEqual(t, runUntilCancel(), 2)
 }

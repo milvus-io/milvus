@@ -384,6 +384,21 @@ func (m *BM25Stats) Clone() *BM25Stats {
 	}
 }
 
+// CloneBM25StatsMap deep-copies a fieldID -> BM25Stats map. Nil entries are
+// skipped, and an empty (or nil) input returns nil.
+func CloneBM25StatsMap(stats map[int64]*BM25Stats) map[int64]*BM25Stats {
+	if len(stats) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]*BM25Stats, len(stats))
+	for fieldID, stat := range stats {
+		if stat != nil {
+			cloned[fieldID] = stat.Clone()
+		}
+	}
+	return cloned
+}
+
 func (m *BM25Stats) Serialize() ([]byte, error) {
 	buffer := bytes.NewBuffer(make([]byte, 0, len(m.rowsWithToken)*8+20))
 

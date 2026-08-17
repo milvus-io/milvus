@@ -25,7 +25,7 @@ import (
 //go:generate mockery --name=BufferManager --structname=MockBufferManager --output=./  --filename=mock_manager.go --with-expecter --inpackage
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
-	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
+	Register(ctx context.Context, channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
 	CreateNewGrowingSegment(ctx context.Context, channel string, info CreateGrowingSegmentInfo) error
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
@@ -38,7 +38,7 @@ type BufferManager interface {
 	// RemoveChannel removes a write buffer from manager.
 	RemoveChannel(channel string)
 	// DropChannel remove write buffer and perform drop.
-	DropChannel(channel string)
+	DropChannel(ctx context.Context, channel string)
 	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
 	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error
@@ -47,22 +47,34 @@ type BufferManager interface {
 	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
 	NotifyCheckpointUpdated(channel string, ts uint64)
 
-	// AllowGrowingSourceFlush returns true if this channel may try growing-source flush.
-	AllowGrowingSourceFlush(channel string) bool
+	// AllowGrowingSourceFlush reports whether the channel's write buffer may try
+	// growing-source flush. found distinguishes "channel present but feature
+	// disabled" (enabled=false, found=true — safe to skip growing-source
+	// handling) from "channel absent from this manager" (found=false). Absent is
+	// NOT "not enabled": DropChannel/RemoveChannel detach the buffer from the
+	// map BEFORE the long final Close, so during that window the buffer is alive
+	// and may still owe a growing-source flush. Callers must treat found=false
+	// as unknown, never as a safe skip.
+	AllowGrowingSourceFlush(channel string) (enabled bool, found bool)
 	// GetGrowingFlushProgress returns growing-source progress for the given channel.
 	// If segmentIDs is empty, all tracked growing-source segments are returned.
 	// Otherwise, the requested segmentIDs are returned together with all tracked
 	// growing-source segments so release handoff cannot miss existing source progress.
-	GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error)
+	GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64) ([]GrowingFlushSegmentProgress, error)
+	// FenceGrowingSourceAdmission stops new segments on the channel from being
+	// admitted to growing-source mode. The release path calls it before
+	// appending its ManualFlush; see
+	// writeBufferBase.FenceGrowingSourceAdmission for why that order matters.
+	FenceGrowingSourceAdmission(channel string)
+	// WaitGrowingFlushDrained blocks until no segment on the channel still owes a
+	// growing-source flush. The release path must not drop growing segments
+	// before it returns — see writeBufferBase.WaitGrowingFlushDrained for why.
+	WaitGrowingFlushDrained(ctx context.Context, channel string, segmentIDs []int64) error
 
 	// Start makes the background check start to work.
 	Start()
 	// Stop the background checker and wait for worker goroutine quit.
 	Stop()
-}
-
-type ReleaseManualFlushNeedChecker interface {
-	CheckReleaseManualFlushNeed(ctx context.Context, channel string, segmentIDs []int64) (bool, error)
 }
 
 // NewManager returns initialized manager as `Manager`
@@ -84,11 +96,62 @@ type bufferManager struct {
 }
 
 func (m *bufferManager) Start() {
-	m.wg.Add(1)
+	m.wg.Add(2)
 	go func() {
 		defer m.wg.Done()
 		m.check()
 	}()
+	go func() {
+		defer m.wg.Done()
+		m.driveRetryBackstop()
+	}()
+}
+
+// syncRetryDriver is what the retry backstop needs from a registered buffer.
+// Asserted instead of added to the WriteBuffer interface so mocks and any
+// buffer without retained flush debts are skipped harmlessly.
+type syncRetryDriver interface {
+	driveSyncRetries()
+}
+
+// retryBackstopPeriod derives the sweep period from
+// dataNode.flushRetryInterval, clamped to [100ms, 1s]: the retry interval
+// itself is applied per segment inside the drive functions, so the ticker only
+// has to be at least as fine — never a spin, never coarser than a second.
+func retryBackstopPeriod() time.Duration {
+	return clampRetryPeriod(
+		paramtable.Get().DataNodeCfg.FlushRetryInterval.GetAsDuration(time.Millisecond),
+		time.Second)
+}
+
+// driveRetryBackstop is the backstop half of the dual-drive retry model. The
+// fast path is the channel timetick (BufferData -> driveRetries), but it only
+// runs while the flowgraph goroutine is delivering msgpacks; when that
+// goroutine is parked — waiting for node-wide admission or flush backpressure —
+// or the WAL is simply idle, this ticker is what keeps a failed flush
+// retrying. Each buffer drives its own due retries under its own locking and
+// per-segment retry interval; closed/dropping buffers are guarded inside.
+// Buffers a Drop/Remove already detached from the manager map are out of reach
+// here — waitSyncsSettled drives those. Nothing is logged per tick; the drives
+// themselves log.
+func (m *bufferManager) driveRetryBackstop() {
+	ticker := time.NewTicker(retryBackstopPeriod())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			m.buffers.Range(func(_ string, buf WriteBuffer) bool {
+				if driver, ok := buf.(syncRetryDriver); ok {
+					driver.driveSyncRetries()
+				}
+				return true
+			})
+			// Re-derive so a config change takes effect without a restart.
+			ticker.Reset(retryBackstopPeriod())
+		case <-m.ch.CloseCh():
+			return
+		}
+	}
 }
 
 func (m *bufferManager) check() {
@@ -141,8 +204,9 @@ func (m *bufferManager) memoryCheck() {
 		m.buffers.Range(func(chanName string, buf WriteBuffer) bool {
 			size := buf.MemorySize()
 			total += size
-			if size > candiSize {
-				candiSize = size
+			evictable := buf.EvictableMemorySize()
+			if evictable > candiSize {
+				candiSize = evictable
 				candidate = buf
 				candiChan = chanName
 			}
@@ -158,10 +222,21 @@ func (m *bufferManager) memoryCheck() {
 			return
 		}
 
-		if candidate != nil {
-			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
-			mlog.Info(context.TODO(), "notify writebuffer to sync",
-				mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		if candidate == nil {
+			mlog.RatedWarn(context.TODO(), rate.Limit(20), "memory watermark exceeded by in-flight flush payload",
+				mlog.Float64("current_total_memory_usage", logutil.ToMB(float64(total))),
+				mlog.Float64("current_memory_watermark", logutil.ToMB(memoryWatermark)))
+			return
+		}
+
+		candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+		mlog.Info(context.TODO(), "notify writebuffer to sync",
+			mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		if candidate.EvictableMemorySize() >= candiSize {
+			mlog.RatedWarn(context.TODO(), rate.Limit(20), "memory force sync made no progress",
+				mlog.String("channel", candiChan),
+				mlog.Float64("evictable_memory", logutil.ToMB(float64(candiSize))))
+			return
 		}
 	}
 }
@@ -172,7 +247,7 @@ func (m *bufferManager) Stop() {
 }
 
 // Register a new WriteBuffer for channel.
-func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
+func (m *bufferManager) Register(ctx context.Context, channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
 	buf, err := NewWriteBuffer(channel, metacache, m.syncMgr, opts...)
 	if err != nil {
 		return err
@@ -180,7 +255,9 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 
 	_, loaded := m.buffers.GetOrInsert(channel, buf)
 	if loaded {
-		buf.Close(context.Background(), false)
+		// The caller's ctx, not Background: Close waits for in-flight syncs, and
+		// that wait is only bounded once something cancels it.
+		buf.Close(ctx, false)
 		return merr.WrapErrChannelReduplicate(channel)
 	}
 	return nil
@@ -249,41 +326,42 @@ func (m *bufferManager) BufferData(channel string, insertData []*InsertData, del
 	return buf.BufferData(insertData, deleteMsgs, startPos, endPos, schemaVersion)
 }
 
-func (m *bufferManager) AllowGrowingSourceFlush(channel string) bool {
+func (m *bufferManager) AllowGrowingSourceFlush(channel string) (enabled bool, found bool) {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
-		return false
+		return false, false
 	}
-	return buf.AllowGrowingSourceFlush()
+	return buf.AllowGrowingSourceFlush(), true
 }
 
-func (m *bufferManager) CheckReleaseManualFlushNeed(ctx context.Context, channel string, segmentIDs []int64) (bool, error) {
+func (m *bufferManager) FenceGrowingSourceAdmission(channel string) {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
-		mlog.Warn(ctx, "write buffer not found when checking release manual flush",
-			mlog.String("channel", channel),
-			mlog.Int64s("segmentIDs", segmentIDs))
-		return true, merr.WrapErrChannelNotFound(channel)
+		// No buffer, so nothing can be admitted on this channel anyway.
+		return
 	}
-	checker, ok := buf.(interface {
-		CheckReleaseManualFlushNeed(segmentIDs []int64) bool
-	})
-	if !ok {
-		return true, nil
-	}
-	return checker.CheckReleaseManualFlushNeed(segmentIDs), nil
+	buf.FenceGrowingSourceAdmission()
 }
 
-func (m *bufferManager) GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error) {
+func (m *bufferManager) WaitGrowingFlushDrained(ctx context.Context, channel string, segmentIDs []int64) error {
+	buf, loaded := m.buffers.Get(channel)
+	if !loaded {
+		// The buffer is already gone, so it owes no flush and holds no
+		// checkpoint. Nothing to wait for.
+		return nil
+	}
+	return buf.WaitGrowingFlushDrained(ctx, segmentIDs)
+}
+
+func (m *bufferManager) GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64) ([]GrowingFlushSegmentProgress, error) {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(ctx, "write buffer not found when get growing flush progress",
 			mlog.String("channel", channel),
-			mlog.Int64s("segmentIDs", segmentIDs),
-			mlog.Uint64("fenceTs", fenceTs))
+			mlog.Int64s("segmentIDs", segmentIDs))
 		return nil, merr.WrapErrChannelNotFound(channel)
 	}
-	return buf.GetGrowingFlushProgress(ctx, segmentIDs, fenceTs)
+	return buf.GetGrowingFlushProgress(ctx, segmentIDs)
 }
 
 // GetCheckpoint returns checkpoint for provided channel.
@@ -319,19 +397,32 @@ func (m *bufferManager) RemoveChannel(channel string) {
 		return
 	}
 
-	buf.Close(context.Background(), false)
+	// Bound the shutdown drain the same way DropChannel is bounded: the
+	// non-drop Close waits for in-flight syncs, and an unbounded wait here
+	// hangs channel release / flusher shutdown behind a stuck native write.
+	closeCtx, cancel := context.WithTimeout(
+		context.Background(),
+		paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second),
+	)
+	defer cancel()
+	buf.Close(closeCtx, false)
 }
 
 // DropChannel removes channel WriteBuffer and process `DropChannel`
 // this method will save all buffered data
-func (m *bufferManager) DropChannel(channel string) {
+func (m *bufferManager) DropChannel(ctx context.Context, channel string) {
 	buf, loaded := m.buffers.GetAndRemove(channel)
 	if !loaded {
 		mlog.Warn(context.TODO(), "failed to drop channel, channel not maintained in manager", mlog.String("channel", channel))
 		return
 	}
 
-	buf.Close(context.Background(), true)
+	dropCtx, cancel := context.WithTimeout(
+		ctx,
+		paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second),
+	)
+	defer cancel()
+	buf.Close(dropCtx, true)
 }
 
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {

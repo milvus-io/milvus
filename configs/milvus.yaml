@@ -934,6 +934,11 @@ dataNode:
     forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.
     checkInterval: 3000 # the interal to check datanode memory usage, in milliseconds
     forceSyncWatermark: 0.5 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
+  # The minimum interval between two flush attempts for one segment, in milliseconds.
+  # A failed flush keeps its buffered data and its position in the segment's queue; the next
+  # timetick that arrives after this interval re-drives it, starting from the oldest pending
+  # batch. This is the only place the flush path retries a whole task.
+  flushRetryInterval: 3000
   timetick:
     interval: 500
   channel:

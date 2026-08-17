@@ -1,9 +1,7 @@
 package writebuffer
 
 import (
-	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
@@ -11,10 +9,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type InsertBufferSuite struct {
@@ -25,93 +23,12 @@ type InsertBufferSuite struct {
 
 func (s *InsertBufferSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
-	s.collSchema = &schemapb.CollectionSchema{
-		Name: "test_collection",
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
-			},
-			{
-				FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
-			},
-			{
-				FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
-			},
-			{
-				FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.DimKey, Value: "128"},
-				},
-			},
-		},
-	}
+	s.collSchema = testCollectionSchema()
 	s.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 }
 
 func (s *InsertBufferSuite) composeInsertMsg(rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
-	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx))) })
-	vectors := lo.RepeatBy(rowCount, func(_ int) []float32 {
-		return lo.RepeatBy(dim, func(_ int) float32 { return rand.Float32() })
-	})
-	flatten := lo.Flatten(vectors)
-	return tss, &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			Version:    msgpb.InsertDataVersion_ColumnBased,
-			RowIDs:     tss,
-			Timestamps: lo.Map(tss, func(id int64, _ int) uint64 { return uint64(id) }),
-			FieldsData: []*schemapb.FieldData{
-				{
-					FieldId: common.RowIDField, FieldName: common.RowIDFieldName, Type: schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{
-									Data: tss,
-								},
-							},
-						},
-					},
-				},
-				{
-					FieldId: common.TimeStampField, FieldName: common.TimeStampFieldName, Type: schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{
-									Data: tss,
-								},
-							},
-						},
-					},
-				},
-				{
-					FieldId: common.StartOfUserFieldID, FieldName: "pk", Type: schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{
-									Data: tss,
-								},
-							},
-						},
-					},
-				},
-				{
-					FieldId: common.StartOfUserFieldID + 1, FieldName: "vector", Type: schemapb.DataType_FloatVector,
-					Field: &schemapb.FieldData_Vectors{
-						Vectors: &schemapb.VectorField{
-							Dim: int64(dim),
-							Data: &schemapb.VectorField_FloatVector{
-								FloatVector: &schemapb.FloatArray{
-									Data: flatten,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	return composeInsertMsg(0, rowCount, dim, schemapb.DataType_Int64)
 }
 
 func (s *InsertBufferSuite) TestBasic() {
@@ -126,6 +43,49 @@ func (s *InsertBufferSuite) TestBasic() {
 		s.True(insertBuffer.IsFull())
 		s.False(insertBuffer.IsEmpty())
 	})
+}
+
+func (s *InsertBufferSuite) TestBM25StatsAreNotCountedTowardBufferSize() {
+	schema := &schemapb.CollectionSchema{
+		Name:      s.collSchema.Name,
+		Fields:    s.collSchema.Fields,
+		Functions: []*schemapb.FunctionSchema{{Name: "bm25"}},
+	}
+	insertBuffer, err := NewInsertBuffer(schema)
+	s.Require().NoError(err)
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1, 2: 1})
+	insertData := &InsertData{
+		data:      []*storage.InsertData{{}},
+		tsField:   []*storage.Int64FieldData{{Data: []int64{100}}},
+		bm25Stats: map[int64]*storage.BM25Stats{101: stats},
+	}
+
+	// The stats are buffered but contribute nothing to the payload budget: they
+	// outlive the payload release (SyncPack.ReleaseData keeps them for Commit),
+	// so counting them here would claim memory back while it is still held.
+	buffered := insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 100},
+		&msgpb.MsgPosition{Timestamp: 200})
+	s.Zero(buffered, "an insert carrying only BM25 stats buffers no payload bytes")
+	s.Zero(insertBuffer.size)
+	s.False(insertBuffer.IsFull())
+
+	// Merging into an existing field, and a nil stat, are still handled.
+	more := storage.NewBM25Stats()
+	more.Append(map[uint32]float32{2: 1, 3: 1})
+	insertData.bm25Stats = map[int64]*storage.BM25Stats{101: more, 102: nil}
+	s.Zero(insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 201},
+		&msgpb.MsgPosition{Timestamp: 300}))
+	s.Zero(insertBuffer.size)
+
+	// And they are still yielded to the flush.
+	yielded := insertBuffer.YieldStats()
+	s.Len(yielded, 1)
+	s.Contains(yielded, int64(101))
+	s.Empty(insertBuffer.YieldStats(), "yield resets the stats buffer")
 }
 
 func (s *InsertBufferSuite) TestBuffer() {

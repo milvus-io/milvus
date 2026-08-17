@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_assignment"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -283,14 +284,52 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocal(t *testing.T) {
 		watcher:  w,
 	}
 
-	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
-	assert.Error(t, err)
-	assert.False(t, prepared)
+	// No streaming node runs in this process (the local component is not
+	// enabled at this point in the package run), so the local-WAL lookup must
+	// fail with the typed sentinel, not some other branch's error.
+	err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.ErrorIs(t, err, registry.ErrNoStreamingNodeDeployed)
 
 	handler.Close()
-	prepared, err = handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	err = handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
 	assert.ErrorIs(t, err, ErrClientClosed)
-	assert.False(t, prepared)
+}
+
+// PrepareReleaseSegmentsIfLocal must classify the "no local streaming node"
+// case with the same typed sentinel as its channel-release sibling: the
+// QueryNode guard keys its structural short-circuit off exactly this error.
+func TestHandlerClient_PrepareReleaseSegmentsIfLocal(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	segmentIDs := []int64{1001}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	service.EXPECT().Close().Return()
+
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	w.EXPECT().Close().Run(func() {})
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		rb:       rb,
+		watcher:  w,
+	}
+
+	pending, err := handler.PrepareReleaseSegmentsIfLocal(context.Background(), 100, vchannel, segmentIDs)
+	assert.ErrorIs(t, err, registry.ErrNoStreamingNodeDeployed)
+	assert.False(t, pending)
+
+	handler.Close()
+	pending, err = handler.PrepareReleaseSegmentsIfLocal(context.Background(), 100, vchannel, segmentIDs)
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.False(t, pending)
 }
 
 func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsLocalWALShutdown(t *testing.T) {
@@ -315,9 +354,8 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsLocalWALShutdown(t
 		watcher:  w,
 	}
 
-	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
 	assert.True(t, status.AsStreamingError(err).IsOnShutdown())
-	assert.False(t, prepared)
 }
 
 func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t *testing.T) {
@@ -333,9 +371,8 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t
 		watcher:  w,
 	}
 
-	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.False(t, prepared)
 }
 
 func TestHandlerClient_GetReplicateCheckpointReplicateViolation(t *testing.T) {
@@ -386,4 +423,53 @@ func TestDial(t *testing.T) {
 	assert.NotNil(t, handler)
 	time.Sleep(100 * time.Millisecond)
 	handler.Close()
+}
+
+// roWALManager serves a local WAL that is read-only, e.g. a replica WAL on
+// this node while the RW WAL lives elsewhere.
+type roWALManager struct {
+	wal wal.WAL
+}
+
+func (m roWALManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
+	return m.wal, nil
+}
+
+func (m roWALManager) Metrics() (*types.StreamingNodeMetrics, error) {
+	return &types.StreamingNodeMetrics{}, nil
+}
+
+// TestHandlerClient_PrepareReleaseManualFlushIfLocalReadOnlyWAL: a local WAL
+// that is read-only cannot append the ManualFlush fence, so the call must fail
+// with the typed ErrReadOnlyWAL before reaching the preparer.
+func TestHandlerClient_PrepareReleaseManualFlushIfLocalReadOnlyWAL(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
+	roWAL := mock_wal.NewMockWAL(t)
+	roWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO})
+	registry.ResetRegisterLocalWALManager()
+	registry.RegisterLocalWALManager(roWALManager{wal: roWAL})
+	t.Cleanup(func() {
+		// Restore the state earlier tests in this file established so any test
+		// added after this one sees the same registry contents regardless of
+		// ordering.
+		registry.ResetRegisterLocalWALManager()
+		registry.RegisterLocalWALManager(shutdownWALManager{})
+	})
+
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		watcher:  w,
+	}
+
+	err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, "pchannel_100v0", []int64{1001})
+	assert.ErrorIs(t, err, ErrReadOnlyWAL)
 }

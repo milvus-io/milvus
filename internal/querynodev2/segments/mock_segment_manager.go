@@ -858,40 +858,6 @@ func (_c *MockSegmentManager_RangeBy_Call) RunAndReturn(run func(SegmentVisitor,
 	return _c
 }
 
-// ReleaseDetached provides a mock function with given fields: ctx, segment
-func (_m *MockSegmentManager) ReleaseDetached(ctx context.Context, segment Segment) {
-	_m.Called(ctx, segment)
-}
-
-// MockSegmentManager_ReleaseDetached_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseDetached'
-type MockSegmentManager_ReleaseDetached_Call struct {
-	*mock.Call
-}
-
-// ReleaseDetached is a helper method to define mock.On call
-//   - ctx context.Context
-//   - segment Segment
-func (_e *MockSegmentManager_Expecter) ReleaseDetached(ctx interface{}, segment interface{}) *MockSegmentManager_ReleaseDetached_Call {
-	return &MockSegmentManager_ReleaseDetached_Call{Call: _e.mock.On("ReleaseDetached", ctx, segment)}
-}
-
-func (_c *MockSegmentManager_ReleaseDetached_Call) Run(run func(ctx context.Context, segment Segment)) *MockSegmentManager_ReleaseDetached_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(Segment))
-	})
-	return _c
-}
-
-func (_c *MockSegmentManager_ReleaseDetached_Call) Return() *MockSegmentManager_ReleaseDetached_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegmentManager_ReleaseDetached_Call) RunAndReturn(run func(context.Context, Segment)) *MockSegmentManager_ReleaseDetached_Call {
-	_c.Run(run)
-	return _c
-}
-
 // Remove provides a mock function with given fields: ctx, segmentID, scope
 func (_m *MockSegmentManager) Remove(ctx context.Context, segmentID int64, scope querypb.DataScope) (int, int) {
 	ret := _m.Called(ctx, segmentID, scope)

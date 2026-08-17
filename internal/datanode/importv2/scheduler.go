@@ -94,8 +94,19 @@ func (s *scheduler) scheduleTasks() {
 	}
 
 	for taskID, fs := range futures {
-		err := conc.AwaitAll(fs...)
+		// A task's final state is its public completion fence. Wait for every file
+		// future before publishing either Failed or Completed, otherwise a sibling
+		// file can keep submitting/committing sync tasks after DataCoord observes a
+		// terminal state and drops the task.
+		err := conc.BlockOnAll(fs...)
 		if err != nil {
+			// Publish unconditionally. An earlier version only published when the
+			// task was still InProgress, which made this fence a no-op on exactly
+			// the path it exists for: a worker that had already published Failed
+			// itself. Workers now record a reason and return the error; this is
+			// the single place a terminal state becomes visible, and it is only
+			// reached once every sibling future is done.
+			s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Failed))
 			continue
 		}
 		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))

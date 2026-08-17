@@ -141,28 +141,6 @@ var (
 			segmentLevelLabelName,
 		})
 
-	QueryNodeGrowingSourceRetainedBytes = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "growing_source_retained_bytes",
-			Help:      "estimated bytes of growing-source segments retained for release handoff",
-		}, []string{
-			nodeIDLabelName,
-			channelNameLabelName,
-		})
-
-	QueryNodeGrowingSourceRetainedSegments = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "growing_source_retained_segments",
-			Help:      "number of growing-source segments retained for release handoff",
-		}, []string{
-			nodeIDLabelName,
-			channelNameLabelName,
-		})
-
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -1006,8 +984,6 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumCollections)
 	registry.MustRegister(QueryNodeNumPartitions)
 	registry.MustRegister(QueryNodeNumSegments)
-	registry.MustRegister(QueryNodeGrowingSourceRetainedBytes)
-	registry.MustRegister(QueryNodeGrowingSourceRetainedSegments)
 	registry.MustRegister(QueryNodeNumDmlChannels)
 	registry.MustRegister(QueryNodeNumDeltaChannels)
 	registry.MustRegister(QueryNodeSQCount)

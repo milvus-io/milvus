@@ -123,7 +123,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		bw := syncmgr.NewBulkPackWriterV2(mc, s.schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 			StorageType: "local",
 			RootPath:    rootPath,
-		}, columnGroups)
+		}, columnGroups, syncmgr.DefaultIORetryAttempts)
 		inserts, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{

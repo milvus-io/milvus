@@ -20,53 +20,60 @@ import (
 	"context"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-var errGrowingSourceProviderClosed = errors.New("growing source provider is closed")
 
 const unknownGrowingSourceChannel = "unknown"
 
+// delegatorGrowingSourceProvider exposes this delegator's growing segments as
+// flush sources.
+//
+// It deliberately owns no lifetime of its own over those segments. A growing
+// segment is reachable here only while the segment manager still holds it, and
+// the flush that reads it pins it for the duration of that read
+// (GetGrowingFlushSource -> PinIfNotReleased, released by
+// delegatorGrowingFlushSource.Release).
+//
+// Nothing here keeps a segment alive past its release, and nothing needs to:
+// the release side waits instead. Before a channel is unsubscribed, the write
+// buffer blocks in waitGrowingFlushDrained until every segment that still owed
+// a growing-source flush has finished one, so by the time these segments are
+// dropped no flush still needs them.
+//
+// That ordering is load-bearing, not defensive. These rows exist ONLY in the
+// growing segment — the write buffer keeps no copy in growing-source mode — so
+// a flush whose source is dropped mid-flight can never be completed by anyone:
+// getSyncTask fails with errGrowingSourceUnavailable on every retry, and the
+// progress entry, which is deleted only once its batches drain, pins the
+// channel checkpoint forever. Do not make release skip that wait.
 type delegatorGrowingSourceProvider struct {
-	segmentManager  segments.SegmentManager
-	waitFence       func(context.Context, uint64) error
-	getTSafe        func() uint64
-	channelName     string
-	mu              sync.Mutex
-	cond            *sync.Cond
-	closing         bool
-	deactivated     bool
-	registration    *syncmgr.GrowingSourceRegistration
-	active          int
-	retained        map[int64]*retainedGrowingFlushSource
-	releaseAllowed  map[int64]uint64
-	releasePrepared map[int64]int64
-	handoffOnly     bool
-	handoffAllowed  map[int64]struct{}
+	segmentManager segments.SegmentManager
+	getTSafe       func() uint64
+
+	mu          sync.Mutex
+	channelName string
+	// serving gates every answer this provider gives. It goes false→true once
+	// in Activate and true→false once in Deactivate, and it never goes back:
+	// the answers this provider hands out are turned into STICKY decisions by
+	// the caller (a Pending commits a segment to growing-source mode for its
+	// whole lifetime), so an answer from a provider that is not serving is not
+	// merely late, it is permanently wrong.
+	serving      bool
+	registration *syncmgr.GrowingSourceRegistration
 }
 
-func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error, getTSafe ...func() uint64) *delegatorGrowingSourceProvider {
+func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, getTSafe ...func() uint64) *delegatorGrowingSourceProvider {
 	provider := &delegatorGrowingSourceProvider{
-		segmentManager:  segmentManager,
-		waitFence:       waitFence,
-		channelName:     unknownGrowingSourceChannel,
-		retained:        make(map[int64]*retainedGrowingFlushSource),
-		releaseAllowed:  make(map[int64]uint64),
-		releasePrepared: make(map[int64]int64),
-		handoffAllowed:  make(map[int64]struct{}),
+		segmentManager: segmentManager,
+		channelName:    unknownGrowingSourceChannel,
 	}
 	if len(getTSafe) > 0 {
 		provider.getTSafe = getTSafe[0]
 	}
-	provider.cond = sync.NewCond(&provider.mu)
 	return provider
 }
 
@@ -76,552 +83,139 @@ func (p *delegatorGrowingSourceProvider) SetChannelName(channelName string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.channelName == channelName {
-		return
-	}
-	p.deleteRetainedMetricsLocked()
 	p.channelName = channelName
-	p.observeRetainedMetricsLocked()
 }
 
-func (p *delegatorGrowingSourceProvider) SetRegistration(registration *syncmgr.GrowingSourceRegistration) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.registration = registration
-}
-
-func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
-	if !p.acquireLease(segmentID) {
+func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+	if !p.isServing() {
 		return nil, syncmgr.GrowingSourceUnavailable
 	}
 	segment := p.segmentManager.GetGrowing(segmentID)
-	retained := false
-	if segment != nil {
-		if p.isDeactivated() {
-			p.releaseLease()
-			return nil, syncmgr.GrowingSourceUnavailable
+	if segment == nil {
+		if p.behindEndPos(endPos) {
+			return nil, syncmgr.GrowingSourcePending
 		}
-	} else {
-		var ok bool
-		segment, ok = p.getRetained(segmentID)
-		if !ok {
-			p.releaseLease()
-			if p.activeProviderBehind(endPos) {
-				return nil, syncmgr.GrowingSourcePending
-			}
-			return nil, syncmgr.GrowingSourceUnavailable
-		}
-		retained = true
-	}
-	if err := segment.PinIfNotReleased(); err != nil {
-		p.releaseLease()
 		return nil, syncmgr.GrowingSourceUnavailable
 	}
-	source := &delegatorGrowingFlushSource{segmentID: segmentID, segment: segment, provider: p, targetOffset: targetOffset, retained: retained}
-	if p.currentOffset(segment) < targetOffset {
-		return source, syncmgr.GrowingSourcePending
+	// The pin is the whole lifetime contract: LocalSegment.Release blocks until
+	// the refcount drops to zero, so a segment cannot be freed under a flush
+	// that is reading it. The provider deliberately keeps no second counter of
+	// its own — one would only track the same window less reliably.
+	if err := segment.PinIfNotReleased(); err != nil {
+		return nil, syncmgr.GrowingSourceUnavailable
 	}
+	source := &delegatorGrowingFlushSource{segmentID: segmentID, segment: segment, provider: p}
 	return source, syncmgr.GrowingSourceUsable
 }
 
-func (p *delegatorGrowingSourceProvider) activeProviderBehind(endPos *msgpb.MsgPosition) bool {
+// behindEndPos reports whether this delegator has yet to consume endPos, which
+// is why a segment it does not hold may still show up later.
+//
+// The serving re-check is not redundant with the one in GetGrowingFlushSource:
+// Deactivate can land between the two, and this is the branch that produces
+// Pending. Being wrong here is not a lost round trip, it is a segment committed
+// to a source that will never exist.
+func (p *delegatorGrowingSourceProvider) behindEndPos(endPos *msgpb.MsgPosition) bool {
 	if endPos == nil || endPos.GetTimestamp() == 0 || p.getTSafe == nil {
 		return false
 	}
-	p.mu.Lock()
-	closing := p.closing
-	deactivated := p.deactivated
-	p.mu.Unlock()
-	return !closing && !deactivated && p.getTSafe() < endPos.GetTimestamp()
-}
-
-func (p *delegatorGrowingSourceProvider) BeginGrowingSourceReleaseHandoff(segmentIDs []int64) func() {
-	segments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segmentIDs))
-	for _, segmentID := range segmentIDs {
-		segments = append(segments, syncmgr.GrowingSourceReleaseHandoffSegment{
-			SegmentID: segmentID,
-		})
-	}
-	snapshot := p.enterHandoffOnly(segments)
-	return func() {
-		p.rollbackHandoffOnly(snapshot)
-	}
-}
-
-func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {
-	if p.isDeactivated() {
-		return p.prepareDeactivatedGrowingSourceReleaseHandoff(fenceTs, segments)
-	}
-	handoffSnapshot := p.enterHandoffOnly(segments)
-	if p.waitFence != nil && fenceTs > 0 {
-		if err := p.waitFence(ctx, fenceTs); err != nil {
-			p.rollbackHandoffOnly(handoffSnapshot)
-			return err
-		}
-	}
-	snapshot := p.snapshotRetained(segments)
-	allowedSegments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segments))
-	preparedSegments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segments))
-	for _, segment := range segments {
-		allowedSegments = append(allowedSegments, segment)
-		if segment.TargetOffset <= 0 {
-			continue
-		}
-		if err := p.registerRetained(segment.SegmentID, segment.TargetOffset); err != nil {
-			if errors.Is(err, merr.ErrSegmentNotFound) {
-				continue
-			}
-			p.rollbackRetained(snapshot)
-			p.rollbackHandoffOnly(handoffSnapshot)
-			return err
-		}
-		preparedSegments = append(preparedSegments, segment)
-	}
-	p.markReleaseAllowed(fenceTs, allowedSegments)
-	p.markReleasePrepared(fenceTs, preparedSegments)
-	return nil
-}
-
-func (p *delegatorGrowingSourceProvider) prepareDeactivatedGrowingSourceReleaseHandoff(fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	for _, segment := range segments {
-		retained, ok := p.retained[segment.SegmentID]
-		if !ok {
-			continue
-		}
-		if segment.TargetOffset > retained.targetOffset {
-			continue
-		}
-		if current, ok := p.releaseAllowed[segment.SegmentID]; !ok || current < fenceTs {
-			p.releaseAllowed[segment.SegmentID] = fenceTs
-		}
-		if segment.TargetOffset <= 0 {
-			continue
-		}
-		if current, ok := p.releasePrepared[segment.SegmentID]; !ok || current < segment.TargetOffset {
-			p.releasePrepared[segment.SegmentID] = segment.TargetOffset
-		}
-	}
-	return nil
-}
-
-func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targetOffset int64) error {
-	p.mu.Lock()
-	if p.closing {
-		p.mu.Unlock()
-		return errGrowingSourceProviderClosed
-	}
-	if retained, ok := p.retained[segmentID]; ok {
-		if retained.targetOffset < targetOffset {
-			retained.targetOffset = targetOffset
-			p.observeRetainedMetricsLocked()
-		}
-		p.mu.Unlock()
-		return nil
-	}
-	p.mu.Unlock()
-
-	segment := p.segmentManager.GetGrowing(segmentID)
-	if segment == nil {
-		return merr.WrapErrSegmentNotFound(segmentID)
-	}
-	if err := segment.PinIfNotReleased(); err != nil {
-		return err
-	}
-	currentOffset := p.currentOffset(segment)
-	if currentOffset < targetOffset {
-		segment.Unpin()
-		return merr.WrapErrServiceInternalMsg("growing-source segment %d is behind target offset, current=%d target=%d", segmentID, currentOffset, targetOffset)
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closing {
-		segment.Unpin()
-		return errGrowingSourceProviderClosed
-	}
-	if retained, ok := p.retained[segmentID]; ok {
-		if retained.targetOffset < targetOffset {
-			retained.targetOffset = targetOffset
-		}
-		segment.Unpin()
-		p.observeRetainedMetricsLocked()
-		return nil
-	}
-	p.retained[segmentID] = &retainedGrowingFlushSource{
-		segment:      segment,
-		targetOffset: targetOffset,
-		bytes:        segmentMemSize(segment),
-	}
-	p.observeRetainedMetricsLocked()
-	return nil
-}
-
-type retainedSnapshot struct {
-	existed         bool
-	source          *retainedGrowingFlushSource
-	targetOffset    int64
-	committedOffset int64
-	detached        bool
-}
-
-func (p *delegatorGrowingSourceProvider) snapshotRetained(segments []syncmgr.GrowingSourceReleaseHandoffSegment) map[int64]retainedSnapshot {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	snapshot := make(map[int64]retainedSnapshot, len(segments))
-	for _, segment := range segments {
-		if _, ok := snapshot[segment.SegmentID]; ok {
-			continue
-		}
-		retained, existed := p.retained[segment.SegmentID]
-		entry := retainedSnapshot{existed: existed, source: retained}
-		if existed {
-			entry.targetOffset = retained.targetOffset
-			entry.committedOffset = retained.committedOffset
-			entry.detached = retained.detached
-		}
-		snapshot[segment.SegmentID] = entry
-	}
-	return snapshot
-}
-
-func (p *delegatorGrowingSourceProvider) rollbackRetained(snapshot map[int64]retainedSnapshot) {
-	var toUnpin []segments.Segment
-	p.mu.Lock()
-	for segmentID, entry := range snapshot {
-		current, exists := p.retained[segmentID]
-		if entry.existed {
-			p.retained[segmentID] = entry.source
-			entry.source.targetOffset = entry.targetOffset
-			entry.source.committedOffset = entry.committedOffset
-			entry.source.detached = entry.detached
-			if exists && current != entry.source {
-				toUnpin = append(toUnpin, current.segment)
-			}
-			continue
-		}
-		if exists {
-			delete(p.retained, segmentID)
-			toUnpin = append(toUnpin, current.segment)
-		}
-	}
-	p.observeRetainedMetricsLocked()
-	p.mu.Unlock()
-	for _, segment := range toUnpin {
-		segment.Unpin()
-	}
-}
-
-type handoffSnapshot struct {
-	enabled bool
-	allowed map[int64]struct{}
-}
-
-func (p *delegatorGrowingSourceProvider) enterHandoffOnly(segments []syncmgr.GrowingSourceReleaseHandoffSegment) handoffSnapshot {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	snapshot := handoffSnapshot{
-		enabled: p.handoffOnly,
-		allowed: make(map[int64]struct{}, len(p.handoffAllowed)),
-	}
-	for segmentID := range p.handoffAllowed {
-		snapshot.allowed[segmentID] = struct{}{}
-	}
-
-	p.handoffOnly = true
-	for _, segment := range segments {
-		p.handoffAllowed[segment.SegmentID] = struct{}{}
-	}
-	return snapshot
-}
-
-func (p *delegatorGrowingSourceProvider) rollbackHandoffOnly(snapshot handoffSnapshot) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.handoffOnly = snapshot.enabled
-	p.handoffAllowed = snapshot.allowed
-}
-
-func (p *delegatorGrowingSourceProvider) markReleaseAllowed(fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, segment := range segments {
-		if current, ok := p.releaseAllowed[segment.SegmentID]; !ok || current < fenceTs {
-			p.releaseAllowed[segment.SegmentID] = fenceTs
-		}
-	}
-}
-
-func (p *delegatorGrowingSourceProvider) markReleasePrepared(fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, segment := range segments {
-		if current, ok := p.releaseAllowed[segment.SegmentID]; !ok || current < fenceTs {
-			p.releaseAllowed[segment.SegmentID] = fenceTs
-		}
-		if current, ok := p.releasePrepared[segment.SegmentID]; !ok || current < segment.TargetOffset {
-			p.releasePrepared[segment.SegmentID] = segment.TargetOffset
-		}
-	}
-}
-
-func (p *delegatorGrowingSourceProvider) IsReleaseAllowed(segmentID int64, checkpointTs uint64) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.isReleaseAllowedLocked(segmentID, checkpointTs)
-}
-
-func (p *delegatorGrowingSourceProvider) IsReleasePrepared(segmentID int64, checkpointTs uint64) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, ok := p.releasePrepared[segmentID]; ok {
-		return p.isReleaseAllowedLocked(segmentID, checkpointTs)
-	}
-	return false
-}
-
-func (p *delegatorGrowingSourceProvider) isReleaseAllowedLocked(segmentID int64, checkpointTs uint64) bool {
-	fenceTs, ok := p.releaseAllowed[segmentID]
-	if !ok {
+	if !p.isServing() {
 		return false
 	}
-	return fenceTs == 0 || checkpointTs == 0 || checkpointTs <= fenceTs
+	return p.getTSafe() < endPos.GetTimestamp()
 }
 
-func (p *delegatorGrowingSourceProvider) ClearReleasePrepared(segmentID int64) {
+func (p *delegatorGrowingSourceProvider) isServing() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.releasePrepared, segmentID)
-	delete(p.releaseAllowed, segmentID)
-	delete(p.handoffAllowed, segmentID)
+	return p.serving
 }
 
-func (p *delegatorGrowingSourceProvider) ReleasePreparedSegments() []int64 {
+// Activate publishes this provider to the registry. It is called from
+// ShardDelegator.Start, i.e. only once the watch has fully succeeded.
+//
+// Activate and Deactivate are NOT safe to interleave from independent
+// operations: reactivating a deactivated provider would re-register a provider
+// whose delegator is already closed. The invariant that forbids it lives one
+// layer up — QueryNode.channelOpLock serializes WatchDmChannels and
+// UnsubDmChannel per channel, so for one provider instance Activate always
+// happens-before its Deactivate, exactly once each.
+//
+// Registering earlier — at construction — makes the provider reachable while
+// the pipeline may still fail to build: it would answer Pending (its segments
+// do not exist yet), the write buffer would take that as "growing-source" and
+// stop keeping the rows, and the rollback would then unregister the provider,
+// leaving a progress entry whose source can never appear.
+func (p *delegatorGrowingSourceProvider) Activate() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	segments := make([]int64, 0, len(p.releasePrepared))
-	for segmentID := range p.releasePrepared {
-		segments = append(segments, segmentID)
-	}
-	return segments
-}
-
-func (p *delegatorGrowingSourceProvider) MarkReleaseDetached(segmentID int64) {
-	p.mu.Lock()
-	retained, ok := p.retained[segmentID]
-	if !ok {
+	if p.serving || p.registration != nil {
 		p.mu.Unlock()
 		return
 	}
-	retained.detached = true
-	registration, released := p.tryReleaseRetainedLocked(segmentID, retained)
-	p.observeRetainedMetricsLocked()
+	// Set before registering, never after: once registered the provider is
+	// reachable, and answering Unavailable in that gap would push a segment to
+	// the write buffer for good.
+	p.serving = true
+	channelName := p.channelName
 	p.mu.Unlock()
-	p.releaseRetained(registration, released)
-}
 
-func (p *delegatorGrowingSourceProvider) getRetained(segmentID int64) (segments.Segment, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	retained, ok := p.retained[segmentID]
-	if !ok {
-		return nil, false
-	}
-	return retained.segment, true
-}
+	registration := syncmgr.DefaultGrowingSourceRegistry().Register(channelName, p)
 
-func (p *delegatorGrowingSourceProvider) releaseRetainedIfComplete(segmentID int64, targetOffset int64) {
 	p.mu.Lock()
-	retained, ok := p.retained[segmentID]
-	if !ok {
+	if !p.serving {
+		// Deactivate ran while we were registering; it saw no registration to
+		// undo, so this one is ours to release.
 		p.mu.Unlock()
-		return
-	}
-	if retained.committedOffset < targetOffset {
-		retained.committedOffset = targetOffset
-	}
-	registration, released := p.tryReleaseRetainedLocked(segmentID, retained)
-	p.observeRetainedMetricsLocked()
-	p.mu.Unlock()
-	p.releaseRetained(registration, released)
-}
-
-func (p *delegatorGrowingSourceProvider) tryReleaseRetainedLocked(segmentID int64, retained *retainedGrowingFlushSource) (*syncmgr.GrowingSourceRegistration, *retainedGrowingFlushSource) {
-	if retained == nil ||
-		!retained.detached ||
-		retained.committedOffset < retained.targetOffset {
-		return nil, nil
-	}
-	delete(p.retained, segmentID)
-	return p.unregisterIfInactiveLocked(), retained
-}
-
-func (p *delegatorGrowingSourceProvider) releaseRetained(registration *syncmgr.GrowingSourceRegistration, retained *retainedGrowingFlushSource) {
-	if retained == nil {
 		syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
 		return
 	}
-	// Drop the retained pin first so Release can drain, then route through the
-	// segment manager's managed release path. The segment was already removed
-	// from the active maps by Detach, so release() will reconcile the
-	// on-releasing set, the segment gauge and the release callback. Calling
-	// segment.Release() directly here would leak the on-releasing set entry and
-	// keep Exist() reporting the segment forever.
-	retained.segment.Unpin()
-	p.segmentManager.ReleaseDetached(context.Background(), retained.segment)
-	syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+	p.registration = registration
+	p.mu.Unlock()
 }
 
-func (p *delegatorGrowingSourceProvider) acquireLease(segmentID int64) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closing {
-		return false
-	}
-	if p.handoffOnly {
-		_, allowed := p.handoffAllowed[segmentID]
-		_, retained := p.retained[segmentID]
-		if !allowed && !retained {
-			return false
-		}
-	}
-	p.active++
-	return true
-}
-
-func (p *delegatorGrowingSourceProvider) releaseLease() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.active > 0 {
-		p.active--
-	}
-	if p.closing && p.active == 0 {
-		p.cond.Broadcast()
-	}
-}
-
-func (p *delegatorGrowingSourceProvider) isDeactivated() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.deactivated
-}
-
+// Deactivate stops this provider serving and unregisters it. Clearing `serving`
+// first is what makes it safe for a caller that copied the provider pointer
+// before Unregister took effect.
+//
+// It deliberately does not wait for flushes already holding a source. Each one
+// pins its segment, and that pin — not anything tracked here — is what keeps
+// the segment alive until the flush lets go.
 func (p *delegatorGrowingSourceProvider) Deactivate() {
 	p.mu.Lock()
-	p.deactivated = true
-	registration := p.unregisterIfInactiveLocked()
-	p.mu.Unlock()
-	syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
-}
-
-func (p *delegatorGrowingSourceProvider) Close() {
-	p.mu.Lock()
-	p.closing = true
-	for p.active > 0 {
-		p.cond.Wait()
-	}
-	retained := p.retained
-	p.retained = make(map[int64]*retainedGrowingFlushSource)
-	p.releaseAllowed = make(map[int64]uint64)
-	p.releasePrepared = make(map[int64]int64)
-	p.handoffOnly = false
-	p.handoffAllowed = make(map[int64]struct{})
+	p.serving = false
 	registration := p.registration
 	p.registration = nil
-	p.deleteRetainedMetricsLocked()
 	p.mu.Unlock()
-	for _, source := range retained {
-		source.segment.Unpin()
-	}
 	syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
-}
-
-func (p *delegatorGrowingSourceProvider) unregisterIfInactiveLocked() *syncmgr.GrowingSourceRegistration {
-	if !p.deactivated || len(p.retained) > 0 {
-		return nil
-	}
-	registration := p.registration
-	p.registration = nil
-	p.releaseAllowed = make(map[int64]uint64)
-	p.releasePrepared = make(map[int64]int64)
-	p.handoffOnly = false
-	p.handoffAllowed = make(map[int64]struct{})
-	p.deleteRetainedMetricsLocked()
-	return registration
-}
-
-func (p *delegatorGrowingSourceProvider) currentOffset(segment segments.Segment) int64 {
-	if segment == nil {
-		return 0
-	}
-	return segment.InsertCount()
-}
-
-func (p *delegatorGrowingSourceProvider) observeRetainedMetricsLocked() {
-	if len(p.retained) == 0 {
-		p.deleteRetainedMetricsLocked()
-		return
-	}
-	var retainedBytes int64
-	for _, retained := range p.retained {
-		retainedBytes += retained.bytes
-	}
-	nodeID := paramtable.GetStringNodeID()
-	metrics.QueryNodeGrowingSourceRetainedBytes.WithLabelValues(nodeID, p.channelName).Set(float64(retainedBytes))
-	metrics.QueryNodeGrowingSourceRetainedSegments.WithLabelValues(nodeID, p.channelName).Set(float64(len(p.retained)))
-}
-
-func (p *delegatorGrowingSourceProvider) deleteRetainedMetricsLocked() {
-	nodeID := paramtable.GetStringNodeID()
-	metrics.QueryNodeGrowingSourceRetainedBytes.DeleteLabelValues(nodeID, p.channelName)
-	metrics.QueryNodeGrowingSourceRetainedSegments.DeleteLabelValues(nodeID, p.channelName)
-}
-
-func segmentMemSize(segment segments.Segment) int64 {
-	if segment == nil {
-		return 0
-	}
-	size := segment.MemSize()
-	if size < 0 {
-		return 0
-	}
-	return size
-}
-
-type retainedGrowingFlushSource struct {
-	segment         segments.Segment
-	targetOffset    int64
-	committedOffset int64
-	detached        bool
-	bytes           int64
 }
 
 type delegatorGrowingFlushSource struct {
-	segmentID    int64
-	segment      segments.Segment
-	provider     *delegatorGrowingSourceProvider
-	targetOffset int64
-	retained     bool
-	once         sync.Once
+	segmentID int64
+	segment   segments.Segment
+	provider  *delegatorGrowingSourceProvider
+	once      sync.Once
 }
 
-func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
-	if s.provider != nil {
-		return s.provider.currentOffset(s.segment)
-	}
-	if s.segment == nil {
+// TSafe is the delegator's consumption watermark: a raw read of the value the
+// pipeline publishes at the END of each message pack (deleteNode), after every
+// insert in that pack has been applied to its growing segment and acknowledged.
+// So tsafe >= T means every row with timestamp <= T is present and complete.
+//
+// Deliberately NOT shardDelegator.waitTSafe: that is a query-serving policy
+// function whose external-table and DowngradeTsafe branches return success
+// without the watermark having advanced. Fine for serving a slightly stale read;
+// fatal for a flush, which would then publish a checkpoint past rows that were
+// never written. And deliberately not a wait at all — see
+// syncmgr.GrowingFlushSource.TSafe.
+func (s *delegatorGrowingFlushSource) TSafe() uint64 {
+	if s.provider == nil || s.provider.getTSafe == nil {
 		return 0
 	}
-	return s.segment.InsertCount()
+	return s.provider.getTSafe()
 }
 
-func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
-	result, err := s.segment.FlushData(ctx, startOffset, endOffset, &segments.FlushConfig{
+func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startTs, endTs uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+	result, err := s.segment.FlushData(ctx, startTs, endTs, &segments.FlushConfig{
 		SegmentBasePath:         config.SegmentBasePath,
 		PartitionBasePath:       config.PartitionBasePath,
 		CollectionID:            config.CollectionID,
@@ -676,15 +270,15 @@ func (s *delegatorGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) 
 }
 
 type primaryKeysProvider interface {
-	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
+	PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error)
 }
 
-func (s *delegatorGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+func (s *delegatorGrowingFlushSource) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
 	provider, ok := s.segment.(primaryKeysProvider)
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("growing flush source segment does not expose primary keys")
 	}
-	return provider.PrimaryKeys(ctx, startOffset, endOffset)
+	return provider.PrimaryKeys(ctx, startTs, endTs)
 }
 
 func (s *delegatorGrowingFlushSource) Release() {
@@ -692,14 +286,18 @@ func (s *delegatorGrowingFlushSource) Release() {
 		if s.segment != nil {
 			s.segment.Unpin()
 		}
-		if s.provider != nil {
-			s.provider.releaseLease()
-		}
 	})
 }
 
-func (s *delegatorGrowingFlushSource) CommitGrowingFlush(targetOffset int64) {
-	if s.retained && s.provider != nil {
-		s.provider.releaseRetainedIfComplete(s.segmentID, targetOffset)
-	}
-}
+// CommitGrowingFlush is a no-op for the delegator source.
+//
+// The call itself stays part of the GrowingFlushSource contract: it is the
+// point of no return the flusher signals after the rows are durable, and the
+// sync task's ordering guarantee (nothing before a successful meta write may
+// call it) is asserted by
+// TestGrowingSourceSyncTaskCommitMetaWriteFailureIsBeforePointOfNoReturn.
+// The delegator has nothing to release on that signal: a growing segment here
+// is only reachable while the segment manager holds it, and the read pin is
+// already returned by Release. Nothing currently consumes the fence, so
+// recording it would be dead state.
+func (s *delegatorGrowingFlushSource) CommitGrowingFlush(flushThroughTs uint64) {}

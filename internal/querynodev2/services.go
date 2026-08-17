@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
@@ -35,16 +34,14 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/growingflush"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
-	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -71,10 +68,6 @@ import (
 // so it cannot be reused, while recognizing it here to return a precise
 // mixed-version protocol error.
 const legacyLoadScopeIndex = querypb.LoadScope(2)
-
-type segmentDetacher interface {
-	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
-}
 
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
@@ -221,6 +214,27 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		log.Warn(ctx, "failed to unsubscribe channel", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+
+	// Serialize against UnsubDmChannel for this channel. The fast-reject sets
+	// above cannot prevent an unsub from removing and closing the delegator
+	// this watch is about to build; only mutual exclusion can. Held until the
+	// delegator is fully started (or rolled back), so an unsub only ever sees
+	// a channel in a settled state.
+	//
+	// The acquire is context-aware: the queue in front of this lock can be a
+	// full unsubscribe drain long, and a bare blocking acquire would (a) keep
+	// this request working after its own RPC deadline has passed and (b) pin
+	// the lifetime reference taken above, so QueryNode.Stop()'s lifetime.Wait()
+	// would queue behind an unrelated channel operation.
+	if err := node.channelOpLock.LockCtx(ctx, channel.GetChannelName()); err != nil {
+		// Wrap, never stringify: the cause (context.Canceled/DeadlineExceeded)
+		// must stay in the chain so merr.Status reports the canceled/timeout
+		// code for an expired request rather than a fabricated one.
+		err = merr.Wrapf(err, "failed to acquire channel operation lock during WatchDmChannels")
+		log.Warn(ctx, "give up waiting for the channel operation lock", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	defer node.channelOpLock.Unlock(channel.GetChannelName())
 
 	_, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
@@ -379,19 +393,58 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	defer node.lifetime.Done()
 
+	// Serialize against WatchDmChannels for this channel — see channelOpLock.
+	// Taken before the unsubscribing marker so a watch that arrives while this
+	// unsub holds the lock is fast-rejected by the marker instead of queueing
+	// behind a potentially long drain.
+	//
+	// Context-aware for the same reason as in WatchDmChannels: give up rather
+	// than acquire past our own deadline while holding a lifetime reference
+	// that QueryNode.Stop() waits on.
+	if err := node.channelOpLock.LockCtx(ctx, req.GetChannelName()); err != nil {
+		// Wrap, never stringify — same reasoning as in WatchDmChannels.
+		err = merr.Wrapf(err, "failed to acquire channel operation lock during UnsubDmChannel")
+		log.Warn(ctx, "give up waiting for the channel operation lock", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	defer node.channelOpLock.Unlock(req.GetChannelName())
+
 	node.unsubscribingChannels.Insert(req.GetChannelName())
 	defer node.unsubscribingChannels.Remove(req.GetChannelName())
 	_, ok := node.delegators.Get(req.GetChannelName())
 	if ok {
 		growingSegmentIDs := node.localGrowingSegmentIDs(req.GetChannelName(), nil)
-		prepared, err := node.prepareReleaseManualFlush(ctx, req.GetCollectionID(), req.GetChannelName(), growingSegmentIDs)
+		err := node.prepareReleaseManualFlush(ctx, req.GetCollectionID(), req.GetChannelName(), growingSegmentIDs)
 		prepareSkipped := false
 		if err != nil {
 			if isReleaseManualFlushPrepareUnavailable(err) {
+				// Skipping the prepare is only safe when no local write buffer can
+				// still owe a growing-source flush for this channel. On a merely
+				// transient failure the local write buffer may be alive with such a
+				// flush in flight, and dropping the growing segments below would
+				// strand it forever (its source is the only copy of those rows and
+				// the channel checkpoint stays pinned behind it). Fail the
+				// unsubscribe instead so the coordinator retries it, and the retry
+				// performs the drain this attempt could not.
+				//
+				// The local growing-segment snapshot is deliberately NOT part of
+				// this condition. delegator.GetGrowingFlushSource returns
+				// GrowingSourcePending for a segment the QueryNode has not
+				// materialized yet, and the write buffer treats Pending as "choose
+				// growing source" — stickily. So the write buffer can already own
+				// growing-source progress for a segment that localGrowingSegmentIDs
+				// does not see. A registered provider for the channel is the real
+				// signal that debt is possible; the snapshot is only a log field.
+				if !isReleaseManualFlushPrepareStructurallyUnavailable(err) &&
+					syncmgr.DefaultGrowingSourceRegistry().ProviderCount(req.GetChannelName()) > 0 {
+					log.Warn(ctx, "release manual flush prepare transiently unavailable on a growing-source channel, fail unsubscribe for retry",
+						mlog.Int64s("segmentIDs", growingSegmentIDs),
+						mlog.Err(err))
+					return merr.Status(err), nil
+				}
 				log.Warn(ctx, "release manual flush prepare unavailable before unsubscribing channel, continue unsubscribe",
 					mlog.Int64s("segmentIDs", growingSegmentIDs),
 					mlog.Err(err))
-				prepared = false
 				prepareSkipped = true
 			} else {
 				log.Warn(ctx, "failed to prepare release manual flush before unsubscribing channel",
@@ -402,12 +455,10 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		}
 		if prepareSkipped {
 			log.Info(ctx, "release manual flush prepare skipped before unsubscribing channel",
-				mlog.Int64s("segmentIDs", growingSegmentIDs),
-				mlog.Bool("prepared", prepared))
+				mlog.Int64s("segmentIDs", growingSegmentIDs))
 		} else {
-			log.Info(ctx, "release manual flush prepare result before unsubscribing channel",
-				mlog.Int64s("segmentIDs", growingSegmentIDs),
-				mlog.Bool("prepared", prepared))
+			log.Info(ctx, "release manual flush prepare done before unsubscribing channel",
+				mlog.Int64s("segmentIDs", growingSegmentIDs))
 		}
 
 		delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
@@ -416,17 +467,15 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 			return merr.Success(), nil
 		}
 		node.pipelineManager.Remove(req.GetChannelName())
-		preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(req.GetChannelName())
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
 
-		if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
-			for _, segmentID := range preparedGrowingSourceSegments {
-				detacher.DetachStreaming(ctx, segmentID)
-				syncmgr.DefaultGrowingSourceRegistry().MarkReleaseDetached(req.GetChannelName(), segmentID)
-				syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(req.GetChannelName(), segmentID)
-			}
-		}
+		// Safe to drop the growing segments only because prepareReleaseManualFlush
+		// above already waited for every growing-source flush that owed one to
+		// finish. In growing-source mode these segments are the only copy of those
+		// rows, so dropping one with a flush still in flight strands it: no source,
+		// endless retries, and a channel checkpoint pinned behind it. Keep this
+		// after a successful prepare.
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
@@ -699,6 +748,21 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		return merr.Success(), nil
 	}
 
+	// NOTE: this direct (non-NeedTransfer) path intentionally carries NO
+	// growing-source flush-debt check; the enforcement point is the
+	// delegator-layer guard in delegator_data.go ReleaseSegments. An
+	// adversarial trace proved this path is unreachable un-checked: the
+	// querycoord executor always sets NeedTransfer=true for
+	// DataScope_Streaming (in-tree since at least 7ac57bf2f6, 2026-06-18,
+	// months before this feature's base, so every querycoord within this
+	// feature's rolling-upgrade compatibility window sets it), every
+	// non-Streaming release that reduces here is DataScope_Historical
+	// (exempt by scope — never touches growing segments), and the second
+	// hop of the delegator chain arrives AFTER the delegator-layer guard
+	// already ran, with no way for debt to reappear in between
+	// (NeedReleaseHandoff only goes false at Flushed, and Flushed segments
+	// cannot re-accrue rows).
+
 	log.Info(ctx, "start to release segments")
 	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
@@ -726,31 +790,26 @@ func (node *QueryNode) localGrowingSegmentIDs(channel string, segmentIDs []int64
 	})
 }
 
-func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collectionID int64, channel string, segmentIDs []int64) (bool, error) {
+func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collectionID int64, channel string, segmentIDs []int64) error {
 	segmentIDs = lo.Uniq(lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
-		return segmentID > 0 && !syncmgr.DefaultGrowingSourceRegistry().IsReleasePrepared(channel, segmentID, 0)
+		return segmentID > 0
 	}))
 	wal := streaming.WAL()
 	if wal == nil {
-		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
+		return merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
 	}
 	return wal.Local().PrepareReleaseManualFlushIfLocal(ctx, collectionID, channel, segmentIDs)
 }
 
 func isReleaseManualFlushPrepareUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, merr.ErrServiceUnavailable) ||
-		errors.Is(err, merr.ErrChannelNotAvailable) ||
-		errors.Is(err, handler.ErrClientClosed) ||
-		errors.Is(err, handler.ErrReadOnlyWAL) ||
-		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
-		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
-		return true
-	}
-	streamingErr := streamingstatus.AsStreamingError(err)
-	return streamingErr.IsOnShutdown() || streamingErr.IsWrongStreamingNode()
+	return growingflush.IsPrepareUnavailable(err)
+}
+
+// isReleaseManualFlushPrepareStructurallyUnavailable reports that no LOCAL write
+// buffer can be left owing a growing-source flush for this channel — see
+// growingflush.IsPrepareStructurallyUnavailable for the full reasoning.
+func isReleaseManualFlushPrepareStructurallyUnavailable(err error) bool {
+	return growingflush.IsPrepareStructurallyUnavailable(err)
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...

@@ -2315,7 +2315,7 @@ func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Sub(segmentTask)
 	assert.Empty(t, delta.records)
 
-	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
+	base := newBaseTask(context.Background(), 0, WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
 	base.SetID(2)
 	base.actions = []Action{NewChannelAction(1, ActionTypeGrow, "ch")}
 	malformedTask := &SegmentTask{baseTask: base, segmentID: 10}
@@ -3263,4 +3263,43 @@ func (suite *TaskSuite) TestNodeTaskQueueRangeByNodePriority() {
 		return true
 	})
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
+}
+
+func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
+	channelTask, err := NewChannelTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		NewChannelAction(1, ActionTypeReduce, "test-channel"),
+	)
+	assert.NoError(t, err)
+	defer channelTask.Cancel(nil)
+
+	deadline, ok := channelTask.Context().Deadline()
+	assert.True(t, ok, "channel task context must carry the task timeout as a deadline")
+
+	select {
+	case <-channelTask.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel task context did not expire after the task timeout")
+	}
+	assert.ErrorIs(t, channelTask.Context().Err(), context.DeadlineExceeded)
+	assert.WithinDuration(t, time.Now(), deadline, 2*time.Second)
+
+	// Segment tasks deliberately keep an unbounded context.
+	segmentTask, err := NewSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer segmentTask.Cancel(nil)
+	_, ok = segmentTask.Context().Deadline()
+	assert.False(t, ok, "segment task context must stay unbounded")
 }

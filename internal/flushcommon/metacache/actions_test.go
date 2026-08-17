@@ -19,6 +19,7 @@ package metacache
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -96,7 +97,7 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(numOfRows, info.NumOfRows())
 
 	info = &SegmentInfo{}
-	actions := SegmentActions(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows),
+	actions := MergeSegmentAction(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows),
 		UpdateBinlogs([]*datapb.FieldBinlog{
 			{
 				FieldID: 1,
@@ -132,6 +133,18 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(1, len(info.Bm25logs()))
 }
 
+func (s *SegmentActionSuite) TestDiscardSyncingDoesNotRestoreMissingPayload() {
+	info := &SegmentInfo{}
+	UpdateBufferedRows(10)(info)
+	StartSyncing(10)(info)
+
+	DiscardSyncing(10)(info)
+
+	s.Zero(info.BufferRows())
+	s.Zero(info.SyncingRows())
+	s.True(WithNoSyncingTask().Filter(info))
+}
+
 func (s *SegmentActionSuite) TestMergeActions() {
 	info := &SegmentInfo{}
 
@@ -159,4 +172,28 @@ func (s *SegmentActionSuite) TestMergeActions() {
 
 func TestActions(t *testing.T) {
 	suite.Run(t, new(SegmentActionSuite))
+}
+
+// The flush-source decision is sticky for the segment's lifetime. If a later
+// call could flip it, one segment's rows would end up split across the write
+// buffer and the growing segment, which have different ack protocols and
+// different checkpoint contributions — and the write-buffer path removes the
+// segment on its final flush while growing-source progress still pins the
+// checkpoint behind it.
+func TestSetFlushSourceModeIsSticky(t *testing.T) {
+	info := NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, nil, nil, nil)
+	assert.Equal(t, FlushSourceUnknown, info.FlushSourceMode())
+
+	SetFlushSourceMode(FlushSourceGrowing)(info)
+	assert.Equal(t, FlushSourceGrowing, info.FlushSourceMode())
+
+	// A later, contradicting decision must be refused, not applied.
+	SetFlushSourceMode(FlushSourceWriteBuffer)(info)
+	assert.Equal(t, FlushSourceGrowing, info.FlushSourceMode())
+
+	// And the same holds from the other side.
+	other := NewSegmentInfo(&datapb.SegmentInfo{ID: 2}, nil, nil, nil)
+	SetFlushSourceMode(FlushSourceWriteBuffer)(other)
+	SetFlushSourceMode(FlushSourceGrowing)(other)
+	assert.Equal(t, FlushSourceWriteBuffer, other.FlushSourceMode())
 }

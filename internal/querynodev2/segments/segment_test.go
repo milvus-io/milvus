@@ -3,6 +3,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -47,6 +48,12 @@ type SegmentSuite struct {
 
 func (suite *SegmentSuite) SetupSuite() {
 	paramtable.Init()
+	// Process-global segcore registrations this suite depends on directly:
+	// RowNum runs a count aggregation (needs the expression function factory)
+	// and FlushData writes through the loon FFI arrow filesystem. Without them
+	// the suite only passes when another suite in the package happens to have
+	// registered them first.
+	initcore.InitExecExpressionFunctionFactory()
 }
 
 func (suite *SegmentSuite) SetupTest() {
@@ -54,7 +61,11 @@ func (suite *SegmentSuite) SetupTest() {
 	ctx := context.Background()
 	msgLength := 100
 
-	suite.rootPath = suite.T().Name()
+	// TempDir, not the test name: rootPath is handed to InitLocalArrowFileSystem,
+	// which is PROCESS-GLOBAL, and the native flush writer is not covered by the
+	// chunk manager teardown — a repo-relative value would leak files into the
+	// source tree.
+	suite.rootPath = suite.T().TempDir()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
@@ -62,6 +73,7 @@ func (suite *SegmentSuite) SetupTest() {
 	initcore.InitLocalChunkManager(localDataRootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
+	initcore.InitLocalArrowFileSystem(suite.rootPath)
 
 	suite.collectionID = 100
 	suite.partitionID = 10
@@ -567,16 +579,13 @@ func (suite *SegmentSuite) TestFlushData() {
 	suite.Greater(rowNum, int64(0), "growing segment should have data")
 
 	// flush all data
-	result, err := suite.growing.FlushData(ctx, 0, rowNum, config)
-	// note: this test may fail if C++ milvus-storage is not properly initialized
-	// in that case, the error is expected
-	if err != nil {
-		suite.T().Logf("FlushData failed (expected if milvus-storage not initialized): %v", err)
-	} else {
-		suite.NotNil(result)
-		suite.NotEmpty(result.ManifestPath)
-		suite.Equal(rowNum, result.NumRows)
-	}
+	// Flush everything the segment holds: the fences are timestamps now, so the
+	// upper one is "past any row's timestamp" rather than a row count.
+	result, err := suite.growing.FlushData(ctx, 0, math.MaxUint64, config)
+	suite.Require().NoError(err)
+	suite.Require().NotNil(result)
+	suite.NotEmpty(result.ManifestPath)
+	suite.Equal(rowNum, result.NumRows)
 }
 
 func (suite *SegmentSuite) TestFlushDataSealedSegmentFails() {
@@ -607,15 +616,11 @@ func (suite *SegmentSuite) TestFlushDataInvalidOffsets() {
 		Schema:            suite.collection.Schema(),
 	}
 
-	// Test negative start offset
-	_, err := suite.growing.FlushData(ctx, -1, 10, config)
+	// An inverted range is the only shape that is rejected outright; there is no
+	// "negative" fence to test now that both ends are timestamps.
+	_, err := suite.growing.FlushData(ctx, 50, 10, config)
 	suite.Error(err)
-	suite.Contains(err.Error(), "invalid offsets")
-
-	// Test end < start
-	_, err = suite.growing.FlushData(ctx, 50, 10, config)
-	suite.Error(err)
-	suite.Contains(err.Error(), "invalid offsets")
+	suite.Contains(err.Error(), "invalid flush range")
 }
 
 func (suite *SegmentSuite) TestFlushDataEmptyRange() {
@@ -635,6 +640,12 @@ func (suite *SegmentSuite) TestFlushDataEmptyRange() {
 	suite.Nil(result)
 }
 
+func (suite *SegmentSuite) TestPrimaryKeysEmptyRange() {
+	pks, err := suite.growing.(*LocalSegment).PrimaryKeys(context.Background(), 10, 10)
+	suite.NoError(err)
+	suite.Empty(pks)
+}
+
 func (suite *SegmentSuite) TestFlushDataPartialRange() {
 	ctx := context.Background()
 
@@ -649,17 +660,17 @@ func (suite *SegmentSuite) TestFlushDataPartialRange() {
 	rowNum := suite.growing.RowNum()
 	suite.Greater(rowNum, int64(20), "growing segment should have enough data")
 
-	// flush partial range
-	start := int64(10)
-	end := int64(20)
+	// A partial range, expressed as timestamps. GenInsertMsg assigns row i the
+	// timestamp i (except row 0, which gets 1), and FlushData's fence is
+	// (startTs, endTs], so (10, 20] selects exactly the rows with timestamps
+	// 11..20 — 10 rows.
+	start := uint64(10)
+	end := uint64(20)
 	result, err := suite.growing.FlushData(ctx, start, end, config)
-	// note: this test may fail if C++ milvus-storage is not properly initialized
-	if err != nil {
-		suite.T().Logf("FlushData failed (expected if milvus-storage not initialized): %v", err)
-	} else {
-		suite.NotNil(result)
-		suite.Equal(end-start, result.NumRows)
-	}
+	suite.Require().NoError(err)
+	suite.Require().NotNil(result)
+	suite.NotEmpty(result.ManifestPath)
+	suite.EqualValues(10, result.NumRows)
 }
 
 func TestSegment(t *testing.T) {

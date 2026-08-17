@@ -118,7 +118,9 @@ func (t *PreImportTask) Cancel() {
 }
 
 func (t *PreImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
+	// Share ctx/cancel across clones instead of deriving a child context; see
+	// ImportTask.Clone for the full rationale.
+	ctx, cancel := t.ctx, t.cancel
 	return &PreImportTask{
 		PreImportTask: typeutil.Clone(t.PreImportTask),
 		ctx:           ctx,

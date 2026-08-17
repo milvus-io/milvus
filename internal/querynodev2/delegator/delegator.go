@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -208,10 +207,7 @@ type shardDelegator struct {
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
 
-	// growingSourceRegistration is the process-local registry lease for this
-	// delegator's optional growing-source source.
-	growingSourceRegistration *syncmgr.GrowingSourceRegistration
-	growingSourceProvider     *delegatorGrowingSourceProvider
+	growingSourceProvider *delegatorGrowingSourceProvider
 
 	leaderViewUpdatedCallback func(channel string)
 }
@@ -373,6 +369,12 @@ func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *intern
 
 // Start sets delegator to working state.
 func (sd *shardDelegator) Start() {
+	// Publish the growing-source provider only here. Every fallible step of the
+	// watch is already behind us, so from this point the provider can actually
+	// serve the segments it advertises.
+	if sd.growingSourceProvider != nil {
+		sd.growingSourceProvider.Activate()
+	}
 	sd.lifetime.SetState(lifetime.Working)
 }
 
@@ -1615,17 +1617,15 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 	sd.collectionVersion.Store(schemaVersion)
 
-	// Register growing-source segments as optional local flush sources. Metadata
-	// commit is still owned by WAL flusher / WriteBuffer.
+	// Build the growing-source provider, but do NOT publish it yet: watching a
+	// channel can still fail after this point (pipeline build, L0 load, WAL
+	// consume), and a reachable provider that never becomes serviceable makes
+	// the write buffer commit segments to a source that will never exist.
+	// Start() publishes it once the watch has fully succeeded.
 	if sd.allowGrowingSourceFlush() {
-		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
-			_, err := sd.waitTSafe(ctx, fenceTs)
-			return err
-		}, sd.GetTSafe)
+		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, sd.GetTSafe)
 		sd.growingSourceProvider.SetChannelName(sd.vchannelName)
-		sd.growingSourceRegistration = syncmgr.DefaultGrowingSourceRegistry().Register(sd.vchannelName, sd.growingSourceProvider)
-		sd.growingSourceProvider.SetRegistration(sd.growingSourceRegistration)
-		log.Info(ctx, "registered growing-source source support")
+		log.Info(ctx, "built growing-source flush provider, pending activation")
 	}
 
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
