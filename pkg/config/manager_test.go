@@ -489,6 +489,31 @@ func TestRegisteredGroupMemberLifecycle(t *testing.T) {
 	assert.Equal(t, "kafka.producer.compression.type", canonical)
 }
 
+// GetRegisteredConfig must report the value the process actually uses. A scalar
+// is read by ParamItem.get through Manager.GetConfig, which looks only under the
+// separator-free identity, so a dotted overlay left by SetMapConfig is not a
+// value anything consumes and must not be reported as one.
+func TestRegisteredScalarIgnoresDottedOverlay(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigKey("minio.address")
+	// The dotted spelling is the only thing set, and nothing in the process
+	// reads a ParamItem under it.
+	mgr.SetMapConfig("minio.address", "stray-dotted-overlay")
+
+	_, _, liveErr := mgr.GetConfig("minio.address")
+	require.ErrorIs(t, liveErr, ErrKeyNotFound, "ParamItem.get would not find this either")
+	_, _, err := mgr.GetRegisteredConfig("minio.address")
+	require.ErrorIs(t, err, ErrKeyNotFound, "so the management API must not report it as the value in force")
+
+	// Once it is set the way a ParamItem is actually read, both agree.
+	mgr.SetConfig("minio.address", "the-value-milvus-uses")
+	_, live, err := mgr.GetConfig("minio.address")
+	require.NoError(t, err)
+	_, reported, err := mgr.GetRegisteredConfig("minio.address")
+	require.NoError(t, err)
+	assert.Equal(t, live, reported)
+}
+
 // A write only counts if Milvus reads it back. ParamGroup.GetValue selects
 // members by the dotted prefix, while a write lands under the separator-free
 // identity, so a brand-new member is stored and then ignored — while overriding
@@ -506,6 +531,18 @@ func TestWriteTakesEffect(t *testing.T) {
 	assert.True(t, mgr.WriteTakesEffect(declared), "the config file supplied the dotted key the group filter needs")
 	assert.False(t, mgr.WriteTakesEffect("kafka.consumer.brand.new.option"))
 	assert.False(t, mgr.WriteTakesEffect("nothing.declares.this"))
+
+	// A group below NotFormatPrefix keeps its separators all the way into etcd,
+	// so a brand-new member there lands inside the namespace the group filters
+	// on and is readable immediately.
+	mgr.RegisterConfigPrefix(NotFormatPrefix)
+	const newKnowhere = "knowhere.MYINDEX.build.max_degree"
+	require.Equal(t, newKnowhere, EtcdConfigKey(newKnowhere))
+	assert.True(t, mgr.WriteTakesEffect(newKnowhere))
+	mgr.SetConfig(newKnowhere, "64")
+	assert.Equal(t, map[string]string{"MYINDEX.build.max_degree": "64"},
+		mgr.GetByRaw(WithPrefix(NotFormatPrefix), RemovePrefix(NotFormatPrefix)),
+		"the prediction WriteTakesEffect made must hold once the write happens")
 
 	// And the claim the predicate rests on: an override of the declared member
 	// reaches the group, an invented one does not.

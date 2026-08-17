@@ -273,7 +273,12 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 // through SetMapConfig, which keeps the separators.
 func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (string, string, error) {
 	candidates := []string{resolved.lookup}
-	if resolved.dotted != resolved.lookup {
+	// Only a ParamGroup member can legitimately live under the dotted spelling:
+	// SetMapConfig writes it, and ParamGroup.GetValue reads it. A ParamItem is
+	// resolved by ParamItem.get through Manager.GetConfig, which looks only
+	// under the separator-free identity — so falling back for a scalar would
+	// report a value nothing in the process actually uses.
+	if resolved.kind == RegisteredConfigGroup && resolved.dotted != resolved.lookup {
 		candidates = append(candidates, resolved.dotted)
 	}
 
@@ -353,19 +358,24 @@ func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 // WriteTakesEffect reports whether persisting key would change what Milvus
 // actually reads.
 //
-// It is false for a ParamGroup member that no source supplies yet, and that is
-// a real limitation rather than a policy: ParamGroup.GetValue selects members by
-// filtering the key space on the group's dotted prefix, while a write reaches
-// etcd under the separator-free identity, which that filter cannot match. So a
-// brand-new member is stored and then never read — whereas overriding a member a
-// config file already declares works, because the file supplied the dotted key
-// the filter needs and the override is found underneath it.
+// It can be false for a ParamGroup member, and that is a real limitation rather
+// than a policy. ParamGroup.GetValue selects members by filtering the key space
+// on the group's dotted prefix, while AlterConfigsInEtcd stores under
+// EtcdConfigKey. Where that formatting strips the separators the stored key
+// falls outside the filter, so a brand-new member would be written and then
+// never read. Two things rescue it: a prefix EtcdConfigKey leaves alone (see
+// NotFormatPrefix), where the stored key stays inside the namespace; and a
+// member some source already supplies under its dotted spelling, where the
+// override is found underneath the key the filter already matches.
 func (m *Manager) WriteTakesEffect(key string) bool {
 	resolved := m.resolveRegisteredKey(key)
 	switch resolved.kind {
 	case RegisteredConfigScalar:
 		return true
 	case RegisteredConfigGroup:
+		if EtcdConfigKey(resolved.dotted) == resolved.dotted {
+			return true
+		}
 		for _, candidate := range [2]string{resolved.dotted, strings.ReplaceAll(resolved.dotted, ".", "/")} {
 			if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
 				return true

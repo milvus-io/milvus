@@ -362,9 +362,11 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		w := httptest.NewRecorder()
 		coord.HandleAlterConfig(w, req)
 		// Removing a secret someone else wrote into etcd is the opposite of
-		// disclosing one, so validation must let it through. Whether it then
-		// reaches etcd is not this assertion's business.
+		// disclosing one, so validation must let it through. Reaching the etcd
+		// step is the proof that it did; this package has no etcd, so that step
+		// is where it stops.
 		assert.NotContains(t, w.Body.String(), "sensitive configuration")
+		assert.Contains(t, w.Body.String(), "etcd source is not enabled")
 	})
 
 	t.Run("sensitive ParamGroup member cannot be set", func(t *testing.T) {
@@ -405,7 +407,8 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 
 	t.Run("unregistered config may still be deleted", func(t *testing.T) {
 		// A key an older build wrote must remain removable even though nothing
-		// declares it any more; only setting one is refused.
+		// declares it any more; only setting one is refused. As above, reaching
+		// the etcd step is what proves validation passed.
 		const key = "test.alter.no.longer.declared"
 		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
 		body, _ := json.Marshal(reqBody)
@@ -413,6 +416,7 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		w := httptest.NewRecorder()
 		coord.HandleAlterConfig(w, req)
 		assert.NotContains(t, w.Body.String(), "unregistered configuration")
+		assert.Contains(t, w.Body.String(), "etcd source is not enabled")
 	})
 
 	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {
