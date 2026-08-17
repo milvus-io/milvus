@@ -24,7 +24,7 @@ const (
 const (
 	// CachePathPrefix is the shared top-level directory for every node-local
 	// cache below. It aliases common.LocalCacheRootPath so the segment stays
-	// registered in common.InternalStorageRootSegments: under
+	// registered in common.LocalOnlyStorageRootSegments: under
 	// common.storageType=local this directory sits directly under the
 	// ChunkManager root, and import path validation refuses paths into it.
 	CachePathPrefix        = common.LocalCacheRootPath
