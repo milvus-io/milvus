@@ -169,6 +169,12 @@ func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexS
 	defer m.mu.Unlock()
 
 	if len(m.sessionVersion) == 0 {
+		// An on-demand form builds most indexes with no query node running,
+		// and its pool never runs an image older than the coordinator, so
+		// empty reads as "all readers current" there; see the seam.
+		if scaleToZeroQueryNodes() {
+			return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+		}
 		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	}
 	for _, version := range m.sessionVersion {
@@ -202,6 +208,11 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
+		// On a form that starts query nodes on demand, empty is the resting
+		// state and zero would misroute disk indexes; see the seam.
+		if v, ok := scaleToZeroVectorEngineVersion(); ok {
+			return v
+		}
 		return 0
 	}
 
@@ -244,6 +255,9 @@ func (m *versionManagerImpl) GetCurrentScalarIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentScalarVersion() int32 {
 	if len(m.scalarIndexVersions) == 0 {
+		if v, ok := scaleToZeroScalarEngineVersion(); ok {
+			return v
+		}
 		return 0
 	}
 

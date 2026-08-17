@@ -15,6 +15,9 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -177,4 +180,55 @@ func TestDropVectorIndexOnLoadedProceedsWhenDrainerAllows(t *testing.T) {
 
 	assert.Empty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
 		"an allowed drop must actually remove the index, not just skip the refusal")
+}
+
+// enginedProvider installs a coordinator engine, which is the declaration that
+// an empty query-node session set means scale-to-zero.
+type enginedProvider struct{ engine extension.CoordinatorEngine }
+
+func (enginedProvider) Name() string                       { return "test" }
+func (enginedProvider) Requires() []extension.CapabilityID { return nil }
+func (p enginedProvider) Capabilities() extension.Capabilities {
+	return extension.Capabilities{CoordinatorEngine: p.engine}
+}
+
+type inertEngine struct{}
+
+func (inertEngine) RegisterOnCoordinator(grpc.ServiceRegistrar)              {}
+func (inertEngine) Start(context.Context, extension.MixCoord) error          { return nil }
+func (inertEngine) Stop() error                                              { return nil }
+
+// With nothing installed, an empty session set keeps its native reading:
+// version zero and the legacy store-path layout, exactly what a stock binary
+// answered before the seam existed.
+func TestEmptyQueryNodeVersionsStayNativeWithoutAProvider(t *testing.T) {
+	extension.ResetForTest()
+	t.Cleanup(extension.ResetForTest)
+
+	m := newIndexEngineVersionManager()
+	assert.Equal(t, int32(0), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetCurrentScalarIndexEngineVersion())
+}
+
+// With an on-demand form installed, an empty session set is the resting state
+// and the versions come from this process's own engine - the same values the
+// absent query nodes, running this same image, would have reported. Version
+// zero here is what misroutes disk indexes in knowhere, so the assertion pins
+// non-zero as well as source equality.
+func TestEmptyQueryNodeVersionsComeFromThisBinaryUnderScaleToZero(t *testing.T) {
+	extension.ResetForTest()
+	t.Cleanup(extension.ResetForTest)
+	require.NoError(t, extension.SetProvider(enginedProvider{engine: inertEngine{}}))
+
+	m := newIndexEngineVersionManager()
+
+	vec := m.GetCurrentIndexEngineVersion()
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, vec,
+		"the fallback must be this binary's own knowhere version")
+	assert.NotZero(t, vec, "version zero is the misrouting answer the fallback exists to avoid")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
+
+	// Minimal versions keep their native zero: they are compatibility floors,
+	// and an empty set genuinely imposes none.
+	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
 }
