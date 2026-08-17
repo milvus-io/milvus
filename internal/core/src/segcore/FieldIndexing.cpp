@@ -41,7 +41,6 @@
 #include "knowhere/expected.h"
 #include "knowhere/object.h"
 #include "knowhere/sparse_utils.h"
-#include "knowhere/version.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
@@ -178,10 +177,7 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 void
 VectorFieldIndexing::recreate_index(DataType data_type,
                                     const VectorBase* field_raw_data) {
-    // Growing indexes are ephemeral and will never be serialized, so use the latest version
-    // supported by this Knowhere build.
-    const auto index_version =
-        knowhere::Version::GetMaximumVersion().VersionNumber();
+    const auto index_version = segcore_config_.get_interim_index_version();
     if (IsSparseFloatVectorDataType(data_type)) {
         index_ = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
             DataType::NONE,

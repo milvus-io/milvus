@@ -97,7 +97,6 @@
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_static.h"
 #include "knowhere/sparse_utils.h"
-#include "knowhere/version.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
@@ -6853,6 +6852,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(
         auto index_metric = field_binlog_config->GetMetricType();
 
         if (enable_binlog_index()) {
+            const auto index_version =
+                segcore_config_.get_interim_index_version();
             std::unique_ptr<
                 milvus::cachinglayer::Translator<milvus::index::IndexBase>>
                 translator =
@@ -6863,6 +6864,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                         field_id.get(),
                         interim_index_type,
                         index_metric,
+                        index_version,
                         build_config,
                         dim,
                         is_sparse,
@@ -6871,8 +6873,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
                     std::move(translator));
-            auto index_version =
-                knowhere::Version::GetMaximumVersion().VersionNumber();
             bool has_raw_data = false;
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {

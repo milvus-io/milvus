@@ -407,8 +407,9 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     }
 
     void
-    ApplyBinlogInterimIndexConfigForTest() {
+    ApplyBinlogInterimIndexConfigForTest(int32_t target_index_version = -1) {
         InterimIndexConfigForTest options;
+        options.target_index_version = target_index_version;
         options.chunk_rows = 1024;
         options.nlist = 16;
         options.nprobe = 16;
@@ -683,7 +684,8 @@ INSTANTIATE_TEST_SUITE_P(MetricTypeParameters,
 
 class SealedInterimIndexVersionTest : public BinlogIndexTest {};
 
-TEST_P(SealedInterimIndexVersionTest, SupportsSindiWithKnowhereMaximumVersion) {
+TEST_P(SealedInterimIndexVersionTest,
+       SupportsSindiWithConfiguredMaximumVersion) {
     ScopedSegcoreConfigRestore config_restore;
     std::map<std::string, std::string> index_params = {
         {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
@@ -699,9 +701,11 @@ TEST_P(SealedInterimIndexVersionTest, SupportsSindiWithKnowhereMaximumVersion) {
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
-    ApplyBinlogInterimIndexConfigForTest();
+    ApplyBinlogInterimIndexConfigForTest(
+        knowhere::Version::GetMaximumVersion().VersionNumber());
     LoadVectorField();
     ASSERT_TRUE(segment->HasIndex(vec_field_id));
+    SegcoreConfig::default_config().set_interim_index_target_version(-1);
 
     constexpr int64_t num_queries = 1;
     milvus::proto::plan::PlanNode plan_node;
