@@ -58,8 +58,15 @@ var (
 )
 
 func authorizeConfigView() gin.HandlerFunc {
+	// Read once, at router construction: internal/distributed/proxy installs the
+	// authentication middleware that populates the username from the same flag
+	// at the same moment. Re-reading it per request would let a runtime Save
+	// turn the gate on while the middleware that feeds it stays absent, and then
+	// nobody — root included — could read the view.
+	authorizationEnabled := paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool()
+
 	return func(c *gin.Context) {
-		if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
+		if !authorizationEnabled {
 			return
 		}
 

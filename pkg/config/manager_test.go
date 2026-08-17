@@ -158,9 +158,10 @@ func TestSensitiveConfigRedaction(t *testing.T) {
 	assert.True(t, isRegistered(mgr, "querynode.graceful_stop_timeout"))
 	assert.True(t, isRegistered(mgr, "credential.aksk1.secret_access_key"))
 	assert.False(t, isRegistered(mgr, "OPAQUE_RUNTIME_VALUE"))
-	// A prefix match alone does not make a key a group member; some source has
-	// to have supplied it under the group's own dotted namespace.
-	assert.False(t, isRegistered(mgr, "credential.aksk1.never_declared"))
+	// A member of a declared group counts even before anything sets it: see
+	// TestRegisteredGroupMemberLifecycle for why refusing it would break the
+	// write-then-delete cycle.
+	assert.True(t, isRegistered(mgr, "credential.aksk1.never_declared"))
 
 	for _, key := range []string{
 		"minio.address",
@@ -391,6 +392,9 @@ func TestConfigProjectionsRedactByDefault(t *testing.T) {
 
 	safeView := mgr.GetConfigsView()
 	assert.Contains(t, safeView[publicKey], RuntimeSource)
+	// A redacted entry carries no "value[source]" annotation: the source name is
+	// the only part left, and printing "*****[RuntimeSource]" would suggest the
+	// mask itself is the value.
 	assert.Equal(t, RedactedValue, safeView[opaqueKey])
 	assert.NotContains(t, safeView, unknownKey)
 
@@ -464,6 +468,62 @@ func TestRegisteredGroupMemberSeesEtcdOverride(t *testing.T) {
 	_, live, err := mgr.GetConfig(key)
 	require.NoError(t, err)
 	assert.Equal(t, live, value)
+}
+
+// A ParamGroup member has to be creatable, readable and deletable through the
+// management endpoints even when no yaml ever mentioned it: AlterConfigsInEtcd
+// stores it under the separator-free identity only, so a rule that demanded the
+// dotted spelling would accept the write and then refuse to read or delete it.
+func TestRegisteredGroupMemberLifecycle(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("kafka.producer.")
+
+	// Nothing anywhere yet: still a legal member of a declared group.
+	_, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.linger.ms")
+	assert.Equal(t, RegisteredConfigGroup, kind, "a member that does not exist yet must still be creatable")
+
+	// What an alter call leaves behind.
+	mgr.SetConfig("kafka.producer.compression.type", "zstd")
+	canonical, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.compression.type")
+	assert.Equal(t, RegisteredConfigGroup, kind, "the key just written must still resolve, or it can never be deleted")
+	assert.Equal(t, "kafka.producer.compression.type", canonical)
+}
+
+// The one ambiguous case stays closed: a key whose sole backing is a process
+// environment variable that collapses into the group's separator-free
+// namespace. Everything else below a declared prefix is configuration.
+func TestRegisteredGroupMemberRejectsEnvironmentOnlyKey(t *testing.T) {
+	t.Setenv("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL", "env-secret")
+
+	mgr, _ := Init(WithEnvSource(formatKey))
+	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
+
+	_, kind := mgr.ResolveRegisteredConfigKey("proxy.accessLog.formatters.DATABASE_URL")
+	assert.Equal(t, RegisteredConfigUnknown, kind)
+	_, _, err := mgr.GetRegisteredConfig("proxy.accessLog.formatters.DATABASE_URL")
+	require.ErrorIs(t, err, ErrKeyUnregistered)
+
+	// A member of the same group that the environment does not back resolves
+	// normally, so the refusal is targeted rather than a blanket one.
+	_, kind = mgr.ResolveRegisteredConfigKey("proxy.accessLog.formatters.base.format")
+	assert.Equal(t, RegisteredConfigGroup, kind)
+}
+
+// A key deleted at runtime must disappear from the projections, not surface as
+// a key whose value is the literal tombstone marker.
+func TestTombstonedKeysAreNotProjected(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigKey("public.key")
+	mgr.SetConfig("public.key", "visible")
+	require.Equal(t, "visible", mgr.GetConfigs()[formatKey("public.key")])
+
+	mgr.DeleteConfig("public.key")
+	assert.NotContains(t, mgr.GetConfigs(), formatKey("public.key"))
+	assert.NotContains(t, mgr.GetConfigsView(), formatKey("public.key"))
+	assert.NotContains(t, mgr.GetBy(WithPrefix("public")), formatKey("public.key"))
+	for _, value := range mgr.GetConfigsView() {
+		assert.NotContains(t, value, TombValue)
+	}
 }
 
 // An operator overriding a declared ParamGroup member through the environment

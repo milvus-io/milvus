@@ -239,7 +239,7 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 	if resolved.kind == RegisteredConfigUnknown {
 		return "", "", errors.Wrap(ErrKeyUnregistered, key)
 	}
-	if resolved.isSensitive() {
+	if m.isSensitiveResolved(resolved.lookup, resolved.dotted) {
 		return "", "", errors.Wrap(ErrKeySensitive, key)
 	}
 	return m.readResolved(resolved, key)
@@ -280,30 +280,36 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 	return "", "", errors.Wrap(ErrKeyNotFound, requestedKey)
 }
 
-// groupMemberDeclared reports whether some source actually supplied a
-// ParamGroup member under the group's own dotted namespace.
+// groupMemberIsEnvironmentOnly reports whether the only thing standing behind a
+// prefix-matching key is a process environment variable that happens to
+// collapse into the group's separator-free namespace.
 //
-// A prefix match on a caller-supplied key is not enough on its own. The
-// separator-free namespace is shared with every process environment variable —
-// EnvSource stores each one under KeyFormatter(name) — so without this check a
-// caller could reach an arbitrary variable by spelling it with dots until it
-// matched a registered prefix. Requiring the dotted identity closes that,
-// because EnvSource never synthesises a dotted key, and it makes the management
-// read surface exactly what ParamGroup.GetValue itself can see: that lookup
-// filters keySourceMap by the dotted prefix too, so a member this check rejects
-// is a member the group was never reading either.
-func (m *Manager) groupMemberDeclared(dotted string) bool {
+// A prefix match alone is not enough to trust a caller-supplied key. EnvSource
+// stores every variable in the pod under KeyFormatter(name), which is the same
+// namespace ParamGroup members are stored in, so a caller could otherwise reach
+// an arbitrary variable by re-spelling it with dots until it matched a
+// registered prefix — PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL asked for as
+// proxy.accessLog.formatters.DATABASE_URL.
+//
+// Anything supplied under the group's own dotted namespace is configuration by
+// construction, because EnvSource never synthesises a dotted key. Everything
+// else is judged by where the separator-free identity came from: an etcd entry
+// written by /management/config/alter is legitimate, and a key that exists
+// nowhere yet is a member waiting to be created. Only the environment is
+// ambiguous, and only the environment is refused.
+func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	// EtcdSource keeps whatever separator the stored key used, so accept the
 	// slash spelling of the same namespace as well.
 	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
 		if _, ok := m.overlays.Get(candidate); ok {
-			return true
+			return false
 		}
 		if _, ok := m.keySourceMap.Get(candidate); ok {
-			return true
+			return false
 		}
 	}
-	return false
+	source, ok := m.keySourceMap.Get(lookup)
+	return ok && source == environmentSourceName
 }
 
 // GetConfigs returns a safe projection of all key values: credentials are
@@ -341,6 +347,11 @@ func (m *Manager) getConfigs(redact bool) map[string]string {
 	})
 
 	m.overlays.Range(func(key, value string) bool {
+		if value == TombValue {
+			// Deleted at runtime; it is not a key with the literal value
+			// "TOMB_VAULE", which is what publishing it would claim.
+			return true
+		}
 		if projected, include := m.projectValue(key, value, redact); include {
 			config[key] = projected
 		}
@@ -375,7 +386,9 @@ func (m *Manager) GetConfigsView() map[string]string {
 	})
 
 	m.overlays.Range(func(key, value string) bool {
-		annotate(key, value, RuntimeSource)
+		if value != TombValue {
+			annotate(key, value, RuntimeSource)
+		}
 		return true
 	})
 
@@ -412,7 +425,7 @@ func (m *Manager) getBy(redact bool, filters ...Filter) map[string]string {
 
 	m.overlays.Range(func(key, value string) bool {
 		newkey, ok := filterate(key, filters...)
-		if !ok {
+		if !ok || value == TombValue {
 			return true
 		}
 		if projected, include := m.projectValue(key, value, redact); include {
@@ -602,7 +615,6 @@ func leafName(canonicalKey string) string {
 // "kafka.producer.", which is why the two must travel together rather than be
 // re-derived from whichever spelling a caller happened to use.
 type resolvedKey struct {
-	m      *Manager
 	lookup string
 	dotted string
 	kind   RegisteredConfigKind
@@ -620,12 +632,13 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	// same way whether the caller used the declared key, its environment alias,
 	// or the separator-free identity the value is stored under.
 	if declared, ok := m.declaredKeys.Get(formattedKey); ok {
-		return resolvedKey{m: m, lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar}
+		return resolvedKey{lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar}
 	}
 
-	resolved := resolvedKey{m: m, lookup: formattedKey, dotted: dotted}
+	resolved := resolvedKey{lookup: formattedKey, dotted: dotted}
 	m.registeredKeyPrefixes.Range(func(prefix string) bool {
-		if strings.HasPrefix(dotted, prefix) && len(dotted) > len(prefix) && m.groupMemberDeclared(dotted) {
+		if strings.HasPrefix(dotted, prefix) && len(dotted) > len(prefix) &&
+			!m.groupMemberIsEnvironmentOnly(dotted, formattedKey) {
 			resolved.kind = RegisteredConfigGroup
 			return false
 		}
@@ -634,16 +647,13 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	return resolved
 }
 
-func (r resolvedKey) isSensitive() bool {
-	return r.m.isSensitiveResolved(r.lookup, r.dotted)
-}
-
 // IsSensitive reports whether key is a credential. It accepts any spelling of
 // the key — declared, environment alias, or separator-free — because it
 // resolves the key first rather than matching prefixes against whatever form
 // the caller passed.
 func (m *Manager) IsSensitive(key string) bool {
-	return m.resolveRegisteredKey(key).isSensitive()
+	resolved := m.resolveRegisteredKey(key)
+	return m.isSensitiveResolved(resolved.lookup, resolved.dotted)
 }
 
 // isSensitiveResolved decides sensitivity from both identities of one key.
@@ -725,7 +735,7 @@ func (m *Manager) classify(key string) projectionKind {
 	switch {
 	case resolved.kind == RegisteredConfigUnknown:
 		return projectionOmit
-	case resolved.isSensitive():
+	case m.isSensitiveResolved(resolved.lookup, resolved.dotted):
 		return projectionRedact
 	default:
 		return projectionKeep

@@ -30,7 +30,7 @@ import (
 // file and k8s Service, while hiding them costs operators the ability to read
 // their own configuration through ShowConfigurations and
 // /management/config/get. Undeclared keys are still redacted at runtime by the
-// fail-closed rule in Manager.ShouldRedact, which is what actually contains
+// fail-closed rule in Manager.RedactValue, which is what actually contains
 // the EnvSource disclosure.
 //
 // sensitivePatterns are substrings that identify such a value by name. Any
@@ -297,9 +297,7 @@ var credentialImmutableAllowlist = map[string]string{
 // hand.
 //
 // Credentials are protected by Sensitive (redaction) plus the management-plane
-// auth gate, never by Immutable. Note also that all of them are
-// refreshable:"false", so runtime mutation was never a live rotation path to
-// begin with.
+// auth gate, never by Immutable.
 func TestNoCredentialIsImmutable(t *testing.T) {
 	params := newSensitiveAuditParams(t)
 

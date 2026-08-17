@@ -143,8 +143,9 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 	// variables in the pod is itself worth withholding.
 	assert.NotContains(t, w.Body.String(), "DATABASE_URL")
 	assert.NotContains(t, w.Body.String(), "MILVUS_CONF_SERVICE_TOKEN")
-	// Declared credentials are still named, and masked.
-	assert.Contains(t, w.Body.String(), params.MinioCfg.SecretAccessKey.Key)
+	// Declared credentials are still named, and masked. Sources lowercase every
+	// key, so the projection carries the lowered spelling, not the declared one.
+	assert.Contains(t, w.Body.String(), strings.ToLower(params.MinioCfg.SecretAccessKey.Key))
 	assert.Contains(t, w.Body.String(), sensitiveMark)
 }
 
