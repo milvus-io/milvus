@@ -186,6 +186,39 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDsByResourceGroup() map[str
 	return nodesByRG
 }
 
+// NoQueryServiceResourceGroups returns the resource groups whose streaming
+// nodes ALL declare no-query-service - at least one node, none serving. This
+// is the positive signal the checkers' delegator fallback keys on: "this
+// resource group's delegators belong on regular query nodes by declaration"
+// is a different fact from "the streaming-query-node set happens to be empty
+// right now", which is what a streaming node mid-restart looks like.
+// StreamingNodeResourceGroups returns every resource group that currently has
+// at least one streaming node, whatever it declares. The complement is how a
+// caller tells "this resource group has no streaming nodes at all" from "its
+// streaming nodes declare no-query-service" - two facts with different
+// consequences for delegator placement.
+func (s *StreamingNodeManager) StreamingNodeResourceGroups() typeutil.Set[string] {
+	streamingNodes := s.fetchStreamingNodes()
+	sawRG := typeutil.NewSet[string]()
+	for _, node := range streamingNodes {
+		sawRG.Insert(node.ResourceGroup)
+	}
+	return sawRG
+}
+
+func (s *StreamingNodeManager) NoQueryServiceResourceGroups() typeutil.Set[string] {
+	streamingNodes := s.fetchStreamingNodes()
+	sawRG := typeutil.NewSet[string]()
+	servingRG := typeutil.NewSet[string]()
+	for _, node := range streamingNodes {
+		sawRG.Insert(node.ResourceGroup)
+		if !node.NoQueryService {
+			servingRG.Insert(node.ResourceGroup)
+		}
+	}
+	return sawRG.Complement(servingRG)
+}
+
 // fetchStreamingNodes fetches all streaming nodes from balancer, falling back to cached nodes on error.
 // The result is cached for use during shutdown when the balancer may not be available.
 func (s *StreamingNodeManager) fetchStreamingNodes() map[int64]*types.StreamingNodeInfoWithResourceGroup {

@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -94,11 +95,16 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 		for _, replica := range replicas {
 			nodes := replica.GetRWNodes()
 			if streamingutil.IsStreamingServiceEnabled() {
-				// Keep the regular read-write nodes when no streaming node of
-				// this replica serves queries: the delegators this checker is
-				// looking for were placed on them. A replica whose streaming
-				// nodes do serve queries reports them here as it always did.
-				if sqNodes := replica.GetRWSQNodes(); len(sqNodes) > 0 {
+				// Keep the regular read-write nodes only when this replica's
+				// streaming nodes serve no queries BY DECLARATION: the
+				// delegators this checker is looking for were placed on them.
+				// A replica whose streaming nodes do serve queries reports
+				// them as it always did - including when the set is
+				// momentarily empty (a node mid-restart), where syncing
+				// against regular query nodes would chase delegators that do
+				// not belong there.
+				sqNodes := replica.GetRWSQNodes()
+				if len(sqNodes) > 0 || !assign.ResourceGroupServesNoQueries(replica.GetResourceGroup()) {
 					nodes = sqNodes
 				}
 			}

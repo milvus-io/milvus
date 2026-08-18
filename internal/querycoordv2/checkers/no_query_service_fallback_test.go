@@ -40,10 +40,27 @@ func (suite *ChannelCheckerTestSuite) TestChannelFallsBackWhenNoStreamingQueryNo
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
 	suite.withServingStreamingNodes(map[string][]int64{})
+	// The fallback keys on the DECLARATION, not on the set being empty.
+	suite.withNoQueryServiceResourceGroups(meta.DefaultResourceGroupName)
 
 	action := suite.channelGrowActionFor(replicaWithSQNodes(1, 1, []int64{1}, nil))
 
 	suite.EqualValues(1, action.Node(), "the delegator must land on the read-write query node")
+}
+
+// An empty streaming-query-node set WITHOUT the no-query declaration is a
+// streaming node mid-restart, not a no-query resource group. Placing the
+// delegator on a regular query node then would strand it there - nothing
+// migrates it back when the streaming node returns - so the checker must do
+// what it always did in that window: nothing.
+func (suite *ChannelCheckerTestSuite) TestChannelDoesNotFallBackInATransientEmptyWindow() {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+	suite.withServingStreamingNodes(map[string][]int64{})
+	suite.withNoQueryServiceResourceGroups() // nothing declared
+
+	suite.Empty(suite.channelGrowActionsFor(replicaWithSQNodes(1, 1, []int64{1}, nil)),
+		"a transient empty window must produce no plan, or the delegator is stranded on a regular query node")
 }
 
 // The native path is untouched: a replica that does have a streaming query node
@@ -78,6 +95,15 @@ func (suite *ChannelCheckerTestSuite) withServingStreamingNodes(byRG map[string]
 	suite.T().Cleanup(func() { walPatch.UnPatch() })
 }
 
+// withNoQueryServiceResourceGroups makes the streaming node manager declare
+// exactly these resource groups as serving no queries.
+func (suite *ChannelCheckerTestSuite) withNoQueryServiceResourceGroups(rgs ...string) {
+	declared := typeutil.NewSet(rgs...)
+	patch := mockey.Mock((*snmanager.StreamingNodeManager).NoQueryServiceResourceGroups).
+		Return(declared).Build()
+	suite.T().Cleanup(func() { patch.UnPatch() })
+}
+
 // channelGrowActionFor runs the checker over one collection holding one channel
 // and returns the single channel grow action it produced.
 func (suite *ChannelCheckerTestSuite) channelGrowActionFor(replica *meta.Replica) *task.ChannelAction {
@@ -106,4 +132,28 @@ func (suite *ChannelCheckerTestSuite) channelGrowActionFor(replica *meta.Replica
 	suite.Require().True(ok)
 	suite.Equal(task.ActionTypeGrow, action.Type())
 	return action
+}
+
+// channelGrowActionsFor is channelGrowActionFor without the one-task
+// requirement, for the cases whose point is that NO plan is produced.
+func (suite *ChannelCheckerTestSuite) channelGrowActionsFor(replica *meta.Replica) []task.Task {
+	ctx := context.Background()
+	checker := suite.checker
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, replica)
+	for _, nodeID := range append(replica.GetNodes(), replica.GetRWSQNodes()...) {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+	}
+	checker.meta.HandleNodeUp(ctx, replica.GetNodes()[0])
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		[]*datapb.VchannelInfo{{CollectionID: 1, ChannelName: "test-insert-channel"}}, nil, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	return checker.Check(ctx)
 }

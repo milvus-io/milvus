@@ -273,14 +273,23 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	plans := make([]assign.ChannelAssignPlan, 0)
 	for _, ch := range channels {
 		var rwNodes []int64
-		if streamingutil.IsStreamingServiceEnabled() {
+		streamingOn := streamingutil.IsStreamingServiceEnabled()
+		if streamingOn {
 			rwNodes = replica.GetRWSQNodes()
 		}
 		// Falling back covers the replica whose streaming nodes serve no
-		// queries, where the delegator belongs on a regular query node. With
-		// the streaming service off, or on with a streaming node that does
-		// serve queries, this is the path it always took.
+		// queries BY DECLARATION, where the delegator belongs on a regular
+		// query node. The trigger is that declaration, never merely an empty
+		// streaming-query-node set: a streaming node mid-restart empties the
+		// set for a moment too, and placing the delegator on a regular query
+		// node then would strand it there - nothing migrates it back when the
+		// streaming node returns. In that window this checker does what it
+		// always did: nothing, until the node re-registers. With the
+		// streaming service off this is the path it always took.
 		if len(rwNodes) == 0 {
+			if streamingOn && !assign.ResourceGroupServesNoQueries(replica.GetResourceGroup()) {
+				continue
+			}
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
 				rwNodes = replica.GetRWNodes()
 			}

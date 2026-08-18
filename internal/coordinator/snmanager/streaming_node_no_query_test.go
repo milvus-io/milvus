@@ -98,3 +98,24 @@ func TestUnlabelledNodesAreGroupedAsBefore(t *testing.T) {
 	assert.ElementsMatch(t, []int64{2}, byRG["rg_b"].Collect())
 	assert.ElementsMatch(t, []int64{1, 2}, m.GetStreamingQueryNodeIDs().Collect())
 }
+
+// NoQueryServiceResourceGroups is the positive signal the checkers' fallback
+// keys on: a group appears only when it has streaming nodes and none serves
+// queries. A group with a mix, a group with only serving nodes, and a group
+// the balancer has never reported all stay out.
+func TestNoQueryServiceResourceGroupsIsAPositiveDeclaration(t *testing.T) {
+	withStreamingNodes(t, map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: node(1, "rg_declared", true),
+		2: node(2, "rg_mixed", true),
+		3: node(3, "rg_mixed", false),
+		4: node(4, "rg_serving", false),
+	})
+
+	declared := StaticStreamingNodeManager.NoQueryServiceResourceGroups()
+	assert.True(t, declared.Contain("rg_declared"))
+	assert.False(t, declared.Contain("rg_mixed"),
+		"one serving node means the group's delegators belong on streaming nodes")
+	assert.False(t, declared.Contain("rg_serving"))
+	assert.False(t, declared.Contain("rg_unknown"),
+		"a group with no streaming nodes at all is a restart window, not a declaration")
+}
