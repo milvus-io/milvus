@@ -51,6 +51,8 @@ type FieldReader struct {
 
 	// structReader is non-nil when Struct Array field exists
 	structReader *StructFieldReader
+
+	readPosition int64
 }
 
 func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema, timezone string) (*FieldReader, error) {
@@ -160,11 +162,15 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			return nil, nil, nil
 		}
 		return data, nil, typeutil.VerifyFloats64(data.([]float64))
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text, schemapb.DataType_UUID:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableStringData(c, count)
 		}
-		isVarcharField := c.field.GetDataType() != schemapb.DataType_Text
+		// UUID is stored as a fixed-length lowercase string, so it takes the same
+		// max-length check path as VarChar/String (GetMaxLength returns 36 for UUID).
+		isVarcharField := c.field.GetDataType() == schemapb.DataType_VarChar ||
+			c.field.GetDataType() == schemapb.DataType_String ||
+			c.field.GetDataType() == schemapb.DataType_UUID
 		data, err := ReadStringData(c, count, isVarcharField)
 		return data, nil, err
 	case schemapb.DataType_JSON:
@@ -598,9 +604,15 @@ func ReadStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, er
 					return nil, err
 				}
 			}
+			if pcr.field.GetDataType() == schemapb.DataType_UUID {
+				if value, err = common.ValidateAndNormalizeUUID(pcr.field.GetName(), pcr.readPosition+int64(len(data)), value); err != nil {
+					return nil, err
+				}
+			}
 			data = append(data, value)
 		}
 	}
+	pcr.readPosition += int64(len(data))
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -619,7 +631,9 @@ func readRawStringDataFromParquet(pcr *FieldReader, count int64) ([]string, []bo
 	data := make([]string, 0, count)
 	validData := make([]bool, 0, count)
 	var maxLength int64
-	isVarcharField := typeutil.IsStringType(dataType) && !typeutil.IsTextType(dataType)
+	// UUID is a fixed-length lowercase string (36 bytes), treat it like VarChar/String
+	// so the max-length check applies (GetMaxLength returns 36 for UUID).
+	isVarcharField := (typeutil.IsStringType(dataType) && !typeutil.IsTextType(dataType)) || typeutil.IsUUIDType(dataType)
 	if isVarcharField {
 		maxLength, err = parameterutil.GetMaxLength(pcr.field)
 		if err != nil {
@@ -650,10 +664,16 @@ func readRawStringDataFromParquet(pcr *FieldReader, count int64) ([]string, []bo
 						return nil, nil, err
 					}
 				}
+				if pcr.field.GetDataType() == schemapb.DataType_UUID {
+					if value, err = common.ValidateAndNormalizeUUID(pcr.field.GetName(), pcr.readPosition+int64(len(data)), value); err != nil {
+						return nil, nil, err
+					}
+				}
 				data = append(data, value)
 			}
 		}
 	}
+	pcr.readPosition += int64(len(data))
 	if len(data) != len(validData) {
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
 	}
@@ -1706,6 +1726,7 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 		return nil, err
 	}
 	data := make([][]string, 0, count)
+	var row int64
 	for _, chunk := range chunked.Chunks() {
 		if chunk.NullN() > 0 {
 			// Array field is not nullable, but some arrays are null
@@ -1715,10 +1736,14 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		err = readStringListLikeData(pcr.field, listReader, func(val string) error {
-			return common.CheckValidString(val, maxLength, pcr.field)
+		err = readStringListLikeData(pcr.field, listReader, func(val string) (string, error) {
+			if err := common.CheckValidString(val, maxLength, pcr.field); err != nil {
+				return val, err
+			}
+			return val, nil
 		}, func(arr []string, valid bool) {
 			data = append(data, arr)
+			row++
 		})
 		if err != nil {
 			return nil, err
@@ -1741,22 +1766,28 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 	}
 	data := make([][]string, 0, count)
 	validData := make([]bool, 0, count)
+	var row int64
 	for _, chunk := range chunked.Chunks() {
 		if _, ok := chunk.(*array.Null); ok {
 			// the chunk type may be *array.Null if the data in chunk is all null
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([][]string, dataNums)...)
+			row += int64(dataNums)
 		} else {
 			listReader, err := newListLikeArray(chunk, pcr.field)
 			if err != nil {
 				return nil, nil, err
 			}
-			err = readStringListLikeData(pcr.field, listReader, func(val string) error {
-				return common.CheckValidString(val, maxLength, pcr.field)
+			err = readStringListLikeData(pcr.field, listReader, func(val string) (string, error) {
+				if err := common.CheckValidString(val, maxLength, pcr.field); err != nil {
+					return val, err
+				}
+				return val, nil
 			}, func(arr []string, valid bool) {
 				data = append(data, arr)
 				validData = append(validData, valid)
+				row++
 			})
 			if err != nil {
 				return nil, nil, err

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CheckValidData(validData []bool, schema *schemapb.FieldSchema, numRows int) error {
@@ -58,6 +59,12 @@ func GetDefaultValue(field *schemapb.FieldSchema) (any, error) {
 			return field.GetDefaultValue().GetTimestamptzData(), nil
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			return field.GetDefaultValue().GetStringData(), nil
+		case schemapb.DataType_UUID:
+			str := field.GetDefaultValue().GetStringData()
+			if str == "" {
+				return [16]byte{}, nil
+			}
+			return typeutil.ParseUUID(str)
 		case schemapb.DataType_Geometry:
 			return common.ConvertWKTToWKB(field.GetDefaultValue().GetStringData())
 		default:

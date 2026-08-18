@@ -41,8 +41,9 @@ func (c *BITMAPChecker) CheckValidDataType(indexType IndexType, field *schemapb.
 		return nil
 	}
 	if !typeutil.IsBoolType(mainType) && !typeutil.IsIntegerType(mainType) &&
-		!typeutil.IsStringType(mainType) && !typeutil.IsArrayType(mainType) {
-		return merr.WrapErrParameterInvalidMsg("bitmap index are only supported on bool, int, string and array field")
+		!typeutil.IsStringType(mainType) && !typeutil.IsArrayType(mainType) &&
+		mainType != schemapb.DataType_UUID {
+		return merr.WrapErrParameterInvalidMsg("bitmap index are only supported on bool, int, string, uuid and array field")
 	}
 	if typeutil.IsArrayType(mainType) {
 		if !typeutil.IsBoolType(elemType) && !typeutil.IsIntegerType(elemType) &&
