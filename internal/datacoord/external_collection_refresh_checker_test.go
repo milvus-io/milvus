@@ -26,6 +26,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1244,6 +1245,12 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
 
+	// The fixture models the PRODUCTION task shape: a runtime task
+	// externalizes its results, so the persisted header carries NO
+	// UpdatedSegments - only the result store (mocked here as
+	// GetCommittedTaskResultsByJobID) has them. A gate that reads the
+	// headers instead sees an empty set and silently never holds, which is
+	// exactly the bug this fixture exists to catch.
 	stage := func(t *testing.T) (*externalCollectionRefreshMeta, *datapb.ExternalCollectionRefreshJob) {
 		t.Helper()
 		catalog := &stubCatalog{}
@@ -1256,12 +1263,22 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 				State:                indexpb.JobState_JobStateFinished,
 				Progress:             100,
 				ResultReady:          true,
-				OwnershipPlanVersion: 1,
-				UpdatedSegments:      []*datapb.SegmentInfo{{ID: 555}, {ID: 556}},
+				OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+				UpdatedSegments:      nil, // externalized: the header never carries them
 			},
 		}
 		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+		mockey.Mock((*externalCollectionRefreshMeta).GetCommittedTaskResultsByJobID).To(
+			func(_ *externalCollectionRefreshMeta, jobID int64) ([]*datapb.ExternalCollectionRefreshTask, error) {
+				return []*datapb.ExternalCollectionRefreshTask{
+					{
+						TaskId: 1001, JobId: jobID, CollectionId: 100,
+						State:           indexpb.JobState_JobStateFinished,
+						UpdatedSegments: []*datapb.SegmentInfo{{ID: 555}, {ID: 556}},
+					},
+				}, nil
+			}).Build()
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		if err != nil {
 			t.Fatal(err)
@@ -1295,11 +1312,18 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
 			meta, job := stage(t)
-			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
+			applied := 0
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					applied++
+					return nil
+				}, nil, nil, nil,
 				func(collID int64, segIDs []int64) []int64 {
 					assert.Equal(t, int64(100), collID)
 					assert.ElementsMatch(t, []int64{555, 556}, segIDs,
-						"the gate must ask about exactly the segments the tasks produced")
+						"the gate must ask about exactly the segments the tasks produced - from the result store, not the emptied headers")
+					assert.Positive(t, applied,
+						"the segments must be APPLIED before their index state is judged: unknown segments read as unindexed forever and the build channel drops their ids")
 					return []int64{556}
 				})
 
@@ -1310,6 +1334,54 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 				"unindexed segments must hold the job open")
 			assert.Equal(t, int64(95), held.GetProgress(),
 				"progress 90-100 tracks the indexed fraction: one of two segments indexed is 95")
+			assert.Contains(t, checker.indexGateEntered, int64(1),
+				"the gate wait must start its own clock")
+		})
+	})
+
+	t.Run("a held job times out on the gate clock, not the ingest clock", func(t *testing.T) {
+		mockey.PatchConvey("gate clock", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job := stage(t)
+			// The ingest consumed far more than the whole job timeout.
+			staleStart := time.Now().Add(-1000 * time.Hour).UnixMilli()
+			job.StartTime = staleStart
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
+				func(int64, []int64) []int64 { return []int64{556} })
+
+			checker.aggregateJobState(job)
+			require.Contains(t, checker.indexGateEntered, int64(1))
+
+			checker.tryTimeoutJob(job)
+			assert.NotEqual(t, indexpb.JobState_JobStateFailed, meta.GetJob(1).GetState(),
+				"a completed ingest waiting on indexes must not be failed on the ingest's spent budget")
+		})
+	})
+
+	t.Run("a transient apply failure retries instead of holding or failing", func(t *testing.T) {
+		mockey.PatchConvey("apply fails", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job := stage(t)
+			debtAsked := false
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					return errors.New("catalog write failed")
+				}, nil, nil, nil,
+				func(int64, []int64) []int64 { debtAsked = true; return nil })
+
+			checker.aggregateJobState(job)
+
+			assert.False(t, debtAsked, "no debt judgment on unapplied segments")
+			assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState(),
+				"a transient apply failure leaves the job for the next tick; the job timeout is the terminal bound")
+			assert.NotContains(t, checker.indexGateEntered, int64(1),
+				"the gate clock must not start until an apply landed")
 		})
 	})
 
