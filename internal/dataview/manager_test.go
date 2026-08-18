@@ -220,6 +220,132 @@ func TestManagerSegmentManifestVersions(t *testing.T) {
 	require.Equal(t, []int64{4}, partition.GetSegmentManifestVersions())
 }
 
+func TestManagerL0CompactUpdatesLatestWithoutVersionAdvance(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	_, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 3)},
+	})
+	require.NoError(t, err)
+
+	oldRef, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, oldRef)
+	defer oldRef.Deref()
+
+	before := catalog.saveCall
+	catalog.saveErr = errors.New("save failed")
+	_, err = manager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID:                1,
+		VChannel:                    "ch-1",
+		SegmentManifestVersions:     []SegmentManifestVersion{{SegmentID: 10, ManifestVersion: 4}},
+		TransformStartAfterTimetick: 500,
+	})
+	require.Error(t, err)
+	require.Equal(t, before, catalog.saveCall)
+	failedRef, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), failedRef.DataView().GetShards()[0].GetTransformStartAfterTimetick())
+	require.Equal(t, []int64{3}, failedRef.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+	failedRef.Deref()
+
+	v, err := manager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID:                1,
+		VChannel:                    "ch-1",
+		SegmentManifestVersions:     []SegmentManifestVersion{{SegmentID: 10, ManifestVersion: 4}, {SegmentID: 999, ManifestVersion: 8}},
+		TransformStartAfterTimetick: 1000,
+	})
+	require.NoError(t, err)
+	requireVersion(t, v, 1, 1)
+	require.Equal(t, before+1, catalog.saveCall)
+	require.Len(t, catalog.views, 2)
+
+	latestRef, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, latestRef)
+	defer latestRef.Deref()
+	latest := latestRef.DataView()
+	requireVersion(t, latest.GetDataVersion(), 1, 1)
+	require.Equal(t, uint64(1000), latest.GetShards()[0].GetTransformStartAfterTimetick())
+	require.Equal(t, []int64{4}, latest.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+	recovered, err := RecoverManager(ctx, catalog, recoverAllCollections)
+	require.NoError(t, err)
+	recoveredRef, err := recovered.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, recoveredRef)
+	recoveredView := recoveredRef.DataView()
+	recoveredRef.Deref()
+	requireVersion(t, recoveredView.GetDataVersion(), 1, 1)
+	require.Equal(t, uint64(1000), recoveredView.GetShards()[0].GetTransformStartAfterTimetick())
+	require.Equal(t, []int64{4}, recoveredView.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+
+	old := oldRef.DataView()
+	require.Equal(t, uint64(0), old.GetShards()[0].GetTransformStartAfterTimetick())
+	require.Equal(t, []int64{3}, old.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+
+	before = catalog.saveCall
+	_, err = manager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID:                1,
+		VChannel:                    "ch-1",
+		SegmentManifestVersions:     []SegmentManifestVersion{{SegmentID: 10, ManifestVersion: 4}},
+		TransformStartAfterTimetick: 900,
+	})
+	require.NoError(t, err)
+	require.Equal(t, before, catalog.saveCall)
+
+	_, err = manager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID:                1,
+		VChannel:                    "ch-1",
+		SegmentManifestVersions:     []SegmentManifestVersion{{SegmentID: 10, ManifestVersion: 2}},
+		TransformStartAfterTimetick: 1100,
+	})
+	require.Error(t, err)
+	require.Equal(t, before, catalog.saveCall)
+}
+
+func TestManagerL0CompactPreservesRefGCProtection(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	_, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 3)},
+	})
+	require.NoError(t, err)
+	oldRef, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, oldRef)
+
+	_, err = manager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID:                1,
+		VChannel:                    "ch-1",
+		SegmentManifestVersions:     []SegmentManifestVersion{{SegmentID: 10, ManifestVersion: 4}},
+		TransformStartAfterTimetick: 1000,
+	})
+	require.NoError(t, err)
+	_, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segment(20, "ch-1", 100)},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, manager.GarbageCollect(ctx, 1, 1))
+	protected, err := manager.Get(ctx, 1, version(1, 1))
+	require.NoError(t, err)
+	require.NotNil(t, protected)
+	protected.Deref()
+
+	oldRef.Deref()
+	require.NoError(t, manager.GarbageCollect(ctx, 1, 1))
+	collected, err := manager.Get(ctx, 1, version(1, 1))
+	require.NoError(t, err)
+	require.Nil(t, collected)
+}
+
 func TestManagerCanonicalizesSegmentManifestVersions(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTestManager()

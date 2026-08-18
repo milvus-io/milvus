@@ -43,6 +43,7 @@ type Manager interface {
 	OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error)
 	OnCopySegmentComplete(ctx context.Context, event CopySegmentCompleteDataViewEvent) (*viewpb.DataVersion, error)
 	OnCompact(ctx context.Context, event CompactDataViewEvent) (*viewpb.DataVersion, error)
+	OnL0Compact(ctx context.Context, event L0CompactDataViewEvent) (*viewpb.DataVersion, error)
 	OnExternalRefresh(ctx context.Context, event ExternalRefreshDataViewEvent) (*viewpb.DataVersion, error)
 	OnDropPartition(ctx context.Context, event DropPartitionDataViewEvent) (*viewpb.DataVersion, error)
 	OnTruncate(ctx context.Context, event TruncateDataViewEvent) (*viewpb.DataVersion, error)
@@ -92,6 +93,18 @@ type CompactDataViewEvent struct {
 	CompactTo    []LoadableSegment
 }
 
+type SegmentManifestVersion struct {
+	SegmentID       int64
+	ManifestVersion int64
+}
+
+type L0CompactDataViewEvent struct {
+	CollectionID                int64
+	VChannel                    string
+	SegmentManifestVersions     []SegmentManifestVersion
+	TransformStartAfterTimetick uint64
+}
+
 type ExternalRefreshDataViewEvent struct {
 	CollectionID int64
 	AddSegments  []LoadableSegment
@@ -122,8 +135,12 @@ type membershipMutation struct {
 }
 
 type versionEntry struct {
-	view     *viewpb.DataViewOfCollection
-	refCount int
+	view *viewpb.DataViewOfCollection
+	refs *versionRefCounter
+}
+
+type versionRefCounter struct {
+	count int
 }
 
 type collectionState struct {
@@ -218,7 +235,7 @@ func RecoverManager(
 				state.mu.Unlock()
 				continue
 			}
-			entry := &versionEntry{view: persisted}
+			entry := newVersionEntry(persisted)
 			state.versions[key] = entry
 			if state.latest == nil || compareDataVersion(entry.view.GetDataVersion(), state.latest.view.GetDataVersion()) > 0 {
 				state.latest = entry
@@ -269,6 +286,32 @@ func (m *dataViewManager) OnCompact(ctx context.Context, event CompactDataViewEv
 		add:    event.CompactTo,
 		remove: event.CompactFrom,
 	})
+}
+
+func (m *dataViewManager) OnL0Compact(ctx context.Context, event L0CompactDataViewEvent) (*viewpb.DataVersion, error) {
+	state := m.getState(event.CollectionID)
+	if state == nil {
+		return nil, nil
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	base := latestView(state)
+	if base == nil {
+		return nil, nil
+	}
+	next := canonicalDataViewClone(base)
+	changed, err := applyL0Compact(next, event)
+	if err != nil {
+		return nil, err
+	}
+	if !changed {
+		return dataVersionFromView(base), nil
+	}
+	if err := m.replaceLatestLocked(ctx, state, next); err != nil {
+		return nil, err
+	}
+	return cloneDataVersion(next.GetDataVersion()), nil
 }
 
 func (m *dataViewManager) OnExternalRefresh(ctx context.Context, event ExternalRefreshDataViewEvent) (*viewpb.DataVersion, error) {
@@ -347,7 +390,7 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 		return compareDataVersion(entries[i].view.GetDataVersion(), entries[j].view.GetDataVersion()) > 0
 	})
 	for idx, entry := range entries {
-		if idx < retainLatest || entry == state.latest || entry.refCount > 0 {
+		if idx < retainLatest || entry == state.latest || entry.refs.count > 0 {
 			continue
 		}
 		version := entry.view.GetDataVersion()
@@ -409,8 +452,20 @@ func (m *dataViewManager) persistLocked(ctx context.Context, state *collectionSt
 	if err := m.catalog.SaveDataView(ctx, persisted); err != nil {
 		return err
 	}
-	entry := &versionEntry{view: persisted}
+	entry := newVersionEntry(persisted)
 	state.versions[key] = entry
+	state.latest = entry
+	return nil
+}
+
+func (m *dataViewManager) replaceLatestLocked(ctx context.Context, state *collectionState, view *viewpb.DataViewOfCollection) error {
+	persisted := canonicalDataViewClone(view)
+	if err := m.catalog.SaveDataView(ctx, persisted); err != nil {
+		return err
+	}
+	entry := newVersionEntry(persisted)
+	entry.refs = state.latest.refs
+	state.versions[dataVersionKey(persisted.GetDataVersion())] = entry
 	state.latest = entry
 	return nil
 }
@@ -448,7 +503,7 @@ func acquireRefLocked(state *collectionState, entry *versionEntry) DataViewRef {
 	if entry == nil {
 		return nil
 	}
-	entry.refCount++
+	entry.refs.count++
 	return &dataViewRef{state: state, entry: entry}
 }
 
@@ -473,10 +528,14 @@ func (r *dataViewRef) Deref() {
 	r.once.Do(func() {
 		r.state.mu.Lock()
 		defer r.state.mu.Unlock()
-		if r.entry.refCount > 0 {
-			r.entry.refCount--
+		if r.entry.refs.count > 0 {
+			r.entry.refs.count--
 		}
 	})
+}
+
+func newVersionEntry(view *viewpb.DataViewOfCollection) *versionEntry {
+	return &versionEntry{view: view, refs: &versionRefCounter{}}
 }
 
 func latestView(state *collectionState) *viewpb.DataViewOfCollection {
@@ -541,6 +600,65 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 		}
 	}
 	return nil
+}
+
+func applyL0Compact(view *viewpb.DataViewOfCollection, event L0CompactDataViewEvent) (bool, error) {
+	if event.VChannel == "" {
+		return false, merr.WrapErrServiceInternalMsg("L0 DataView event has no vchannel")
+	}
+	var targetShard *viewpb.DataViewOfShard
+	for _, shard := range view.GetShards() {
+		if shard.GetVchannel() == event.VChannel {
+			targetShard = shard
+			break
+		}
+	}
+	if targetShard == nil {
+		return false, merr.WrapErrDataIntegrityMsg("L0 DataView event references unknown vchannel %q", event.VChannel)
+	}
+
+	changed := false
+	if event.TransformStartAfterTimetick > targetShard.GetTransformStartAfterTimetick() {
+		targetShard.TransformStartAfterTimetick = event.TransformStartAfterTimetick
+		changed = true
+	}
+
+	slots := dataViewSegmentSlots(view)
+	for _, update := range event.SegmentManifestVersions {
+		if update.SegmentID == 0 || update.ManifestVersion < 0 {
+			return false, merr.WrapErrServiceInternalMsg(
+				"invalid L0 Segment Manifest version: segment=%d manifestVersion=%d",
+				update.SegmentID,
+				update.ManifestVersion,
+			)
+		}
+		slot, ok := slots[update.SegmentID]
+		if !ok {
+			continue
+		}
+		if slot.location.vchannel != event.VChannel {
+			return false, merr.WrapErrDataIntegrityMsg(
+				"L0 Segment %d belongs to vchannel %q, not %q",
+				update.SegmentID,
+				slot.location.vchannel,
+				event.VChannel,
+			)
+		}
+		currentVersion := slot.partition.SegmentManifestVersions[slot.index]
+		if update.ManifestVersion < currentVersion {
+			return false, merr.WrapErrDataIntegrityMsg(
+				"Segment %d Manifest version cannot regress from %d to %d",
+				update.SegmentID,
+				currentVersion,
+				update.ManifestVersion,
+			)
+		}
+		if update.ManifestVersion > currentVersion {
+			slot.partition.SegmentManifestVersions[slot.index] = update.ManifestVersion
+			changed = true
+		}
+	}
+	return changed, nil
 }
 
 func validatePersistedSegmentManifestVersions(view *viewpb.DataViewOfCollection) error {
@@ -684,7 +802,6 @@ func canonicalizeDataView(view *viewpb.DataViewOfCollection) {
 		return view.Shards[i].GetVchannel() < view.Shards[j].GetVchannel()
 	})
 	for _, shard := range view.GetShards() {
-		shard.TransformStartAfterTimetick = 0
 		sort.Slice(shard.Partitions, func(i, j int) bool {
 			return shard.Partitions[i].GetPartitionId() < shard.Partitions[j].GetPartitionId()
 		})

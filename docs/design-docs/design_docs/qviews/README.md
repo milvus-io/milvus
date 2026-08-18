@@ -134,17 +134,20 @@ Key observations:
 - A Segment's Manifest version is monotonic across DataViews. Replaying the
   same version is a no-op, a higher version advances it, and a lower version is
   rejected.
+- L0 compaction persists higher target Segment Manifest versions and the shard
+  `transform_start_after_timetick` by replacing the latest snapshot under the
+  same DataVersion.
 
 ### 5.4 Constraints
 
-- Each DataVersion corresponds to one or more Segment membership changes or
-  Manifest-version advances carried by the same publication event.
+- Membership changes create new DataVersions. L0 compaction is a same-version
+  latest-snapshot replacement for Manifest and delete-frontier changes.
 - DataViewManager does not understand compaction lineage. Event producers must
   not publish a superseded input Segment again after compaction removes it.
 - SegmentMeta and Manifest updates do not automatically rewrite DataView.
   Version-0 Segments observe them through the Coordinator watch path. A higher
-  version may be published only through an existing DataView On event; there is
-  no standalone Manifest-update API.
+  version may be published through an existing membership event or the
+  L0-specific event; there is no generic Manifest-update API.
 - The storage view version number is at the Collection level (laying the groundwork for future capabilities such as Shard splitting).
 - DataView tracks loadable Segment membership and monotonically increasing
   Manifest versions. Delete-frontier refreshes do not advance DataVersion.

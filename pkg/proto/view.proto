@@ -30,8 +30,8 @@ message DataViewOfCollection {
 message DataViewOfShard {
     string vchannel = 1;
     repeated DataViewOfPartition partitions = 2;
-    // Derived delete-retention metadata; membership-only DataViewManager does
-    // not populate or persist this field.
+    // Delete-retention frontier persisted in the latest DataView. L0
+    // compaction may advance it without advancing DataVersion.
     uint64 transform_start_after_timetick = 3;
 }
 

@@ -30,6 +30,8 @@ type (
 	ImportDataViewEvent              = dataview.ImportDataViewEvent
 	CopySegmentCompleteDataViewEvent = dataview.CopySegmentCompleteDataViewEvent
 	CompactDataViewEvent             = dataview.CompactDataViewEvent
+	L0CompactDataViewEvent           = dataview.L0CompactDataViewEvent
+	SegmentManifestVersion           = dataview.SegmentManifestVersion
 	ExternalRefreshDataViewEvent     = dataview.ExternalRefreshDataViewEvent
 	DropPartitionDataViewEvent       = dataview.DropPartitionDataViewEvent
 	TruncateDataViewEvent            = dataview.TruncateDataViewEvent

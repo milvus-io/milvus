@@ -491,7 +491,46 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	if err := t.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		return err
 	}
-	return nil
+	return t.publishDataViewAfterL0Compact(ctx, outputSegs)
+}
+
+func (t *l0CompactionTask) publishDataViewAfterL0Compact(ctx context.Context, outputSegs []*datapb.CompactionSegment) error {
+	meta, ok := t.meta.(*meta)
+	if !ok || meta.dataViewManager == nil {
+		return nil
+	}
+
+	versions := make([]SegmentManifestVersion, 0, len(outputSegs))
+	for _, output := range outputSegs {
+		if len(output.GetDeltalogs()) == 0 {
+			continue
+		}
+		segment := meta.GetSegment(ctx, output.GetSegmentID())
+		if segment == nil {
+			return merr.WrapErrSegmentNotFound(output.GetSegmentID())
+		}
+		manifestVersion := int64(0)
+		if segment.GetManifestPath() != "" {
+			var err error
+			_, manifestVersion, err = packed.UnmarshalManifestPath(segment.GetManifestPath())
+			if err != nil {
+				return merr.WrapErrStorage(err, "failed to parse L0 compaction Manifest path for Segment %d", segment.GetID())
+			}
+		}
+		versions = append(versions, SegmentManifestVersion{
+			SegmentID:       segment.GetID(),
+			ManifestVersion: manifestVersion,
+		})
+	}
+
+	task := t.GetTaskProto()
+	_, err := meta.dataViewManager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID:                task.GetCollectionID(),
+		VChannel:                    task.GetChannel(),
+		SegmentManifestVersions:     versions,
+		TransformStartAfterTimetick: task.GetPos().GetTimestamp(),
+	})
+	return err
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {

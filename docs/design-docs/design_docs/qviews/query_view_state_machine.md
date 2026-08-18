@@ -15,18 +15,23 @@ Coord is the leader of the global state machine. It generates QueryViews, drives
 
 Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahead), **Dropped** (deletion).
 
-Each state-machine instance is derived from one exact Collection-scoped
-DataVersion. The QueryView manager must own the corresponding `DataViewRef`
-from Preparing through Ready, Up, Down, Unrecoverable, and Dropping, and release
-it only after Dropped destroys the instance. On recovery, persisted QueryViews
-must reacquire their exact DataVersions before DataView snapshot GC is enabled.
-This ownership wiring is a required QueryView integration step and is not
-implemented by the current DataView-only PR.
+Each state-machine instance is derived from one Collection-scoped DataVersion.
+The QueryView manager must own the corresponding `DataViewRef` from Preparing
+through Ready, Up, Down, Unrecoverable, and Dropping, and release it only after
+Dropped destroys the instance. On recovery, persisted QueryViews must reacquire
+their DataVersions before DataView snapshot GC is enabled.
+
+L0 compaction is a same-DataVersion metadata refresh: it replaces only the
+latest DataView's Manifest versions and delete frontier, without creating a new
+QueryView state-machine instance. QueryView integration must propagate that
+refresh separately and replace its retained Ref when it adopts the refreshed
+snapshot. This ownership and refresh wiring is not implemented by the current
+DataView-only PR.
 
 ### 1.1 Preparing
 
 **Entry Conditions:**
-- Balancer generates a new view (triggers: DataView version change, balance request, QN online/offline, previous view becomes Unrecoverable, load config change such as LoadPartition/ReleasePartition).
+- Balancer generates a new view (triggers: DataView membership-version change, balance request, QN online/offline, previous view becomes Unrecoverable, load config change such as LoadPartition/ReleasePartition). An L0 same-version refresh updates the existing QueryView instead of creating a new state-machine instance.
 - Recovery: loaded from ETCD in Preparing state.
 
 **Automatic Behavior:**

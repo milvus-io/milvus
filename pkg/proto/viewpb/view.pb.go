@@ -219,8 +219,8 @@ type DataViewOfShard struct {
 
 	Vchannel   string                 `protobuf:"bytes,1,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
 	Partitions []*DataViewOfPartition `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
-	// Derived delete-retention metadata; membership-only DataViewManager does
-	// not populate or persist this field.
+	// Delete-retention frontier persisted in the latest DataView. L0
+	// compaction may advance it without advancing DataVersion.
 	TransformStartAfterTimetick uint64 `protobuf:"varint,3,opt,name=transform_start_after_timetick,json=transformStartAfterTimetick,proto3" json:"transform_start_after_timetick,omitempty"`
 }
 
