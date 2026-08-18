@@ -759,20 +759,37 @@ func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
 		return 0
 	}
 
-	utilization := 0.0
+	// The fold is expressed as the FREE fraction rather than as
+	// 1 - utilization, and the minimum of the free fractions is the same
+	// fold as the maximum of the utilizations.
+	//
+	// This is not a stylistic choice. `1 - reserved/total` rounds twice: for a
+	// nine-tenths-consumed dimension, 900/1000 is the double just ABOVE 0.9,
+	// and subtracting it from 1 lands on 0.09999999999999998, just BELOW a
+	// tenth. Multiplying by a legacyTotal that is a multiple of ten then lands
+	// just under an integer, and int64() truncates towards zero, so a node with
+	// exactly a tenth of its budget free reported 7 slots out of 80 instead of
+	// 8. Dividing the free capacity by the total directly is one rounding
+	// instead of two and lands on the nearest double to a tenth.
+	//
+	// The error was always in the same direction -- under-reporting -- so it hid
+	// capacity from DataCoord rather than over-committing the node, but it is
+	// systematic, not noise. See
+	// TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint.
+	free := 1.0
 	if snap.Total.CPU > 0 {
-		utilization = snap.Reserved.CPU / snap.Total.CPU
+		free = (snap.Total.CPU - snap.Reserved.CPU) / snap.Total.CPU
 	}
 	if snap.Total.Memory > 0 {
-		if memUtil := float64(snap.Reserved.Memory) / float64(snap.Total.Memory); memUtil > utilization {
-			utilization = memUtil
+		if memFree := float64(snap.Total.Memory-snap.Reserved.Memory) / float64(snap.Total.Memory); memFree < free {
+			free = memFree
 		}
 	}
-	if utilization > 1 {
-		utilization = 1
+	if free < 0 {
+		free = 0
 	}
 
-	available := int64(float64(legacyTotal) * (1 - utilization))
+	available := int64(float64(legacyTotal) * free)
 	if available < 0 {
 		available = 0
 	}
