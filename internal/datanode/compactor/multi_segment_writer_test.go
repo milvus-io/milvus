@@ -18,11 +18,13 @@ package compactor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -34,12 +36,74 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func TestMultiSegmentWriterSuite(t *testing.T) {
 	suite.Run(t, new(MultiSegmentWriterSuite))
+}
+
+func TestMergeSortDirectForwardPreservesMultiSegmentRotation(t *testing.T) {
+	tc := mixCompactorBenchmarkCase{
+		name: "rotation", readers: 2, rowsPerReader: 512,
+		layout: benchmarkDisjoint, key: benchmarkInt64Key, nullableValue: true,
+	}
+	schema := benchmarkSchema(tc)
+	records := benchmarkRecords(t, tc, schema)
+	defer func() {
+		for _, record := range records {
+			record.Release()
+		}
+	}()
+
+	run := func(version int64, rebuild bool) []int64 {
+		root := t.TempDir()
+		binlogIO := newBenchmarkLocalBinlogIO(root)
+		defer binlogIO.Close()
+		params := compaction.Params{
+			StorageVersion: version,
+			BinLogMaxSize:  64 * 1024 * 1024,
+			StorageConfig:  &indexpb.StorageConfig{StorageType: "local", RootPath: root},
+		}
+		writer, err := NewMultiSegmentWriter(context.Background(), binlogIO,
+			NewCompactionAllocator(
+				allocator.NewLocalAllocator(10_000, 20_000),
+				allocator.NewLocalAllocator(100_000, 1_000_000),
+			),
+			1, schema, params, int64(tc.readers*tc.rowsPerReader), 1, 1, "rotation", 4096,
+			storage.WithStorageConfig(params.StorageConfig), storage.WithVersion(version))
+		require.NoError(t, err)
+
+		readers := make([]storage.RecordReader, 0, len(records))
+		for _, record := range records {
+			input := record
+			if rebuild {
+				input = benchmarkNonForwardRecord{Record: record}
+			}
+			readers = append(readers, &benchmarkRecordReader{record: input})
+		}
+		rows, err := storage.MergeSort(30_000, schema, readers, writer,
+			func(storage.Record, int, int) bool { return true }, benchmarkMergeKeys(tc))
+		closeBenchmarkReaders(readers)
+		require.NoError(t, err)
+		require.Equal(t, tc.readers*tc.rowsPerReader, rows)
+		require.NoError(t, writer.Close())
+
+		segmentRows := make([]int64, 0, len(writer.GetCompactionSegments()))
+		for _, segment := range writer.GetCompactionSegments() {
+			segmentRows = append(segmentRows, segment.GetNumOfRows())
+		}
+		return segmentRows
+	}
+
+	for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			require.Equal(t, run(version, true), run(version, false),
+				"direct forwarding must not change output segment rotation")
+		})
+	}
 }
 
 type MultiSegmentWriterSuite struct {
