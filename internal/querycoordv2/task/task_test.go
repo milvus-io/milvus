@@ -3368,7 +3368,7 @@ func TestTaskDeadlineExcludesQueueingTime(t *testing.T) {
 func TestActivateDeadlinePerStepGetsFreshBudget(t *testing.T) {
 	task, err := NewSegmentTask(
 		context.Background(),
-		80*time.Millisecond,
+		500*time.Millisecond,
 		WrapIDSource(0),
 		1,
 		meta.NilReplica,
@@ -3383,7 +3383,7 @@ func TestActivateDeadlinePerStepGetsFreshBudget(t *testing.T) {
 	deadline0, _ := task.Context().Deadline()
 
 	// Spend most of step 0's budget before it "finishes" and step 1 is armed.
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	assert.NoError(t, task.Context().Err(), "step 0 must not have expired yet")
 
 	// Re-arming for the same step must be a no-op: the deadline must not move.
@@ -3398,8 +3398,8 @@ func TestActivateDeadlinePerStepGetsFreshBudget(t *testing.T) {
 	assert.True(t, ok)
 	assert.True(t, deadline1.After(deadline0), "step 1's deadline must be later than step 0's, not reuse it")
 
-	time.Sleep(60 * time.Millisecond)
-	assert.NoError(t, task.Context().Err(), "step 1 must have its own fresh 80ms budget, not step 0's leftover ~20ms")
+	time.Sleep(300 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "step 1 must have its own fresh 500ms budget, not step 0's leftover ~200ms")
 
 	select {
 	case <-task.Context().Done():

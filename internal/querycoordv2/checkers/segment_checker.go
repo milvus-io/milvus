@@ -528,7 +528,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	}
 
 	// TODO: this assumes a single segment always finishes loading within
-	// SegmentTaskTimeout (3min default). If a segment's real load time is
+	// SegmentTaskTimeout (5min default). If a segment's real load time is
 	// consistently longer (large disk-index segment, throttled cold storage),
 	// the task is killed by its deadline every round and rebuilt here with
 	// the same budget on the next check tick -- it never converges. Needs

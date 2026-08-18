@@ -218,7 +218,7 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 //
 // TODO: this is still a flat wall-clock budget per step, on the assumption a
 // single action always finishes within its configured timeout
-// (segmentTaskTimeout defaults to 3min). A real operation that legitimately
+// (segmentTaskTimeout defaults to 5min). A real operation that legitimately
 // runs longer never gets a chance to finish: the checker rebuilds it with the
 // same budget on every check tick, forever. See
 // SegmentChecker.createSegmentLoadTasks / ChannelChecker's equivalent.
