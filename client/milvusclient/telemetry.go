@@ -1430,6 +1430,18 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 	}
 	sort.Strings(ignored)
 
+	// Validate before touching anything: a payload is applied whole or not at all. Writing
+	// the fields as they were read would let a rejected value leave earlier ones applied,
+	// so a command carrying both enabled and a bad interval would switch telemetry off and
+	// still report failure -- the caller would have no way to know what state it left.
+	if payload.HeartbeatInterval != nil && *payload.HeartbeatInterval <= 0 {
+		return &CommandReply{
+			CommandId:    cmd.CommandId,
+			Success:      false,
+			ErrorMessage: "heartbeat_interval_ms must be positive",
+		}
+	}
+
 	applied := make([]string, 0, len(configPayloadKeys))
 
 	// Apply configuration changes with write lock
@@ -1439,18 +1451,13 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 		applied = append(applied, "enabled")
 	}
 	if payload.HeartbeatInterval != nil {
-		if *payload.HeartbeatInterval <= 0 {
-			m.configMu.Unlock()
-			return &CommandReply{
-				CommandId:    cmd.CommandId,
-				Success:      false,
-				ErrorMessage: "heartbeat_interval_ms must be positive",
-			}
-		}
 		m.config.HeartbeatInterval = time.Duration(*payload.HeartbeatInterval) * time.Millisecond
 		applied = append(applied, "heartbeat_interval_ms")
 	}
 	if payload.SamplingRate != nil {
+		// Out-of-range rates are clamped rather than rejected, which is why this is not
+		// part of the validation above: 1.5 means "everything" and -0.5 means "nothing",
+		// and neither is ambiguous enough to refuse.
 		samplingRate := *payload.SamplingRate
 		if samplingRate < 0.0 {
 			samplingRate = 0.0

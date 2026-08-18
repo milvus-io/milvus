@@ -1231,6 +1231,32 @@ func TestPushConfigReplyReportsAppliedAndIgnoredKeys(t *testing.T) {
 		assert.Equal(t, []string{"ttl_seconds"}, decode(t, reply).Ignored)
 	})
 
+	// A payload is applied whole or not at all. The check on heartbeat_interval_ms used to
+	// run after enabled had already been written, so a payload carrying both left telemetry
+	// switched off while the reply said the command had failed -- the one case where
+	// knowing what was applied matters most, and the one case that reported nothing.
+	t.Run("a rejected value leaves every field untouched", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		// Copied by value: m.config is a pointer, so holding it would compare the struct
+		// with itself and pass no matter what the handler did.
+		manager.configMu.RLock()
+		before := *manager.config
+		manager.configMu.RUnlock()
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"enabled": false, "sampling_rate": 0.1, "heartbeat_interval_ms": 0}`),
+		})
+		assert.False(t, reply.Success)
+		assert.Contains(t, reply.ErrorMessage, "must be positive")
+
+		manager.configMu.RLock()
+		defer manager.configMu.RUnlock()
+		assert.Equal(t, before.Enabled, manager.config.Enabled, "telemetry was switched off by a command that failed")
+		assert.Equal(t, before.SamplingRate, manager.config.SamplingRate)
+		assert.Equal(t, before.HeartbeatInterval, manager.config.HeartbeatInterval)
+	})
+
 	t.Run("a rejected value reports no applied keys", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
 
