@@ -183,7 +183,7 @@ func registerCoordinatorEngineGRPC(reg grpc.ServiceRegistrar) {
 // activeNotifier is the slice of the concrete coordinator the seam uses to
 // defer the engine's start to activation. Implemented by mixCoordImpl; a
 // coordinator that does not implement it (a test double) starts the engine
-// immediately, which is also the pre-active-standby behaviour.
+// immediately, which is also the pre-active-standby behavior.
 type activeNotifier interface {
 	OnActive(fn func())
 }

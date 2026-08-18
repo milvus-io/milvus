@@ -7,13 +7,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // fakeRBACProvider installs a preset RBACBootstrap capability and nothing
@@ -161,4 +164,28 @@ func TestCatalogCredentialStoreForwardsRemainingMethods(t *testing.T) {
 	assert.Equal(t, []*milvuspb.UserResult{{User: userEntity}}, users)
 
 	assert.NoError(t, store.AlterGrant(ctx, "tenant1", grantEntity, milvuspb.OperatePrivilegeType_Grant))
+}
+
+// A meta implementation that is not the real MetaTable cannot store
+// credentials, so with the bootstrap capability installed initRbac refuses to
+// continue. The refusal must be classified: it is reported to the operator as
+// a start-up failure, and a raw errors.New reaches them with no code on it.
+func TestInitRbacRefusesANonMetaTableThroughMerr(t *testing.T) {
+	paramtable.Init()
+	installRBACBootstrapper(t, &recordingBootstrapper{})
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+	meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(len(util.DefaultRoles))
+
+	Params.Save(Params.RoleCfg.Enabled.Key, "false")
+	Params.Save(Params.CommonCfg.EnablePublicPrivilege.Key, "false")
+	defer func() {
+		Params.Reset(Params.RoleCfg.Enabled.Key)
+		Params.Reset(Params.CommonCfg.EnablePublicPrivilege.Key)
+	}()
+
+	err := c.initRbac(context.TODO())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }

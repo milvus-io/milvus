@@ -1240,7 +1240,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 // but whose segments lack indexes is held InProgress - finishing it would
 // broadcast the schema update and expose brute-force-only segments to queries
 // - and finishes on the pass that finds the debt cleared. Off, the native
-// behaviour is untouched: ingest done means finished.
+// behavior is untouched: ingest done means finished.
 func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()

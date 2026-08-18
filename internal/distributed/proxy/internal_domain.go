@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -52,12 +53,12 @@ func (s *Server) startInternalDomainServers() error {
 	grpcPort, restPort := internalDomainPorts()
 	if grpcPort != 0 {
 		if err := s.startInternalDomainGrpc(grpcPort); err != nil {
-			return fmt.Errorf("start the internal-domain grpc listener: %w", err)
+			return merr.WrapErrServiceInternalErr(err, "start the internal-domain grpc listener")
 		}
 	}
 	if restPort != 0 {
 		if err := s.startInternalDomainRest(restPort); err != nil {
-			return fmt.Errorf("start the internal-domain rest listener: %w", err)
+			return merr.WrapErrServiceInternalErr(err, "start the internal-domain rest listener")
 		}
 	}
 	return nil
@@ -122,7 +123,7 @@ func (s *Server) startInternalDomainGrpc(port int) error {
 	if Params.TLSMode.GetAsInt() >= 1 {
 		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
-			return fmt.Errorf("load the internal-domain server certificate: %w", err)
+			return merr.WrapErrServiceInternalErr(err, "load the internal-domain server certificate")
 		}
 		limiterOpts = append(limiterOpts, grpc.Creds(creds))
 	}
@@ -196,7 +197,26 @@ func (s *Server) startInternalDomainRest(port int) error {
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2WithCheckAuth(s.proxy, false).RegisterRoutesToV2(appV2)
 
-	s.internalDomainHTTPServer = &http.Server{Handler: ginHandler}
+	// The same timeout policy as the external REST listener in service.go:
+	// this is the same class of server on the same handler set, and a
+	// listener without ReadHeaderTimeout can be held open by a client that
+	// dribbles headers. Reading them from the one HTTPCfg keeps the two
+	// listeners from drifting apart as that policy is tuned.
+	//
+	// MaxHeaderBytes is deliberately NOT mirrored. Its 16MiB default exists
+	// only because the external listener runs in shared-port mode and carries
+	// external gRPC over HTTP/2, so it has to match grpc-go's max header list
+	// size (see proxy.http.maxHeaderBytes' own doc). This listener is plain
+	// HTTP/1 gin with no h2c, so copying it would raise the cap 16x over Go's
+	// 1MiB default on an UNAUTHENTICATED socket and buy nothing.
+	httpParams := &proxy.Params.HTTPCfg
+	s.internalDomainHTTPServer = &http.Server{
+		Handler:           ginHandler,
+		ReadHeaderTimeout: httpParams.ReadHeaderTimeout.GetAsDurationByParse(),
+		ReadTimeout:       httpParams.ReadTimeout.GetAsDurationByParse(),
+		WriteTimeout:      httpParams.WriteTimeout.GetAsDurationByParse(),
+		IdleTimeout:       httpParams.IdleTimeout.GetAsDurationByParse(),
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()

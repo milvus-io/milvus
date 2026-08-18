@@ -635,7 +635,7 @@ func (c *Core) initRbac(initCtx context.Context) error {
 			return errors.Wrap(err, "failed to bootstrap extension rbac")
 		}
 	} else if extension.Caps().RBACBootstrap != nil {
-		return errors.New("rbac bootstrap capability installed, but the meta table cannot store credentials")
+		return merr.WrapErrServiceInternal("rbac bootstrap capability installed, but the meta table cannot store credentials")
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {
