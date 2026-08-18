@@ -73,6 +73,11 @@ package planparserv2
 //   - one binding in a shape that cannot be read is a failure that says so,
 //     never a guess and never a skip.
 //
+// A macro is the one thing that defeats the second of those, by declaring a
+// constant without its name ever appearing next to an initializer, so the sources
+// are required to be free of #define rather than scanned optimistically. They use
+// none today.
+//
 // Evaluating rather than demanding a literal is deliberate. The alternative --
 // pinning the initializer as text -- forces segcore to spell its limits as
 // magic decimals so that a Go test can match them, which is a permanent cost in
@@ -171,6 +176,11 @@ var (
 	// opens earliest wins, as in C++.
 	cppComment = regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`)
 
+	// An object-like or function-like #define. `#pragma`, `#include` and the
+	// conditionals are not matched: those cannot manufacture a declaration out
+	// of a name that is not written next to its initializer.
+	cppDefine = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*define\b.*$`)
+
 	cppWhitespace = regexp.MustCompile(`\s+`)
 	// A declaration holds exactly one `=`, its initializer's; these constants
 	// have no comparison in their initializers. Applied only to an already
@@ -227,7 +237,23 @@ func assertCppConstantParity(t *testing.T, sources []string, pinned []cppConstan
 	root := findCppSourceRoot(t)
 	bodies := make(map[string]string, len(sources))
 	for _, source := range sources {
-		bodies[source] = normalizeCppWhitespace(stripCppComments(readCppSource(t, root, source)))
+		raw := stripCppComments(readCppSource(t, root, source))
+		// The binding invariant below counts places a name is written next to its
+		// initializer, which is the one thing a macro can defeat: expand
+		// `MRB1_DECL(kHeaderSize, 33)` and the name is never written next to an
+		// `=`, so the live declaration becomes invisible and a decoy elsewhere
+		// gets graded in its place. This check does not run the preprocessor, so
+		// rather than be silently wrong it refuses to scan sources that could do
+		// that. These two files use no #define today.
+		if macros := cppDefine.FindAllString(raw, -1); len(macros) > 0 {
+			require.Failf(t, "cannot pin constants through the preprocessor",
+				"%s uses #define, and this check does not expand macros, so a macro could "+
+					"declare or hide a pinned constant without it appearing next to an "+
+					"initializer:\n%s\nEither keep these sources macro-free, or move the "+
+					"pin to a static_assert against a generated header.",
+				source, strings.Join(macros, "\n"))
+		}
+		bodies[source] = normalizeCppWhitespace(raw)
 	}
 
 	for _, pin := range pinned {
