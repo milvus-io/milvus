@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -809,17 +810,26 @@ func copySearchResultsWithData(src *milvuspb.SearchResults, data *schemapb.Searc
 }
 
 type aggregateOperator struct {
-	aggCtx     *search_agg.SearchAggregationContext
-	collSchema *schemapb.CollectionSchema
+	aggCtx       *search_agg.SearchAggregationContext
+	collSchema   *schemapb.CollectionSchema
+	roundDecimal int64
 }
 
 func newAggregateOperator(t *searchTask, _ map[string]any) (operator, error) {
 	if t.aggCtx == nil {
 		return nil, merr.WrapErrServiceInternal("aggregate operator requires non-nil aggCtx")
 	}
+	// Aggregation searches bypass endOperator (newSearchPipeline returns early for
+	// aggCtx), so round the aggregation hit scores here at the terminal step to keep
+	// round_decimal behavior consistent with non-aggregation searches.
+	roundDecimal := int64(-1)
+	if !t.GetIsAdvanced() && len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
+		roundDecimal = t.queryInfos[0].GetRoundDecimal()
+	}
 	return &aggregateOperator{
-		aggCtx:     t.aggCtx,
-		collSchema: t.schema.CollectionSchema,
+		aggCtx:       t.aggCtx,
+		collSchema:   t.schema.CollectionSchema,
+		roundDecimal: roundDecimal,
 	}, nil
 }
 
@@ -857,6 +867,7 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	aggBuckets := make([]*schemapb.AggBucket, 0)
 	aggTopks := make([]int64, 0, len(nqAggResults))
 	for _, buckets := range nqAggResults {
+		roundAggHitScores(buckets, op.roundDecimal)
 		aggTopks = append(aggTopks, int64(len(buckets)))
 		aggBuckets = append(aggBuckets, serializeAggBuckets(buckets, fieldIDToName, op.aggCtx.Levels, 0)...)
 	}
@@ -1517,7 +1528,6 @@ func (op *organizeOperator) emptyFieldDataAccordingFieldSchema(fieldData *schema
 		FieldName: fieldData.FieldName,
 		FieldId:   fieldData.FieldId,
 		IsDynamic: fieldData.IsDynamic,
-		ValidData: make([]bool, 0),
 	}
 	if fieldData.Type == schemapb.DataType_FloatVector ||
 		fieldData.Type == schemapb.DataType_BinaryVector ||
@@ -1773,12 +1783,18 @@ func (op *lambdaOperator) run(ctx context.Context, span trace.Span, inputs ...an
 type endOperator struct {
 	outputFieldNames []string
 	fieldSchemas     []*schemapb.FieldSchema
+	roundDecimal     int64
 }
 
 func newEndOperator(t *searchTask, _ map[string]any) (operator, error) {
+	roundDecimal := int64(-1)
+	if !t.GetIsAdvanced() && len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
+		roundDecimal = t.queryInfos[0].GetRoundDecimal()
+	}
 	return &endOperator{
 		outputFieldNames: t.translatedOutputFields,
 		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
+		roundDecimal:     roundDecimal,
 	}, nil
 }
 
@@ -1798,7 +1814,45 @@ func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) 
 	})
 	allSearchCount := aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
 	result.GetResults().AllSearchCount = allSearchCount
+	roundSearchScores(result.GetResults(), op.roundDecimal)
 	return []any{result}, nil
+}
+
+func roundScore(score float32, roundDecimal int64) float32 {
+	if roundDecimal < 0 {
+		return score
+	}
+	multiplier := math.Pow(10.0, float64(roundDecimal))
+	return float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
+}
+
+func roundSearchScores(result *schemapb.SearchResultData, roundDecimal int64) {
+	if result == nil || roundDecimal < 0 {
+		return
+	}
+	for i, score := range result.Scores {
+		result.Scores[i] = roundScore(score, roundDecimal)
+	}
+}
+
+// roundAggHitScores rounds aggregation hit scores in place (recursing into
+// sub-aggregation buckets). Applied at the aggregate operator's terminal step
+// because aggregation searches bypass endOperator.
+func roundAggHitScores(buckets []*search_agg.AggBucketResult, roundDecimal int64) {
+	if roundDecimal < 0 {
+		return
+	}
+	for _, b := range buckets {
+		if b == nil {
+			continue
+		}
+		for _, h := range b.Hits {
+			if h != nil {
+				h.Score = roundScore(h.Score, roundDecimal)
+			}
+		}
+		roundAggHitScores(b.SubAggBuckets, roundDecimal)
+	}
 }
 
 func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
@@ -2164,7 +2218,7 @@ func compareNulls(validData []bool, i, j int, nullsFirst bool) (int, bool) {
 // It returns the final order comparison after applying ASC/DESC to non-null values.
 func compareOrderByField(field *schemapb.FieldData, orderBy OrderByField, idxI, idxJ int, cache jsonValueCache) (int, error) {
 	if orderBy.JSONPath != "" && field.GetType() == schemapb.DataType_JSON {
-		if cmp, handled := compareNulls(field.ValidData, idxI, idxJ, orderBy.NullsFirst); handled {
+		if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), idxI, idxJ, orderBy.NullsFirst); handled {
 			return cmp, nil
 		}
 		valI := cache.getCachedJSONValue(orderBy.FieldName, orderBy.JSONPath, idxI)
@@ -2176,7 +2230,7 @@ func compareOrderByField(field *schemapb.FieldData, orderBy OrderByField, idxI, 
 		return cmp, nil
 	}
 
-	if cmp, handled := compareNulls(field.ValidData, idxI, idxJ, orderBy.NullsFirst); handled {
+	if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), idxI, idxJ, orderBy.NullsFirst); handled {
 		return cmp, nil
 	}
 	cmp, err := compareFieldDataAt(field, idxI, idxJ, orderBy.NullsFirst)
@@ -2369,7 +2423,7 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 // (see task_insert.go withNANCheck() -> validate_util.go -> typeutil.VerifyFloat).
 // Therefore, NaN values cannot exist in stored data and will never reach this comparison.
 func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (int, error) {
-	if cmp, handled := compareNulls(field.ValidData, i, j, nullsFirst); handled {
+	if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), i, j, nullsFirst); handled {
 		return cmp, nil
 	}
 
@@ -2566,7 +2620,7 @@ func (op *orderByOperator) reorderResults(result *milvuspb.SearchResults, indice
 }
 
 func prepareNullableFieldDataReorder(field *schemapb.FieldData, indices []int) ([]bool, []int, int, error) {
-	validData := field.GetValidData()
+	validData := typeutil.GetFieldDataValidData(field)
 	if len(validData) == 0 {
 		return nil, nil, 0, nil
 	}
@@ -2606,8 +2660,9 @@ func reorderNullableFloatVectorData(field *schemapb.FieldData, data []float32, w
 		return nil, merr.WrapErrServiceInternalMsg("reorderFieldData: nullable FloatVector field %s has %d elements, expected compact %d (valid=%d, dim=%d)", field.GetFieldName(), len(data), expected, validCount, width)
 	}
 	newData := make([]float32, 0, countValidRows(newValidData)*width)
+	validData := typeutil.GetFieldDataValidData(field)
 	for _, oldIdx := range indices {
-		if !field.ValidData[oldIdx] {
+		if !validData[oldIdx] {
 			continue
 		}
 		physicalIdx := logicalToPhysical[oldIdx]
@@ -2623,8 +2678,9 @@ func reorderNullableByteVectorData(field *schemapb.FieldData, typeName string, d
 		return nil, merr.WrapErrServiceInternalMsg("reorderFieldData: nullable %s field %s has %d bytes, expected compact %d (valid=%d, width=%d)", typeName, field.GetFieldName(), len(data), expected, validCount, width)
 	}
 	newData := make([]byte, 0, countValidRows(newValidData)*width)
+	validData := typeutil.GetFieldDataValidData(field)
 	for _, oldIdx := range indices {
-		if !field.ValidData[oldIdx] {
+		if !validData[oldIdx] {
 			continue
 		}
 		physicalIdx := logicalToPhysical[oldIdx]
@@ -2639,8 +2695,9 @@ func reorderNullableSparseVectorData(field *schemapb.FieldData, contents [][]byt
 		return nil, merr.WrapErrServiceInternalMsg("reorderFieldData: nullable SparseFloatVector field %s has %d elements, expected compact %d", field.GetFieldName(), len(contents), validCount)
 	}
 	newContents := make([][]byte, 0, countValidRows(newValidData))
+	validData := typeutil.GetFieldDataValidData(field)
 	for _, oldIdx := range indices {
-		if !field.ValidData[oldIdx] {
+		if !validData[oldIdx] {
 			continue
 		}
 		newContents = append(newContents, contents[logicalToPhysical[oldIdx]])
@@ -2937,7 +2994,7 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 
 	// Reorder valid data if present
 	if newValidData != nil {
-		field.ValidData = newValidData
+		typeutil.SetFieldDataValidData(field, newValidData)
 	}
 	return nil
 }

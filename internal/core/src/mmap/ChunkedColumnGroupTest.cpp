@@ -274,6 +274,29 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
         &offset,
         1);
 
+    // Regression: a non-nullable column must invoke the callback EXACTLY once
+    // per row. Before the missing-return fix, the !nullable_ branch fell
+    // through into the nullable branch and invoked the callback a second time
+    // per row.
+    {
+        std::vector<int64_t> all_offsets = {0, 1, 2, 3, 4};
+        std::unordered_map<size_t, int> call_count;
+        proxy_int64->BulkIsValid(
+            nullptr,
+            [&](bool is_valid, size_t i) {
+                EXPECT_TRUE(is_valid);
+                call_count[i]++;
+            },
+            all_offsets.data(),
+            static_cast<int64_t>(all_offsets.size()));
+        ASSERT_EQ(call_count.size(), all_offsets.size());
+        for (const auto& kv : call_count) {
+            EXPECT_EQ(kv.second, 1)
+                << "row " << kv.first << " callback invoked " << kv.second
+                << " times";
+        }
+    }
+
     // Test string proxy
     auto proxy_string = std::make_shared<ProxyChunkColumn>(
         column_group, FieldId(2), string_field_meta);

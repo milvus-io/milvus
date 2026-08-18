@@ -114,6 +114,71 @@ Schema::set_external_spec(const std::string& spec) {
     is_milvus_table_external_ = IsMilvusTableExternalSpec(spec);
 }
 
+Schema::Schema(const Schema& other)
+    : debug_id(other.debug_id),
+      field_ids_(other.field_ids_),
+      fields_(other.fields_),
+      name_ids_(other.name_ids_),
+      id_names_(other.id_names_),
+      primary_field_id_opt_(other.primary_field_id_opt_),
+      dynamic_field_id_opt_(other.dynamic_field_id_opt_),
+      namespace_field_id_opt_(other.namespace_field_id_opt_),
+      ttl_field_id_opt_(other.ttl_field_id_opt_),
+      load_fields_(other.load_fields_),
+      bm25_function_output_fields_(other.bm25_function_output_fields_),
+      schema_version_(other.schema_version_),
+      has_mmap_setting_(other.has_mmap_setting_),
+      mmap_enabled_(other.mmap_enabled_),
+      mmap_fields_(other.mmap_fields_),
+      struct_array_field_cache_(other.struct_array_field_cache_),
+      warmup_vector_index_(other.warmup_vector_index_),
+      warmup_scalar_index_(other.warmup_scalar_index_),
+      warmup_scalar_field_(other.warmup_scalar_field_),
+      warmup_vector_field_(other.warmup_vector_field_),
+      warmup_fields_(other.warmup_fields_),
+      external_source_(other.external_source_),
+      external_spec_(other.external_spec_),
+      function_output_field_ids_(other.function_output_field_ids_),
+      is_milvus_table_external_(other.is_milvus_table_external_) {
+}
+
+Schema&
+Schema::operator=(const Schema& other) {
+    if (this == &other) {
+        return *this;
+    }
+
+    Schema copied(other);
+    std::swap(debug_id, copied.debug_id);
+    std::swap(field_ids_, copied.field_ids_);
+    std::swap(fields_, copied.fields_);
+    std::swap(name_ids_, copied.name_ids_);
+    std::swap(id_names_, copied.id_names_);
+    std::swap(primary_field_id_opt_, copied.primary_field_id_opt_);
+    std::swap(dynamic_field_id_opt_, copied.dynamic_field_id_opt_);
+    std::swap(namespace_field_id_opt_, copied.namespace_field_id_opt_);
+    std::swap(ttl_field_id_opt_, copied.ttl_field_id_opt_);
+    std::swap(load_fields_, copied.load_fields_);
+    std::swap(bm25_function_output_fields_,
+              copied.bm25_function_output_fields_);
+    std::swap(schema_version_, copied.schema_version_);
+    std::swap(has_mmap_setting_, copied.has_mmap_setting_);
+    std::swap(mmap_enabled_, copied.mmap_enabled_);
+    std::swap(mmap_fields_, copied.mmap_fields_);
+    std::swap(struct_array_field_cache_, copied.struct_array_field_cache_);
+    std::swap(warmup_vector_index_, copied.warmup_vector_index_);
+    std::swap(warmup_scalar_index_, copied.warmup_scalar_index_);
+    std::swap(warmup_scalar_field_, copied.warmup_scalar_field_);
+    std::swap(warmup_vector_field_, copied.warmup_vector_field_);
+    std::swap(warmup_fields_, copied.warmup_fields_);
+    std::swap(external_source_, copied.external_source_);
+    std::swap(external_spec_, copied.external_spec_);
+    std::swap(function_output_field_ids_, copied.function_output_field_ids_);
+    std::swap(is_milvus_table_external_, copied.is_milvus_table_external_);
+    std::atomic_store(&loon_arrow_lob_schema_cache_, ArrowSchemaPtr{});
+    return *this;
+}
+
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
@@ -272,6 +337,13 @@ Schema::ConvertToArrowSchema() const {
 
 const ArrowSchemaPtr
 Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
+    if (text_lob_as_binary) {
+        auto cached = std::atomic_load(&loon_arrow_lob_schema_cache_);
+        if (cached != nullptr) {
+            return cached;
+        }
+    }
+
     arrow::FieldVector arrow_fields;
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
@@ -309,7 +381,11 @@ Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
                                            metadata);
         arrow_fields.push_back(arrow_field);
     }
-    return arrow::schema(arrow_fields);
+    auto loon_arrow_schema = arrow::schema(arrow_fields);
+    if (text_lob_as_binary) {
+        std::atomic_store(&loon_arrow_lob_schema_cache_, loon_arrow_schema);
+    }
+    return loon_arrow_schema;
 }
 
 proto::schema::CollectionSchema
@@ -474,7 +550,11 @@ Schema::WarmupPolicy(const FieldId& field_id,
         return {true, it->second};
     }
 
-    // Fallback to appropriate collection-level config based on field type
+    return CollectionWarmupPolicy(is_vector, is_index);
+}
+
+std::pair<bool, std::string>
+Schema::CollectionWarmupPolicy(bool is_vector, bool is_index) const {
     if (is_vector) {
         if (is_index) {
             return {warmup_vector_index_.has_value(),

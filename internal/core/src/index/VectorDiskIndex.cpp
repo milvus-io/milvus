@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -83,13 +84,15 @@ struct EmptyEmbListState {
 
 class DiskEmptyVectorIterator : public knowhere::IndexNode::iterator {
  public:
-    std::pair<int64_t, float>
-    Next() override {
-        throw std::runtime_error("empty vector iterator has no next result");
+    knowhere::expected<std::pair<int64_t, float>>
+    Next() noexcept override {
+        return knowhere::expected<std::pair<int64_t, float>>::Err(
+            knowhere::Status::knowhere_inner_error,
+            "empty vector iterator has no next result");
     }
 
-    bool
-    HasNext() override {
+    knowhere::expected<bool>
+    HasNext() noexcept override {
         return false;
     }
 };
@@ -372,8 +375,13 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     }
 
     if (disk_valid_data.found) {
-        BuildValidDataFromBitmap(
-            this, disk_valid_data.total_count, disk_valid_data.bitmap.data());
+        auto offset_mapping_options = GetOffsetMappingMmapOptions(load_config);
+        offset_mapping_options.mmap_dir_path =
+            GetOffsetMappingMmapDir(local_index_path_prefix);
+        BuildValidDataFromBitmap(this,
+                                 disk_valid_data.total_count,
+                                 disk_valid_data.bitmap.data(),
+                                 offset_mapping_options);
     }
 }
 
@@ -755,15 +763,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     float* distances = const_cast<float*>(final->GetDistance());
     final->SetIsOwner(true);
 
-    auto round_decimal = search_info.round_decimal_;
     auto total_num = num_queries * topk;
 
-    if (round_decimal != -1) {
-        const float multiplier = pow(10.0, round_decimal);
-        for (int i = 0; i < total_num; i++) {
-            distances[i] = std::round(distances[i] * multiplier) / multiplier;
-        }
-    }
     search_result.seg_offsets_.resize(total_num);
     search_result.distances_.resize(total_num);
     search_result.total_nq_ = num_queries;

@@ -42,93 +42,6 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 	return nil
 }
 
-type addCollectionFunctionTask struct {
-	baseTask
-	Condition
-	*milvuspb.AddCollectionFunctionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *commonpb.Status
-}
-
-func (t *addCollectionFunctionTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *addCollectionFunctionTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *addCollectionFunctionTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *addCollectionFunctionTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *addCollectionFunctionTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *addCollectionFunctionTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *addCollectionFunctionTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *addCollectionFunctionTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_AddCollectionFunction
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *addCollectionFunctionTask) Name() string {
-	return AddCollectionFunctionTask
-}
-
-func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
-	if t.FunctionSchema == nil {
-		return merr.WrapErrParameterInvalidMsg("function schema is empty")
-	}
-
-	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("currently does not support adding BM25 function")
-	}
-	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
-	if err != nil {
-		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
-			mlog.String("dbName", t.GetDbName()),
-			mlog.String("collectionName", t.GetCollectionName()),
-			mlog.Err(err))
-		return err
-	}
-	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
-	newColl.Functions = append(coll.schema.Functions, t.FunctionSchema)
-	if err := validator.ValidateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *addCollectionFunctionTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.mixCoord.AddCollectionFunction(ctx, t.AddCollectionFunctionRequest)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *addCollectionFunctionTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 type alterCollectionFunctionTask struct {
 	baseTask
 	Condition
@@ -197,15 +110,18 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			mlog.Err(err))
 		return err
 	}
-	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
+	if err := rejectExternalCollectionFunctionMutation(coll.Schema.CollectionSchema); err != nil {
 		return err
 	}
 	funcExist := false
 	newFunctions := []*schemapb.FunctionSchema{}
-	for _, fSchema := range coll.schema.Functions {
+	for _, fSchema := range coll.Schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
 				return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
+			}
+			if err := validator.CheckFunctionAlterAllowed(fSchema, t.FunctionSchema); err != nil {
+				return err
 			}
 			newFunctions = append(newFunctions, t.FunctionSchema)
 			funcExist = true
@@ -217,7 +133,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("function %s not found", t.FunctionName)
 	}
 
-	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
+	newColl := proto.Clone(coll.Schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = newFunctions
 	if err := validator.ValidateFunction(newColl, t.FunctionName, false); err != nil {
 		return err
@@ -238,101 +154,6 @@ func (t *alterCollectionFunctionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type dropCollectionFunctionTask struct {
-	baseTask
-	Condition
-	*milvuspb.DropCollectionFunctionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-
-	result  *commonpb.Status
-	fSchema *schemapb.FunctionSchema
-}
-
-func (t *dropCollectionFunctionTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *dropCollectionFunctionTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *dropCollectionFunctionTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *dropCollectionFunctionTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *dropCollectionFunctionTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *dropCollectionFunctionTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *dropCollectionFunctionTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *dropCollectionFunctionTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_DropCollectionFunction
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *dropCollectionFunctionTask) Name() string {
-	return DropCollectionFunctionTask
-}
-
-func (t *dropCollectionFunctionTask) PreExecute(ctx context.Context) error {
-	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
-	if err != nil {
-		mlog.Error(t.ctx, "DropFunctionTask, get collection info failed",
-			mlog.String("dbName", t.GetDbName()),
-			mlog.String("collectionName", t.GetCollectionName()),
-			mlog.Err(err))
-		return err
-	}
-	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
-		return err
-	}
-
-	for _, f := range coll.schema.Functions {
-		if f.Name == t.FunctionName {
-			t.fSchema = f
-			break
-		}
-	}
-	return nil
-}
-
-func (t *dropCollectionFunctionTask) Execute(ctx context.Context) error {
-	if t.fSchema == nil {
-		return nil
-	}
-
-	if t.fSchema.Type == schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("currently does not support droping BM25 function")
-	}
-
-	var err error
-	t.result, err = t.mixCoord.DropCollectionFunction(ctx, t.DropCollectionFunctionRequest)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *dropCollectionFunctionTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 func getCollectionInfo(ctx context.Context, dbName string, collectionName string) (*collectionInfo, error) {
 	collID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 	if err != nil {
@@ -342,6 +163,6 @@ func getCollectionInfo(ctx context.Context, dbName string, collectionName string
 	if err != nil {
 		return nil, err
 	}
-	coll.schema.DbName = dbName
+	coll.Schema.DbName = dbName
 	return coll, nil
 }

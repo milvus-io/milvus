@@ -20,7 +20,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -92,13 +91,15 @@ struct EmptyEmbListState {
 
 class EmptyVectorIterator : public knowhere::IndexNode::iterator {
  public:
-    std::pair<int64_t, float>
-    Next() override {
-        throw std::runtime_error("empty vector iterator has no next result");
+    knowhere::expected<std::pair<int64_t, float>>
+    Next() noexcept override {
+        return knowhere::expected<std::pair<int64_t, float>>::Err(
+            knowhere::Status::knowhere_inner_error,
+            "empty vector iterator has no next result");
     }
 
-    bool
-    HasNext() override {
+    knowhere::expected<bool>
+    HasNext() noexcept override {
         return false;
     }
 };
@@ -795,15 +796,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_queries = final->GetRows();
     float* distances = const_cast<float*>(final->GetDistance());
     final->SetIsOwner(true);
-    auto round_decimal = search_info.round_decimal_;
     auto total_num = num_queries * topk;
 
-    if (round_decimal != -1) {
-        const float multiplier = pow(10.0, round_decimal);
-        for (int i = 0; i < total_num; i++) {
-            distances[i] = std::round(distances[i] * multiplier) / multiplier;
-        }
-    }
     search_result.seg_offsets_.resize(total_num);
     search_result.distances_.resize(total_num);
     search_result.total_nq_ = num_queries;

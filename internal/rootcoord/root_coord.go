@@ -228,6 +228,37 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 	return c.quotaCenter
 }
 
+func (c *Core) GetProxyClientManager() proxyutil.ProxyClientManagerInterface {
+	return c.proxyClientManager
+}
+
+func (c *Core) ServerExist(serverID int64) bool {
+	sessions, _, err := c.session.GetSessions(c.ctx, typeutil.ProxyRole)
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to get sessions", mlog.Err(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
+func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
+	c.proxyClientManager.SetProxyClients(sessions)
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
+}
+
+func (c *Core) addProxyClient(session *sessionutil.Session) {
+	c.proxyClientManager.AddProxyClient(session)
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
+}
+
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 	pc := c.chanTimeTick.listDmlChannels()
 	pt := make([]uint64, len(pc))
@@ -497,9 +528,9 @@ func (c *Core) initInternal() error {
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.SetProxyClients,
+		c.setProxyClients,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.addProxyClient)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	mlog.Info(context.TODO(), "init proxy manager done")
 
@@ -557,10 +588,10 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
-		// Recover file resource refCnt for pending CreateCollection broadcast tasks
+		// Recover file resource refCnt for pending schema broadcast tasks
 		// before registering DDL callbacks, so ack callbacks won't race with recovery.
 		// See #48612.
-		pending := broadcast.GetPendingCreateCollectionResources()
+		pending := broadcast.GetPendingSchemaFileResources()
 		if len(pending) > 0 {
 			c.meta.RecoverFileResourceRefCnt(pending)
 			mlog.Info(context.TODO(), "recovered file resource refCnt from pending broadcast tasks", mlog.Int("count", len(pending)))
@@ -1423,31 +1454,16 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	return merr.Success(), nil
 }
 
+// AddCollectionFunction is the deprecated legacy attach RPC; it only allowed the
+// unsafe attach-over-existing-field path. A function is coupled to its output field
+// (BM25/MinHash via add_function_field; TextEmbedding at collection creation), so
+// this path is rejected.
 func (c *Core) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("AddCollectionFunction")
-
-	mlog.Info(context.TODO(), "received request to Add collection function")
-
-	if err := c.broadcastAlterCollectionForAddFunction(ctx, in); err != nil {
-		if errors.Is(err, errIgnoredAlterCollection) {
-			mlog.Info(context.TODO(), "add collection function make no changes, ignore it")
-			metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
-		mlog.Warn(context.TODO(), "failed to alter collection function", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AddCollectionFunction").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	mlog.Info(context.TODO(), "done to add collection function")
-	return merr.Success(), nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"AddCollectionFunction RPC is no longer supported; add BM25/MinHash via add_function_field, and define a TextEmbedding function at collection creation")), nil
 }
 
 func (c *Core) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
@@ -1477,31 +1493,15 @@ func (c *Core) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCo
 	return merr.Success(), nil
 }
 
+// DropCollectionFunction is the deprecated legacy detach RPC; pymilvus routes
+// drop through AlterCollectionSchema (drop_function_field / detach), so this path
+// is unused. Reject to avoid a second, divergent DDL path.
 func (c *Core) DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("DropCollectionFunction")
-
-	mlog.Info(context.TODO(), "received request to drop collection function")
-
-	if err := c.broadcastAlterCollectionForDropFunction(ctx, in); err != nil {
-		if errors.Is(err, errIgnoredAlterCollection) {
-			mlog.Info(context.TODO(), "Drop collection function make no changes, ignore it")
-			metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
-		mlog.Warn(context.TODO(), "failed to drop collection function", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollectionFunction").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	mlog.Info(context.TODO(), "done to drop collection function")
-	return merr.Success(), nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field")), nil
 }
 
 func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
@@ -3101,6 +3101,9 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.GetName() == "" {
+		return merr.Status(merr.WrapErrParameterMissing("file resource name")), nil
+	}
 
 	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
 		return merr.Status(err), nil
@@ -3108,22 +3111,53 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
 	}
 
-	id, err := c.tsoAllocator.GenerateTSO(1)
-	if err != nil {
-		return merr.Status(err), nil
+	alreadyExists := false
+	if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
+		resources, _ := c.meta.ListFileResource(ctx)
+		for _, resource := range resources {
+			if resource.GetName() != req.GetName() {
+				continue
+			}
+			if resource.GetPath() != req.GetPath() {
+				return merr.Status(merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())), nil
+			}
+			alreadyExists = true
+			break
+		}
+
+		if !alreadyExists {
+			size, err := c.storage.Size(ctx, req.GetPath())
+			if err != nil {
+				return merr.Status(err), nil
+			}
+			if size < 0 {
+				return merr.Status(merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)), nil
+			}
+			if size > maxFileSize {
+				return merr.Status(merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
+					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))), nil
+			}
+		}
 	}
-	resource := &internalpb.FileResourceInfo{
-		Id:   int64(id),
-		Name: req.GetName(),
-		Path: req.GetPath(),
-	}
-	err = c.meta.AddFileResource(ctx, resource)
-	if err != nil {
-		return merr.Status(err), nil
+
+	if !alreadyExists {
+		id, err := c.tsoAllocator.GenerateTSO(1)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		resource := &internalpb.FileResourceInfo{
+			Id:   int64(id),
+			Name: req.GetName(),
+			Path: req.GetPath(),
+		}
+		err = c.meta.AddFileResource(ctx, resource)
+		if err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	if c.fileResourceObserver != nil {
-		err = c.fileResourceObserver.Sync()
+		err := c.fileResourceObserver.Sync()
 		if err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil

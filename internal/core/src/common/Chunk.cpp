@@ -15,7 +15,7 @@
 
 namespace milvus {
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
+std::pair<std::vector<std::string_view>, ValidityView>
 StringChunk::StringViews(
     std::optional<std::pair<int64_t, int64_t>> offset_len = std::nullopt) {
     auto start_offset = 0;
@@ -46,12 +46,7 @@ StringChunk::StringViews(
     for (auto i = start_offset; i < end_offset; i++) {
         ret.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
     }
-    if (nullable_) {
-        FixedVector<bool> res_valid(valid_.begin() + start_offset,
-                                    valid_.begin() + end_offset);
-        return {ret, std::move(res_valid)};
-    }
-    return {ret, {}};
+    return {std::move(ret), Validity(start_offset)};
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>

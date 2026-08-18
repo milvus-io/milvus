@@ -127,7 +127,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	deadline, ok := g.TraceCtx().Deadline()
 	if ok {
-		g.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		g.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline)
 	}
 
 	// check if collection/partitions are loaded into query node
@@ -287,14 +287,14 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 			mlog.Int64("nodeID", nodeID),
 			mlog.String("channel", channel),
 			mlog.Err(err))
-		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		mlog.Warn(ctx, "QueryNode is not shardLeader",
 			mlog.Int64("nodeID", nodeID),
 			mlog.String("channel", channel))
-		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -331,7 +331,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			CollectionID: info.collID,
+			CollectionID: info.CollID,
 			PartitionIDs: searchPartitionIDs,
 		})
 		if err != nil {
@@ -357,7 +357,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID: info.CollID,
 	})
 	if err != nil {
 		return nil, nil, merr.Wrapf(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)

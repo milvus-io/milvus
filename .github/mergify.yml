@@ -65,13 +65,9 @@ misc:
         - or: *WHEN_GO_UNIT_TEST_SUCCESS
         - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
   - when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
-      or:
-        - status-success=ci-v2/build-ut-cov
-        - *WHEN_MASTER_LEGACY_BUILD_UT_COV_SUCCESS
+      status-success=ci-v2/build-ut-cov
   - when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS
-      or:
-        - status-success=ci-v2/build-ut-cov
-        - *WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_SUCCESS
+      status-success=ci-v2/build-ut-cov
   - when_master_legacy_build_ut_cov_failure: &WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
       or:
         - and:
@@ -145,12 +141,10 @@ misc:
       and:
         - -status-success=ci-v2/build-ut-cov
         - status-failure=ci-v2/build-ut-cov
-        - *WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
   - when_master_go_unit_build_ut_cov_gate_failure: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_FAILURE
       and:
         - -status-success=ci-v2/build-ut-cov
         - status-failure=ci-v2/build-ut-cov
-        - *WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_FAILURE
 
   # Branch configurations
   - branch: &BRANCHES
@@ -429,8 +423,7 @@ pull_request_rules:
       - label!=manual-pass
       - *source_code_files
       - or:
-        # build-ut-cov replaces the legacy build/ut/code-check group on master:
-        # remove ci-passed only when both systems indicate failure.
+        # build-ut-cov replaces the legacy build/ut/code-check group on master.
         - and:
             - *only_go_unittest_files
             - *WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_FAILURE

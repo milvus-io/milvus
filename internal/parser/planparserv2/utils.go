@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -76,6 +77,15 @@ func IsString(n *planpb.GenericValue) bool {
 		return true
 	}
 	return false
+}
+
+func IsBytes(n *planpb.GenericValue) bool {
+	switch n.GetVal().(type) {
+	case *planpb.GenericValue_BytesVal:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsArray(n *planpb.GenericValue) bool {
@@ -252,6 +262,15 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	// A raw-bytes value has exactly two consumers — the bloom_match filter blob
+	// and the roaring_match bitmap blob — each validated and embedded by its own
+	// Fill*ExpressionValue without passing through castValue. Reject it in every
+	// typed/JSON comparison context here, at the proxy, instead of fanning out a
+	// GenericValue kBytesVal that segcore's plan parser cannot evaluate.
+	if IsBytes(value) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"a bytes template value can only be used as the bloom_match or roaring_match filter argument")
+	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
 	}
@@ -282,7 +301,12 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 
-	return nil, merr.WrapErrQueryPlanMsg("cannot cast value to %s, value: %s", dataType.String(), value)
+	// The value is not echoed. castValue is reached from fill_expression_value
+	// after template substitution, so it can hold a value the caller supplied
+	// out of band; the design doc forbids rendering one. The declared type and
+	// the value's own type are what identify the mismatch anyway.
+	return nil, merr.WrapErrQueryPlanMsg(
+		"cannot cast value to %s: incompatible source type", dataType.String())
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
@@ -298,6 +322,16 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 	if arithOp == planpb.ArithOpType_Div || arithOp == planpb.ArithOpType_Mod {
 		if (IsInteger(operand) && operand.GetInt64Val() == 0) || (IsFloating(operand) && operand.GetFloatVal() == 0) {
 			return nil, merr.WrapErrQueryPlanMsg("division or modulus by zero")
+		}
+	}
+
+	// A negative or too-large shift amount is undefined behavior in the C++
+	// executor, so reject it at plan time (constant-const folding is guarded
+	// separately in ShiftLeft/ShiftRight). Templated operands are validated when
+	// the placeholder value is filled in.
+	if (arithOp == planpb.ArithOpType_Shl || arithOp == planpb.ArithOpType_Shr) && !isTemplateExpr(operandExpr) {
+		if !IsInteger(operand) || operand.GetInt64Val() < 0 || operand.GetInt64Val() >= 64 {
+			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", operand.String())
 		}
 	}
 
@@ -442,6 +476,13 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 
 	if leftColumnInfo == nil || rightColumnInfo == nil {
 		return nil, merr.WrapErrQueryPlanMsg("only comparison between two fields is supported")
+	}
+
+	// CompareExpr only carries field IDs and storage data types. It cannot
+	// represent an element path for an ARRAY-backed column, and the executor
+	// does not support ARRAY as an operand type.
+	if typeutil.IsArrayType(leftColumnInfo.GetDataType()) || typeutil.IsArrayType(rightColumnInfo.GetDataType()) {
+		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison involving ARRAY fields is not supported")
 	}
 
 	// Check if both left and right are non-JSON types
@@ -705,7 +746,8 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
 		}
-	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor:
+	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
 		}
@@ -735,6 +777,17 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 		}
 	}
 	return value, nil
+}
+
+func validateBinaryRangeBounds(lower, upper *planpb.GenericValue, lowerInclusive, upperInclusive bool) error {
+	cmp, ok := rewriter.CompareRangeValues(lower, upper)
+	if !ok {
+		return merr.WrapErrQueryPlanMsg("invalid range: bounds are not comparable")
+	}
+	if cmp > 0 || (cmp == 0 && (!lowerInclusive || !upperInclusive)) {
+		return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
+	}
+	return nil
 }
 
 func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {

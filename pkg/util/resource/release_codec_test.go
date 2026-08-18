@@ -21,7 +21,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/mem"
+	"google.golang.org/protobuf/proto"
 
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
@@ -154,6 +157,41 @@ func TestSearchResultsImplementsMsgPinnable(t *testing.T) {
 	var req interface{} = &internalpb.SearchRequest{}
 	_, ok = req.(MsgPinnable)
 	require.False(t, ok, "SearchRequest should not implement MsgPinnable")
+}
+
+// TestReleaseCodecFastpbFastPath covers the fastpb.TryUnmarshal fast path in
+// Unmarshal: the two hot types decode through fastpb (round-trip equal to the
+// official codec), and a fast-path decode error is surfaced to the caller.
+func TestReleaseCodecFastpbFastPath(t *testing.T) {
+	codec := releaseCodec{}
+
+	rr := &internalpb.RetrieveResults{ReqID: 42, ChannelIDsRetrieved: []string{"ch1"}}
+	out, err := codec.Marshal(rr)
+	require.NoError(t, err)
+	gotRR := &internalpb.RetrieveResults{}
+	require.NoError(t, codec.Unmarshal(out, gotRR))
+	require.True(t, proto.Equal(rr, gotRR))
+
+	ir := &milvuspb.InsertRequest{CollectionName: "c", NumRows: 3}
+	out, err = codec.Marshal(ir)
+	require.NoError(t, err)
+	gotIR := &milvuspb.InsertRequest{}
+	require.NoError(t, codec.Unmarshal(out, gotIR))
+	require.True(t, proto.Equal(ir, gotIR))
+
+	// UpsertRequest takes the fast path too; the upsert-only fields
+	// (partial_update/namespace/field_ops) fold to the official codec.
+	ns := "tenant-x"
+	ur := &milvuspb.UpsertRequest{CollectionName: "c", NumRows: 3, PartialUpdate: true, Namespace: &ns}
+	out, err = codec.Marshal(ur)
+	require.NoError(t, err)
+	gotUR := &milvuspb.UpsertRequest{}
+	require.NoError(t, codec.Unmarshal(out, gotUR))
+	require.True(t, proto.Equal(ur, gotUR))
+
+	// malformed wire (truncated varint tag) → fast path must return the error
+	bad := mem.BufferSlice{mem.SliceBuffer([]byte{0x80})}
+	require.Error(t, codec.Unmarshal(bad, &internalpb.RetrieveResults{}))
 }
 
 func TestReleaseCodecMarshalNotPinnedPinnable(t *testing.T) {

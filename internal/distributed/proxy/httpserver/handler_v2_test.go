@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,7 +43,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -82,6 +85,35 @@ func init() {
 	streaming.SetupNoopWALForTest()
 }
 
+type httpServerLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*httpServerLogBuffer) Sync() error {
+	return nil
+}
+
+func captureHTTPServerLogs(t *testing.T) *httpServerLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &httpServerLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
 func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
 	t.Run(testName, func(t *testing.T) {
 		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))
@@ -99,7 +131,7 @@ func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method str
 }
 
 func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
-	externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 	testCases := []struct {
 		name string
 		req  any
@@ -131,7 +163,149 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 			request := fmt.Sprint(field.Interface)
 			assert.NotContains(t, request, "AKIAEXAMPLE")
 			assert.NotContains(t, request, "SUPERSECRET")
+			assert.NotContains(t, request, "FUTURE_SECRET_SENTINEL")
 			assert.Contains(t, request, "***")
+			assert.Contains(t, request, "parquet")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTExternalCollectionCredentials(t *testing.T) {
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIA_EXTERNAL_SENTINEL","access_key_value":"SECRET_EXTERNAL_SENTINEL","future_password":"FUTURE_SPEC_REST_SENTINEL","region":"us-east-1"}}`
+	externalSource := "s3://SOURCE_ACCESS_REST_SENTINEL:SOURCE_SECRET_REST_SENTINEL@bucket/path"
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "create external collection",
+			req: &CollectionReq{
+				CollectionName: "external_collection",
+				Schema: CollectionSchema{
+					ExternalSource: externalSource,
+					ExternalSpec:   externalSpec,
+				},
+				TopLevelExternalSource: externalSource,
+				TopLevelExternalSpec:   externalSpec,
+			},
+		},
+		{
+			name: "refresh external collection",
+			req: &RefreshExternalCollectionReq{
+				CollectionName: "external_collection",
+				ExternalSource: externalSource,
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "SOURCE_ACCESS_REST_SENTINEL")
+			assert.NotContains(t, request, "SOURCE_SECRET_REST_SENTINEL")
+			assert.NotContains(t, request, "AKIA_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "SECRET_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "FUTURE_SPEC_REST_SENTINEL")
+			assert.Contains(t, request, "<redacted>")
+		})
+	}
+}
+
+func TestCreateExternalCollectionValidationDoesNotLogExternalSpec(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.TraceLogMode.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(proxy.Params.CommonCfg.TraceLogMode.Key))
+	})
+
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "top-level config rejected",
+			body: `{
+				"collectionName": "external_books",
+				"externalSource": "s3://bucket/books",
+				"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}",
+				"schema": {"fields": []}
+			}`,
+		},
+		{
+			name: "quick create rejected",
+			body: `{
+				"collectionName": "external_books",
+				"dimension": 2,
+				"schema": {
+					"externalSource": "s3://bucket/books",
+					"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}"
+				}
+			}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			logs := captureHTTPServerLogs(t)
+			testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(testCase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			output := logs.String()
+			assert.NotContains(t, output, "AKIA_LOG_SENTINEL")
+			assert.NotContains(t, output, "SECRET_LOG_SENTINEL")
+			assert.NotContains(t, output, "FUTURE_LOG_SECRET_SENTINEL")
+			assert.Contains(t, output, "***")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTPasswords(t *testing.T) {
+	description := "account description"
+	testCases := []struct {
+		name    string
+		req     any
+		secrets []string
+	}{
+		{
+			name: "create user",
+			req: &PasswordReq{
+				UserName:    "alice",
+				Password:    "CREATE_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{"CREATE_PASSWORD_SENTINEL_DO_NOT_LOG"},
+		},
+		{
+			name: "update password",
+			req: &NewPasswordReq{
+				UserName:    "alice",
+				Password:    "OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				NewPassword: "NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{
+				"OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				"NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.Contains(t, request, "alice")
+			for _, secret := range testCase.secrets {
+				assert.NotContains(t, request, secret)
+			}
 		})
 	}
 }
@@ -895,6 +1069,112 @@ func TestDocInDocOutInsert(t *testing.T) {
 	}
 
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestTextFieldDMLV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+
+	assertTextFieldData := func(fieldsData []*schemapb.FieldData) {
+		textFieldData := getFieldDataByName(fieldsData, FieldText)
+		require.NotNil(t, textFieldData)
+		assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
+		assert.Equal(t, []string{"rest text value"}, textFieldData.GetScalars().GetStringData().GetData())
+	}
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			InsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			UpsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	requestBody := []byte(`{
+		"collectionName": "book",
+		"data": [{
+			"book_id": 1,
+			"word_count": 10,
+			"book_intro": [0.1, 0.2],
+			"text_field": "rest text value"
+		}]
+	}`)
+	for _, action := range []string{InsertAction, UpsertAction} {
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, action),
+			requestBody: requestBody,
+		}
+		sendReqAndVerify(t, testEngine, action, http.MethodPost, testcase)
+	}
+}
+
+func TestTextFieldQueryV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
+		Status:       commonSuccessStatus,
+		OutputFields: []string{FieldText},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Text,
+				FieldName: FieldText,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"rest query text"}},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, QueryAction), bytes.NewReader([]byte(`{
+		"collectionName": "book",
+		"filter": "book_id > 0",
+		"outputFields": ["text_field"],
+		"limit": 10
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	resp := map[string]interface{}{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, float64(0), resp[HTTPReturnCode])
+	data := resp[HTTPReturnData].([]interface{})
+	require.Len(t, data, 1)
+	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
 }
 
 func TestDocInDocOutInsertInvalid(t *testing.T) {
@@ -2064,6 +2344,372 @@ func TestCreateCollection(t *testing.T) {
 	})
 }
 
+func TestBinaryMetricTypesForQuickCreate(t *testing.T) {
+	params := paramtable.Get()
+	key := params.AutoIndexConfig.BinaryIndexParams.Key
+
+	testcases := []struct {
+		name     string
+		config   string
+		expected []string
+	}{
+		{
+			name:     "bin ivf flat uses ivf binary metrics",
+			config:   `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIvfMetrics,
+		},
+		{
+			name:     "missing index type falls back to ivf binary metrics",
+			config:   `{"metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIvfMetrics,
+		},
+		{
+			name:     "unknown index type falls back to ivf binary metrics",
+			config:   `{"index_type": "UNKNOWN", "metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIvfMetrics,
+		},
+		{
+			name:     "bin flat uses id map binary metrics",
+			config:   `{"index_type": "BIN_FLAT", "metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIDMapMetrics,
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			params.Save(key, testcase.config)
+			t.Cleanup(func() {
+				params.Reset(key)
+			})
+
+			assert.ElementsMatch(t, testcase.expected, binaryMetricTypesForQuickCreate())
+		})
+	}
+}
+
+func TestCreateCollectionQuickVectorFieldType(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	path := versionalV2(CollectionCategory, CreateAction)
+
+	t.Run("reject invalid vector field type", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"vectorFieldType": "InvalidVectorType"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Equal(t, "vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector: invalid parameter[expected=FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector][actual=InvalidVectorType]", returnBody.Message)
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+
+	t.Run("reject sparse vector dimension", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"vectorFieldType": "SparseFloatVector"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "dimension should not be specified for SparseFloatVector quick create")
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+
+	invalidMetricCases := []struct {
+		name        string
+		body        string
+		expectedMsg string
+	}{
+		{
+			name: "reject binary vector invalid metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "COSINE",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: COSINE",
+		},
+		{
+			name: "reject binary vector substructure metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "SUBSTRUCTURE",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: SUBSTRUCTURE",
+		},
+		{
+			name: "reject binary vector superstructure metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "SUPERSTRUCTURE",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: SUPERSTRUCTURE",
+		},
+		{
+			name: "reject binary vector mhjaccard metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "MHJACCARD",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: MHJACCARD",
+		},
+		{
+			name: "reject sparse float vector invalid metric",
+			body: `{
+				"collectionName": "book",
+				"metricType": "COSINE",
+				"vectorFieldType": "SparseFloatVector"
+			}`,
+			expectedMsg: "only IP&BM25 is the supported metric type for sparse index",
+		},
+		{
+			name: "reject sparse float vector bm25 metric",
+			body: `{
+				"collectionName": "book",
+				"metricType": "BM25",
+				"vectorFieldType": "SparseFloatVector"
+			}`,
+			expectedMsg: "only BM25 Function output field support BM25 metric type",
+		},
+	}
+	for _, testcase := range invalidMetricCases {
+		t.Run(testcase.name, func(t *testing.T) {
+			proxy := &externalCollectionRESTProxy{}
+			testEngine := initHTTPServerV2(proxy, false)
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(testcase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, int32(1100), returnBody.Code)
+			assert.Contains(t, returnBody.Message, testcase.expectedMsg)
+			assert.Nil(t, proxy.createReq)
+			assert.Empty(t, proxy.createIndexReqs)
+		})
+	}
+
+	t.Run("binary vector metric follows configured binary auto index", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key, `{"index_type": "BIN_FLAT", "metric_type": "HAMMING"}`)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key)
+
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 8,
+			"metricType": "SUBSTRUCTURE",
+			"vectorFieldType": "BinaryVector"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), returnBody.Code)
+		require.NotNil(t, proxy.createReq)
+		require.Len(t, proxy.createIndexReqs, 1)
+		require.Len(t, proxy.createIndexReqs[0].GetExtraParams(), 1)
+		assert.Equal(t, common.MetricTypeKey, proxy.createIndexReqs[0].GetExtraParams()[0].GetKey())
+		assert.Equal(t, "SUBSTRUCTURE", proxy.createIndexReqs[0].GetExtraParams()[0].GetValue())
+	})
+
+	testcases := []struct {
+		name             string
+		body             string
+		expectedType     schemapb.DataType
+		expectedDimParam bool
+		expectedMetric   string
+	}{
+		{
+			name: "binary vector default metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedType:     schemapb.DataType_BinaryVector,
+			expectedDimParam: true,
+			expectedMetric:   paramtable.BinaryVectorDefaultMetricType,
+		},
+		{
+			name: "float16 vector",
+			body: `{
+				"collectionName": "book",
+				"dimension": 4,
+				"vectorFieldType": "Float16Vector"
+			}`,
+			expectedType:     schemapb.DataType_Float16Vector,
+			expectedDimParam: true,
+			expectedMetric:   DefaultMetricType,
+		},
+		{
+			name: "bfloat16 vector",
+			body: `{
+				"collectionName": "book",
+				"dimension": 4,
+				"vectorFieldType": "BFloat16Vector"
+			}`,
+			expectedType:     schemapb.DataType_BFloat16Vector,
+			expectedDimParam: true,
+			expectedMetric:   DefaultMetricType,
+		},
+		{
+			name: "sparse float vector default metric",
+			body: `{
+				"collectionName": "book",
+				"vectorFieldType": "SparseFloatVector"
+			}`,
+			expectedType:     schemapb.DataType_SparseFloatVector,
+			expectedDimParam: false,
+			expectedMetric:   paramtable.SparseFloatVectorDefaultMetricType,
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			proxy := &externalCollectionRESTProxy{}
+			testEngine := initHTTPServerV2(proxy, false)
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(testcase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, int32(0), returnBody.Code)
+			require.NotNil(t, proxy.createReq)
+
+			collSchema := &schemapb.CollectionSchema{}
+			require.NoError(t, proto.Unmarshal(proxy.createReq.GetSchema(), collSchema))
+			require.Len(t, collSchema.GetFields(), 2)
+			vectorField := collSchema.GetFields()[1]
+			assert.Equal(t, testcase.expectedType, vectorField.GetDataType())
+
+			dimFound := false
+			for _, typeParam := range vectorField.GetTypeParams() {
+				if typeParam.GetKey() == Dim {
+					dimFound = true
+				}
+			}
+			assert.Equal(t, testcase.expectedDimParam, dimFound)
+
+			require.Len(t, proxy.createIndexReqs, 1)
+			indexReq := proxy.createIndexReqs[0]
+			assert.Equal(t, DefaultVectorFieldName, indexReq.GetFieldName())
+			assert.Equal(t, DefaultVectorFieldName, indexReq.GetIndexName())
+			require.Len(t, indexReq.GetExtraParams(), 1)
+			assert.Equal(t, common.MetricTypeKey, indexReq.GetExtraParams()[0].GetKey())
+			assert.Equal(t, testcase.expectedMetric, indexReq.GetExtraParams()[0].GetValue())
+		})
+	}
+}
+
+func TestCreateCollectionTopLevelConsistencyLevel(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	path := versionalV2(CollectionCategory, CreateAction)
+
+	t.Run("reject invalid top-level consistency level", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"consistencyLevel": "Invalid"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "consistencyLevel can only be")
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+
+	t.Run("accept valid top-level consistency level", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"consistencyLevel": "Strong"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), returnBody.Code)
+		require.NotNil(t, proxy.createReq)
+		assert.Equal(t, commonpb.ConsistencyLevel_Strong, proxy.createReq.GetConsistencyLevel())
+		require.Len(t, proxy.createIndexReqs, 1)
+	})
+
+	t.Run("reject conflicting consistency levels", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"consistencyLevel": "Strong",
+			"params": {"consistencyLevel": "Bounded"}
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "top-level consistencyLevel conflicts with params.consistencyLevel")
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+}
+
 func TestCreateCollectionStructArrayDuplicateName(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -2110,18 +2756,25 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 type externalCollectionRESTProxy struct {
 	mockProxyComponent
 	createReq                  *milvuspb.CreateCollectionRequest
+	createIndexReqs            []*milvuspb.CreateIndexRequest
 	describeResp               *milvuspb.DescribeCollectionResponse
 	refreshReq                 *milvuspb.RefreshExternalCollectionRequest
 	listReq                    *milvuspb.ListRefreshExternalCollectionJobsRequest
 	progressReq                *milvuspb.GetRefreshExternalCollectionProgressRequest
 	restoreReq                 *milvuspb.RestoreExternalSnapshotRequest
 	exportReq                  *milvuspb.ExportSnapshotRequest
+	getExportSnapshotStateReq  *milvuspb.GetExportSnapshotStateRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	m.createReq = request
+	return commonSuccessStatus, nil
+}
+
+func (m *externalCollectionRESTProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+	m.createIndexReqs = append(m.createIndexReqs, request)
 	return commonSuccessStatus, nil
 }
 
@@ -2201,8 +2854,27 @@ func (m *externalCollectionRESTProxy) RestoreExternalSnapshot(ctx context.Contex
 func (m *externalCollectionRESTProxy) ExportSnapshot(ctx context.Context, request *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
 	m.exportReq = request
 	return &milvuspb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: request.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+		Status: merr.Success(),
+		JobId:  3001,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) GetExportSnapshotState(ctx context.Context, request *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	m.getExportSnapshotStateReq = request
+	return &milvuspb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &milvuspb.ExportSnapshotInfo{
+			JobId:               request.GetJobId(),
+			SnapshotName:        "snapshot_1",
+			DbName:              "default",
+			CollectionName:      "source_books",
+			State:               milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+			Progress:            100,
+			TotalFiles:          10,
+			CopiedFiles:         10,
+			TotalBytes:          4096,
+			SnapshotMetadataUri: "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+		},
 	}, nil
 }
 
@@ -2478,6 +3150,25 @@ func TestExportSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "snapshot_1", proxy.exportReq.GetName())
 	assert.Equal(t, "s3://foreign-bucket/export-root", proxy.exportReq.GetTargetS3Path())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.exportReq.GetExternalSpec())
+	assert.Contains(t, w.Body.String(), `"jobId":3001`)
+}
+
+func TestGetExportSnapshotStateRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, DescribeExportAction), bytes.NewReader([]byte(`{"jobId":"3001"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(3001), proxy.getExportSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"state":"ExportSnapshotCompleted"`)
+	assert.Contains(t, w.Body.String(), `"progress":100`)
+	assert.Contains(t, w.Body.String(), `"totalBytes":4096`)
 	assert.Contains(t, w.Body.String(), `"snapshotMetadataURI":"s3://foreign-bucket/export-root/snapshots/100/metadata/1.json"`)
 }
 
@@ -3453,6 +4144,172 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
+func TestQueryOrderByFields(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(2)
+	orderByValues := []string{}
+	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		for _, pair := range req.GetQueryParams() {
+			if pair.GetKey() == proxy.OrderByFieldsKey {
+				orderByValues = append(orderByValues, pair.GetValue())
+			}
+		}
+		return &milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil
+	}).Times(2)
+	testEngine := initHTTPServerV2(mp, false)
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "limit": 10, "orderByFields": ["word_count:desc", "book_id:asc"]}`),
+		},
+		{
+			// no orderByFields -> no order_by_fields query param forwarded
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "limit": 10}`),
+		},
+	}, false)
+	assert.Equal(t, []string{"word_count:desc,book_id:asc"}, orderByValues)
+}
+
+func TestQueryGroupByFields(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(6)
+
+	queryParams := make([]map[string]string, 0, 6)
+	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		params := make(map[string]string, len(req.GetQueryParams()))
+		for _, pair := range req.GetQueryParams() {
+			params[pair.GetKey()] = pair.GetValue()
+		}
+		queryParams = append(queryParams, params)
+		return &milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil
+	}).Times(6)
+
+	testEngine := initHTTPServerV2(mp, false)
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count", "book_id"]}`),
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count"], "limit": 10, "offset": 2}`),
+		},
+		{
+			// Preserve the master REST behavior for a global lone count(*).
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "limit": 10}`),
+		},
+		{
+			// Global mixed count aggregates keep master behavior: REST forwards its
+			// default limit and Proxy rejects count(*) pagination.
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "sum(word_count)"]}`),
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "sum(word_count)"], "groupByFields": ["word_count"], "limit": 10}`),
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count"], "orderByFields": ["word_count:asc"]}`),
+		},
+	}, false)
+
+	require.Len(t, queryParams, 6)
+	assert.Equal(t, "word_count,book_id", queryParams[0][proxy.GroupByFieldsKey])
+	assert.Equal(t, "100", queryParams[0][proxy.LimitKey])
+	assert.Equal(t, "word_count", queryParams[1][proxy.GroupByFieldsKey])
+	assert.Equal(t, "10", queryParams[1][proxy.LimitKey])
+	assert.Equal(t, "2", queryParams[1][proxy.OffsetKey])
+	assert.NotContains(t, queryParams[2], proxy.GroupByFieldsKey)
+	assert.NotContains(t, queryParams[2], proxy.LimitKey)
+	assert.NotContains(t, queryParams[3], proxy.GroupByFieldsKey)
+	assert.Equal(t, "100", queryParams[3][proxy.LimitKey])
+	assert.Equal(t, "word_count", queryParams[4][proxy.GroupByFieldsKey])
+	assert.Equal(t, "10", queryParams[4][proxy.LimitKey])
+	assert.Equal(t, "word_count", queryParams[5][proxy.GroupByFieldsKey])
+	assert.Equal(t, "word_count:asc", queryParams[5][proxy.OrderByFieldsKey])
+}
+
+func TestSearchOrderByFields(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(6)
+
+	orderByValues := []string{}
+	mp.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		for _, pair := range req.GetSearchParams() {
+			if pair.GetKey() == proxy.OrderByFieldsKey {
+				orderByValues = append(orderByValues, pair.GetValue())
+			}
+		}
+		return &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil
+	}).Times(4)
+
+	testEngine := initHTTPServerV2(mp, false)
+	searchAggregation := `"searchAggregation": {"fields": ["word_count"], "size": 1}`
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "orderByFields": ["word_count:desc", "book_id:asc"]}`),
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4}`),
+		},
+		{
+			// The legacy searchParams passthrough remains unchanged.
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "searchParams": {"order_by_fields": "book_id:asc"}}`),
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "orderByFields": ["word_count:desc"], "searchParams": {"order_by_fields": "book_id:asc"}}`),
+			errCode:     1100,
+			errMsg:      "ambiguous order by: use either orderByFields or searchParams.order_by_fields, not both",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "orderByFields": ["word_count:desc"], ` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "orderByFields and searchAggregation cannot be used simultaneously",
+		},
+		{
+			// This legacy combination was accepted by master, so it must stay accepted.
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "searchParams": {"order_by_fields": "book_id:asc"}, ` + searchAggregation + `}`),
+		},
+	}, false)
+	assert.Equal(t, []string{"word_count:desc,book_id:asc", "book_id:asc", "book_id:asc"}, orderByValues)
+}
+
 func TestAllowInt64(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -3479,6 +4336,96 @@ func TestAllowInt64(t *testing.T) {
 	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 
 	validateTestCases(t, testEngine, queryTestCases, true)
+}
+
+func TestNarrowIntegerOverflowV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateNarrowIntegerCollectionSchema(schemapb.DataType_Int8),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"narrow_int":128}]}`)
+
+	for _, action := range []string{InsertAction, UpsertAction} {
+		t.Run(action, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "actual=128")
+			assert.Contains(t, returnBody.Message, "field narrow_int value must be an integer in range [-128, 127]")
+		})
+	}
+}
+
+func TestStructArrayIntegerExponentV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         buildStructArrayTestSchema(),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":1e-999999,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+
+	for _, action := range []string{InsertAction, UpsertAction} {
+		t.Run(action, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "sub-field sub_int")
+			assert.Contains(t, returnBody.Message, "value=1e-999999")
+		})
+	}
+}
+
+func TestStructArrayExactInt64V2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return hasStructArrayInt64Value(req.GetFieldsData(), "my_struct", "sub_int", 9007199254740993)
+	})).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		InsertCnt: 1,
+		IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		}},
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":9007199254740993.0,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, InsertAction), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
 }
 
 func generateCollectionSchemaWithVectorFields() *schemapb.CollectionSchema {
@@ -3784,8 +4731,13 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
-		errMsg:      "can only accept json format request, error: Mismatch type uint8",
-		errCode:     1801,
+		// Do not pin the reported Go type here. sonic selects its decoder by
+		// architecture (internal/decoder/api: jitdec on amd64, optdec on arm64) and
+		// the two disagree on which type they blame for a []byte mismatch — jitdec
+		// says "uint8", optdec says "[]uint8". Asserting either one turns this case
+		// red on the other architecture.
+		errMsg:  "can only accept json format request, error: Mismatch type",
+		errCode: 1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -4159,8 +5111,85 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldNormal() {
 			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Array", "elementDataType": "Int64", "nullable": true}}`),
 		},
 	}
-	s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+		addRequest := req.GetAction().GetAddRequest()
+		return req.GetDbName() == DefaultDbName &&
+			req.GetCollectionName() == "book" &&
+			len(addRequest.GetFieldInfos()) == 1 &&
+			addRequest.GetFieldInfos()[0].GetFieldSchema().GetName() == "new_field" &&
+			len(addRequest.GetFuncSchema()) == 0
+	})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Times(len(addFieldTestCases))
 	validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
+}
+
+func (s *AddCollectionFieldSuite) TestDropCollectionField() {
+	s.Run("field_name", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			dropRequest := req.GetAction().GetDropRequest()
+			return req.GetDbName() == "db" && req.GetCollectionName() == "book" && dropRequest.GetFieldName() == "old_field"
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldName":"old_field"}`),
+			},
+		}, false)
+	})
+
+	s.Run("field_id", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			dropRequest := req.GetAction().GetDropRequest()
+			return req.GetDbName() == "db" && req.GetCollectionName() == "book" && dropRequest.GetFieldId() == 101
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldId":101}`),
+			},
+		}, false)
+	})
+
+	s.Run("bad_request", func() {
+		dropFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book"}`),
+				errCode:     1100,
+				errMsg:      "exactly one of fieldName or fieldId is required: invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldName":"old_field","fieldId":101}`),
+				errCode:     1100,
+				errMsg:      "exactly one of fieldName or fieldId is required: invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldId":0}`),
+				errCode:     1100,
+				errMsg:      "fieldId must be greater than 0: invalid parameter",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, dropFieldTestCases, false)
+	})
+}
+
+func (s *AddCollectionFieldSuite) TestDropCollectionFieldAlterStatusError() {
+	dropFieldTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionFieldCategory, DropAction),
+			requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldName":"server_error"}`),
+			errCode:     5,
+			errMsg:      "service internal error: mock error",
+		},
+	}
+	s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+		return req.GetDbName() == "db" && req.GetCollectionName() == "book" && req.GetAction().GetDropRequest().GetFieldName() == "server_error"
+	})).Return(&milvuspb.AlterCollectionSchemaResponse{
+		AlterStatus: merr.Status(merr.WrapErrServiceInternal("mock error")),
+	}, nil).Once()
+
+	validateRequestBodyTestCases(s.T(), s.testEngine, dropFieldTestCases, false)
 }
 
 func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
@@ -4378,7 +5407,9 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 				errMsg:      "service internal error: mock error",
 			},
 		}
-		s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Status(merr.WrapErrServiceInternal("mock error")), nil).Maybe()
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(merr.WrapErrServiceInternal("mock error")),
+		}, nil).Once()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
 	})
@@ -4455,6 +5486,20 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionNormal() {
 	})
 }
 
+func (s *CollectionFunctionSuite) TestAddCollectionFunctionInvalidType() {
+	// no expectation on s.mp: an invalid function type must be rejected
+	// before any AddCollectionFunction RPC is issued
+	addFunctionTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, AddFunctionAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "test_function", "type": "InvalidType", "inputFieldNames": [], "OutputFieldNames": []}}`),
+			errCode:     1100,
+			errMsg:      "Unsupported function type: InvalidType: invalid parameter",
+		},
+	}
+	validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+}
+
 func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 	s.Run("success", func() {
 		alterFunctionTestCases := []requestBodyTestCase{
@@ -4489,6 +5534,20 @@ func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 	})
 }
 
+func (s *CollectionFunctionSuite) TestAlterCollectionFunctionInvalidType() {
+	// no expectation on s.mp: an invalid function type must be rejected
+	// before any AlterCollectionFunction RPC is issued
+	alterFunctionTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, AlterFunctionAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "test_function", "function": {"name": "test_function", "type": "InvalidType", "inputFieldNames": [], "OutputFieldNames": []}}`),
+			errCode:     1100,
+			errMsg:      "Unsupported function type: InvalidType: invalid parameter",
+		},
+	}
+	validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
+}
+
 func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
 	s.Run("success", func() {
 		addFunctionTestCases := []requestBodyTestCase{
@@ -4502,6 +5561,87 @@ func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
 		s.mp.EXPECT().DropCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+	})
+}
+
+func (s *CollectionFunctionSuite) TestAddCollectionFunctionFieldNormal() {
+	s.Run("success", func() {
+		addFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}, "indexParams": {"fieldName": "sparse", "indexName": "sparse_idx", "metricType": "BM25", "indexType": "SPARSE_INVERTED_INDEX"}}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+			{
+				// indexParams omitted: the bound index resolves via AutoIndex on the server side.
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionFieldTestCases, false)
+	})
+
+	s.Run("bad_request", func() {
+		addFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}, "indexParams": {"fieldName": "sparse"}}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters, error: Key: 'CollectionAddFunctionField.CollectionName' Error:Field validation for 'CollectionName' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}, "indexParams": {"fieldName": "wrong_field", "indexName": "sparse_idx", "metricType": "BM25", "indexType": "SPARSE_INVERTED_INDEX"}}`),
+				errCode:     1100,
+				errMsg:      `indexParams.fieldName "wrong_field" must match outputField.fieldName "sparse": invalid parameter`,
+			},
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`invalid json`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionFieldTestCases, false)
+	})
+}
+
+func (s *CollectionFunctionSuite) TestDropCollectionFunctionFieldNormal() {
+	s.Run("success", func() {
+		dropFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "bm25_fn"}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, dropFunctionFieldTestCases, false)
+	})
+
+	s.Run("bad_request", func() {
+		dropFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": ""}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters, error: Key: 'CollectionDropFunctionField.FunctionName' Error:Field validation for 'FunctionName' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody: []byte(`invalid json`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, dropFunctionFieldTestCases, false)
 	})
 }
 
@@ -4599,7 +5739,7 @@ func TestSearchByPK(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "ids": [1.5, 2.9], "limit": 10, "outputFields": ["word_count"]}`),
-		errMsg:      "has fractional part",
+		errMsg:      "is not an integer in the int64 range",
 		errCode:     1100, // ErrParameterInvalid
 	})
 
@@ -4899,5 +6039,200 @@ func TestAbortImportJob(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
 		assert.Equal(t, int32(0), returnBody.Code)
+	})
+}
+
+// The insert path stores a JSON or dynamic field from its original token
+// without re-validating it, on the grounds that the binder has already parsed
+// the whole body as JSON. That premise is what makes the passthrough safe, so
+// pin it: a malformed body must be refused before any Insert RPC is issued.
+//
+// The mock carries no Insert expectation, so reaching the proxy fails the test.
+// PostgreSQL's json.sql spends about twenty five cases on this shape of input;
+// here it only has to be established that none of them get through.
+func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
+	paramtable.Init()
+
+	malformed := []struct {
+		name string
+		body string
+	}{
+		{"not json at all", `invalid json`},
+		{"unclosed object", `{"collectionName":"book","data":[{"a":1}`},
+		{"trailing comma", `{"collectionName":"book","data":[1,2,]}`},
+		{"single quotes", `{'collectionName':'book'}`},
+		{"unquoted key", `{collectionName:"book"}`},
+		{"leading zero number", `{"collectionName":"book","data":[{"a":01}]}`},
+		{"two values", `{"collectionName":"book"} {"a":1}`},
+		{"empty body", ``},
+		{"whitespace only", `   `},
+	}
+
+	for _, tt := range malformed {
+		t.Run(tt.name, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			testEngine := initHTTPServerV2(mp, false)
+
+			req := httptest.NewRequest(http.MethodPost,
+				versionalV2(EntityCategory, InsertAction), bytes.NewReader([]byte(tt.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.NotEqual(t, int32(0), returnBody.Code,
+				"a malformed body must not be accepted: %s", tt.body)
+		})
+	}
+}
+
+// The old gate forwarded groupSize only when it was greater than zero, which
+// conflated an absent knob (server default), an explicitly invalid one (the
+// server rejects 0 and negatives, but never saw them), and strictGroupSize on
+// its own (silently dropped behind the same gate).
+func TestAppendGroupParamsValidatesTheKnobs(t *testing.T) {
+	i32 := func(v int32) *int32 { return &v }
+	b := func(v bool) *bool { return &v }
+	kv := func(pairs []*commonpb.KeyValuePair) map[string]string {
+		m := map[string]string{}
+		for _, p := range pairs {
+			m[p.Key] = p.Value
+		}
+		return m
+	}
+
+	t.Run("absent knobs mean the server default", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", nil, nil)
+		require.NoError(t, err)
+		m := kv(params)
+		assert.Equal(t, "cat", m[ParamGroupByField])
+		_, hasSize := m[ParamGroupSize]
+		assert.False(t, hasSize)
+	})
+
+	t.Run("explicit zero and negative are refused, not swallowed", func(t *testing.T) {
+		for _, v := range []int32{0, -1} {
+			_, err := appendGroupParams(nil, "cat", i32(v), nil)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
+	})
+
+	t.Run("a positive size is forwarded", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", i32(3), b(true))
+		require.NoError(t, err)
+		m := kv(params)
+		assert.Equal(t, "3", m[ParamGroupSize])
+		assert.Equal(t, "true", m[ParamStrictGroupSize])
+	})
+
+	t.Run("strictGroupSize no longer rides behind groupSize", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", nil, b(true))
+		require.NoError(t, err)
+		assert.Equal(t, "true", kv(params)[ParamStrictGroupSize])
+	})
+
+	t.Run("group knobs without a grouping field are refused", func(t *testing.T) {
+		_, err := appendGroupParams(nil, "", i32(2), nil)
+		require.Error(t, err)
+		_, err = appendGroupParams(nil, "", nil, b(true))
+		require.Error(t, err)
+	})
+
+	t.Run("a grouping field of blanks is absent, not provided", func(t *testing.T) {
+		// the proxy trims the name before resolving it, so blanks must count
+		// as absent here too or the knobs are swallowed downstream again
+		_, err := appendGroupParams(nil, "  ", i32(2), nil)
+		require.Error(t, err)
+
+		params, err := appendGroupParams(nil, " cat ", i32(2), nil)
+		require.NoError(t, err)
+		assert.Equal(t, "cat", kv(params)[ParamGroupByField])
+	})
+}
+
+// The group knobs have two spellings -- the top-level fields and the
+// searchParams keys -- and the searchParams one was appended first, so it
+// silently won any disagreement. The ambiguity is refused now, and the
+// searchParams spelling can no longer smuggle group knobs past the
+// searchAggregation conflict check either.
+func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
+	postReq := func(body string) (int, string) {
+		paramtable.Init()
+		// tolerated shapes travel the whole handler; keep the limiter out of it
+		quotaKey := paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key
+		paramtable.Get().Save(quotaKey, "false")
+		t.Cleanup(func() { paramtable.Get().Reset(quotaKey) })
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			CollectionName: "book",
+			Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil).Maybe()
+		// requests that pass validation reach the proxy; answer them so the
+		// tolerated shapes complete instead of riding the timeout middleware
+		mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+			Status:  &StatusSuccess,
+			Results: &schemapb.SearchResultData{NumQueries: 1, TopK: 0, Topks: []int64{0}, Ids: &schemapb.IDs{}},
+		}, nil).Maybe()
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, SearchAction), strings.NewReader(body))
+		req.Header.Set(HTTPHeaderDBName, DefaultDbName)
+		// requests that pass validation ride into the mocked proxy; a short
+		// per-request timeout keeps the tolerated shapes from idling there
+		req.Header.Set(HTTPHeaderRequestTimeout, "1")
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	t.Run("both spellings at once is ambiguous", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"groupingField": "cat",
+			"searchParams": {"group_size": 5}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("searchParams size knobs alone still need a group field", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"group_size": 5}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "require a group field")
+	})
+
+	t.Run("nested-only group keys are inert and refused", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"params": {"group_by_field": "cat", "group_size": 2}}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "cannot carry")
+	})
+
+	t.Run("nested copies beside a working root spelling are tolerated", func(t *testing.T) {
+		// generateSearchParams itself duplicates root keys into the params
+		// JSON, so this is the shape a previously-working client sends
+		_, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"group_by_field": "cat", "group_size": 5,
+				"params": {"group_by_field": "cat", "group_size": 5}}}`)
+		assert.NotContains(t, body, "cannot carry")
+		assert.NotContains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("nested copies beside the top-level spelling are tolerated", func(t *testing.T) {
+		_, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"groupingField": "cat",
+			"searchParams": {"params": {"group_size": 5}}}`)
+		assert.NotContains(t, body, "cannot carry")
+		assert.NotContains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("searchParams group size cannot ride under searchAggregation", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"strict_group_size": true},
+			"searchAggregation": {"fields": ["cat"], "size": 10}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "cannot be used simultaneously")
 	})
 }

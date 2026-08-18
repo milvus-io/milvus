@@ -19,8 +19,10 @@ package segments
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -29,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type SearchSuite struct {
 	suite.Suite
+	rootPath     string
 	chunkManager storage.ChunkManager
 
 	manager      *Manager
@@ -55,8 +59,11 @@ func (suite *SearchSuite) SetupTest() {
 	ctx := context.Background()
 	msgLength := 100
 
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
-	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	suite.rootPath = suite.T().Name()
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
+	chunkManager, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	suite.Require().NoError(err)
+	suite.chunkManager = chunkManager
 	initcore.InitRemoteChunkManager(paramtable.Get())
 	initcore.InitLocalChunkManager(suite.T().Name())
 	initcore.InitMmapManager(paramtable.Get(), 1)
@@ -127,7 +134,7 @@ func (suite *SearchSuite) SetupTest() {
 
 	insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, suite.growing.ID(), msgLength)
 	suite.Require().NoError(err)
-	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+	insertRecord, _, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
 	suite.growing.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 
@@ -136,10 +143,19 @@ func (suite *SearchSuite) SetupTest() {
 }
 
 func (suite *SearchSuite) TearDownTest() {
-	suite.sealed.Release(context.Background())
-	DeleteCollection(suite.collection)
 	ctx := context.Background()
-	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	if suite.sealed != nil {
+		suite.sealed.Release(ctx)
+		suite.sealed = nil
+	}
+	if suite.collection != nil {
+		DeleteCollection(suite.collection)
+		suite.collection = nil
+	}
+	if suite.chunkManager != nil {
+		suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+		suite.chunkManager = nil
+	}
 }
 
 func (suite *SearchSuite) TestSearchSealed() {
@@ -289,7 +305,7 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
-		insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+		insertRecord, _, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 		suite.Require().NoError(err)
 		err = seg.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 		suite.Require().NoError(err)
@@ -314,6 +330,107 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 	for _, segID := range growingSegIDs {
 		suite.manager.Segment.Remove(ctx, segID, querypb.DataScope_Streaming)
 	}
+}
+
+func (suite *SearchSuite) TestSearchSegmentsReleasesCompletedResultsBeforeGateRetry() {
+	ctx := context.Background()
+	searchReq, err := mock_segcore.GenSearchPlanAndRequests(
+		suite.collection.GetCCollection(),
+		[]int64{suite.segmentID, suite.segmentID + 1},
+		mock_segcore.IndexFaissIDMap,
+		1,
+	)
+	suite.Require().NoError(err)
+	defer searchReq.Delete()
+
+	firstResultReady := make(chan struct{})
+	var firstSearchCalls atomic.Int32
+	var secondSearchCalls atomic.Int32
+	firstSegment := NewMockSegment(suite.T())
+	secondSegment := NewMockSegment(suite.T())
+	for _, segment := range []*MockSegment{firstSegment, secondSegment} {
+		segment.EXPECT().DatabaseName().Return("default").Maybe()
+		segment.EXPECT().ResourceGroup().Return("rg").Maybe()
+		segment.EXPECT().ExistIndex(mock.Anything).Return(true).Twice()
+	}
+
+	firstSegment.EXPECT().Search(mock.Anything, searchReq).
+		RunAndReturn(func(context.Context, *SearchRequest) (*SearchResult, error) {
+			if firstSearchCalls.Add(1) == 1 {
+				close(firstResultReady)
+			}
+			return new(SearchResult), nil
+		}).Twice()
+	secondSegment.EXPECT().Search(mock.Anything, searchReq).
+		RunAndReturn(func(context.Context, *SearchRequest) (*SearchResult, error) {
+			if secondSearchCalls.Add(1) == 1 {
+				<-firstResultReady
+				return nil, merr.SegcoreError(
+					2037, "segment read gate busy for segment 2")
+			}
+			return new(SearchResult), nil
+		}).Twice()
+
+	cleanupCalled := false
+	cleanup := func(results []*SearchResult) {
+		suite.Len(results, 1)
+		cleanupCalled = true
+	}
+	waitRetry := func(context.Context, int) error {
+		suite.True(cleanupCalled, "partial results must be released before retry")
+		return nil
+	}
+
+	results, err := searchSegmentsWithRetry(
+		ctx,
+		nil,
+		[]Segment{firstSegment, secondSegment},
+		SegmentTypeSealed,
+		searchReq,
+		cleanup,
+		waitRetry,
+	)
+	suite.NoError(err)
+	suite.Len(results, 2)
+	suite.True(cleanupCalled)
+	suite.Equal(int32(2), firstSearchCalls.Load())
+	suite.Equal(int32(2), secondSearchCalls.Load())
+}
+
+func (suite *SearchSuite) TestSearchSegmentsGateRetryObeysContext() {
+	ctx, cancel := context.WithCancel(context.Background())
+	searchReq, err := mock_segcore.GenSearchPlanAndRequests(
+		suite.collection.GetCCollection(),
+		[]int64{suite.segmentID},
+		mock_segcore.IndexFaissIDMap,
+		1,
+	)
+	suite.Require().NoError(err)
+	defer searchReq.Delete()
+
+	segment := NewMockSegment(suite.T())
+	segment.EXPECT().DatabaseName().Return("default").Maybe()
+	segment.EXPECT().ResourceGroup().Return("rg").Maybe()
+	segment.EXPECT().ExistIndex(mock.Anything).Return(true).Once()
+	segment.EXPECT().Search(mock.Anything, searchReq).
+		Return(nil, merr.SegcoreError(
+			2037, "segment read gate busy for segment 1")).Once()
+
+	waitRetry := func(ctx context.Context, _ int) error {
+		cancel()
+		return ctx.Err()
+	}
+	results, err := searchSegmentsWithRetry(
+		ctx,
+		nil,
+		[]Segment{segment},
+		SegmentTypeSealed,
+		searchReq,
+		func([]*SearchResult) {},
+		waitRetry,
+	)
+	suite.Nil(results)
+	suite.ErrorIs(err, context.Canceled)
 }
 
 func TestSearch(t *testing.T) {

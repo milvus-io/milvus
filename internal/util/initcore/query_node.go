@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -59,6 +60,16 @@ func InitQueryNode(ctx context.Context) error {
 func doInitQueryNodeOnce(ctx context.Context) error {
 	nodeID := paramtable.GetNodeID()
 
+	// Deprecated compatibility shim for common.visibilityFilterEnabled. The
+	// bypass it used to gate returned deleted rows to readers and was removed;
+	// row visibility filtering is now always enforced. The key stays
+	// recognized so an operator who set it to false gets this explicit
+	// failure instead of a silent behavior change on upgrade.
+	if !paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.visibilityFilterEnabled=false is no longer supported: row visibility filtering (timestamp, delete, and TTL) is always enforced; remove the setting to start this querynode")
+	}
+
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
@@ -72,15 +83,12 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	// override the FM-index count-first guard threshold (queryNode.fmindexCostRatio)
+	cFmindexCostRatio := C.float(paramtable.Get().QueryNodeCfg.FmindexCostRatio.GetAsFloat())
+	C.SegcoreSetFMIndexCostRatio(cFmindexCostRatio)
+
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
-
-	visibilityEnabled := paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool()
-	bloomEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
-	C.SegcoreSetVisibilityFilterEnabled(C.bool(visibilityEnabled))
-	if !visibilityEnabled && bloomEnabled {
-		mlog.Warn(ctx, "visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
-	}
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
@@ -139,6 +147,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
+
+	cDriverPrefetchEnabled := C.bool(paramtable.Get().CommonCfg.EnableDriverPrefetch.GetAsBool())
+	C.SetDefaultDriverPrefetchEnable(cDriverPrefetchEnabled)
 
 	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.SetDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
@@ -211,6 +222,11 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	}
 
 	err = InitGeometryCache(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	err = InitGISSplitFusion(paramtable.Get())
 	if err != nil {
 		return err
 	}

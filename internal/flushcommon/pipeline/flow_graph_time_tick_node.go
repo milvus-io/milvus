@@ -74,6 +74,7 @@ func (ttn *ttNode) Close() {
 // Operate handles input messages, implementing flowgraph.Node
 func (ttn *ttNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*FlowGraphMsg)
+	ctx := fgMsg.TraceCtx()
 	if fgMsg.dropCollection {
 		ttn.dropMode.Store(true)
 		if ttn.dropCallback != nil {
@@ -88,7 +89,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	// skip updating checkpoint for drop collection
 	// even if its the close msg
 	if ttn.dropMode.Load() {
-		mlog.RatedInfo(context.TODO(), rate.Limit(1.0), "ttnode in dropMode", mlog.String("channel", ttn.vChannelName))
+		mlog.RatedInfo(ctx, rate.Limit(1.0), "ttnode in dropMode", mlog.String("channel", ttn.vChannelName))
 		return []Msg{}
 	}
 
@@ -101,13 +102,13 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 		if len(fgMsg.EndPositions) > 0 {
 			channelPos, _, err := ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
 			if err != nil {
-				mlog.Warn(context.TODO(), "channel removed", mlog.String("channel", ttn.vChannelName), mlog.Err(err))
+				mlog.Warn(ctx, "channel removed", mlog.String("channel", ttn.vChannelName), mlog.Err(err))
 				return []Msg{}
 			}
-			mlog.Info(context.TODO(), "flowgraph is closing, force update channel CP",
+			mlog.Info(ctx, "flowgraph is closing, force update channel CP",
 				mlog.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())),
 				mlog.String("channel", channelPos.GetChannelName()))
-			ttn.updateChannelCP(channelPos, curTs, false)
+			ttn.updateChannelCP(ctx, channelPos, curTs, false)
 		}
 		return in
 	}
@@ -116,27 +117,26 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	channelPos, needUpdate, err := ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
 
 	if fgMsg.isAlterWal && !needUpdate {
-		channelPos, needUpdate, err = ttn.waitForCheckpointUpdate(fgMsg, curTs)
+		channelPos, needUpdate, err = ttn.waitForCheckpointUpdate(ctx, fgMsg, curTs)
 	}
 
 	if err != nil {
-		mlog.Warn(context.TODO(), "channel removed", mlog.String("channel", ttn.vChannelName), mlog.Err(err))
+		mlog.Warn(ctx, "channel removed", mlog.String("channel", ttn.vChannelName), mlog.Err(err))
 		return []Msg{}
 	}
 
 	if curTs.Sub(ttn.lastUpdateTime.Load()) >= paramtable.Get().DataNodeCfg.UpdateChannelCheckpointInterval.GetAsDuration(time.Second) {
-		ttn.updateChannelCP(channelPos, curTs, false)
+		ttn.updateChannelCP(ctx, channelPos, curTs, false)
 		return []Msg{}
 	}
 	if needUpdate {
-		ttn.updateChannelCP(channelPos, curTs, true)
+		ttn.updateChannelCP(ctx, channelPos, curTs, true)
 	}
 	return []Msg{}
 }
 
 // waitForCheckpointUpdate waits for checkpoint to be ready using exponential backoff retry
-func (ttn *ttNode) waitForCheckpointUpdate(fgMsg *FlowGraphMsg, curTs time.Time) (*msgpb.MsgPosition, bool, error) {
-	ctx := context.Background()
+func (ttn *ttNode) waitForCheckpointUpdate(ctx context.Context, fgMsg *FlowGraphMsg, curTs time.Time) (*msgpb.MsgPosition, bool, error) {
 	backoffConfig := backoff.NewExponentialBackOff()
 	backoffConfig.InitialInterval = 100 * time.Millisecond
 	backoffConfig.MaxInterval = 1 * time.Second
@@ -191,12 +191,12 @@ func (ttn *ttNode) waitForCheckpointUpdate(fgMsg *FlowGraphMsg, curTs time.Time)
 	return channelPos, needUpdate, nil
 }
 
-func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time, flush bool) {
+func (ttn *ttNode) updateChannelCP(ctx context.Context, channelPos *msgpb.MsgPosition, curTs time.Time, flush bool) {
 	callBack := func() {
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
 		// reset flush ts to prevent frequent flush
 		ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
-		mlog.Debug(context.TODO(), "UpdateChannelCheckpoint success",
+		mlog.Debug(ctx, "UpdateChannelCheckpoint success",
 			mlog.String("channel", ttn.vChannelName),
 			mlog.Uint64("cpTs", channelPos.GetTimestamp()),
 			mlog.Stringer("walName", channelPos.WALName),

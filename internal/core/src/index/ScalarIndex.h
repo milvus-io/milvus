@@ -46,6 +46,7 @@ enum class ScalarIndexType {
     JSONSTATS,
     RTREE,
     NGRAM,
+    FMINDEX,
 };
 
 inline std::string
@@ -67,6 +68,8 @@ ToString(ScalarIndexType type) {
             return "RTREE";
         case ScalarIndexType::NGRAM:
             return "NGRAM";
+        case ScalarIndexType::FMINDEX:
+            return "FMINDEX";
         default:
             return "UNKNOWN";
     }
@@ -88,6 +91,8 @@ FromString(const std::string& type) {
         return ScalarIndexType::RTREE;
     } else if (type == "NGRAM") {
         return ScalarIndexType::NGRAM;
+    } else if (type == "FMINDEX") {
+        return ScalarIndexType::FMINDEX;
     } else {
         return ScalarIndexType::NONE;
     }
@@ -158,6 +163,16 @@ class ScalarIndex : public IndexBase {
     virtual std::optional<T>
     Reverse_Lookup(size_t offset) const = 0;
 
+    // True iff per-row Reverse_Lookup is cheap (O(1)/O(log n)/O(strlen)).
+    // BITMAP without an offset cache reverse-looks-up in O(cardinality) per
+    // row, so it overrides this to reflect its offset-cache state. Callers
+    // that drive Reverse_Lookup once per row (e.g. bloom_match's index-only
+    // fallback) use this to avoid an O(rows * cardinality) scan.
+    virtual bool
+    SupportFastReverseLookup() const {
+        return true;
+    }
+
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
 
@@ -182,7 +197,8 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::INVERTED_INDEX_TYPE ||
                index_type_ == milvus::index::MARISA_TRIE ||
                index_type_ == milvus::index::MARISA_TRIE_UPPER ||
-               index_type_ == milvus::index::ASCENDING_SORT;
+               index_type_ == milvus::index::ASCENDING_SORT ||
+               index_type_ == milvus::index::FMINDEX_INDEX_TYPE;
     }
 
     bool
@@ -197,8 +213,19 @@ class ScalarIndex : public IndexBase {
     // index directly. Pattern ops need extra capability checks:
     // - PatternMatch is the public index capability for all pattern ops.
     // - PatternQuery is an implementation detail used inside PatternMatch.
+    // Routing gate for the executor: should `op` — with the concrete query
+    // literal in `pattern`, when the caller has one — run through this index,
+    // or fall back to the raw-data scan? `pattern` lets an index that can
+    // bound the match cardinality cheaply (FMINDEX's O(|pattern|) count)
+    // decline degenerate high-hit literals (e.g. LIKE '%a%' matching most
+    // rows) whose enumeration would lose to the scan — correct either way,
+    // the gate only picks the cheaper executor. Callers without a literal
+    // (non-pattern ops, tests) omit it; overrides must treat an empty pattern
+    // as "no literal information" and answer on the op alone. NOTE: overrides
+    // repeat the `= ""` default — keep the values identical (a differing
+    // default on a virtual is the classic static-binding trap).
     virtual bool
-    ShouldUseOp(proto::plan::OpType op) const {
+    ShouldUseOp(proto::plan::OpType op, const std::string& pattern = "") const {
         switch (op) {
             case proto::plan::OpType::Match:
             case proto::plan::OpType::PrefixMatch:

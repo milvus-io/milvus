@@ -32,6 +32,7 @@
 #include "bitset/common.h"
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
@@ -114,7 +115,7 @@ struct BinaryRangeElementFunc {
 // 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
 #define BinaryRangeJSONCompare(cmp)                                    \
     do {                                                               \
-        if (valid_data != nullptr && !valid_data[offset]) {            \
+        if (valid_data && !valid_data[offset]) {                       \
             res[i] = valid_res[i] = false;                             \
             break;                                                     \
         }                                                              \
@@ -161,7 +162,7 @@ struct BinaryRangeElementFuncForJson {
                const ValueType& val2,
                const std::string& pointer,
                const milvus::Json* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -200,7 +201,7 @@ struct BinaryRangeElementFuncForArray {
                const ValueType& val2,
                int index,
                const milvus::ArrayView* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -208,6 +209,8 @@ struct BinaryRangeElementFuncForArray {
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
+        AssertInfo(index >= 0,
+                   "array element range predicate requires nested path");
         for (size_t i = 0; i < n; ++i) {
             if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                 continue;
@@ -216,37 +219,23 @@ struct BinaryRangeElementFuncForArray {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (index >= src[offset].length()) {
+                res[i] = false;
+                valid_res[i] = false;
+                continue;
+            }
+            auto value = src[offset].get_data<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value < val2;
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value <= val2;
             } else {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value < val2;
             }
         }
@@ -347,7 +336,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForIndex();
+    ExecRangeVisitorImplForIndex(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -357,9 +346,12 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForJson(EvalCtx& context);
 
+    VectorPtr
+    ExecRangeVisitorImplForJsonPreciseNumeric(EvalCtx& context);
+
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJsonStats();
+    ExecRangeVisitorImplForJsonStats(OffsetVector* input = nullptr);
 
     template <typename ValueType>
     VectorPtr
@@ -378,7 +370,6 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     SingleElement lower_arg_;
     SingleElement upper_arg_;
     bool arg_inited_{false};

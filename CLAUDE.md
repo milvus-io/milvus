@@ -32,6 +32,7 @@ NEVER answer based on documentation alone or code alone. NEVER skip Step 2 — t
 
 ### Subsystems Reference
 
+- [**Observability**](docs/agent_guides/observability/README.md): Logging, metrics, tracing, and observability debug workflows.
 - [**Streaming System**](docs/agent_guides/streaming-system/streaming-system.md): Write path, WAL, DDL/DCL execution, replication && CDC.
 
 ## Testing

@@ -13,9 +13,15 @@ Milvus supports multi-cluster WAL replication via a star topology: one PRIMARY c
 
 ## Data Flow
 
-1. **Primary WAL** → **CDC ChannelReplicator** (per-PChannel, runs on primary StreamingNode): reads messages from the primary WAL starting at the secondary's `ReplicateCheckpoint`. Self-controlled messages (TimeTick, CreateSegment, Flush) are skipped.
+1. **Primary WAL** → **CDC ChannelReplicator** (per-PChannel, runs on primary StreamingNode): reads messages from the primary WAL starting at the secondary's `ReplicateCheckpoint`. Self-controlled messages (TimeTick, CreateSegment, Flush) and messages carrying the `Unreplicable` (`_ur`) property are skipped.
 2. **ChannelReplicator** → **Secondary Proxy** via `CreateReplicateStream` gRPC bidirectional stream: sends each message with its original `MessageID`, `Properties`, and `Payload`, along with the `SourceClusterID`.
 3. **Secondary Proxy** → **Secondary WAL**: the Proxy remaps VChannel names and appends to the local WAL. The **Replicate Interceptor** validates the incoming message (cluster ID match, TimeTick deduplication) and tracks checkpoint.
+
+## Message-Level Replication Skip
+
+Some DDL/control messages cannot be safely replayed on a SECONDARY until their replay contract is deterministic across clusters. Producers mark those concrete WAL messages with the `Unreplicable` (`_ur`) message property. The CDC sender treats them like ignored messages and advances replication progress without sending them. The SECONDARY replicate interceptor also ignores replicated messages that carry `_ur`, which protects mixed-version or already-forwarded traffic.
+
+This is a **message property**, not a static `MessageType` rule. Future support for one of these DDLs should stop setting `_ur` on newly generated messages; old WAL messages that already carry `_ur` remain skipped for rolling-upgrade compatibility.
 
 ## Checkpoint & Consistency
 

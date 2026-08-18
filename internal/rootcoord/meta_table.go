@@ -120,6 +120,7 @@ type IMetaTable interface {
 	TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
+	GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool)
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
@@ -175,9 +176,12 @@ type MetaTable struct {
 	fileResourceName2Meta map[string]*internalpb.FileResourceInfo // file resource name -> file resource meta
 	fileResourceID2Meta   map[int64]*internalpb.FileResourceInfo  // file resource id -> file resource meta
 	fileResourceRefCnt    map[int64]int                           // file resource id -> reference count
+	fileResourceRefHolds  map[int64]map[int64]int                 // collection id -> file resource id -> pending alter reservation count
 	fileResourceVersion   uint64
 
-	generalCnt int // sum of product of partition number and shard number
+	generalCnt                   int // sum of product of partition number and shard number
+	availableCollectionCount     int
+	availableCollectionCountByDB map[int64]int
 
 	// collections *collectionDb
 	names   *nameDb
@@ -209,6 +213,7 @@ func (mt *MetaTable) reload() error {
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
 	mt.partitionName2ID = make(map[int64]map[string]int64)
 	mt.fileResourceRefCnt = make(map[int64]int)
+	mt.fileResourceRefHolds = make(map[int64]map[int64]int)
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
@@ -308,6 +313,8 @@ func (mt *MetaTable) reload() error {
 			mt.aliases.insert(dbName, alias.Name, alias.CollectionID)
 		}
 	}
+
+	mt.rebuildAvailableCollectionCountLocked()
 
 	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
@@ -443,6 +450,10 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	mt.names.createDbIfNotExist(dbName)
 	mt.aliases.createDbIfNotExist(dbName)
 	mt.dbName2Meta[dbName] = db
+	if mt.availableCollectionCountByDB == nil {
+		mt.availableCollectionCountByDB = make(map[int64]int)
+	}
+	mt.availableCollectionCountByDB[db.ID] = 0
 
 	mlog.Info(ctx, "create database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
 	return nil
@@ -501,6 +512,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
 	delete(mt.dbName2Meta, dbName)
+	delete(mt.availableCollectionCountByDB, db.ID)
 
 	metrics.RootCoordNumOfDatabases.Dec()
 	mlog.Info(ctx, "drop database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
@@ -551,9 +563,6 @@ func (mt *MetaTable) getDatabaseByNameInternal(ctx context.Context, dbName strin
 }
 
 func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-
 	// Note:
 	// 1, idempotency check was already done outside;
 	// 2, no need to check time travel logic, since ts should always be the latest;
@@ -561,20 +570,37 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
+	mt.ddLock.RLock()
 	// check if there's a collection meta with the same collection id.
 	// merge the collection meta together.
-	if _, ok := mt.collID2Meta[coll.CollectionID]; ok {
+	_, collectionExists := mt.collID2Meta[coll.CollectionID]
+	mt.ddLock.RUnlock()
+	if collectionExists {
 		mlog.Info(ctx, "collection already created, skip add collection to meta table", mlog.Int64("collectionID", coll.CollectionID))
 		return nil
 	}
 
+	// The broadcaster resource-key lock serializes conflicting collection and
+	// database DDL. Do not hold the global metadata lock during catalog I/O so
+	// unrelated metadata readers and DDL can continue.
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.CreateCollection(ctx1, coll, coll.CreateTime); err != nil {
 		return err
 	}
 
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// Recheck after catalog I/O for idempotent retries that may have completed
+	// while the global metadata lock was released.
+	if _, ok := mt.collID2Meta[coll.CollectionID]; ok {
+		mlog.Info(ctx, "collection already created after catalog write, skip add collection to meta table", mlog.Int64("collectionID", coll.CollectionID))
+		return nil
+	}
+
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
+	mt.increaseAvailableCollectionCountLocked(coll.DBID)
 	// Build partition name index for the new collection
 	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
 	for _, partition := range coll.Partitions {
@@ -610,6 +636,15 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		return nil
 	}
 
+	// Resolve the database before persisting the Dropping state. Once the
+	// collection becomes Dropping, callback retries take the idempotent return
+	// above, so no fallible lookup should remain before the in-memory counters
+	// and channel stats are updated.
+	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
+	if err != nil {
+		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
+	}
+
 	clone := coll.Clone()
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
@@ -633,14 +668,12 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		mlog.String("state", clone.State.String()),
 	)
 
-	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
-	if err != nil {
-		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
-	}
-
 	pn := coll.GetPartitionNum(true)
 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
+	if coll.Available() {
+		mt.decreaseAvailableCollectionCountLocked(coll.DBID)
+	}
 	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
@@ -926,6 +959,8 @@ func (mt *MetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionI
 	return mt.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
 }
 
+// ListAllAvailCollections returns available collection IDs grouped by database.
+// Use GetAvailableCollectionCount for max-count checks that only need counts.
 func (mt *MetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]int64 {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -1071,6 +1106,14 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		}
 	}
 	newColl.UpdateTimestamp = result.GetMaxTimeTick()
+	var addedFileResourceIds []int64
+	var removedFileResourceIds []int64
+	if fieldModify {
+		addedFileResourceIds, removedFileResourceIds = diffFileResourceIDs(oldColl.FileResourceIds, newColl.FileResourceIds)
+		if err := mt.validateAddedFileResourceRefsLocked(newColl.CollectionID, addedFileResourceIds); err != nil {
+			return err
+		}
+	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if !dbChanged {
@@ -1091,8 +1134,15 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		}
 	}
 
+	if fieldModify {
+		mt.applyAlterCollectionFileResourceRefCntLocked(ctx, oldColl.CollectionID, addedFileResourceIds, removedFileResourceIds)
+	}
+
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
+	if dbChanged && oldColl.Available() && newColl.Available() {
+		mt.moveAvailableCollectionCountLocked(oldColl.DBID, newColl.DBID)
+	}
 	mt.collID2Meta[header.CollectionId] = newColl
 	mlog.Info(ctx, "alter collection finished",
 		mlog.String("oldDBName", oldColl.DBName),
@@ -1578,8 +1628,8 @@ func (mt *MetaTable) CheckIfAliasAlterable(ctx context.Context, dbName string, a
 }
 
 func (mt *MetaTable) DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error) {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 
 	if dbName == "" {
 		mlog.Warn(ctx, "db name is empty", mlog.String("alias", alias))
@@ -1674,6 +1724,65 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 	defer mt.ddLock.RUnlock()
 
 	return mt.generalCnt
+}
+
+func normalizeCollectionDBID(dbID int64) int64 {
+	if dbID == util.NonDBID {
+		return util.DefaultDBID
+	}
+	return dbID
+}
+
+func (mt *MetaTable) rebuildAvailableCollectionCountLocked() {
+	mt.availableCollectionCount = 0
+	mt.availableCollectionCountByDB = make(map[int64]int, len(mt.dbName2Meta))
+	for _, db := range mt.dbName2Meta {
+		mt.availableCollectionCountByDB[db.ID] = 0
+	}
+	for _, coll := range mt.collID2Meta {
+		if !coll.Available() {
+			continue
+		}
+		mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	}
+}
+
+func (mt *MetaTable) increaseAvailableCollectionCountLocked(dbID int64) {
+	if mt.availableCollectionCountByDB == nil {
+		mt.availableCollectionCountByDB = make(map[int64]int)
+	}
+	dbID = normalizeCollectionDBID(dbID)
+	mt.availableCollectionCountByDB[dbID]++
+	mt.availableCollectionCount++
+}
+
+func (mt *MetaTable) decreaseAvailableCollectionCountLocked(dbID int64) {
+	dbID = normalizeCollectionDBID(dbID)
+	if mt.availableCollectionCountByDB[dbID] > 0 {
+		mt.availableCollectionCountByDB[dbID]--
+		if mt.availableCollectionCount > 0 {
+			mt.availableCollectionCount--
+		}
+	}
+}
+
+func (mt *MetaTable) moveAvailableCollectionCountLocked(fromDBID int64, toDBID int64) {
+	fromDBID = normalizeCollectionDBID(fromDBID)
+	toDBID = normalizeCollectionDBID(toDBID)
+	if fromDBID == toDBID {
+		return
+	}
+	mt.decreaseAvailableCollectionCountLocked(fromDBID)
+	mt.increaseAvailableCollectionCountLocked(toDBID)
+}
+
+func (mt *MetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	dbID = normalizeCollectionDBID(dbID)
+	dbCount, dbExists = mt.availableCollectionCountByDB[dbID]
+	return dbCount, mt.availableCollectionCount, dbExists
 }
 
 func (mt *MetaTable) InitCredential(ctx context.Context) error {
@@ -2467,12 +2576,17 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
 }
 
-// IncFileResourceRefCnt increments refCnt for file resources, binding them to a
-// collection being created. Under ddLock, atomic with RemoveFileResource.
+// IncFileResourceRefCnt increments refCnt for file resources, reserving them for
+// a pending collection schema change. Under ddLock, atomic with
+// RemoveFileResource.
 // Returns error if any resource ID does not exist.
 func (mt *MetaTable) IncFileResourceRefCnt(ids []int64) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
+	return mt.incFileResourceRefCntLocked(ids)
+}
+
+func (mt *MetaTable) incFileResourceRefCntLocked(ids []int64) error {
 	for _, id := range ids {
 		if _, ok := mt.fileResourceID2Meta[id]; !ok {
 			return merr.WrapErrParameterInvalidMsg("file resource %d not found", id)
@@ -2499,18 +2613,29 @@ func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
 }
 
 // RecoverFileResourceRefCnt re-increments refCnt for file resources referenced by
-// pending CreateCollection broadcast tasks whose collections have not yet been
-// persisted. Called during startup before rootcoord becomes Healthy.
+// pending schema broadcast tasks. CreateCollection tasks may not have persisted
+// their collections yet; AlterCollection tasks may reference resources that are
+// not in the persisted collection schema yet. Called during startup before
+// rootcoord becomes Healthy.
 func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]int64) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	for collID, resourceIds := range pendingCollections {
-		if _, exists := mt.collID2Meta[collID]; exists {
-			continue // collection already persisted, reload already counted it
+		existingResourceIDs := map[int64]struct{}{}
+		if coll, exists := mt.collID2Meta[collID]; exists {
+			for _, id := range coll.FileResourceIds {
+				existingResourceIDs[id] = struct{}{}
+			}
 		}
 		for _, id := range resourceIds {
+			if _, exists := existingResourceIDs[id]; exists {
+				continue
+			}
 			if _, ok := mt.fileResourceID2Meta[id]; ok {
 				mt.fileResourceRefCnt[id]++
+				if _, collectionExists := mt.collID2Meta[collID]; collectionExists {
+					mt.recordFileResourceRefHoldLocked(collID, []int64{id})
+				}
 			} else {
 				mlog.Warn(context.TODO(), "RecoverFileResourceRefCnt: pending task references missing file resource",
 					mlog.Int64("collectionID", collID), mlog.Int64("resourceID", id))

@@ -147,8 +147,8 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 				ChannelInfo: types.PChannelInfo{
 					Name: "ch1",
 				},
-				MVCCTimeTick:     tsoutil.ComposeTSByTime(now, 0),
-				RecoveryTimeTick: tsoutil.ComposeTSByTime(now.Add(-time.Second), 0),
+				MVCCTimeTick:     tsoutil.ComposeTSByTime(now),
+				RecoveryTimeTick: tsoutil.ComposeTSByTime(now.Add(-time.Second)),
 			},
 			{Name: "ch2"}: types.ROWALMetrics{},
 		},
@@ -160,7 +160,7 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 	m := getStreamingQuotaMetrics()
 	assert.Len(t, m.WALs, 1)
 	assert.Equal(t, "ch1", m.WALs[0].Channel.Name)
-	assert.Equal(t, tsoutil.ComposeTSByTime(now.Add(-time.Second), 0), m.WALs[0].RecoveryTimeTick)
+	assert.Equal(t, tsoutil.ComposeTSByTime(now.Add(-time.Second)), m.WALs[0].RecoveryTimeTick)
 
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Unset()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("test"))

@@ -200,6 +200,21 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	assert.GreaterOrEqual(t, metrics.FailedCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.MultiPartUploadCreated, int64(0))
 	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
+
+	// makePropertiesFromConfig omits fs.max_connections when the producer left
+	// it at 0, so milvus-storage keeps its registered default instead of being
+	// handed an explicit "0" that lowers the connection cap. Drive both sides
+	// of that branch through the public entry point.
+	for _, maxConns := range []uint32{0, 64} {
+		cfg := &indexpb.StorageConfig{
+			StorageType:    "local",
+			RootPath:       dir,
+			MaxConnections: maxConns,
+		}
+		m, err := GetFilesystemMetricsWithConfig(cfg)
+		require.NoError(t, err, "MaxConnections=%d must build valid properties", maxConns)
+		require.NotNil(t, m)
+	}
 }
 
 // TestPublishFilesystemMetricsWithLocalConfig tests PublishFilesystemMetricsWithConfig

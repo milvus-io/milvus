@@ -11,7 +11,8 @@
 
 #include "PlanProto.h"
 
-#include <google/protobuf/text_format.h>
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/message.h>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -25,13 +26,13 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <unordered_map>
 #include <vector>
 
 #include "NamedType/underlying_functionalities.hpp"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/RoaringMembership.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -242,6 +243,101 @@ getAggregateOpName(planpb::AggregateOp op) {
 
 namespace {
 
+// Adds a non-zero field id once while preserving first-seen order.
+void
+AddAccessFieldID(std::vector<FieldId>& field_ids, int64_t field_id) {
+    if (field_id == 0) {
+        return;
+    }
+    auto it = std::find_if(
+        field_ids.begin(), field_ids.end(), [field_id](FieldId id) {
+            return id.get() == field_id;
+        });
+    if (it == field_ids.end()) {
+        field_ids.emplace_back(FieldId(field_id));
+    }
+}
+
+// Walks a plan proto tree and records every ColumnInfo field reference.
+void
+CollectColumnInfoFieldIDs(const google::protobuf::Message& message,
+                          std::vector<FieldId>& field_ids) {
+    if (message.GetDescriptor() == proto::plan::ColumnInfo::descriptor()) {
+        const auto& column_info =
+            static_cast<const proto::plan::ColumnInfo&>(message);
+        AddAccessFieldID(field_ids, column_info.field_id());
+        return;
+    }
+
+    const auto* descriptor = message.GetDescriptor();
+    const auto* reflection = message.GetReflection();
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const auto* field = descriptor->field(i);
+        if (field->cpp_type() !=
+            google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+            continue;
+        }
+        if (field->is_repeated()) {
+            auto size = reflection->FieldSize(message, field);
+            for (int j = 0; j < size; ++j) {
+                CollectColumnInfoFieldIDs(
+                    reflection->GetRepeatedMessage(message, field, j),
+                    field_ids);
+            }
+            continue;
+        }
+        if (reflection->HasField(message, field)) {
+            CollectColumnInfoFieldIDs(reflection->GetMessage(message, field),
+                                      field_ids);
+        }
+    }
+}
+
+// Builds the unified field-reference list used by external manifest checks.
+std::vector<FieldId>
+CollectAccessFieldIDs(const proto::plan::PlanNode& plan_node_proto) {
+    std::vector<FieldId> field_ids;
+    auto add_field_id = [&](int64_t field_id) {
+        AddAccessFieldID(field_ids, field_id);
+    };
+    // This list is consumed by the external-collection manifest guard. It is
+    // deliberately a field-reference list, not a data/index-readiness list:
+    // external output can be served by take(), while predicates/group-by/etc.
+    // may use loaded columns or indexes. Both only need the current loaded
+    // manifest to contain the referenced external column.
+    if (plan_node_proto.has_vector_anns()) {
+        const auto& vector_anns = plan_node_proto.vector_anns();
+        add_field_id(vector_anns.field_id());
+        if (vector_anns.has_query_info()) {
+            const auto& query_info = vector_anns.query_info();
+            add_field_id(query_info.query_field_id());
+            add_field_id(query_info.group_by_field_id());
+            for (auto field_id : query_info.group_by_field_ids()) {
+                add_field_id(field_id);
+            }
+        }
+    }
+
+    if (plan_node_proto.has_query()) {
+        const auto& query = plan_node_proto.query();
+        for (auto field_id : query.group_by_field_ids()) {
+            add_field_id(field_id);
+        }
+        for (const auto& aggregate : query.aggregates()) {
+            add_field_id(aggregate.field_id());
+        }
+        for (const auto& order_by : query.order_by_fields()) {
+            add_field_id(order_by.field_id());
+        }
+    }
+
+    CollectColumnInfoFieldIDs(plan_node_proto, field_ids);
+    for (auto field_id : plan_node_proto.output_field_ids()) {
+        add_field_id(field_id);
+    }
+    return field_ids;
+}
+
 // Helper function to process group_by fields
 void
 ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
@@ -382,8 +478,8 @@ BuildProjectAndAggregationNodes(
 // Helper function to build ProjectNode for ORDER BY queries.
 // Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
 // deferred_field_ids is empty for single-project mode (all columns materialized
-// in the first project), or non-empty for two-project mode (variable-width
-// non-sort output columns deferred until after TopK).
+// in the first project), or non-empty for two-project mode (variable-width or
+// vector non-sort output columns deferred until after TopK).
 // pipeline_field_ids mirrors project_ids so FillOrderByResult can stamp
 // the correct field_id on each DataArray produced by the pipeline.
 std::tuple<plan::PlanNodePtr, std::vector<FieldId>, std::vector<FieldId>>
@@ -421,11 +517,13 @@ BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
         }
     }
 
-    // Collect non-sort output fields and check for variable-width types.
+    // Collect non-sort output fields and check whether any must be late
+    // materialized. ProjectNode only materializes scalar columns, so vector
+    // outputs must be deferred just like variable-width outputs.
     // Skip system fields (RowFieldID, TimestampFieldID) — they are handled
     // separately in FillTargetEntry and must not enter the pipeline.
     std::vector<FieldId> non_sort_output_fields;
-    bool has_variable_width = false;
+    bool requires_late_materialization = false;
     for (auto fid_raw : plan_node_proto.output_field_ids()) {
         if (seen_field_ids.count(fid_raw) == 0) {
             auto fid = FieldId(fid_raw);
@@ -433,14 +531,16 @@ BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
                 continue;
             }
             non_sort_output_fields.push_back(fid);
-            if (IsVariableDataType(schema->GetFieldType(fid))) {
-                has_variable_width = true;
+            auto field_type = schema->GetFieldType(fid);
+            if (IsVariableDataType(field_type) ||
+                IsVectorDataType(field_type)) {
+                requires_late_materialization = true;
             }
         }
     }
 
     std::vector<FieldId> deferred_field_ids;
-    if (has_variable_width) {
+    if (requires_late_materialization) {
         // Two-project mode: defer ALL non-sort output fields until after TopK.
         deferred_field_ids = non_sort_output_fields;
     } else {
@@ -856,15 +956,121 @@ ProtoParser::RetrievePlanNodeFromProto(
     return plan_node;
 }
 
+// A plan may carry a large bloom_match or roaring_match blob. Expanding it via
+// ShortDebugString() octal-escapes every non-printable byte (~4x blow-up), and a
+// compact Roaring body can encode millions of exact member values while the
+// whole plan still fits below a generic byte threshold. Large plans are elided
+// entirely; small plans are cheap to copy and have every membership blob
+// replaced before rendering.
+static constexpr size_t kMaxPlanDebugBytes = 4096;
+
+// Counts what was dropped so the rendered line can still say it happened.
+struct UnknownFieldElision {
+    size_t field_count = 0;
+    size_t byte_count = 0;
+};
+
+// Unknown fields are, by definition, bytes this build cannot interpret, so it
+// cannot judge whether they are sensitive: a membership blob from a newer peer
+// arrives this way and ShortDebugString() would print it verbatim. Drop the
+// content but keep the fact, which is the useful signal when diagnosing a
+// version skew.
+static void
+ClearUnknownFields(google::protobuf::Message* message,
+                   UnknownFieldElision* elision) {
+    auto* unknown = message->GetReflection()->MutableUnknownFields(message);
+    if (unknown->empty()) {
+        return;
+    }
+    const auto before = message->ByteSizeLong();
+    elision->field_count += static_cast<size_t>(unknown->field_count());
+    unknown->Clear();
+    elision->byte_count += before - message->ByteSizeLong();
+}
+
+static void
+RedactMembershipFilterBlobs(google::protobuf::Message* message,
+                            UnknownFieldElision* elision) {
+    ClearUnknownFields(message, elision);
+
+    // Elide the blob, then fall through to the recursive walk below rather
+    // than returning: these messages own submessages (column_info) that can
+    // carry unknown fields of their own, and returning here left them intact.
+    if (message->GetDescriptor() ==
+        proto::plan::BloomFilterExpr::descriptor()) {
+        auto* bloom = static_cast<proto::plan::BloomFilterExpr*>(message);
+        const auto size = bloom->filter_blob().size();
+        bloom->set_filter_blob("<" + std::to_string(size) + " bytes elided>");
+    } else if (message->GetDescriptor() ==
+               proto::plan::RoaringFilterExpr::descriptor()) {
+        auto* roaring = static_cast<proto::plan::RoaringFilterExpr*>(message);
+        const auto size = roaring->bitmap_blob().size();
+        roaring->set_bitmap_blob("<" + std::to_string(size) + " bytes elided>");
+    }
+
+    const auto* descriptor = message->GetDescriptor();
+    const auto* reflection = message->GetReflection();
+
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const auto* field = descriptor->field(i);
+        if (field->cpp_type() !=
+            google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+            continue;
+        }
+        if (field->is_repeated()) {
+            const auto size = reflection->FieldSize(*message, field);
+            for (int j = 0; j < size; ++j) {
+                RedactMembershipFilterBlobs(
+                    reflection->MutableRepeatedMessage(message, field, j),
+                    elision);
+            }
+        } else if (reflection->HasField(*message, field)) {
+            RedactMembershipFilterBlobs(
+                reflection->MutableMessage(message, field), elision);
+        }
+    }
+}
+
+std::string
+PlanProtoDebugString(const proto::plan::PlanNode& plan_node_proto) {
+    const auto size = plan_node_proto.ByteSizeLong();
+    if (size > kMaxPlanDebugBytes) {
+        return "<" + std::to_string(size) + " bytes, elided>";
+    }
+
+    // Copying is bounded by kMaxPlanDebugBytes. This avoids mutating a plan that
+    // may be read concurrently while still retaining useful non-sensitive plan
+    // structure in debug logs.
+    auto redacted = plan_node_proto;
+    UnknownFieldElision elision;
+    RedactMembershipFilterBlobs(&redacted, &elision);
+    auto rendered = redacted.ShortDebugString();
+    if (elision.field_count != 0) {
+        rendered += " <" + std::to_string(elision.field_count) +
+                    " unknown fields, " + std::to_string(elision.byte_count) +
+                    " bytes elided>";
+    }
+    return rendered;
+}
+
+static void
+LogPlanProtoDebug(const char* what,
+                  const proto::plan::PlanNode& plan_node_proto) {
+    if (!VLOG_IS_ON(GLOG_DEBUG)) {
+        return;
+    }
+    LOG_DEBUG("create {} plan from proto: {}",
+              what,
+              PlanProtoDebugString(plan_node_proto));
+}
+
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
-    LOG_DEBUG("create search plan from proto: {}",
-              plan_node_proto.ShortDebugString());
+    LogPlanProtoDebug("search", plan_node_proto);
     auto plan = std::make_unique<Plan>(schema);
-
-    auto plan_node = PlanNodeFromProto(plan_node_proto);
-    plan->plan_node_ = std::move(plan_node);
+    plan->plan_node_ = PlanNodeFromProto(plan_node_proto);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
+    plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
     ExtractedPlanInfo extra_info(schema->get_field_id_bitset_size());
     extra_info.add_involved_field(plan->plan_node_->search_info_.field_id_);
     plan->extra_info_opt_ = std::move(extra_info);
@@ -882,13 +1088,10 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
-    LOG_DEBUG("create retrieve plan from proto: {}",
-              plan_node_proto.ShortDebugString());
+    LogPlanProtoDebug("retrieve", plan_node_proto);
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
-
-    auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
-
-    retrieve_plan->plan_node_ = std::move(plan_node);
+    retrieve_plan->plan_node_ = RetrievePlanNodeFromProto(plan_node_proto);
+    retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);
@@ -1006,6 +1209,61 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto predicate = this->ParseExprs(expr_pb.predicate());
     return std::make_shared<expr::MatchExpr>(
         struct_name, match_type, count, predicate);
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseRoaringFilterExprs(
+    const proto::plan::RoaringFilterExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    // Mirrors the proxy's accepted type set exactly. Roaring indexes integers,
+    // so there is no VARCHAR or JSON path: hashing a string into the key space
+    // would reintroduce the false positives this expression exists to avoid.
+    switch (data_type) {
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            break;
+        default:
+            ThrowInfo(ExprInvalid,
+                      "roaring_match does not support field data type: {}",
+                      data_type);
+    }
+    auto membership = RoaringMembership::Parse(expr_pb.bitmap_blob());
+    return std::make_shared<expr::RoaringFilterExpr>(
+        expr::ColumnInfo(column_info), std::move(membership));
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseBloomFilterExprs(
+    const proto::plan::BloomFilterExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    // bloom_match supports scalar INT8/16/32/64, VARCHAR, and JSON paths
+    // (design doc 20260707). The request content picks the field, so an
+    // unsupported type is an input error.
+    switch (data_type) {
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::VARCHAR:
+        case DataType::JSON:
+            break;
+        default:
+            ThrowInfo(ExprInvalid,
+                      "bloom_match does not support field data type: {}",
+                      data_type);
+    }
+    return std::make_shared<expr::BloomFilterExpr>(
+        expr::ColumnInfo(column_info), expr_pb.filter_blob());
 }
 
 expr::TypedExprPtr
@@ -1292,10 +1550,24 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             result = ParseMatchExprs(expr_pb.match_expr());
             break;
         }
+        case ppe::kBloomFilterExpr: {
+            result = ParseBloomFilterExprs(expr_pb.bloom_filter_expr());
+            break;
+        }
+        case ppe::kRoaringFilterExpr: {
+            result = ParseRoaringFilterExprs(expr_pb.roaring_filter_expr());
+            break;
+        }
         default: {
-            std::string s;
-            google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            ThrowInfo(ExprInvalid, "unsupported expr proto node: {}", s);
+            // Report only the oneof discriminant. Printing the node would put
+            // the whole expression into the message, and a membership-filter
+            // node carries a client blob up to 128 MiB of user values — which
+            // then travels back to the client and into logs. An old QueryNode
+            // that does not know a newer node type lands here, so this is
+            // exactly the path a rolling upgrade exercises.
+            ThrowInfo(ExprInvalid,
+                      "unsupported or unset expr proto node (expr_case: {})",
+                      static_cast<int>(expr_pb.expr_case()));
         }
     }
     if (type_check(result->type())) {

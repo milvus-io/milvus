@@ -87,30 +87,93 @@ PrepareBFSearchParams(const SearchInfo& search_info,
             search_info.trace_ctx_.traceFlags;
     }
 
+    // Per-segment index_info is authoritative when present. A segment that
+    // predates a field added by add_function_field lacks the field there, so
+    // brute force falls back to brute_force_index_params_, sourced from the
+    // collection metadata at plan creation (never routed through search_params_,
+    // so the query hook cannot drop it).
     if (search_info.metric_type_ == knowhere::metric::BM25) {
         search_cfg[knowhere::meta::BM25_AVGDL] =
             search_info.search_params_[knowhere::meta::BM25_AVGDL];
-        search_cfg[knowhere::meta::BM25_K1] =
-            std::stof(index_info.at(knowhere::meta::BM25_K1));
-        search_cfg[knowhere::meta::BM25_B] =
-            std::stof(index_info.at(knowhere::meta::BM25_B));
+        if (index_info.empty()) {
+            const auto& fallback = search_info.brute_force_index_params_;
+            if (fallback.bm25_k1_.has_value()) {
+                search_cfg[knowhere::meta::BM25_K1] = fallback.bm25_k1_.value();
+            }
+            if (fallback.bm25_b_.has_value()) {
+                search_cfg[knowhere::meta::BM25_B] = fallback.bm25_b_.value();
+            }
+        } else {
+            auto it_k1 = index_info.find(knowhere::meta::BM25_K1);
+            if (it_k1 != index_info.end()) {
+                search_cfg[knowhere::meta::BM25_K1] = std::stof(it_k1->second);
+            }
+            auto it_b = index_info.find(knowhere::meta::BM25_B);
+            if (it_b != index_info.end()) {
+                search_cfg[knowhere::meta::BM25_B] = std::stof(it_b->second);
+            }
+        }
     }
 
     if (search_info.metric_type_ == knowhere::metric::MHJACCARD) {
-        auto it_band = index_info.find(knowhere::indexparam::MH_LSH_BAND);
-        if (it_band != index_info.end()) {
-            search_cfg[knowhere::indexparam::MH_LSH_BAND] =
-                std::stoi(it_band->second);
-        }
+        if (index_info.empty()) {
+            const auto& fallback = search_info.brute_force_index_params_;
+            if (fallback.minhash_lsh_band_.has_value()) {
+                search_cfg[knowhere::indexparam::MH_LSH_BAND] =
+                    fallback.minhash_lsh_band_.value();
+            }
+            if (fallback.minhash_element_bit_width_.has_value()) {
+                search_cfg[knowhere::indexparam::MH_ELEMENT_BIT_WIDTH] =
+                    fallback.minhash_element_bit_width_.value();
+            }
+        } else {
+            auto it_band = index_info.find(knowhere::indexparam::MH_LSH_BAND);
+            if (it_band != index_info.end()) {
+                search_cfg[knowhere::indexparam::MH_LSH_BAND] =
+                    std::stoi(it_band->second);
+            }
 
-        auto it_width =
-            index_info.find(knowhere::indexparam::MH_ELEMENT_BIT_WIDTH);
-        if (it_width != index_info.end()) {
-            search_cfg[knowhere::indexparam::MH_ELEMENT_BIT_WIDTH] =
-                std::stoi(it_width->second);
+            auto it_width =
+                index_info.find(knowhere::indexparam::MH_ELEMENT_BIT_WIDTH);
+            if (it_width != index_info.end()) {
+                search_cfg[knowhere::indexparam::MH_ELEMENT_BIT_WIDTH] =
+                    std::stoi(it_width->second);
+            }
         }
     }
     return search_cfg;
+}
+
+void
+PopulateBruteForceIndexParams(SearchInfo& search_info,
+                              const FieldIndexMeta& field_index_meta) {
+    const auto& index_params = field_index_meta.GetIndexParams();
+    auto& params = search_info.brute_force_index_params_;
+
+    if (search_info.metric_type_ == knowhere::metric::BM25) {
+        auto it = index_params.find(knowhere::meta::BM25_K1);
+        if (it != index_params.end()) {
+            params.bm25_k1_ = std::stof(it->second);
+        }
+        it = index_params.find(knowhere::meta::BM25_B);
+        if (it != index_params.end()) {
+            params.bm25_b_ = std::stof(it->second);
+        }
+    } else if (search_info.metric_type_ == knowhere::metric::MHJACCARD) {
+        // Knowhere's construction defaults, materialized so a stale segment
+        // uses the same values as an index whose metadata omitted the optional
+        // params.
+        params.minhash_lsh_band_ = 1;
+        params.minhash_element_bit_width_ = 8;
+        auto it = index_params.find(knowhere::indexparam::MH_LSH_BAND);
+        if (it != index_params.end()) {
+            params.minhash_lsh_band_ = std::stoll(it->second);
+        }
+        it = index_params.find(knowhere::indexparam::MH_ELEMENT_BIT_WIDTH);
+        if (it != index_params.end()) {
+            params.minhash_element_bit_width_ = std::stoll(it->second);
+        }
+    }
 }
 
 std::pair<knowhere::DataSetPtr, knowhere::DataSetPtr>
@@ -299,7 +362,6 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                       KnowhereStatusString(stat));
         }
     }
-    sub_result.round_values();
     return sub_result;
 }
 

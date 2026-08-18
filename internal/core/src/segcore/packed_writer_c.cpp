@@ -32,6 +32,7 @@
 #include "fmt/core.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
 #include "monitor/scope_metric.h"
@@ -129,9 +130,10 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                                           columnGroups,
                                                           buffer_size,
                                                           writer_properties);
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create packed writer: " +
-                       result.status().ToString());
+        if (!result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
         auto writer = result.ValueOrDie();
         *c_packed_writer =
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
@@ -202,9 +204,10 @@ NewPackedWriter(struct ArrowSchema* schema,
                                                           columnGroups,
                                                           buffer_size,
                                                           writer_properties);
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create packed writer: " +
-                       result.status().ToString());
+        if (!result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
         auto writer = result.ValueOrDie();
         *c_packed_writer =
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
@@ -257,8 +260,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 
         auto status = packed_writer->Write(record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                          status.ToString());
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -277,8 +280,8 @@ CloseWriter(CPackedWriter c_packed_writer) {
         auto status = (*packed_writer)->Close();
         delete packed_writer;
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                          status.ToString());
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -298,15 +301,15 @@ CloseAndTell(CPackedWriter c_packed_writer, int64_t* sizes, size_t num_groups) {
         auto status = (*packed_writer)->Close();
         if (!status.ok()) {
             delete packed_writer;
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                          status.ToString());
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
         }
 
         auto res = (*packed_writer)->Tell();
         if (!res.ok()) {
             delete packed_writer;
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          res.status().ToString());
+            auto error = milvus_storage::ToSegcoreError(res.status());
+            return milvus::FailureCStatus(&error);
         }
 
         const auto& size_vec = res.ValueOrDie();

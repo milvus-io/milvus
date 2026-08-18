@@ -244,7 +244,7 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 }
 
 func newFunctionChainTestSchema() *schemaInfo {
-	return newSchemaInfo(&schemapb.CollectionSchema{
+	return mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
@@ -257,7 +257,7 @@ func newFunctionChainTestSchema() *schemaInfo {
 }
 
 func newFunctionChainStructTestSchema() *schemaInfo {
-	return newSchemaInfo(&schemapb.CollectionSchema{
+	return mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},

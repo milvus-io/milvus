@@ -12,9 +12,9 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -71,7 +71,6 @@ func TestRbacDefault(t *testing.T) {
 	userName := common.GenRandomString("user", 6)
 	pwd := common.GenRandomString("pwd", 6)
 	userDescription := "go client user description"
-	mlog.Info(ctx, t.Name(), mlog.String("pwd", pwd))
 	err := mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd).WithDescription(userDescription))
 	common.CheckErr(t, err, true)
 	users, err := mc.ListUsers(ctx, client.NewListUserOption())
@@ -290,7 +289,6 @@ func TestUpdatePassword(t *testing.T) {
 	oldPwd := newPwd
 	passwords := []string{"中文", "シャオミン", "샤오밍", "ಸೂರ್ಯ", "myPwd@aa.com", "φεγγάρι", "mặt trăng"}
 	for i := 0; i < len(passwords); i++ {
-		mlog.Info(ctx, t.Name(), mlog.String("pwd", passwords[i]))
 		err = mc.UpdatePassword(ctx, client.NewUpdatePasswordOption(userName, oldPwd, passwords[i]))
 		common.CheckErr(t, err, true)
 		oldPwd = passwords[i]

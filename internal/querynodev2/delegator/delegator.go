@@ -70,6 +70,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	updateSchemaWorkerRetryCount          = 5
+	updateSchemaWorkerRetryInitialBackoff = 500 * time.Millisecond
+	updateSchemaWorkerRetryMaxBackoff     = time.Minute
+)
+
 // ShardDelegator is the interface definition.
 type ShardDelegator interface {
 	Collection() int64
@@ -95,8 +101,6 @@ type ShardDelegator interface {
 	SyncTargetVersion(action *querypb.SyncAction, partitions []int64)
 	GetChannelQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
-	DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error
-
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)
 	VerifyExcludedSegments(segmentID int64, ts uint64) bool
@@ -119,6 +123,19 @@ type ShardDelegator interface {
 }
 
 var _ ShardDelegator = (*shardDelegator)(nil)
+
+// ShardDelegatorOption customizes shard delegator creation.
+type ShardDelegatorOption func(*shardDelegator)
+
+// WithLeaderViewUpdatedCallback registers a callback for leader view changes.
+func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegatorOption {
+	return func(sd *shardDelegator) {
+		sd.leaderViewUpdatedCallback = callback
+		if sd.distribution != nil {
+			sd.distribution.leaderViewUpdatedCallback = callback
+		}
+	}
+}
 
 type idfOracleHolder struct {
 	oracle IDFOracle
@@ -164,14 +181,17 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	functionState *functionRuntimeState
-
 	// current forward policy
 	l0ForwardPolicy string
 
 	// schemaBarrierTs fences load results started before the latest schema update.
 	schemaChangeMutex sync.RWMutex
 	schemaBarrierTs   uint64
+	// collectionVersion is the collection schema version applied to this delegator's
+	// channel-local FunctionRunner and IDF runtime.
+	collectionVersion atomic.Uint64
+	// bm25Functions is the BM25 function set applied to the channel-local IDF runtime.
+	bm25Functions bm25FunctionSet
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -179,6 +199,10 @@ type shardDelegator struct {
 
 	// streaming data catch-up state
 	catchingUpStreamingData *atomic.Bool
+
+	// skipStreamingForExternalTable is true for read-only external table collections.
+	// Such collections do not need DML stream replay before becoming searchable.
+	skipStreamingForExternalTable bool
 
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
@@ -188,6 +212,8 @@ type shardDelegator struct {
 	// delegator's optional growing-source source.
 	growingSourceRegistration *syncmgr.GrowingSourceRegistration
 	growingSourceProvider     *delegatorGrowingSourceProvider
+
+	leaderViewUpdatedCallback func(channel string)
 }
 
 // getLogger returns the logger with pre-defined shard attributes.
@@ -209,6 +235,85 @@ func (sd *shardDelegator) getIDFOracle() IDFOracle {
 
 func (sd *shardDelegator) publishIDFOracle(idfOracle IDFOracle) {
 	sd.idfOracle.Store(&idfOracleHolder{oracle: idfOracle})
+}
+
+// UpdateDelegatorSchema synchronizes this delegator's channel-local FunctionRunner,
+// IDF runtime, schema version, and load barrier with the shared Collection snapshot.
+func (sd *shardDelegator) UpdateDelegatorSchema(ctx context.Context) error {
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	_, collectionVersion, schemaBarrierTs := sd.collection.SchemaSnapshot()
+	sd.schemaChangeMutex.RLock()
+	upToDate := sd.collectionVersion.Load() >= collectionVersion && sd.schemaBarrierTs >= schemaBarrierTs
+	sd.schemaChangeMutex.RUnlock()
+	if upToDate {
+		return nil
+	}
+
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+
+	return sd.updateDelegatorSchemaLocked(ctx)
+}
+
+// updateDelegatorSchemaLocked requires schemaChangeMutex to be held for writing.
+func (sd *shardDelegator) updateDelegatorSchemaLocked(ctx context.Context) error {
+	schema, collectionVersion, schemaBarrierTs := sd.collection.SchemaSnapshot()
+	currentVersion := sd.collectionVersion.Load()
+	if currentVersion > collectionVersion {
+		return nil
+	}
+	if currentVersion == collectionVersion {
+		if sd.schemaBarrierTs < schemaBarrierTs {
+			sd.schemaBarrierTs = schemaBarrierTs
+		}
+		return nil
+	}
+
+	newSet := newBM25FunctionSet(schema)
+	if newSet.HasIncompatibleCommonFunction(sd.bm25Functions) {
+		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
+	}
+	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
+		return err
+	}
+
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
+		if len(newSet) > 0 {
+			idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
+			idfOracle.Start()
+			sd.distribution.SetIDFOracle(idfOracle)
+			if current := sd.distribution.current.Load(); current != nil {
+				idfOracle.SetNext(current)
+			}
+			sd.publishIDFOracle(idfOracle)
+		}
+	} else if !newSet.Equal(sd.bm25Functions) {
+		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
+			return err
+		}
+	}
+
+	sd.bm25Functions = newSet
+	sd.collectionVersion.Store(collectionVersion)
+	if sd.schemaBarrierTs < schemaBarrierTs {
+		sd.schemaBarrierTs = schemaBarrierTs
+	}
+	sd.getLogger(ctx).Info(ctx, "delegator runtime schema updated",
+		mlog.Uint64("schemaVersion", collectionVersion),
+		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
+	)
+	return nil
+}
+
+func (sd *shardDelegator) notifyLeaderViewUpdated() {
+	if sd.leaderViewUpdatedCallback != nil {
+		sd.leaderViewUpdatedCallback(sd.vchannelName)
+	}
 }
 
 func (sd *shardDelegator) NotStopped(state lifetime.State) error {
@@ -237,26 +342,33 @@ func (sd *shardDelegator) Stopped() bool {
 func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
 	var avgdl float64
 	isBM25 := false
-	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
+	ok, err := function.GetManager().RunWithRunner(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), req.GetFieldId(), func(runner function.FunctionRunner) error {
+		functionType := runner.GetSchema().GetType()
 		switch functionType {
 		case schemapb.FunctionType_BM25:
 			isBM25 = true
 			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 			}
-			var buildErr error
-			avgdl, buildErr = sd.buildBM25IDF(ctx, req)
-			return buildErr
+			var runErr error
+			avgdl, runErr = sd.buildBM25IDF(req, runner)
+			return runErr
 		case schemapb.FunctionType_MinHash:
 			if req.GetMetricType() != metric.MHJACCARD && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("MHJACCARD", req.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
 			}
-			return sd.parseMinHash(ctx, req)
+			return sd.parseMinHash(req, runner)
 		default:
-			return nil
+			return merr.WrapErrServiceInternalMsg("unsupported managed function type %s", functionType.String())
 		}
 	})
-	return avgdl, isBM25 && avgdl <= 0, err
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		return 0, false, nil
+	}
+	return avgdl, isBM25 && avgdl <= 0, nil
 }
 
 // Start sets delegator to working state.
@@ -471,11 +583,16 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	)
 
 	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
-	// wait tsafe
+	// Resolve the MVCC timestamp used by this search.
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	var tSafe uint64
 	var err error
-	if partialResultRequiredDataRatio >= 1.0 {
+	if sd.skipStreamingForExternalTable {
+		// External collections read a materialized snapshot instead of the WAL.
+		// Use the full MVCC range even when partial search skips tSafe waiting, so
+		// a stale channel checkpoint does not hide snapshot rows or deltalog deletes.
+		tSafe = typeutil.MaxTimestamp
+	} else if partialResultRequiredDataRatio >= 1.0 {
 		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	} else {
 		// partial search enabled, could ignore streaming data
@@ -491,8 +608,9 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	// use tsafe as mvcc timestamp if request not provide it
-	if req.GetReq().GetMvccTimestamp() == 0 {
+	// External reads always use the full snapshot MVCC timestamp. Normal reads
+	// use tSafe only when the request does not provide an MVCC timestamp.
+	if sd.skipStreamingForExternalTable || req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
 
@@ -591,6 +709,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
 	if !sd.Serviceable() {
 		return merr.WrapErrServiceUnavailable("delegator", "not serviceable")
 	}
@@ -621,8 +743,9 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		return err
 	}
 
-	// use tsafe as mvcc timestamp if request not provide it
-	if req.GetReq().GetMvccTimestamp() == 0 {
+	// External reads always use the full snapshot MVCC timestamp. Normal reads
+	// use tSafe only when the request does not provide an MVCC timestamp.
+	if sd.skipStreamingForExternalTable || req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
 
@@ -711,8 +834,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		return nil, err
 	}
 
-	// use tsafe as mvcc timestamp if request not provide it
-	if req.GetReq().GetMvccTimestamp() == 0 {
+	// External reads always use the full snapshot MVCC timestamp. Normal reads
+	// use tSafe only when the request does not provide an MVCC timestamp.
+	if sd.skipStreamingForExternalTable || req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
 
@@ -1041,6 +1165,9 @@ func (sd *shardDelegator) speedupGuranteeTS(
 	mvccTS uint64,
 	isIterator bool,
 ) uint64 {
+	if sd.skipStreamingForExternalTable {
+		return guaranteeTS
+	}
 	// because the mvcc speed up will make the guarantee timestamp smaller.
 	// and the update latest required mvcc timestamp and mvcc speed up are executed concurrently.
 	// so we update the latest required mvcc timestamp first, then the mvcc speed up will not affect the latest required mvcc timestamp.
@@ -1062,6 +1189,13 @@ func (sd *shardDelegator) speedupGuranteeTS(
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
 func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
+	if sd.skipStreamingForExternalTable {
+		// External collection data is materialized by refresh/load manifests,
+		// not by this WAL. Use a full snapshot timestamp so low guarantee
+		// placeholders such as Eventually(1) do not hide loaded deltalog deletes.
+		return typeutil.MaxTimestamp, nil
+	}
+
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
 	defer sp.End()
 	log := sd.getLogger(ctx)
@@ -1134,12 +1268,18 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 
 // GetLatestRequiredMVCCTimeTick returns the latest required mvcc timestamp for the delegator.
 func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
+	if sd.skipStreamingForExternalTable {
+		// External reads do not require WAL tSafe advancement. Returning zero
+		// prevents the empty-timetick slowdowner from treating read timestamps
+		// as a WAL catch-up target.
+		return 0
+	}
 	if sd.catchingUpStreamingData.Load() {
 		// delegator need to catch up the streaming data when startup,
 		// If the empty timetick is filtered, the load operation will be blocked.
 		// We want the delegator to catch up the streaming data, and load done as soon as possible,
 		// so we always return the current time as the latest required mvcc timestamp.
-		return tsoutil.GetCurrentTime()
+		return tsoutil.ComposeTSByTime(time.Now())
 	}
 	return sd.latestRequiredMVCCTimeTick.Load()
 }
@@ -1191,6 +1331,7 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 				mlog.Bool("caughtUp", caughtUp))
 			if caughtUp {
 				sd.catchingUpStreamingData.Store(false)
+				sd.notifyLeaderViewUpdated()
 			}
 		}
 	}
@@ -1221,37 +1362,12 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
-	// This pre-check is a best-effort guard for delegator side effects. Load
-	// paths can still call collectionManager.PutOrRef under collectionManager's
-	// own lock and advance the collection snapshot before the final
-	// collectionManager.UpdateSchema below. The collection manager remains the
-	// source-of-truth freshness gate and will skip that stale final apply.
 	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
 		mlog.Info(ctx, "delegator skip stale or no-op schema event",
 			mlog.Uint64("schemaVersion", schemaVersion),
 			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
 		)
-		return nil
-	}
-
-	newFunctionState, err := buildFunctionRuntimeState(schema)
-	if err != nil {
-		return err
-	}
-
-	oldSet := newBM25FunctionSet(sd.collection.Schema())
-	newSet := newBM25FunctionSet(schema)
-	idfOracle := sd.getIDFOracle()
-	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
-		newFunctionState.Close()
-		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
-	}
-
-	// Keep the load barrier monotonic. A higher logical schema version can be
-	// replayed with a smaller barrier than an earlier same-version property
-	// refresh, but that must not reopen older load results.
-	if sd.schemaBarrierTs < schemaBarrierTs {
-		sd.schemaBarrierTs = schemaBarrierTs
+		return sd.updateDelegatorSchemaLocked(ctx)
 	}
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
@@ -1283,51 +1399,42 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 			return nodeReq
 		})
 	if err != nil {
-		newFunctionState.Close()
 		return err
 	}
 
 	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 1)
-		status, err := worker.UpdateSchema(ctx, req)
+		var status *commonpb.Status
+		err := retry.Do(ctx, func() error {
+			rpcCtx := retry.WithMaxAttemptsContext(ctx, 1)
+			var err error
+			status, err = worker.UpdateSchema(rpcCtx, req)
+			return merr.CheckRPCCall(status, err)
+		},
+			retry.Attempts(updateSchemaWorkerRetryCount+1),
+			retry.Sleep(updateSchemaWorkerRetryInitialBackoff),
+			retry.MaxSleepTime(updateSchemaWorkerRetryMaxBackoff),
+		)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
 	if err != nil {
-		newFunctionState.Close()
 		return err
 	}
 
 	// Apply the local collection update with the same barrier used for remote
 	// workers. collectionManager keeps schema.Version as the logical freshness key.
 	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
-		newFunctionState.Close()
 		return err
 	}
-	sd.updateFunctionRunners(schema)
-	if idfOracle == nil && len(newSet) > 0 {
-		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
-		// Old growings cannot receive stats for newly added BM25 fields; ProcessInsert registers only new growings.
-		idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
-		idfOracle.Start()
-		sd.distribution.SetIDFOracle(idfOracle)
-		if current := sd.distribution.current.Load(); current != nil {
-			idfOracle.SetNext(current)
-		}
-		sd.publishIDFOracle(idfOracle)
-	} else if idfOracle != nil && !newSet.Equal(oldSet) {
-		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
-			newFunctionState.Close()
-			return err
-		}
+	if err := sd.updateDelegatorSchemaLocked(ctx); err != nil {
+		return err
 	}
-	sd.functionState.swap(newFunctionState).Close()
+
 	mlog.Info(ctx, "delegator finished update schema event",
 		mlog.Uint64("schemaVersion", schemaVersion),
 		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
-		mlog.Uint64("loadBarrierTs", sd.schemaBarrierTs),
 		mlog.Int("sealedNum", len(sealed)),
 		mlog.Int("growingNum", len(growing)),
-		mlog.Int("bm25FunctionNum", len(newSet)),
+		mlog.Int("bm25FunctionNum", len(newBM25FunctionSet(schema))),
 	)
 	return nil
 }
@@ -1351,19 +1458,14 @@ func (sd *shardDelegator) Close() {
 		sd.growingSourceProvider.Deactivate()
 	}
 
-	// Stop background snapshot loop before refunding candidates
 	sd.distribution.Close()
-
-	// Refund all sealed segment candidates in distribution
-	sd.distribution.RefundAllCandidates()
 
 	// clean idf oracle
 	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
 		idfOracle.Close()
 	}
 
-	sd.functionState.Close()
-	sd.releaseFunctionRunners()
+	function.GetManager().Release(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 
 	// clean up l0 segment in delete buffer
 	start := time.Now()
@@ -1375,35 +1477,6 @@ func (sd *shardDelegator) Close() {
 	if sd.postLoadConfigHandler != nil {
 		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, sd.postLoadConfigHandler)
 	}
-}
-
-func (sd *shardDelegator) allocFunctionRunners(schema *schemapb.CollectionSchema) {
-	if err := function.AllocFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		sd.warnFunctionRunnerInit(err, "allocate", schema)
-	}
-}
-
-func (sd *shardDelegator) updateFunctionRunners(schema *schemapb.CollectionSchema) {
-	if err := function.UpdateFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		sd.warnFunctionRunnerInit(err, "update", schema)
-	}
-}
-
-func (sd *shardDelegator) warnFunctionRunnerInit(err error, operation string, schema *schemapb.CollectionSchema) {
-	schemaVersion := function.LatestFunctionRunnerVersion
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
-	mlog.Warn(context.TODO(), "failed to initialize delegator function runners",
-		mlog.Int64("collectionID", sd.collectionID),
-		mlog.String("vchannel", sd.vchannelName),
-		mlog.String("operation", operation),
-		mlog.Int32("schemaVersion", schemaVersion),
-		mlog.Err(err))
-}
-
-func (sd *shardDelegator) releaseFunctionRunners() {
-	function.ReleaseFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 }
 
 func delegatorFunctionRunnerKey(vchannel string) string {
@@ -1461,6 +1534,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
 	binlogSaver segments.BinlogSaver,
+	opts ...ShardDelegatorOption,
 ) (ShardDelegator, error) {
 	log := mlog.With(mlog.Int64("collectionID", collectionID),
 		mlog.Int64("replicaID", replicaID),
@@ -1472,6 +1546,17 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
+	}
+	schema, schemaVersion, schemaBarrierTs := collection.SchemaSnapshot()
+	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), schema); err != nil {
+		return nil, err
+	}
+
+	skipStreamingForExternalTable := typeutil.IsExternalCollection(schema)
+	catchingUpStreamingData := !skipStreamingForExternalTable
+	if skipStreamingForExternalTable {
+		log.Info(ctx, "skip streaming data catchup for read-only external collection",
+			mlog.Time("initialTSafe", tsoutil.PhysicalTime(startTs)))
 	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
@@ -1503,44 +1588,41 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:      NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{paramtable.GetStringNodeID(), channel}),
-		latestTsafe:                atomic.NewUint64(startTs),
-		loader:                     loader,
-		queryHook:                  queryHook,
-		chunkManager:               chunkManager,
-		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
-		excludedSegments:           excludedSegments,
-		l0ForwardPolicy:            policy,
-		postLoadSem:                postLoadSem,
-		postLoadConfigHandler:      postLoadConfigHandler,
-		catchingUpStreamingData:    atomic.NewBool(true),
-		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		latestTsafe:                   atomic.NewUint64(startTs),
+		loader:                        loader,
+		queryHook:                     queryHook,
+		chunkManager:                  chunkManager,
+		partitionStats:                make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		excludedSegments:              excludedSegments,
+		l0ForwardPolicy:               policy,
+		postLoadSem:                   postLoadSem,
+		postLoadConfigHandler:         postLoadConfigHandler,
+		catchingUpStreamingData:       atomic.NewBool(catchingUpStreamingData),
+		skipStreamingForExternalTable: skipStreamingForExternalTable,
+		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
+		schemaBarrierTs:               schemaBarrierTs,
 	}
-
-	functionState, err := buildFunctionRuntimeState(collection.Schema())
-	if err != nil {
-		return nil, err
+	for _, opt := range opts {
+		opt(sd)
 	}
-	sd.functionState = functionState
-	sd.allocFunctionRunners(collection.Schema())
+	sd.bm25Functions = newBM25FunctionSet(schema)
 
-	hasBM25Field := lo.ContainsBy(collection.Schema().GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
-		return tf.GetType() == schemapb.FunctionType_BM25
-	})
-
-	if hasBM25Field {
-		idfOracle := NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+	if len(sd.bm25Functions) > 0 {
+		idfOracle := NewIDFOracle(sd.vchannelName, schema.GetFunctions())
 		idfOracle.Start()
 		sd.distribution.SetIDFOracle(idfOracle)
 		sd.publishIDFOracle(idfOracle)
 	}
+	sd.collectionVersion.Store(schemaVersion)
 
 	// Register growing-source segments as optional local flush sources. Metadata
 	// commit is still owned by WAL flusher / WriteBuffer.
-	if sd.useGrowingSourceFlush() {
+	if sd.allowGrowingSourceFlush() {
 		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
 			_, err := sd.waitTSafe(ctx, fenceTs)
 			return err
 		}, sd.GetTSafe)
+		sd.growingSourceProvider.SetChannelName(sd.vchannelName)
 		sd.growingSourceRegistration = syncmgr.DefaultGrowingSourceRegistry().Register(sd.vchannelName, sd.growingSourceProvider)
 		sd.growingSourceProvider.SetRegistration(sd.growingSourceRegistration)
 		log.Info(ctx, "registered growing-source source support")
@@ -1552,51 +1634,26 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	return sd, nil
 }
 
-// useGrowingSourceFlush returns true when the collection should expose growing segments as a flush source.
-func (sd *shardDelegator) useGrowingSourceFlush() bool {
+// allowGrowingSourceFlush returns true when the collection may expose growing segments as a flush source.
+func (sd *shardDelegator) allowGrowingSourceFlush() bool {
 	if sd == nil || sd.collection == nil {
 		return false
 	}
-	return typeutil.UseGrowingSourceFlush(sd.collection.Schema(),
+	return typeutil.AllowGrowingSourceFlush(sd.collection.Schema(),
 		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
 }
 
 func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
-	schema := sd.collection.Schema()
-	ok, err := function.RunWithAnalyzer(ctx, sd.collectionID, schema.GetVersion(), fieldID, run)
-	if ok || err != nil {
-		return ok, err
-	}
-	if fieldHasBM25Analyzer(schema, fieldID) {
-		return false, nil
-	}
-
-	field := typeutil.GetField(schema, fieldID)
-	if field == nil || !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
-		return false, nil
-	}
-
-	analyzer, err := function.NewAnalyzerRunner(field)
-	if err != nil {
-		return false, err
-	}
-	if runner, ok := analyzer.(function.FunctionRunner); ok {
-		defer runner.Close()
-	}
-	return true, run(analyzer)
-}
-
-func fieldHasBM25Analyzer(schema *schemapb.CollectionSchema, fieldID int64) bool {
-	for _, fn := range schema.GetFunctions() {
-		if fn.GetType() == schemapb.FunctionType_BM25 && slices.Contains(fn.GetInputFieldIds(), fieldID) {
-			return true
-		}
-	}
-	return false
+	return function.GetManager().RunWithAnalyzer(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), fieldID, run)
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return nil, err
+	}
+	defer sd.lifetime.Done()
+
 	var result [][]*milvuspb.AnalyzerToken
 	var analyzeErr error
 	texts := lo.Map(req.GetPlaceholder(), func(bytes []byte, _ int) string {

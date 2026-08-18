@@ -86,10 +86,9 @@ type HandlerClient interface {
 	// Returns an empty slice if no force promote has occurred.
 	GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error)
 
-	// PrepareReleaseManualFlush prepares process-local release handoff.
-	// Returns false when the current process is not the local flush owner or
-	// the channel does not need growing-source retention.
-	PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
+	// PrepareReleaseManualFlushIfLocal prepares process-local release handoff.
+	// If the wal is located at remote, it will return false, error.
+	PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
 
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.

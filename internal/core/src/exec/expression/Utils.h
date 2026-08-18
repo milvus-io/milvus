@@ -130,7 +130,7 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                ThrowInfo(DataTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported data type {}",
                           arr2.array(i).val_case());
         }

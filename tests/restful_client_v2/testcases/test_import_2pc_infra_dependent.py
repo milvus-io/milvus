@@ -422,6 +422,12 @@ class Import2PCInfraBase(TestBase):
         if partition_name is not None:
             payload["partitionName"] = partition_name
         rsp = self.import_job_client.create_import_jobs(payload)
+        if (
+            payload["options"].get("l0_import") == "true"
+            and rsp.get("code") != 0
+            and "l0 import is disabled" in str(rsp.get("message", ""))
+        ):
+            pytest.skip("dataCoord.import.enableL0Import is disabled on this cluster")
         assert rsp["code"] == 0, rsp
         return rsp["data"]["jobId"]
 

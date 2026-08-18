@@ -55,7 +55,7 @@ func newNamespaceTestCore(t *testing.T, dbName, collectionName string, enableNam
 	defaultPartition := &model.Partition{
 		PartitionID:               namespaceTestDefault,
 		PartitionName:             Params.CommonCfg.DefaultPartitionName.GetValue(),
-		PartitionCreatedTimestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+		PartitionCreatedTimestamp: tsoutil.ComposeTSByTime(time.Now()),
 		CollectionID:              namespaceTestCollection,
 		State:                     pb.PartitionState_PartitionCreated,
 	}
@@ -133,7 +133,7 @@ func addNamespaceTestPartition(mt *MetaTable, collectionID, partitionID int64, p
 	mt.collID2Meta[collectionID].Partitions = append(mt.collID2Meta[collectionID].Partitions, &model.Partition{
 		PartitionID:               partitionID,
 		PartitionName:             partitionName,
-		PartitionCreatedTimestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+		PartitionCreatedTimestamp: tsoutil.ComposeTSByTime(time.Now()),
 		CollectionID:              collectionID,
 		State:                     state,
 	})

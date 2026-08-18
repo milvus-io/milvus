@@ -107,6 +107,17 @@ var (
 			collectionIDLabelName,
 		})
 
+	QueryNodeSkippedInsertFieldCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "skipped_insert_field_count",
+			Help:      "count of insert payload field columns skipped because the field is absent from the current schema, e.g. dropped fields carried by messages replayed from WAL",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
 	QueryNodeNumPartitions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -128,6 +139,28 @@ var (
 			collectionIDLabelName,
 			segmentStateLabelName,
 			segmentLevelLabelName,
+		})
+
+	QueryNodeGrowingSourceRetainedBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_source_retained_bytes",
+			Help:      "estimated bytes of growing-source segments retained for release handoff",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
+
+	QueryNodeGrowingSourceRetainedSegments = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_source_retained_segments",
+			Help:      "number of growing-source segments retained for release handoff",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
 		})
 
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
@@ -254,6 +287,19 @@ var (
 			queryTypeLabelName,
 			reduceLevelName,
 			reduceType,
+		})
+
+	QueryNodeFunctionChainLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "function_chain_latency",
+			Help:      "query-level function chain execution latency in milliseconds",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			chainLevelLabelName,
+			statusLabelName,
 		})
 
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(
@@ -960,6 +1006,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumCollections)
 	registry.MustRegister(QueryNodeNumPartitions)
 	registry.MustRegister(QueryNodeNumSegments)
+	registry.MustRegister(QueryNodeGrowingSourceRetainedBytes)
+	registry.MustRegister(QueryNodeGrowingSourceRetainedSegments)
 	registry.MustRegister(QueryNodeNumDmlChannels)
 	registry.MustRegister(QueryNodeNumDeltaChannels)
 	registry.MustRegister(QueryNodeSQCount)
@@ -970,6 +1018,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
+	registry.MustRegister(QueryNodeFunctionChainLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
 	registry.MustRegister(QueryNodeReadTaskReadyNQ)
@@ -991,6 +1040,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeConsumeCounter)
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)
+	registry.MustRegister(QueryNodeSkippedInsertFieldCount)
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
 	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
 	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
@@ -1050,6 +1100,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	}
 	QueryNodeConsumerMsgCount.DeletePartialMatch(labels)
+	QueryNodeSkippedInsertFieldCount.DeletePartialMatch(labels)
 	QueryNodeConsumeTimeTickLag.DeletePartialMatch(labels)
 	QueryNodeNumEntities.DeletePartialMatch(labels)
 	QueryNodeEntitiesSize.DeletePartialMatch(labels)

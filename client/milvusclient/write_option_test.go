@@ -23,8 +23,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type ColumnBasedDataOptionSuite struct {
@@ -44,7 +44,7 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	s.Require().Len(req.GetFieldsData(), 1)
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
-	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+	s.ElementsMatch([]bool{true, true, true}, fd.GetScalars().GetValidData())
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
@@ -118,6 +118,81 @@ func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
 	s.Require().Equal(2, len(va.GetData()))
 	s.EqualValues(2*dim, len(va.GetData()[0].GetFloatVector().GetData()))
 	s.EqualValues(1*dim, len(va.GetData()[1].GetFloatVector().GetData()))
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumn() {
+	dim := 2
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("clip_emb").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)))
+	collSchema := entity.NewSchema().WithName("c").
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithStructSchema(structSchema).
+			WithNullable(true))
+
+	rows := []map[string]any{
+		{"clip_str": []string{"a"}, "clip_emb": [][]float32{{0.1, 0.2}}},
+		nil,
+		{"clip_str": []string{}, "clip_emb": [][]float32{}},
+	}
+	opt := NewColumnBasedInsertOption("c").
+		WithInt64Column("id", []int64{1, 2, 3}).
+		WithStructArrayColumn("clips", structSchema, rows)
+
+	req, err := opt.InsertRequest(&entity.Collection{Schema: collSchema})
+	s.Require().NoError(err)
+	s.EqualValues(3, req.GetNumRows())
+
+	var clipsFD *schemapb.FieldData
+	for _, fd := range req.GetFieldsData() {
+		if fd.GetFieldName() == "clips" {
+			clipsFD = fd
+			break
+		}
+	}
+	s.Require().NotNil(clipsFD)
+	subs := clipsFD.GetStructArrays().GetFields()
+	s.Require().Len(subs, 2)
+	for _, sub := range subs {
+		if sub.GetScalars() != nil {
+			s.Equal([]bool{true, false, true}, sub.GetScalars().GetValidData())
+		} else {
+			s.Equal([]bool{true, false, true}, sub.GetVectors().GetValidData())
+		}
+	}
+	s.Len(subs[0].GetScalars().GetArrayData().GetData(), 2)
+	s.Len(subs[1].GetVectors().GetVectorArray().GetData(), 2)
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumnRejectsNilSubField() {
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("clip_emb").WithDataType(entity.FieldTypeFloatVector).WithDim(2))
+	collSchema := entity.NewSchema().WithName("c").
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithStructSchema(structSchema).
+			WithNullable(true))
+
+	opt := NewColumnBasedInsertOption("c").
+		WithInt64Column("id", []int64{1, 2}).
+		WithStructArrayColumn("clips", structSchema, []map[string]any{
+			nil,
+			{"clip_str": nil, "clip_emb": [][]float32{{0.1, 0.2}}},
+		})
+
+	_, err := opt.InsertRequest(&entity.Collection{Schema: collSchema})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "clip_str")
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnDeferredError() {
@@ -216,6 +291,41 @@ func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 	s.Equal(namespace, upsertReq.GetNamespace())
 }
 
+func (s *ColumnBasedDataOptionSuite) TestTextColumnInsertAndUpsertRequests() {
+	const collectionName = "text_write_option"
+	values := []string{"short text", "长文本", "large payload"}
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collectionName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("content").WithDataType(entity.FieldTypeText)),
+	}
+
+	opt := NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", []int64{1, 2, 3}).
+		WithTextColumn("content", values)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(3, insertReq.GetNumRows())
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(3, upsertReq.GetNumRows())
+
+	for _, fieldsData := range [][]*schemapb.FieldData{insertReq.GetFieldsData(), upsertReq.GetFieldsData()} {
+		var textData *schemapb.FieldData
+		for _, fd := range fieldsData {
+			if fd.GetFieldName() == "content" {
+				textData = fd
+				break
+			}
+		}
+		s.Require().NotNil(textData)
+		s.Equal(schemapb.DataType_Text, textData.GetType())
+		s.Equal(values, textData.GetScalars().GetStringData().GetData())
+	}
+}
+
 func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	collName := "namespace_row_write_option"
 	namespace := "tenant_a"
@@ -260,15 +370,47 @@ func (s *DeleteOptionSuite) TestBasic() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	opt := NewDeleteOption(collectionName)
 
-	s.Equal(collectionName, opt.Request().GetCollectionName())
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.Equal(collectionName, req.GetCollectionName())
 }
 
 func (s *DeleteOptionSuite) TestWithNamespace() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	namespace := "tenant_a"
 
-	req := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	req, err := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *DeleteOptionSuite) TestWithTemplateParam() {
+	blob, err := NewRoaringBitmapBlob([]int64{-1, 0, 42})
+	s.Require().NoError(err)
+
+	req, err := NewDeleteOption("collection").
+		WithExpr("roaring_match(id, {ids})").
+		WithTemplateParam("ids", blob).
+		Request()
+	s.Require().NoError(err)
+	value := req.GetExprTemplateValues()["ids"]
+	s.Require().NotNil(value)
+	bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
+	s.Require().True(ok)
+	s.Equal([]byte(blob), bytesValue.BytesVal)
+}
+
+func (s *DeleteOptionSuite) TestTemplateParamConversionError() {
+	// Request() surfaces the conversion failure instead of returning a request
+	// that silently lacks the template value. Before DeleteOption gained the
+	// error return this was dropped, and a caller building the protobuf
+	// directly would send an expression whose placeholder was never bound.
+	_, err := NewDeleteOption("collection").
+		WithExpr("roaring_match(id, {ids})").
+		WithTemplateParam("ids", struct{ Unsupported bool }{}).
+		Request()
+	s.Require().Error(err)
+	s.Contains(err.Error(), "ids")
 }
 
 func TestDeleteOption(t *testing.T) {

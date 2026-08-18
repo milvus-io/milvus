@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type SearchOptionSuite struct {
@@ -111,6 +111,21 @@ func (s *SearchOptionSuite) TestWithNamespace() {
 		HybridRequest()
 	s.Require().NoError(err)
 	s.Equal(namespace, hybridReq.GetNamespace())
+}
+
+func (s *SearchOptionSuite) TestQueryOrderByFields() {
+	collName := "query_order_by"
+
+	queryReq, err := NewQueryOption(collName).
+		WithFilter("price > 50").
+		WithLimit(10).
+		WithOrderByFields("price:desc", "name:asc").
+		Request()
+	s.Require().NoError(err)
+
+	queryParams := entity.KvPairsMap(queryReq.GetQueryParams())
+	s.Equal("price:desc,name:asc", queryParams[spOrderByFields])
+	s.Equal("10", queryParams[spLimit])
 }
 
 func (s *SearchOptionSuite) TestPlaceHolder() {

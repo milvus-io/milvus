@@ -46,9 +46,14 @@ type fakeMilvusTableDeltalogReader struct {
 	nextErr  error
 	closeErr error
 	next     int
+	current  storage.Record
 }
 
 func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	if r.nextErr != nil {
 		return nil, r.nextErr
 	}
@@ -57,10 +62,15 @@ func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
 	}
 	record := r.records[r.next]
 	r.next++
+	r.current = record
 	return record, nil
 }
 
 func (r *fakeMilvusTableDeltalogReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	return r.closeErr
 }
 
@@ -1322,15 +1332,12 @@ func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path 
 		if err != nil {
 			t.Fatalf("read deltalog: %v", err)
 		}
-		func() {
-			defer record.Release()
-			pkColumn := record.Column(0).(*array.Int64)
-			tsColumn := record.Column(common.TimeStampField).(*array.Int64)
-			for i := 0; i < record.Len(); i++ {
-				pks = append(pks, pkColumn.Value(i))
-				tss = append(tss, tsColumn.Value(i))
-			}
-		}()
+		pkColumn := record.Column(0).(*array.Int64)
+		tsColumn := record.Column(common.TimeStampField).(*array.Int64)
+		for i := 0; i < record.Len(); i++ {
+			pks = append(pks, pkColumn.Value(i))
+			tss = append(tss, tsColumn.Value(i))
+		}
 	}
 	return pks, tss
 }

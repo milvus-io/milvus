@@ -1,10 +1,11 @@
 import json
 import sys
-import pytest
 import time
+
+import pytest
+from api.milvus import CollectionClient, VectorClient
 from pymilvus import connections, db
 from utils.util_log import test_log as logger
-from api.milvus import VectorClient, CollectionClient
 from utils.utils import get_data_by_payload
 
 
@@ -27,10 +28,9 @@ class Base:
 
 
 class TestBase(Base):
-
     def teardown_method(self):
         self.collection_client.api_key = self.api_key
-        all_collections = self.collection_client.collection_list()['data']
+        all_collections = self.collection_client.collection_list()["data"]
         if self.name in all_collections:
             logger.info(f"collection {self.name} exist, drop it")
             payload = {
@@ -64,7 +64,7 @@ class TestBase(Base):
             "vectorField": "vector",
         }
         rsp = self.collection_client.collection_create(schema_payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         self.wait_collection_load_completed(collection_name)
         batch_size = batch_size
         batch = nb // batch_size
@@ -73,24 +73,18 @@ class TestBase(Base):
         for i in range(batch):
             nb = batch_size
             data = get_data_by_payload(schema_payload, nb)
-            payload = {
-                "collectionName": collection_name,
-                "data": data
-            }
+            payload = {"collectionName": collection_name, "data": data}
             body_size = sys.getsizeof(json.dumps(payload))
             logger.debug(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
+            assert rsp["code"] == 200
         # insert remainder data
         if remainder:
             nb = remainder
             data = get_data_by_payload(schema_payload, nb)
-            payload = {
-                "collectionName": collection_name,
-                "data": data
-            }
+            payload = {"collectionName": collection_name, "data": data}
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
+            assert rsp["code"] == 200
 
         return schema_payload, data
 
@@ -118,4 +112,3 @@ class TestBase(Base):
         self.create_database(db_name=db_name)
         self.collection_client.db_name = db_name
         self.vector_client.db_name = db_name
-

@@ -74,7 +74,7 @@ func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				guard := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(tt.schema), nil).Build()
+				guard := mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(tt.schema), nil).Build()
 				defer guard.UnPatch()
 
 				task := &createNamespaceTask{
@@ -97,7 +97,7 @@ func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
 func TestCreateNamespaceTaskPreExecuteRejectsInvalidName(t *testing.T) {
 	mockey.PatchConvey("create namespace invalid name", t, func() {
 		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name:            "coll",
 			EnableNamespace: true,
 			Properties: []*commonpb.KeyValuePair{
@@ -118,7 +118,7 @@ func TestCreateNamespaceTaskPreExecuteRejectsInvalidName(t *testing.T) {
 func TestDropNamespaceTaskPreExecuteRejectsLoadedNamespace(t *testing.T) {
 	mockey.PatchConvey("drop namespace loaded rejection", t, func() {
 		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name:            "coll",
 			EnableNamespace: true,
 			Properties: []*commonpb.KeyValuePair{

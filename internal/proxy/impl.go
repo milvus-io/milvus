@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -123,6 +124,24 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context, req *internalpb.Get
 	}, nil
 }
 
+func (node *Proxy) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources()); err != nil {
+		mlog.Warn(ctx, "sync file resource failed",
+			mlog.Uint64("version", req.GetVersion()),
+			mlog.Int("resourceCount", len(req.GetResources())),
+			mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	mlog.Info(ctx, "sync file resource completed",
+		mlog.Uint64("version", req.GetVersion()),
+		mlog.Int("resourceCount", len(req.GetResources())))
+	return merr.Success(), nil
+}
+
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -132,80 +151,84 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
 	defer sp.End()
-	mlog.Info(context.TODO(), "received request to invalidate collection meta cache")
+	mlog.Info(ctx, "received request to invalidate collection meta cache")
 
 	dbName := request.DbName
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
+	// The shard leader cache is keyed by the cluster-unique collection id (issue #51533), so an
+	// alias/collection name is no longer a cache key. Evicting the affected collection id covers
+	// every name/alias that resolves to it; alias repoints and renames don't move a collection's
+	// shard leaders, so for those this is a harmless best-effort refresh. The names argument is
+	// kept only so the call sites (which still pass alias names for the meta-cache path) are
+	// untouched.
+	deprecateShardCaches := func(names ...string) {
+		if collectionID != UniqueID(0) {
+			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
+		}
+	}
 
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
-			// remove collection by name first, otherwise the drop collection remove version will be failed.
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+			aliasOperation := msgType == commonpb.MsgType_CreateAlias ||
+				msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias
+			aliasName = globalMetaCache.InvalidateCollectionMeta(
+				ctx, request.GetDbName(), collectionName, collectionID, aliasOperation)
+			deprecateShardCaches(append(aliasName, collectionName)...)
+			if aliasOperation && collectionName != "" {
+				if request.CollectionID == UniqueID(0) && msgType != commonpb.MsgType_DropAlias {
+					// An alias-DDL broadcast with no target id (id==0) means
+					// the old target could not be precisely located, so fall
+					// back to scanning for cached holders of the alias --
+					// otherwise a concurrent-describe race could leave the old
+					// target's Aliases list stale with no healing event. Two
+					// sources reach here, so this is a PERMANENT safety net,
+					// not upgrade-window compat: (a) an old rootcoord that
+					// predates old_collection_id, and (b) a new rootcoord that
+					// could not resolve the pre-alter AlterAlias target (a meta
+					// inconsistency). DropAlias is EXCLUDED: it legitimately
+					// carries no id in every version (its single-target hint
+					// resolution is race-free -- nothing re-points an alias
+					// concurrently with its drop), so scanning there would
+					// reintroduce a permanent O(N) stall on the normal path.
+					globalMetaCache.RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
 				}
 			}
-			// Invalidate alias cache for alias operations
-			if msgType == commonpb.MsgType_CreateAlias || msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias {
-				if collectionName != "" {
-					globalMetaCache.RemoveAlias(ctx, request.GetDbName(), collectionName)
-				}
-			}
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
+			mlog.Info(ctx, "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
-				}
+				aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
+				deprecateShardCaches(aliasName...)
 			}
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
+			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
 			if request.GetPartitionName() == "" {
-				mlog.Warn(context.TODO(), "invalidate collection meta cache failed. partitionName is empty")
-				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+				err := merr.WrapErrServiceInternalMsg("partition cache invalidation received empty partition name")
+				mlog.Warn(ctx, "failed to invalidate partition meta cache", mlog.Err(err),
+					mlog.FieldDbName(request.GetDbName()),
+					mlog.FieldCollectionName(collectionName),
+					mlog.FieldCollectionID(collectionID))
+				return merr.Status(err), nil
 			}
-			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName(), request.GetBase().GetTimestamp())
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
+			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
+			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
-			fallthrough
-		case commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+		case commonpb.MsgType_AlterDatabase:
+			globalMetaCache.RemoveDatabaseInfo(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
-				}
-			}
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
-			}
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
+			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			deprecateShardCaches(append(aliasName, collectionName)...)
+			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		default:
-			mlog.Warn(context.TODO(), "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
-				}
-			}
-
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
+			mlog.Warn(ctx, "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
+			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
 
@@ -223,7 +246,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	}
-	mlog.Info(context.TODO(), "complete to invalidate collection meta cache")
+	mlog.Info(ctx, "complete to invalidate collection meta cache")
 
 	return merr.Success(), nil
 }
@@ -854,16 +877,6 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 	resp, err := interceptor.Call(ctx, request)
-	// Single-point redaction at the API edge. The persisted spec carries
-	// extfs credentials (access_key_id / access_key_value / ssl_ca_cert)
-	// that internal callers (refresh / load) need raw via the same
-	// mixCoord.DescribeCollection RPC; redacting at source would break
-	// FFI auth. Sanitize here so every provider path (cached / remote)
-	// converges through one spot — adding a new provider does not
-	// re-introduce the leak.
-	if resp != nil && resp.GetSchema() != nil {
-		resp.Schema.ExternalSpec = externalspec.RedactExternalSpec(resp.Schema.ExternalSpec)
-	}
 	return resp, err
 }
 
@@ -1054,6 +1067,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		AlterCollectionSchemaRequest: request,
 		mixCoord:                     node.mixCoord,
 		oldSchema:                    dresp.GetSchema(),
+		collectionProperties:         dresp.GetProperties(),
 	}
 	method := "AlterCollectionSchema"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1325,53 +1339,17 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	return act.result, nil
 }
 
+// AddCollectionFunction is the deprecated legacy attach RPC. A function is coupled
+// to its output field: BM25/MinHash add a brand-new output field via
+// add_function_field, and TextEmbedding is defined at collection creation (runtime
+// add awaits embedding backfill). This RPC only allowed the unsafe attach-over-
+// existing-field path, so it is rejected.
 func (node *Proxy) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionFunction")
-	defer sp.End()
-	method := "AddCollectionFunction"
-	tr := timerecord.NewTimeRecorder(method)
-	task := &addCollectionFunctionTask{
-		ctx:                          ctx,
-		Condition:                    NewTaskCondition(ctx),
-		AddCollectionFunctionRequest: request,
-		mixCoord:                     node.mixCoord,
-	}
-	mlog.Info(ctx, rpcReceived(method))
-
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToEnqueue(method),
-			mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	mlog.Debug(ctx,
-		rpcEnqueued(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()),
-		mlog.Uint64("timestamp", request.Base.Timestamp))
-
-	if err := task.WaitToFinish(); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
-			mlog.Uint64("BeginTs", task.BeginTs()),
-			mlog.Uint64("EndTs", task.EndTs()))
-
-		return merr.Status(err), nil
-	}
-
-	mlog.Info(ctx,
-		rpcDone(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()))
-
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"AddCollectionFunction RPC is no longer supported; add BM25/MinHash via add_function_field, and define a TextEmbedding function at collection creation")), nil
 }
 
 func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
@@ -1423,53 +1401,16 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	return task.result, nil
 }
 
+// DropCollectionFunction is the deprecated legacy detach RPC. pymilvus
+// drop_collection_function routes through AlterCollectionSchema (drop_function_field
+// / detach) instead, so this RPC is unused; reject to avoid a second, divergent DDL
+// path.
 func (node *Proxy) DropCollectionFunction(ctx context.Context, request *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropCollectionFunction")
-	defer sp.End()
-	method := "DropCollectionFunction"
-	tr := timerecord.NewTimeRecorder(method)
-	task := &dropCollectionFunctionTask{
-		ctx:                           ctx,
-		Condition:                     NewTaskCondition(ctx),
-		DropCollectionFunctionRequest: request,
-		mixCoord:                      node.mixCoord,
-	}
-	mlog.Info(ctx, rpcReceived(method))
-
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToEnqueue(method),
-			mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	mlog.Debug(ctx,
-		rpcEnqueued(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()),
-		mlog.Uint64("timestamp", request.Base.Timestamp))
-
-	if err := task.WaitToFinish(); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
-			mlog.Uint64("BeginTs", task.BeginTs()),
-			mlog.Uint64("EndTs", task.EndTs()))
-
-		return merr.Status(err), nil
-	}
-
-	mlog.Info(ctx,
-		rpcDone(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()))
-
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field")), nil
 }
 
 func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
@@ -3147,7 +3088,22 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err != nil {
 		rsp.Status = merr.Status(err)
 	}
+	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, nil
+}
+
+func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
+	resultData := result.GetResults()
+	if resultData == nil {
+		return
+	}
+	for _, field := range resultData.GetFieldsData() {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
+	for _, field := range resultData.GetGroupByFieldValues() {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
+	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
@@ -3392,6 +3348,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, err
 }
 
@@ -3655,7 +3612,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Get anns_field from search params, or infer from schema if only one vector field exists
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
 	if err != nil || annsFieldName == "" {
-		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.schema.CollectionSchema)
+		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
@@ -3667,7 +3624,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		annsFieldName = vecFields[0].Name
 	}
 
-	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
+	annField := typeutil.GetFieldByName(collectionInfo.Schema.CollectionSchema, annsFieldName)
 	if annField == nil {
 		// annsFieldName comes from the user's search request; a missing field is
 		// the user's input error.
@@ -3679,7 +3636,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Check if this is a BM25 function-based search
-	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.Functions)
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.Schema.Functions)
 
 	// For BM25 search, we need to fetch text field; for vector search, we need vector field
 	var fieldToFetch string
@@ -3698,7 +3655,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get primary key field
-	pkField, err := collectionInfo.schema.GetPkField()
+	pkField, err := collectionInfo.Schema.GetPkField()
 	if err != nil {
 		return nil, err
 	}
@@ -3830,7 +3787,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return fieldData.GetValidData(), nil
+	return typeutil.GetFieldDataValidData(fieldData), nil
 }
 
 // Flush notify data nodes to persist the data of collection.
@@ -4053,6 +4010,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	method := "Query"
 
 	res, storageCost, err := node.query(ctx, qt, sp)
+	for _, field := range res.GetFieldsData() {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -4577,9 +4537,11 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 			State:        info.GetState(),
 			Level:        commonpb.SegmentLevel(info.GetLevel()),
 			IsSorted:     info.GetIsSorted(),
-			InsertLogs:   getLogIDs(info.GetBinlogs()),
-			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
-			StatsLogs:    getLogIDs(info.GetStatslogs()),
+			// V3 segments return empty: insert data is referenced via
+			// manifest, not per-field binlog KVs.
+			InsertLogs: getLogIDs(info.GetBinlogs()),
+			DeltaLogs:  getLogIDs(info.GetDeltalogs()),
+			StatsLogs:  getLogIDs(info.GetStatslogs()),
 		})
 	}
 
@@ -4987,7 +4949,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if typeutil.IsExternalCollection(collInfo.schema.CollectionSchema) {
+		if typeutil.IsExternalCollection(collInfo.Schema.CollectionSchema) {
 			var collIdentifier string
 			if req.GetCollectionName() != "" {
 				collIdentifier = fmt.Sprintf("name=%s", req.GetCollectionName())
@@ -5950,7 +5912,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RestoreRBAC", mlog.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", mlog.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -6780,6 +6742,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, getTelemetryClientConfig(node))
 	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, getTelemetryClientHistory(node))
 	router.POST(http.TelemetryCommandsPath, telemetryAuth, postTelemetryCommand(node))
+	router.GET(http.TelemetryCommandReplyPath, telemetryAuth, getTelemetryCommandReply(node))
 	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, deleteTelemetryCommand(node))
 }
 
@@ -7602,8 +7565,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	if srcSet != specSet {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
-				req.GetExternalSource(), req.GetExternalSpec())),
+				"external_source and external_spec must be both provided or both omitted on refresh (source_set=%t, spec_set=%t)",
+				srcSet, specSet)),
 		}, nil
 	}
 
@@ -7629,7 +7592,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Validate it's an external collection
-	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+	if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
 		mlog.Warn(context.TODO(), "collection is not an external collection")
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
@@ -7644,8 +7607,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// checked to defensively reassert the atomic-tuple invariant in case
 	// any legacy collection holds a half-initialized pair.
 	if !srcSet {
-		persistedSrc := collectionInfo.schema.GetExternalSource()
-		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		persistedSrc := collectionInfo.Schema.GetExternalSource()
+		persistedSpec := collectionInfo.Schema.GetExternalSpec()
 		if persistedSrc == "" || persistedSpec == "" {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
@@ -7655,7 +7618,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}
 	}
 
-	collectionID := collectionInfo.collID
+	collectionID := collectionInfo.CollID
 
 	// Call DataCoord to refresh the external collection
 	resp, err := node.mixCoord.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -7762,14 +7725,14 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 			}, nil
 		}
 
-		if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+		if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
 			mlog.Warn(context.TODO(), "collection is not an external collection")
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 			}, nil
 		}
 
-		collectionID = collectionInfo.collID
+		collectionID = collectionInfo.CollID
 	}
 
 	// Call DataCoord to list jobs

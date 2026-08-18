@@ -368,9 +368,8 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
-	// set analyzer resource for text match index if use ref mode.
 	// Namespace-enabled clustering compaction is routed to the namespace compactor on the
-	// DataNode, which builds the text index inline and needs the analyzer resources.
+	// DataNode, which builds the text index inline and needs the analyzer resources in ref mode.
 	taskSchema := taskProto.GetSchema()
 	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
 		taskSchema.GetEnableNamespace() &&
@@ -591,21 +590,19 @@ func (t *clusteringCompactionTask) completeTask() error {
 
 	// update current partition stats version
 	// at this point, the segment view includes both the input segments and the result segments.
-	if err = t.meta.GetPartitionStatsMeta().SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
+	// Persist the stats info and the current-version pointer bump as a single
+	// composite catalog write (info first, version pointer last as the commit
+	// marker), so a crash cannot leave the current version pointing at a stats
+	// set that was never persisted.
+	if err = t.meta.GetPartitionStatsMeta().SavePartitionStatsAndVersion(&datapb.PartitionStatsInfo{
 		CollectionID: t.GetTaskProto().GetCollectionID(),
 		PartitionID:  t.GetTaskProto().GetPartitionID(),
 		VChannel:     t.GetTaskProto().GetChannel(),
 		Version:      t.GetTaskProto().GetPlanID(),
 		SegmentIDs:   t.GetTaskProto().GetResultSegments(),
 		CommitTime:   time.Now().Unix(),
-	}); err != nil {
-		return merr.WrapErrClusteringCompactionMetaError("SavePartitionStatsInfo", err)
-	}
-
-	err = t.meta.GetPartitionStatsMeta().SaveCurrentPartitionStatsVersion(t.GetTaskProto().GetCollectionID(),
-		t.GetTaskProto().GetPartitionID(), t.GetTaskProto().GetChannel(), t.GetTaskProto().GetPlanID())
-	if err != nil {
-		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion", err)
+	}, t.GetTaskProto().GetPlanID()); err != nil {
+		return merr.WrapErrClusteringCompactionMetaError("SavePartitionStatsAndVersion", err)
 	}
 
 	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {

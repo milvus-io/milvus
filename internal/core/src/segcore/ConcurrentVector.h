@@ -30,6 +30,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/FieldData.h"
+#include "common/GrowingOffsetMapping.h"
 #include "common/Json.h"
 #include "common/OffsetMapping.h"
 #include "common/Span.h"
@@ -39,29 +40,36 @@
 
 namespace milvus::segcore {
 
+// Validity (null bitmap) storage for growing segments.
+//
+// Backed by fixed-size per-chunk buffers held in a std::deque so that, once a
+// chunk is appended, its buffer never moves. A raw pointer returned by
+// get_chunk_data() therefore stays valid across concurrent inserts (which only
+// append — never relocate existing chunks). This replaces a single resizable
+// FixedVector<bool> whose reallocation on insert could dangle a validity
+// pointer that a concurrent query had cached.
+//
+// Contract: a get_chunk_data() borrow may only be read within its own chunk
+// ([offset, chunk end)). All current readers apply validity per chunk (see
+// ApplyFieldValidData and InsertRecord::get_span_base), so this holds.
 class ThreadSafeValidData {
  public:
-    explicit ThreadSafeValidData() = default;
-    explicit ThreadSafeValidData(FixedVector<bool> data)
-        : data_(std::move(data)) {
+    explicit ThreadSafeValidData(int64_t size_per_chunk)
+        : size_per_chunk_(size_per_chunk) {
+        AssertInfo(size_per_chunk_ > 0,
+                   "size_per_chunk must be positive, got {}",
+                   size_per_chunk_);
     }
 
     void
     set_data_raw(const std::vector<FieldDataPtr>& datas) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        auto total = 0;
-        for (auto& field_data : datas) {
-            total += field_data->get_num_rows();
-        }
-        if (length_ + total > data_.size()) {
-            data_.resize(length_ + total);
-        }
-
         for (auto& field_data : datas) {
             auto num_row = field_data->get_num_rows();
-            for (size_t i = 0; i < num_row; i++) {
-                data_[length_ + i] = field_data->is_valid(i);
-            }
+            reserve_to(length_ + num_row);
+            write_bits(length_, num_row, [&field_data](size_t i) {
+                return field_data->is_valid(i);
+            });
             length_ += num_row;
         }
     }
@@ -72,12 +80,41 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
-            if (length_ + num_rows > data_.size()) {
-                data_.resize(length_ + num_rows);
-            }
-            auto src = data->valid_data().data();
-            std::copy_n(src, num_rows, data_.data() + length_);
+            reserve_to(length_ + num_rows);
+            write_from(
+                length_, num_rows, GetFieldDataRowValidData(*data).data());
             length_ += num_rows;
+        }
+    }
+
+    // Write validity at the logical offset the caller reserved, rather than
+    // appending at the current length. The two agree only as long as inserts
+    // arrive in reserved order; writing at the reserved offset states the
+    // contract in the code instead of relying on it silently.
+    void
+    set_data_raw(size_t element_offset,
+                 size_t num_rows,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        if (field_meta.is_nullable()) {
+            const auto end = element_offset + num_rows;
+            // No gaps. length_ advances to `end`, and is_valid() admits every
+            // offset below it, so a write that starts past the current length
+            // would publish a range nobody ever wrote -- validity bits read
+            // back as garbage rather than as null. Overwriting an already
+            // written range IS allowed: that is what makes a Reopen backfill
+            // retry idempotent.
+            AssertInfo(element_offset <= length_,
+                       "validity write leaves a gap: element_offset={}, "
+                       "length={}",
+                       element_offset,
+                       length_);
+            reserve_to(end);
+            write_from(element_offset,
+                       num_rows,
+                       GetFieldDataRowValidData(*data).data());
+            length_ = std::max(length_, end);
         }
     }
 
@@ -88,9 +125,12 @@ class ThreadSafeValidData {
                    "offset out of range, offset={}, length_={}",
                    offset,
                    length_);
-        return data_[offset];
+        return chunks_[offset / size_per_chunk_][offset % size_per_chunk_];
     }
 
+    // Borrow a pointer into the validity bitmap at `offset`. Valid only for
+    // reads within the same chunk ([offset, chunk end)); the pointed-to chunk
+    // buffer never moves, so the borrow survives concurrent inserts.
     bool*
     get_chunk_data(size_t offset) {
         std::shared_lock<std::shared_mutex> lck(mutex_);
@@ -98,18 +138,119 @@ class ThreadSafeValidData {
                    "offset out of range, offset={}, length_={}",
                    offset,
                    length_);
-        return &data_[offset];
+        return &chunks_[offset / size_per_chunk_][offset % size_per_chunk_];
     }
 
+    // Fill out[i] with the validity of offsets[i] for `count` offsets under a
+    // single lock acquisition. Out-of-range offsets yield false (not an
+    // assert), matching the tolerant semantics of offset-driven read paths.
+    void
+    bulk_is_valid(const int64_t* offsets, int64_t count, bool* out) const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = offsets[i];
+            out[i] = offset >= 0 && static_cast<size_t>(offset) < length_ &&
+                     chunks_[offset / spc][offset % spc];
+        }
+    }
+
+    // Same, for a contiguous range. The compact-storage write path needs the
+    // validity of every row in the batch it is about to append and would
+    // otherwise take the lock once per row.
+    void
+    bulk_is_valid_range(int64_t start, int64_t count, bool* out) const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        for (int64_t i = 0; i < count; ++i) {
+            const auto offset = start + i;
+            out[i] = offset >= 0 && static_cast<size_t>(offset) < length_ &&
+                     chunks_[offset / spc][offset % spc];
+        }
+    }
+
+    // WARNING: materializes a flat copy of the WHOLE bitmap (O(segment rows))
+    // — avoid on hot paths. Prefer empty() for emptiness checks,
+    // is_valid()/bulk_is_valid() for point/batch lookups, or get_chunk_data()
+    // to borrow within a chunk.
     FixedVector<bool>
     get_data() const {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        return data_;
+        FixedVector<bool> out(length_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        size_t copied = 0;
+        for (const auto& chunk : chunks_) {
+            if (copied >= length_) {
+                break;
+            }
+            const size_t n = std::min(spc, length_ - copied);
+            std::copy_n(chunk.begin(), n, out.begin() + copied);
+            copied += n;
+        }
+        return out;
+    }
+
+    bool
+    empty() const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        return length_ == 0;
     }
 
  private:
+    // Ensure enough chunks exist to hold `n` elements. Caller holds the lock.
+    void
+    reserve_to(size_t n) {
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        const size_t need = (n + spc - 1) / spc;
+        while (chunks_.size() < need) {
+            chunks_.emplace_back(spc, false);
+        }
+    }
+
+    // Write `count` bits starting at global offset `at` from a contiguous
+    // source array, chunk by chunk via copy_n. Caller holds the lock and has
+    // already reserved capacity.
+    void
+    write_from(size_t at, size_t count, const bool* src) {
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        size_t written = 0;
+        while (written < count) {
+            const size_t g = at + written;
+            const size_t ci = g / spc;
+            const size_t oi = g % spc;
+            const size_t n = std::min(count - written, spc - oi);
+            std::copy_n(src + written, n, chunks_[ci].begin() + oi);
+            written += n;
+        }
+    }
+
+    // Write `count` bits starting at global offset `at`, taking bit k from
+    // f(k). Splits across chunk boundaries. Caller holds the lock and has
+    // already reserved capacity.
+    template <typename F>
+    void
+    write_bits(size_t at, size_t count, F&& f) {
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        size_t written = 0;
+        while (written < count) {
+            const size_t g = at + written;
+            const size_t ci = g / spc;
+            const size_t oi = g % spc;
+            const size_t room = spc - oi;
+            const size_t n =
+                (count - written < room) ? (count - written) : room;
+            auto& chunk = chunks_[ci];
+            for (size_t k = 0; k < n; ++k) {
+                chunk[oi + k] = f(written + k);
+            }
+            written += n;
+        }
+    }
+
     mutable std::shared_mutex mutex_{};
-    FixedVector<bool> data_;
+    // Fixed-size (size_per_chunk_) buffers; deque keeps existing buffers put.
+    std::deque<FixedVector<bool>> chunks_;
+    const int64_t size_per_chunk_;
     // number of actual elements
     size_t length_{0};
 };
@@ -197,11 +338,45 @@ class VectorBase {
         return FixedVector<bool>{};
     }
 
+    // Non-nullable fields have no mapping at all; hand back the shared no-op
+    // so callers never have to branch on a null pointer.
     virtual const OffsetMapping&
     get_offset_mapping() const {
-        static const OffsetMapping empty;
+        static const NoOpOffsetMapping empty;
         return empty;
     }
+
+    // Shared ownership of the chunk storage, for consumers that keep raw
+    // pointers into chunk buffers beyond their lock scope (Knowhere
+    // brute-force iterators). clear() swaps the container's INTERNAL
+    // collection under the container's own mutex, so a holder of this
+    // reference keeps the buffers it points into alive while reclamation
+    // proceeds immediately for the segment.
+    //
+    // Take it BEFORE reading any chunk pointers, and read them only through
+    // it: acquire() latches {storage, count} as one generation under the
+    // container's own internal mutex, and that latch is the only thing that
+    // orders this call against a concurrent try_remove_chunks swap -- there
+    // is no external chunk lock. A snapshot taken after raw pointers were
+    // read could pin a newer generation than the buffers those pointers
+    // address.
+    //
+    // Pure, not defaulted: a column that cannot hand out a snapshot cannot
+    // protect a reader either, and an empty handle would let the caller
+    // believe it had pinned something. An implementation that grows a new
+    // storage kind must answer this question deliberately.
+    virtual ChunkSnapshot
+    acquire_chunks() const = 0;
+
+    // Snapshot-addressed reads. No lock: `snap` pins the generation, so
+    // reclamation cannot pull the chunks out from under the caller, and the
+    // caller's MVCC bound governs which rows inside them are visible.
+    virtual const void*
+    get_chunk_data(const ChunkSnapshot& snap, ssize_t chunk_index) const = 0;
+    virtual int64_t
+    get_chunk_size(const ChunkSnapshot& snap, ssize_t chunk_index) const = 0;
+    virtual SpanBase
+    get_span_base(const ChunkSnapshot& snap, int64_t chunk_id) const = 0;
 
  protected:
     const int64_t size_per_chunk_;
@@ -250,17 +425,22 @@ class ConcurrentVectorImpl : public VectorBase {
 
     SpanBase
     get_span_base(int64_t chunk_id) const override {
+        return get_span_base(acquire_chunks(), chunk_id);
+    }
+
+    SpanBase
+    get_span_base(const ChunkSnapshot& snap, int64_t chunk_id) const override {
         if constexpr (std::is_same_v<Type, VectorArray>) {
             ThrowInfo(NotImplemented, "unimplemented");
         } else if constexpr (is_type_entire_row) {
-            return chunks_ptr_->get_span(chunk_id);
+            return chunks_ptr_->get_span(snap, chunk_id);
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
             // only for testing
             ThrowInfo(NotImplemented, "unimplemented");
         } else {
-            auto chunk_data = chunks_ptr_->get_chunk_data(chunk_id);
-            auto chunk_size = chunks_ptr_->get_chunk_size(chunk_id);
+            auto chunk_data = chunks_ptr_->get_chunk_data(snap, chunk_id);
+            auto chunk_size = chunks_ptr_->get_chunk_size(snap, chunk_id);
             static_assert(
                 std::is_same_v<typename TraitType::embedded_type, Type>);
             return Span<TraitType>(
@@ -295,18 +475,26 @@ class ConcurrentVectorImpl : public VectorBase {
                 storage_offset = offset_mapping_.GetValidCount();
                 // Build valid_data array for offset mapping
                 std::unique_ptr<bool[]> valid_data(new bool[element_count]);
-                for (ssize_t i = 0; i < element_count; ++i) {
-                    bool is_valid =
-                        valid_data_ptr_->is_valid(element_offset + i);
-                    valid_data[i] = is_valid;
-                    if (is_valid) {
-                        valid_count++;
-                    }
-                }
+                // One lock acquisition for the batch. The caller has already
+                // written this range's validity (SegmentGrowingImpl::Insert
+                // and fill_empty_field both do so before touching the column),
+                // which is what makes reading it back here well-defined.
+                valid_data_ptr_->bulk_is_valid_range(
+                    element_offset, element_count, valid_data.get());
+                valid_count = std::count(
+                    valid_data.get(), valid_data.get() + element_count, true);
                 offset_mapping_.Append(valid_data.get(),
                                        element_count,
                                        element_offset,
                                        storage_offset);
+            } else {
+                // Unreachable today: only vector fields enable compact
+                // storage, and no vector type maps to bool. Guard it anyway --
+                // falling through here would leave valid_count at 0 and write
+                // nothing at all, silently dropping the batch.
+                ThrowInfo(NotImplemented,
+                          "compact mapping storage is not supported for bool "
+                          "columns");
             }
         } else {
             valid_count = element_count;
@@ -328,9 +516,21 @@ class ConcurrentVectorImpl : public VectorBase {
         return (const void*)chunks_ptr_->get_chunk_data(chunk_index);
     }
 
+    const void*
+    get_chunk_data(const ChunkSnapshot& snap,
+                   ssize_t chunk_index) const override {
+        return (const void*)chunks_ptr_->get_chunk_data(snap, chunk_index);
+    }
+
     int64_t
     get_chunk_size(ssize_t chunk_index) const override {
         return chunks_ptr_->get_chunk_size(chunk_index);
+    }
+
+    int64_t
+    get_chunk_size(const ChunkSnapshot& snap,
+                   ssize_t chunk_index) const override {
+        return chunks_ptr_->get_chunk_size(snap, chunk_index);
     }
 
     int64_t
@@ -381,6 +581,21 @@ class ConcurrentVectorImpl : public VectorBase {
         return data + chunk_offset * elements_per_row_;
     }
 
+    // Snapshot-addressed: reads the generation the caller pinned, so a
+    // concurrent try_remove_chunks cannot free the buffer mid-read.
+    const Type*
+    get_physical_element(const ChunkSnapshot& snap,
+                         ssize_t physical_index) const {
+        if (physical_index == -1) {
+            return nullptr;
+        }
+        auto chunk_id = physical_index / size_per_chunk_;
+        auto chunk_offset = physical_index % size_per_chunk_;
+        auto data = static_cast<const Type*>(
+            chunks_ptr_->get_chunk_data(snap, chunk_id));
+        return data + chunk_offset * elements_per_row_;
+    }
+
     const Type&
     operator[](ssize_t element_index) const {
         AssertInfo(
@@ -402,8 +617,15 @@ class ConcurrentVectorImpl : public VectorBase {
 
     bool
     empty() override {
-        for (size_t i = 0; i < chunks_ptr_->size(); i++) {
-            if (chunks_ptr_->get_chunk_size(i) > 0) {
+        // One snapshot for the whole scan. Pairing size() (a bare counter_
+        // load) with the per-index accessor (which asserts against a freshly
+        // loaded counter_) is a TOCTOU: a try_remove_chunks landing between
+        // the two turns an emptiness check into a thrown assertion. That is
+        // reachable from HasFieldData on any query thread, and reclamation no
+        // longer waits for a chunk lock, so the window is no longer rare.
+        auto snap = chunks_ptr_->acquire();
+        for (int64_t i = 0; i < snap.count; i++) {
+            if (chunks_ptr_->get_chunk_size(snap, i) > 0) {
                 return false;
             }
         }
@@ -413,7 +635,18 @@ class ConcurrentVectorImpl : public VectorBase {
 
     void
     clear() override {
+        // The container swaps its internal chunk collection under its own
+        // mutex; acquire_chunks() holders keep the swapped-out buffers alive.
+        // chunks_ptr_ itself is never reassigned, so num_chunk()'s bare
+        // counter_ load stays safe (it may go stale, never torn). Anything
+        // that follows a count with a chunk access must go through one
+        // snapshot instead -- see empty() above.
         chunks_ptr_->clear();
+    }
+
+    ChunkSnapshot
+    acquire_chunks() const override {
+        return chunks_ptr_->acquire();
     }
 
     bool
@@ -523,6 +756,10 @@ class ConcurrentVectorImpl : public VectorBase {
 
  protected:
     const ssize_t elements_per_row_;
+    // Stable for the column's lifetime -- some readers (flush-path
+    // HasFieldData/empty) dereference it without holding chunk locks. The
+    // swap that backs share_chunk_storage() happens INSIDE the container,
+    // under its own mutex.
     ChunkVectorPtr<Type> chunks_ptr_ = nullptr;
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
 

@@ -47,7 +47,7 @@ func InitOptions() error {
 		return nil
 	}
 
-	if err := UpdateParams(); err != nil {
+	if err := updateParams(); err != nil {
 		return err
 	}
 
@@ -77,10 +77,6 @@ func buildLinderaDownloadURLs(values map[string]string) map[string][]string {
 	return urls
 }
 
-func UpdateParams() error {
-	return updateParams()
-}
-
 func updateParams() error {
 	bytes, err := json.Marshal(BuildRuntimeOptions())
 	if err != nil {
@@ -91,10 +87,7 @@ func updateParams() error {
 	defer C.free(unsafe.Pointer(paramPtr))
 
 	status := C.set_tokenizer_option(paramPtr)
-	if err := HandleCStatus(&status, "failed to init segcore analyzer option"); err != nil {
-		return err
-	}
-	return nil
+	return HandleCStatus(&status, "failed to init segcore analyzer option")
 }
 
 func BuildExtraResourceInfo(storage string, resources []*internalpb.FileResourceInfo) (string, error) {

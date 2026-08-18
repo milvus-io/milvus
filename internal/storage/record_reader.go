@@ -17,6 +17,8 @@ import (
 )
 
 type RecordReader interface {
+	// Next returns a record borrowed from the reader and valid until the next
+	// Next or Close. Callers retaining it longer must Retain and Release it.
 	Next() (Record, error)
 	Close() error
 }
@@ -44,10 +46,10 @@ func (pr *packedRecordReader) Next() (Record, error) {
 }
 
 func (pr *packedRecordReader) Close() error {
-	if pr.reader != nil {
-		return pr.reader.Close()
+	if pr == nil || pr.reader == nil {
+		return nil
 	}
-	return nil
+	return pr.reader.Close()
 }
 
 func (pr *ffiPackedRecordReader) Next() (Record, error) {
@@ -59,10 +61,10 @@ func (pr *ffiPackedRecordReader) Next() (Record, error) {
 }
 
 func (pr *ffiPackedRecordReader) Close() error {
-	if pr.reader != nil {
-		return pr.reader.Close()
+	if pr == nil || pr.reader == nil {
+		return nil
 	}
-	return nil
+	return pr.reader.Close()
 }
 
 func newPackedRecordReader(
@@ -176,10 +178,19 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		ir.cur, err = ir.iterate()
-		if err != nil {
-			return nil, err
+		// Clear cur before iterating: iterate() returns a typed-nil reader
+		// (e.g. a nil *packedRecordReader boxed into the RecordReader
+		// interface) together with an error when opening the next chunk
+		// fails, e.g. a binlog object is missing in object storage. Assigning
+		// that to ir.cur would leave a non-nil interface holding a nil pointer,
+		// and the deferred Close() would then dereference it and panic. Only
+		// publish the reader once iterate() succeeds.
+		ir.cur = nil
+		next, iterErr := ir.iterate()
+		if iterErr != nil {
+			return nil, iterErr
 		}
+		ir.cur = next
 		rec, err = ir.cur.Next()
 	}
 	return rec, err
@@ -393,15 +404,18 @@ func (mr *ManifestReader) Close() error {
 type ChunkedBlobsReader func() ([]*Blob, error)
 
 type CompositeBinlogRecordReader struct {
-	fields map[FieldID]*schemapb.FieldSchema
-	index  map[FieldID]int16
-	brs    []*BinlogReader
-	rrs    []array.RecordReader
+	fields  map[FieldID]*schemapb.FieldSchema
+	index   map[FieldID]int16
+	brs     []*BinlogReader
+	rrs     []array.RecordReader
+	current Record
 }
 
 var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
 
 func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
+	crr.releaseCurrent()
+
 	recs := make([]arrow.Array, len(crr.fields))
 	releaseRecsOnError := true
 	defer func() {
@@ -443,13 +457,16 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		recs[crr.index[f.FieldID]] = arr
 	}
 	releaseRecsOnError = false
-	return &compositeRecord{
+	crr.current = &compositeRecord{
 		index: crr.index,
 		recs:  recs,
-	}, nil
+	}
+	return crr.current, nil
 }
 
 func (crr *CompositeBinlogRecordReader) Close() error {
+	crr.releaseCurrent()
+
 	if crr.brs != nil {
 		for _, er := range crr.brs {
 			if er != nil {
@@ -465,4 +482,11 @@ func (crr *CompositeBinlogRecordReader) Close() error {
 		}
 	}
 	return nil
+}
+
+func (crr *CompositeBinlogRecordReader) releaseCurrent() {
+	if crr.current != nil {
+		crr.current.Release()
+		crr.current = nil
+	}
 }

@@ -303,11 +303,18 @@ class TestMilvusClientFileResourceAdd(FileResourceTestBase):
         """
         target: add with empty name
         method: add_file_resource(name="", ...)
-        expected: server may accept empty name (no validation); cleanup after
+        expected: reject the request because name is required
         """
         client = self._client()
         # 1. add file resource with empty name
-        self.add_file_resource(client, "", JIEBA_DICT_PATH)
+        error = {ct.err_code: 1101, ct.err_msg: "missing parameter"}
+        self.add_file_resource(
+            client,
+            "",
+            JIEBA_DICT_PATH,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_file_resource_empty_path(self, file_resource_env):
@@ -1710,12 +1717,6 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         self.add_file_resource(client, res_name, remote)
         self.remove_file_resource(client, res_name)
 
-    @pytest.mark.xfail(
-        reason="https://github.com/milvus-io/milvus/issues/49684: "
-        "UTF-8 BOM is not stripped from first line of stop-words file, "
-        "so the first stop word (`\\ufeff的`) fails to match `的` and leaks through.",
-        strict=False,
-    )
     @pytest.mark.tags(CaseLabel.L2)
     def test_file_with_bom_and_crlf(self, file_resource_env):
         """
@@ -1829,7 +1830,6 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
 
             assert self.wait_until(_ok, timeout=30, interval=1), f"{name} still in-use after collection drop"
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/49279")
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_then_remove_remote_resources_no_panic(self, file_resource_env):
         """

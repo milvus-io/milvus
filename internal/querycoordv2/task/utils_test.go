@@ -574,11 +574,6 @@ func (s *UtilsSuite) TestPackLoadSegmentRequestLoadScope() {
 		wantScope querypb.LoadScope
 	}{
 		{
-			name:      "index update",
-			action:    ActionTypeUpdate,
-			wantScope: querypb.LoadScope_Index,
-		},
-		{
 			name:      "legacy stats update",
 			action:    ActionTypeStatsUpdate,
 			wantScope: querypb.LoadScope_Stats,
@@ -724,6 +719,68 @@ func TestApplyCollectionWarmupSettingAutoWarmup(t *testing.T) {
 		warmup, exist := common.GetWarmupPolicy(field.GetTypeParams()...)
 		assert.True(t, exist)
 		assert.Equal(t, common.WarmupDisable, warmup, "collection-level setting should override autoWarmupForNonPKIsolationCollection")
+	})
+}
+
+func TestApplyCollectionSettingsAutoWarmupVectorIndexCarrier(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("autoWarmupForNonPKIsolationCollection carries vector index warmup on effective schema", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_FloatVector},
+			},
+		}
+
+		result := applyCollectionSettings(schema, nil)
+
+		warmup, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, result.GetProperties()...)
+		assert.True(t, exist)
+		assert.Equal(t, common.WarmupSync, warmup)
+		_, fieldWarmupExist := common.GetWarmupPolicy(result.GetFields()[0].GetTypeParams()...)
+		assert.False(t, fieldWarmupExist, "vector field warmup should not be changed by autoWarmupForNonPKIsolationCollection")
+	})
+
+	t.Run("explicit vector index warmup keeps priority over autoWarmupForNonPKIsolationCollection", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{
+			{Key: common.WarmupVectorIndexKey, Value: common.WarmupDisable},
+		}
+
+		result := applyCollectionSettings(schema, collectionProps)
+
+		warmup, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, result.GetProperties()...)
+		assert.True(t, exist)
+		assert.Equal(t, common.WarmupDisable, warmup)
+	})
+
+	t.Run("PKI collection does not carry vector index auto warmup", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "true"},
+		}
+
+		result := applyCollectionSettings(schema, collectionProps)
+
+		_, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, result.GetProperties()...)
+		assert.False(t, exist)
 	})
 }
 

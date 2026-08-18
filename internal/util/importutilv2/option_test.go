@@ -61,14 +61,14 @@ func TestOption_ParseTimeRange(t *testing.T) {
 	assert.Equal(t, uint64(0), s)
 	assert.Equal(t, uint64(math.MaxUint64), e)
 
-	startTs := tsoutil.GetCurrentTime()
+	startTs := tsoutil.ComposeTSByTime(time.Now())
 	options := []*commonpb.KeyValuePair{{Key: StartTs, Value: fmt.Sprintf("%d", startTs)}}
 	s, e, err = ParseTimeRange(options)
 	assert.NoError(t, err)
 	assert.Equal(t, startTs, s)
 	assert.Equal(t, uint64(math.MaxUint64), e)
 
-	endTs := tsoutil.GetCurrentTime()
+	endTs := tsoutil.ComposeTSByTime(time.Now())
 	options = []*commonpb.KeyValuePair{{Key: EndTs, Value: fmt.Sprintf("%d", endTs)}}
 	s, e, err = ParseTimeRange(options)
 	assert.NoError(t, err)

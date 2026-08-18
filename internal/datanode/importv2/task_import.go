@@ -166,7 +166,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		mlog.Int64("bufferSize", bufferSize),
 		mlog.Int64("taskSlot", t.GetSlots()),
 		mlog.Any("files", t.req.GetFiles()),
-		mlog.Any("schema", t.GetSchema()),
+		mlog.FieldSchema(t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -227,6 +227,12 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if rowNum == 0 {
 			mlog.Info(t.ctx, "0 row was imported, the data may have been deleted", WrapLogFields(t)...)
 			continue
+		}
+		// the same check has been done in preimport task, double-check here since
+		// the actual import task re-reads the files
+		err = CheckStructArrayConsistency(t.GetSchema(), data)
+		if err != nil {
+			return err
 		}
 		err = AppendSystemFieldsData(t, data, rowNum)
 		if err != nil {

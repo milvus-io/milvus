@@ -443,6 +443,32 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {
     EXPECT_EQ(loon_schema->field(1)->name(), std::to_string(float_id.get()));
 }
 
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaCachesTextLobBinarySchema) {
+    schema_->AddDebugField("pk_field", DataType::INT64, false);
+    auto text_id = schema_->AddDebugField("text_field", DataType::TEXT, true);
+
+    auto first = schema_->ConvertToLoonArrowSchema();
+    auto second = schema_->ConvertToLoonArrowSchema();
+    EXPECT_NE(first.get(), second.get());
+
+    auto lob_first =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    auto lob_second =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    EXPECT_EQ(lob_first.get(), lob_second.get());
+    EXPECT_EQ(
+        lob_first->GetFieldByName(std::to_string(text_id.get()))->type()->id(),
+        arrow::Type::BINARY);
+
+    auto float_id =
+        schema_->AddDebugField("float_field", DataType::FLOAT, false);
+    auto updated =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    EXPECT_NE(lob_first.get(), updated.get());
+    ASSERT_EQ(updated->num_fields(), 3);
+    EXPECT_EQ(updated->field(2)->name(), std::to_string(float_id.get()));
+}
+
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaVsConvertToArrowSchema) {
     auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);

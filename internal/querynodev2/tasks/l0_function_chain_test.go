@@ -17,20 +17,32 @@
 package tasks
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
+
+func histogramSampleCount(t *testing.T, observer prometheus.Observer) uint64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	require.NoError(t, observer.(prometheus.Metric).Write(metric))
+	return metric.GetHistogram().GetSampleCount()
+}
 
 func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
@@ -262,6 +274,103 @@ func TestApplyPublicL0RerankPrunesInputsAndPreservesReduceSystemColumns(t *testi
 	require.InDelta(t, 1.0, scores.Value(1), 1e-6)
 	require.Equal(t, int64(1), ids.Value(2))
 	require.InDelta(t, 0.6, scores.Value(2), 1e-6)
+}
+
+func TestApplyL0RerankMetrics(t *testing.T) {
+	withBoostScoreCheckedAllocator(t)
+
+	repr, err := chain.ProtoChainToRepr(l0FunctionChainForTest(mapOpWithParamsForTest(
+		types.ScoreFieldName,
+		chainexpr.NumCombineFuncName,
+		map[string]*schemapb.FunctionParamValue{
+			types.NumCombineParamMode: stringParamForTest(types.NumCombineModeSum),
+		},
+		columnArgForTest(types.ScoreFieldName),
+		columnArgForTest(types.IDFieldName),
+	)))
+	require.NoError(t, err)
+	publicPrepared := &preparedQueryNodeFunctionChains{l0Chains: []*chain.ChainRepr{repr}}
+	boostPlan := &planpb.PlanNode{
+		Scorers: []*planpb.ScoreFunction{{Weight: 1}},
+		ScoreOption: &planpb.ScoreOption{
+			FunctionMode: planpb.FunctionMode_FunctionModeSum,
+			BoostMode:    planpb.BoostMode_BoostModeMultiply,
+		},
+	}
+	boostPrepared := &preparedQueryNodeFunctionChains{plan: boostPlan}
+	task := &SearchTask{ctx: t.Context()}
+	nodeID := fmt.Sprint(task.GetNodeID())
+
+	successObserver := metrics.QueryNodeFunctionChainLatency.WithLabelValues(
+		nodeID,
+		metrics.FunctionChainLevelL0,
+		metrics.SuccessLabel,
+	)
+	failObserver := metrics.QueryNodeFunctionChainLatency.WithLabelValues(
+		nodeID,
+		metrics.FunctionChainLevelL0,
+		metrics.FailLabel,
+	)
+
+	t.Run("public L0 success", func(t *testing.T) {
+		before := histogramSampleCount(t, successObserver)
+		segDFs := []*chain.DataFrame{
+			makeBoostScoreTestDF(t, []int64{1, 2}, []float32{0.5, 0.2}, []int64{10, 20}, []int64{2}),
+			makeBoostScoreTestDF(t, []int64{3, 4}, []float32{0.9, 0.1}, []int64{30, 40}, []int64{2}),
+		}
+		defer func() {
+			for _, df := range segDFs {
+				df.Release()
+			}
+		}()
+
+		require.NoError(t, task.applyL0Rerank(segDFs, publicPrepared, nil, nil))
+		require.Equal(t, before+1, histogramSampleCount(t, successObserver))
+	})
+
+	t.Run("public L0 failure", func(t *testing.T) {
+		before := histogramSampleCount(t, failObserver)
+		err := task.applyL0Rerank([]*chain.DataFrame{nil}, publicPrepared, nil, nil)
+		require.Error(t, err)
+		require.Equal(t, before+1, histogramSampleCount(t, failObserver))
+	})
+
+	t.Run("boost score success", func(t *testing.T) {
+		oldFactory := boostScoreRunnerFactory
+		boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+			scores:   []float32{2.0},
+			hasScore: []bool{true},
+		})
+		defer func() { boostScoreRunnerFactory = oldFactory }()
+
+		before := histogramSampleCount(t, successObserver)
+		segDFs := []*chain.DataFrame{
+			makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1}),
+		}
+		defer func() {
+			for _, df := range segDFs {
+				df.Release()
+			}
+		}()
+
+		require.NoError(t, task.applyL0Rerank(segDFs, boostPrepared, []segments.Segment{nil}, nil))
+		require.Equal(t, before+1, histogramSampleCount(t, successObserver))
+	})
+
+	t.Run("boost score failure", func(t *testing.T) {
+		before := histogramSampleCount(t, failObserver)
+		err := task.applyL0Rerank(nil, boostPrepared, []segments.Segment{nil}, nil)
+		require.Error(t, err)
+		require.Equal(t, before+1, histogramSampleCount(t, failObserver))
+	})
+
+	t.Run("no rerank does not record", func(t *testing.T) {
+		successBefore := histogramSampleCount(t, successObserver)
+		failBefore := histogramSampleCount(t, failObserver)
+		require.NoError(t, task.applyL0Rerank(nil, &preparedQueryNodeFunctionChains{}, nil, nil))
+		require.Equal(t, successBefore, histogramSampleCount(t, successObserver))
+		require.Equal(t, failBefore, histogramSampleCount(t, failObserver))
+	})
 }
 
 func l0FunctionChainForTest(ops ...*schemapb.FunctionChainOp) *schemapb.FunctionChain {

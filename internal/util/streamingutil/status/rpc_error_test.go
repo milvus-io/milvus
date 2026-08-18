@@ -6,6 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -42,7 +43,42 @@ func TestNewGRPCStatusFromStreamingError(t *testing.T) {
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
 
 	st = NewGRPCStatusFromStreamingError(
+		NewUnrecoverableError("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewSchemaVersionMismatch("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewRateLimitRejected("test"),
+	)
+	assert.Equal(t, codes.ResourceExhausted, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
 		New(10086, "test"),
 	)
 	assert.Equal(t, codes.Unknown, st.Code())
+}
+
+func TestPartialUpdateCASErrorsGRPCMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		err  *StreamingError
+		code codes.Code
+	}{
+		{"retryable", NewPartialUpdateRetryable("retry"), codes.Aborted},
+		{"malformed", NewUnrecoverableError("bad"), codes.FailedPrecondition},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := NewGRPCStatusFromStreamingError(tc.err)
+			require.Equal(t, tc.code, st.Code())
+			roundTrip := ConvertStreamingError("test", st.Err())
+			se := AsStreamingError(roundTrip)
+			require.Equal(t, tc.err.Code, se.Code)
+		})
+	}
 }

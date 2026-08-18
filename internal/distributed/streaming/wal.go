@@ -83,10 +83,6 @@ func (w *walAccesserImpl) Local() Local {
 	return localServiceImpl{w}
 }
 
-func (w *walAccesserImpl) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
-	return w.handlerClient.PrepareReleaseManualFlush(ctx, collectionID, vchannel, releaseSegmentIDs)
-}
-
 // ControlChannel returns the control channel name of the wal.
 func (w *walAccesserImpl) ControlChannel() string {
 	last, err := w.streamingCoordClient.Assignment().GetLatestAssignments(context.Background())
@@ -134,6 +130,26 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 		IgnorePauseConsumption: opts.IgnorePauseConsumption,
 	})
 	return rc
+}
+
+// ResolvePChannelInfo returns the current pchannel assignment for the vchannel.
+func (w *walAccesserImpl) ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return types.PChannelInfo{}, ErrWALAccesserClosed
+	}
+	defer w.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return types.PChannelInfo{}, err
+	}
+	for _, assignment := range assignments.Assignments {
+		if pchannelInfo, ok := assignment.Channels[pchannel]; ok {
+			return pchannelInfo, nil
+		}
+	}
+	return types.PChannelInfo{}, status.NewChannelNotExist(pchannel)
 }
 
 // Broadcast returns a broadcast for broadcasting records to the wal.

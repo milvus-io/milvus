@@ -90,12 +90,6 @@ type Loader interface {
 	// GetChunkManager returns the chunk manager for remote storage access.
 	GetChunkManager() storage.ChunkManager
 
-	// LoadIndex append index for segment and remove vector binlogs.
-	LoadIndex(ctx context.Context,
-		segment Segment,
-		info *querypb.SegmentLoadInfo,
-		version int64) error
-
 	// ReopenSegments update segment data according to new load info.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
@@ -158,10 +152,11 @@ type resourceEstimateFactor struct {
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
 	// externalRawDataFactor is the peak-memory safety factor for external
-	// segments. External tables always download, decompress and deserialize
-	// row groups into Arrow buffers regardless of mmap / TieredEviction
-	// settings, so peak transient memory = rawDataSize * factor. Defaults
-	// to 2.0 via paramtable queryNode.externalCollection.rawDataFactor.
+	// segments when tiered eviction is disabled. With tiered eviction enabled,
+	// the caching layer reserves transient loading overhead from the sampled
+	// external row size, so applying this factor in Go would reserve the same
+	// raw-data memory twice. Defaults to 2.0 via paramtable
+	// queryNode.externalCollection.rawDataFactor.
 	externalRawDataFactor float64
 }
 
@@ -282,26 +277,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	for _, info := range infos {
 		loadInfo := info
 
-		for _, indexInfo := range loadInfo.IndexInfos {
-			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-
-			// some build params also exist in indexParams, which are useless during loading process
-			if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-				if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-					return nil, err
-				}
-			}
-
-			// set whether enable offset cache for bitmap index
-			if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-				indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-			}
-
-			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-				return nil, err
-			}
-
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		if err := prepareIndexLoadParams(loadInfo.GetIndexInfos()); err != nil {
+			return nil, err
 		}
 
 		segment, err := NewSegment(
@@ -418,6 +395,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
+		if localSegment, ok := segment.(*LocalSegment); ok {
+			localSegment.compactLoadInfoForRuntime()
+		}
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
@@ -1139,6 +1119,8 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 
+	relatedDataSize := calculateSegmentLogSize(segment.LoadInfo())
+	segment.relatedDataSize.Store(relatedDataSize)
 	binlogSize := calculateSegmentMemorySize(segment.LoadInfo())
 	segment.manager.AddLoadedBinlogSize(binlogSize)
 	segment.binlogSize.Store(binlogSize)
@@ -1193,45 +1175,6 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
-	schemaHelper *typeutil.SchemaHelper,
-	segment *LocalSegment,
-	numRows int64,
-	indexedFieldInfos map[int64]*IndexedFieldInfo,
-) error {
-	for _, fieldInfo := range indexedFieldInfos {
-		fieldID := fieldInfo.IndexInfo.FieldID
-		indexInfo := fieldInfo.IndexInfo
-		tr := timerecord.NewTimeRecorder("loadFieldIndex")
-		err := loader.loadFieldIndex(ctx, segment, indexInfo)
-		loadFieldIndexSpan := tr.RecordSpan()
-		if err != nil {
-			return err
-		}
-
-		mlog.Info(context.TODO(), "load field binlogs done for sealed segment with index",
-			mlog.Int64("fieldID", fieldID),
-			mlog.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
-			mlog.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
-			mlog.Duration("load_duration", loadFieldIndexSpan),
-		)
-
-		// set average row data size of variable field
-		field, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			return err
-		}
-		if typeutil.IsVariableDataType(field.GetDataType()) {
-			err = segment.UpdateFieldRawDataSize(ctx, numRows, fieldInfo.FieldBinlog)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
 func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64, stats map[int64]*storage.BM25Stats, binlogPaths map[int64][]string) error {
 	if len(binlogPaths) == 0 {
 		mlog.Info(context.TODO(), "there are no bm25 stats logs saved with segment")
@@ -1272,29 +1215,6 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 	}
 
 	return nil
-}
-
-func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
-	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-
-	for _, indexPath := range indexInfo.IndexFilePaths {
-		if path.Base(indexPath) != storage.IndexParamsKey {
-			filteredPaths = append(filteredPaths, indexPath)
-		}
-	}
-
-	indexInfo.IndexFilePaths = filteredPaths
-	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
-	if err != nil {
-		return err
-	}
-
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
-	}
-
-	return segment.LoadIndex(ctx, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(
@@ -1453,7 +1373,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return readDeltaRecords(reader)
 	}
 
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
+	// Manifest-backed delta loading is shared by the parent segment and by
+	// compact-to child manifests carried as a load-time delete overlay.
+	readManifestDeltas := func(manifestPath string) error {
 		if isMilvusTableRealPK {
 			// Real-PK milvus-table manifests keep source deltalogs. Target-owned
 			// deltalogs are only valid for virtual-PK translation.
@@ -1530,9 +1452,16 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return err
 			}
 		}
+		return nil
+	}
+
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
+		if err := readManifestDeltas(manifestPath); err != nil {
+			return err
+		}
 	} else {
 		// V1: delta data referenced by Deltalogs entries
-		var paths []string
+		paths := make([]string, 0)
 		for _, deltalog := range deltaLogs {
 			for _, binlog := range lo.Filter(deltalog.Binlogs, valid) {
 				if p := binlog.GetLogPath(); p != "" {
@@ -1545,6 +1474,14 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return loader.cm.MultiRead(ctx, paths)
 			}),
 		); err != nil {
+			return err
+		}
+	}
+
+	// Child manifests are loaded after the parent delete source so all delete
+	// records are folded into the same DeltaData before segcore sees the segment.
+	for _, manifestPath := range loadInfo.GetChildManifestPaths() {
+		if err := readManifestDeltas(manifestPath); err != nil {
 			return err
 		}
 	}
@@ -1635,6 +1572,9 @@ func createStorageConfig() *indexpb.StorageConfig {
 		return &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	}
 	return &indexpb.StorageConfig{
@@ -1652,6 +1592,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
@@ -1965,6 +1906,48 @@ func (loader *segmentLoader) checkLoadingResource(
 	return nil
 }
 
+// resolveSegmentEstimateLogs returns the raw and delta metadata consumed by the
+// existing estimator. Internal Storage V3 descriptors are adapted to pathless
+// FieldBinlogs; all other SegmentLoadInfo metadata remains on the original proto.
+func resolveSegmentEstimateLogs(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog) {
+	binlogs := loadInfo.GetBinlogPaths()
+	deltalogs := loadInfo.GetDeltalogs()
+	if len(binlogs) > 0 {
+		return binlogs, deltalogs
+	}
+	if loadInfo.GetStorageVersion() != storage.StorageV3 || loadInfo.GetManifestPath() == "" || typeutil.IsExternalCollection(schema) {
+		return binlogs, deltalogs
+	}
+
+	stats := loadInfo.GetStats()
+	resource := stats.GetLoadResource()
+	if resource == nil {
+		return binlogs, deltalogs
+	}
+
+	groups := resource.GetColumnGroups()
+	binlogs = make([]*datapb.FieldBinlog, 0, len(groups))
+	for _, group := range groups {
+		binlogs = append(binlogs, &datapb.FieldBinlog{
+			FieldID:     group.GetGroupId(),
+			ChildFields: append([]int64(nil), group.GetFieldIds()...),
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum: loadInfo.GetNumOfRows(),
+				MemorySize: group.GetMemorySize(),
+			}},
+		})
+	}
+
+	deltalogs = nil
+	if deltaSize := stats.GetDeltaBinlogSize(); deltaSize > 0 {
+		deltalogs = []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{MemorySize: deltaSize}},
+		}}
+	}
+
+	return binlogs, deltalogs
+}
+
 // this function is used to estimate the logical resource usage of a segment, which should only be used when tiered eviction is enabled
 // the result is the final resource usage of the segment inevictable part plus the final usage of evictable part with cache ratio applied
 // TODO: the inevictable part is not correct, since we cannot know the final resource usage of interim index and default-value column before loading,
@@ -1973,7 +1956,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	var segmentInevictableMemorySize, segmentInevictableDiskSize uint64
 	var segmentEvictableMemorySize, segmentEvictableDiskSize uint64
 
-	id2Binlogs := lo.SliceToMap(loadInfo.BinlogPaths, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
+	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	id2Binlogs := lo.SliceToMap(binlogs, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
 		return fieldBinlog.GetFieldID(), fieldBinlog
 	})
 
@@ -2060,8 +2044,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			// get field schema from fieldID
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				mlog.Warn(context.TODO(), "failed to get field schema", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()), mlog.Err(err))
-				return nil, err
+				mlog.Info(ctx, "skip binlog for dropped field", mlog.FieldFieldID(fieldID), mlog.String("name", schema.GetName()))
+				continue
 			}
 
 			// missing mapping, shall be "0" group for storage v2
@@ -2117,7 +2101,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	}
 
 	// PART 4: calculate logical resource usage of delete data
-	for _, fieldBinlog := range loadInfo.Deltalogs {
+	for _, fieldBinlog := range deltalogs {
 		// MemorySize of filedBinlog is the actual size in memory, so the expansionFactor
 		//   should be 1, in most cases.
 		expansionFactor := float64(1)
@@ -2169,7 +2153,8 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	var mmapFieldCount int
 	var fieldGpuMemorySize []uint64
 
-	id2Binlogs := lo.SliceToMap(loadInfo.BinlogPaths, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
+	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	id2Binlogs := lo.SliceToMap(binlogs, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
 		return fieldBinlog.GetFieldID(), fieldBinlog
 	})
 
@@ -2348,17 +2333,19 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// External segments carry pre-computed MemorySize in fake binlogs (from
 	// DataNode Take sampling). Adjust the memory estimate for two external-
 	// specific behaviors:
-	//   1. Non-lazy path: apply externalRawDataFactor to cover the peak
-	//      transient memory during download + decompress + Arrow deserialize
-	//      (normal packed segments do not have this peak because their
-	//      binlogs are already in Arrow IPC format).
+	//   1. Non-lazy path without tiered eviction: apply externalRawDataFactor
+	//      to cover the peak transient memory during download + decompress +
+	//      Arrow deserialize (normal packed segments do not have this peak
+	//      because their binlogs are already in Arrow IPC format). When tiered
+	//      eviction is enabled, the caching layer reserves this loading
+	//      overhead, so Go must not reserve the same raw-data margin again.
 	//   2. Full-lazy path (all external fields warmup=disable): no eager
 	//      load, so subtract the raw data size that PART 2 added.
 	// Also propagate EstimatedBytesPerRow to the C++ ManifestGroupTranslator
 	// so the tiered-cache layer sizes chunks correctly.
 	if typeutil.IsExternalCollection(schema) && loadInfo.GetNumOfRows() > 0 {
 		var fakeBinlogMemSize int64
-		for _, fb := range loadInfo.BinlogPaths {
+		for _, fb := range binlogs {
 			fakeBinlogMemSize += getBinlogDataMemorySize(fb)
 		}
 		loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
@@ -2371,9 +2358,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			} else {
 				segMemoryLoadingSize = 0
 			}
-		} else if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
-			// Non-lazy → add peak margin on top of rawSize that PART 2 added.
-			segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+		} else if !multiplyFactor.TieredEvictionEnabled {
+			if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
+				// Non-lazy → add peak margin on top of rawSize that PART 2 added.
+				segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+			}
 		}
 	}
 
@@ -2387,7 +2376,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// PART 4: calculate size of delete data
 	// delete data isn't managed by the caching layer, so its size should always be included,
 	// regardless of the tiered eviction value
-	for _, fieldBinlog := range loadInfo.Deltalogs {
+	for _, fieldBinlog := range deltalogs {
 		// MemorySize of filedBinlog is the actual size in memory, but we should also consider
 		// the memcpy from golang to cpp side, so the expansionFactor is set to 2.
 		expansionFactor := float64(2)
@@ -2470,90 +2459,39 @@ func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 		dataType == schemapb.DataType_BFloat16Vector
 }
 
-func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {
-	collection := loader.manager.Collection.Get(collectionID)
-	if collection == nil {
-		return 0, merr.WrapErrCollectionNotFound(collectionID)
-	}
-
-	for _, field := range collection.Schema().GetFields() {
-		if field.GetFieldID() == fieldID {
-			return field.GetDataType(), nil
+// prepareIndexLoadParams injects QueryNode-local index load parameters into each
+// index's IndexParams in place. These params (e.g. DISKANN num_load_thread) are
+// derived from local QueryNode resources/config and are never persisted in the
+// index metadata, so they must be re-injected on every load path before the load
+// info reaches segcore. Both full-load (Load) and Reopen call this; skipping it
+// on Reopen was the root cause of issue #51249 (segcore asserts
+// "param num_load_thread is empty" while loading a DISKANN index).
+func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
+	for _, indexInfo := range indexInfos {
+		if indexInfo == nil {
+			continue
 		}
-	}
+		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
 
-	for _, structField := range collection.Schema().GetStructArrayFields() {
-		if structField.GetFieldID() == fieldID {
-			return schemapb.DataType_ArrayOfStruct, nil
-		}
-		for _, subField := range structField.GetFields() {
-			if subField.GetFieldID() == fieldID {
-				return subField.GetDataType(), nil
-			}
-		}
-	}
-
-	return 0, merr.WrapErrFieldNotFound(fieldID)
-}
-
-func (loader *segmentLoader) LoadIndex(ctx context.Context,
-	seg Segment,
-	loadInfo *querypb.SegmentLoadInfo,
-	version int64,
-) error {
-	segment, ok := seg.(*LocalSegment)
-	if !ok {
-		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
-	}
-	// Filter out LOADING segments only
-	// use None to avoid loaded check
-	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo)
-	defer loader.unregister(infos...)
-
-	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
-		info = typeutil.Clone(info)
-		// remain binlog paths whose field id is in index infos to estimate resource usage correctly
-		indexFields := typeutil.NewSet(lo.Map(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) int64 { return indexInfo.GetFieldID() })...)
-		var binlogPaths []*datapb.FieldBinlog
-		for _, binlog := range info.GetBinlogPaths() {
-			if indexFields.Contain(binlog.GetFieldID()) {
-				binlogPaths = append(binlogPaths, binlog)
-			}
-		}
-		info.BinlogPaths = binlogPaths
-		info.Deltalogs = nil
-		info.Statslogs = nil
-		return info
-	})
-	requestResourceResult, err := loader.requestResource(ctx, indexInfo...)
-	if err != nil {
-		return err
-	}
-	defer loader.freeRequestResource(requestResourceResult)
-
-	mlog.Info(context.TODO(), "segment loader start to load index", mlog.Int("segmentNumAfterFilter", len(infos)))
-	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Inc()
-	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Dec()
-
-	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
-	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	for _, loadInfo := range infos {
-		for _, info := range loadInfo.GetIndexInfos() {
-			if len(info.GetIndexFilePaths()) == 0 {
-				mlog.Warn(context.TODO(), "failed to add index for segment, index file list is empty, the segment may be too small")
-				return merr.WrapErrIndexNotFound("index file list empty")
-			}
-
-			err := loader.loadFieldIndex(ctx, segment, info)
-			if err != nil {
-				mlog.Warn(context.TODO(), "failed to load index for segment", mlog.Err(err))
+		// some build params also exist in indexParams, which are useless during loading process
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
+			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
 				return err
 			}
 		}
-		loader.notifyLoadFinish(loadInfo)
-	}
 
-	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
+		// set whether enable offset cache for bitmap index
+		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+			indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+		}
+
+		if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+			return err
+		}
+
+		indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+	}
+	return nil
 }
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,

@@ -166,7 +166,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        return true;
+        return !is_nested_index_ && !is_array_field_;
     }
 
     void
@@ -253,6 +253,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     int64_t field_id_ = 0;
 
     bool is_nested_index_ = false;
+    bool is_array_field_ = false;
     bool is_built_ = false;
     Config config_;
     // idx_to_offsets: maps row_id → sorted offset.

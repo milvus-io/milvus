@@ -19,6 +19,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math/rand"
@@ -142,7 +143,6 @@ func TestBinlogStreamWriter(t *testing.T) {
 		ok := rr.Next()
 		assert.True(t, ok)
 		rec := rr.Record()
-		defer rec.Release()
 		assert.Equal(t, int64(size), rec.NumRows())
 		ok = rr.Next()
 		assert.False(t, ok)
@@ -728,7 +728,9 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	require.NotNil(t, capturedPluginContext)
 	require.Equal(t, int64(7), capturedPluginContext.GetEncryptionZoneId())
 	require.Equal(t, int64(2), capturedPluginContext.GetCollectionId())
-	require.Equal(t, "unsafe-key", capturedPluginContext.GetEncryptionKey())
+	// the plugin context contract carries the key base64-encoded, matching
+	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
+	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {

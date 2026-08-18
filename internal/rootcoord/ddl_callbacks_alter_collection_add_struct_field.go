@@ -78,6 +78,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {

@@ -751,6 +751,58 @@ func (_c *MockCache_HasDatabase_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
+// InvalidateCollectionMeta provides a mock function with given fields: ctx, database, collectionName, collectionID, removeAlias
+func (_m *MockCache) InvalidateCollectionMeta(ctx context.Context, database string, collectionName string, collectionID int64, removeAlias bool) []string {
+	ret := _m.Called(ctx, database, collectionName, collectionID, removeAlias)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InvalidateCollectionMeta")
+	}
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, bool) []string); ok {
+		r0 = rf(ctx, database, collectionName, collectionID, removeAlias)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	return r0
+}
+
+// MockCache_InvalidateCollectionMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidateCollectionMeta'
+type MockCache_InvalidateCollectionMeta_Call struct {
+	*mock.Call
+}
+
+// InvalidateCollectionMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - collectionID int64
+//   - removeAlias bool
+func (_e *MockCache_Expecter) InvalidateCollectionMeta(ctx interface{}, database interface{}, collectionName interface{}, collectionID interface{}, removeAlias interface{}) *MockCache_InvalidateCollectionMeta_Call {
+	return &MockCache_InvalidateCollectionMeta_Call{Call: _e.mock.On("InvalidateCollectionMeta", ctx, database, collectionName, collectionID, removeAlias)}
+}
+
+func (_c *MockCache_InvalidateCollectionMeta_Call) Run(run func(ctx context.Context, database string, collectionName string, collectionID int64, removeAlias bool)) *MockCache_InvalidateCollectionMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int64), args[4].(bool))
+	})
+	return _c
+}
+
+func (_c *MockCache_InvalidateCollectionMeta_Call) Return(_a0 []string) *MockCache_InvalidateCollectionMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCache_InvalidateCollectionMeta_Call) RunAndReturn(run func(context.Context, string, string, int64, bool) []string) *MockCache_InvalidateCollectionMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveAlias provides a mock function with given fields: ctx, database, alias
 func (_m *MockCache) RemoveAlias(ctx context.Context, database string, alias string) {
 	_m.Called(ctx, database, alias)
@@ -786,9 +838,44 @@ func (_c *MockCache_RemoveAlias_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
-// RemoveCollection provides a mock function with given fields: ctx, database, collectionName, version
-func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string, version uint64) {
-	_m.Called(ctx, database, collectionName, version)
+// RemoveAliasHolders provides a mock function with given fields: ctx, database, alias
+func (_m *MockCache) RemoveAliasHolders(ctx context.Context, database string, alias string) {
+	_m.Called(ctx, database, alias)
+}
+
+// MockCache_RemoveAliasHolders_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveAliasHolders'
+type MockCache_RemoveAliasHolders_Call struct {
+	*mock.Call
+}
+
+// RemoveAliasHolders is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - alias string
+func (_e *MockCache_Expecter) RemoveAliasHolders(ctx interface{}, database interface{}, alias interface{}) *MockCache_RemoveAliasHolders_Call {
+	return &MockCache_RemoveAliasHolders_Call{Call: _e.mock.On("RemoveAliasHolders", ctx, database, alias)}
+}
+
+func (_c *MockCache_RemoveAliasHolders_Call) Run(run func(ctx context.Context, database string, alias string)) *MockCache_RemoveAliasHolders_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemoveAliasHolders_Call) Return() *MockCache_RemoveAliasHolders_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RemoveAliasHolders_Call) RunAndReturn(run func(context.Context, string, string)) *MockCache_RemoveAliasHolders_Call {
+	_c.Run(run)
+	return _c
+}
+
+// RemoveCollection provides a mock function with given fields: ctx, database, collectionName
+func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string) {
+	_m.Called(ctx, database, collectionName)
 }
 
 // MockCache_RemoveCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveCollection'
@@ -800,14 +887,13 @@ type MockCache_RemoveCollection_Call struct {
 //   - ctx context.Context
 //   - database string
 //   - collectionName string
-//   - version uint64
-func (_e *MockCache_Expecter) RemoveCollection(ctx interface{}, database interface{}, collectionName interface{}, version interface{}) *MockCache_RemoveCollection_Call {
-	return &MockCache_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, database, collectionName, version)}
+func (_e *MockCache_Expecter) RemoveCollection(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_RemoveCollection_Call {
+	return &MockCache_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, database, collectionName)}
 }
 
-func (_c *MockCache_RemoveCollection_Call) Run(run func(ctx context.Context, database string, collectionName string, version uint64)) *MockCache_RemoveCollection_Call {
+func (_c *MockCache_RemoveCollection_Call) Run(run func(ctx context.Context, database string, collectionName string)) *MockCache_RemoveCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
 	})
 	return _c
 }
@@ -817,22 +903,22 @@ func (_c *MockCache_RemoveCollection_Call) Return() *MockCache_RemoveCollection_
 	return _c
 }
 
-func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context, string, string, uint64)) *MockCache_RemoveCollection_Call {
+func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context, string, string)) *MockCache_RemoveCollection_Call {
 	_c.Run(run)
 	return _c
 }
 
-// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID, version, removeVersion
-func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64, version uint64, removeVersion bool) []string {
-	ret := _m.Called(ctx, collectionID, version, removeVersion)
+// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID
+func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64) []string {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveCollectionsByID")
 	}
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64, bool) []string); ok {
-		r0 = rf(ctx, collectionID, version, removeVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []string); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -850,15 +936,13 @@ type MockCache_RemoveCollectionsByID_Call struct {
 // RemoveCollectionsByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-//   - version uint64
-//   - removeVersion bool
-func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}, version interface{}, removeVersion interface{}) *MockCache_RemoveCollectionsByID_Call {
-	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID, version, removeVersion)}
+func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}) *MockCache_RemoveCollectionsByID_Call {
+	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID)}
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64, version uint64, removeVersion bool)) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64)) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(uint64), args[3].(bool))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -868,7 +952,7 @@ func (_c *MockCache_RemoveCollectionsByID_Call) Return(_a0 []string) *MockCache_
 	return _c
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Context, int64, uint64, bool) []string) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Context, int64) []string) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -907,9 +991,43 @@ func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// RemovePartition provides a mock function with given fields: ctx, database, collectionID, collectionName, partitionName, version
-func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID int64, collectionName string, partitionName string, version uint64) {
-	_m.Called(ctx, database, collectionID, collectionName, partitionName, version)
+// RemoveDatabaseInfo provides a mock function with given fields: ctx, database
+func (_m *MockCache) RemoveDatabaseInfo(ctx context.Context, database string) {
+	_m.Called(ctx, database)
+}
+
+// MockCache_RemoveDatabaseInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDatabaseInfo'
+type MockCache_RemoveDatabaseInfo_Call struct {
+	*mock.Call
+}
+
+// RemoveDatabaseInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+func (_e *MockCache_Expecter) RemoveDatabaseInfo(ctx interface{}, database interface{}) *MockCache_RemoveDatabaseInfo_Call {
+	return &MockCache_RemoveDatabaseInfo_Call{Call: _e.mock.On("RemoveDatabaseInfo", ctx, database)}
+}
+
+func (_c *MockCache_RemoveDatabaseInfo_Call) Run(run func(ctx context.Context, database string)) *MockCache_RemoveDatabaseInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemoveDatabaseInfo_Call) Return() *MockCache_RemoveDatabaseInfo_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RemoveDatabaseInfo_Call) RunAndReturn(run func(context.Context, string)) *MockCache_RemoveDatabaseInfo_Call {
+	_c.Run(run)
+	return _c
+}
+
+// RemovePartition provides a mock function with given fields: ctx, database, collectionID, collectionName, partitionName
+func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID int64, collectionName string, partitionName string) {
+	_m.Called(ctx, database, collectionID, collectionName, partitionName)
 }
 
 // MockCache_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
@@ -923,14 +1041,13 @@ type MockCache_RemovePartition_Call struct {
 //   - collectionID int64
 //   - collectionName string
 //   - partitionName string
-//   - version uint64
-func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionID interface{}, collectionName interface{}, partitionName interface{}, version interface{}) *MockCache_RemovePartition_Call {
-	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionID, collectionName, partitionName, version)}
+func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionID interface{}, collectionName interface{}, partitionName interface{}) *MockCache_RemovePartition_Call {
+	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionID, collectionName, partitionName)}
 }
 
-func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID int64, collectionName string, partitionName string, version uint64)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID int64, collectionName string, partitionName string)) *MockCache_RemovePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(string), args[4].(string), args[5].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(string), args[4].(string))
 	})
 	return _c
 }
@@ -940,7 +1057,7 @@ func (_c *MockCache_RemovePartition_Call) Return() *MockCache_RemovePartition_Ca
 	return _c
 }
 
-func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, int64, string, string, uint64)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, int64, string, string)) *MockCache_RemovePartition_Call {
 	_c.Run(run)
 	return _c
 }

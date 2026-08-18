@@ -100,7 +100,7 @@ func TestErrorTypeMarker(t *testing.T) {
 }
 
 // TestSentinelErrorTypeClassification guards the input/system split that the
-// proxy fail_input/fail_system alerting relies on. A sentinel silently losing
+// proxy cause="user"/cause="system" alerting relies on. A sentinel silently losing
 // (or gaining) WithErrorType(InputError) flips which party an alert blames.
 func TestSentinelErrorTypeClassification(t *testing.T) {
 	// The request's own fault -> InputError (and therefore non-retriable).

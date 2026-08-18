@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -494,7 +495,29 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int32(4), ver)
 	assert.True(t, m.collections[104].HasTextField())
-	assert.True(t, m.collections[104].UseGrowingSourceFlush())
+	assert.True(t, m.collections[104].RequiresStorageV3())
+	assert.False(t, m.collections[104].AllowGrowingSourceFlush())
+
+	legacySchema := proto.Clone(textSchema).(*schemapb.CollectionSchema)
+	legacySchema.Version = 5
+	legacySchemaBytes, err := proto.Marshal(legacySchema)
+	require.NoError(t, err)
+	createMsgLegacySchema := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v_legacy_schema").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 105,
+			PartitionIds: []int64{205},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: legacySchemaBytes}).
+		MustBuildMutable().
+		WithTimeTick(275).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(14))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgLegacySchema))
+
+	storedLegacySchema, err := m.GetCollectionSchema(105, legacySchema.GetVersion())
+	require.NoError(t, err)
+	require.True(t, proto.Equal(legacySchema, storedLegacySchema))
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
@@ -640,6 +663,84 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	m.Close()
 }
 
+func TestShardManagerGetPrimaryKeyDescriptor(t *testing.T) {
+	newSchema := func(version int32, fieldID int64, dataType schemapb.DataType) *streamingpb.CollectionSchemaOfVChannel {
+		return &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Version: version,
+				Fields: []*schemapb.FieldSchema{{
+					FieldID:      fieldID,
+					DataType:     dataType,
+					IsPrimaryKey: true,
+				}},
+			},
+		}
+	}
+
+	t.Run("returns cached descriptor", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(2, 100, schemapb.DataType_Int64))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, 2)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, descriptor)
+		assert.NotNil(t, info.primaryKey)
+	})
+
+	t.Run("refreshes descriptor with schema", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(1, 100, schemapb.DataType_Int64))
+		info.setSchema(newSchema(2, 101, schemapb.DataType_VarChar))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, latestCollectionSchemaVersion)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 101, DataType: schemapb.DataType_VarChar}, descriptor)
+	})
+
+	t.Run("reads existing uncached collection info", func(t *testing.T) {
+		info := &CollectionInfo{Schema: newSchema(1, 100, schemapb.DataType_Int64)}
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, descriptor)
+		assert.Nil(t, info.primaryKey)
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{}}
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionNotFound)
+	})
+
+	t.Run("schema not found", func(t *testing.T) {
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: {}}}
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionSchemaNotFound)
+	})
+
+	t.Run("schema version mismatch", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(2, 100, schemapb.DataType_Int64))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
+	})
+
+	t.Run("schema has no primary key", func(t *testing.T) {
+		info := &CollectionInfo{Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101}}},
+		}}
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		_, err := m.GetPrimaryKeyDescriptor(10, latestCollectionSchemaVersion)
+		assert.Error(t, err)
+	})
+}
+
 // newShardManagerWithGrowingSegment builds a minimal shard manager that has
 // collection collID / partition partID / growing segment segID pre-loaded.
 func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64) *shardManagerImpl {
@@ -689,6 +790,69 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 		},
 		TxnManager: &mockedTxnManager{},
 	}).(*shardManagerImpl)
+}
+
+func TestAsyncFlushSegmentDoesNotHoldShardManagerLockWhileWaitingForWAL(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	const (
+		collID = int64(10)
+		partID = int64(20)
+		segID  = int64(3001)
+	)
+	m := newShardManagerWithGrowingSegment(t, collID, partID, segID)
+	readyWAL := m.wal.Get()
+	pendingWAL := syncutil.NewFuture[wal.WAL]()
+	m.wal = pendingWAL
+	for _, pm := range m.partitionManagers {
+		pm.wal = pendingWAL
+	}
+
+	flushDone := make(chan struct{})
+	go func() {
+		m.AsyncFlushSegment(utils.SealSegmentSignal{
+			SegmentBelongs: utils.SegmentBelongs{
+				PChannel:     m.Channel().Name,
+				VChannel:     "v_alter",
+				CollectionID: collID,
+				PartitionID:  partID,
+				SegmentID:    segID,
+			},
+			SealPolicy: policy.PolicyCapacity(),
+		})
+		close(flushDone)
+	}()
+	select {
+	case <-flushDone:
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	schemaReadDone := make(chan struct{})
+	go func() {
+		m.GetAllCollectionSchemaInfos()
+		close(schemaReadDone)
+	}()
+
+	select {
+	case <-schemaReadDone:
+	case <-time.After(200 * time.Millisecond):
+		pendingWAL.Set(readyWAL)
+		<-flushDone
+		<-schemaReadDone
+		m.Close()
+		t.Fatal("schema read blocked on shard manager lock while flush waited for WAL readiness")
+	}
+
+	select {
+	case <-flushDone:
+	case <-time.After(time.Second):
+		pendingWAL.Set(readyWAL)
+		<-flushDone
+		m.Close()
+		t.Fatal("async flush blocked while waiting for WAL readiness")
+	}
+	m.Close()
 }
 
 func TestAlterCollectionSchemaChange(t *testing.T) {
@@ -835,17 +999,17 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 	assert.Equal(t, int32(3), ci.SchemaVersion())
 }
 
-func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
+func TestCollectionInfoAllowGrowingSourceFlush(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	assert.False(t, (*CollectionInfo)(nil).UseGrowingSourceFlush())
+	assert.False(t, (*CollectionInfo)(nil).AllowGrowingSourceFlush())
 	ci := &CollectionInfo{}
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{}
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -854,12 +1018,12 @@ func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
 		},
 	}
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.UseGrowingSourceFlush())
+	assert.True(t, ci.AllowGrowingSourceFlush())
 }
 
-func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
+func TestCollectionInfoAllowGrowingSourceFlush_TextField(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
@@ -877,9 +1041,12 @@ func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
 		},
 	}
 	assert.True(t, ci.HasTextField())
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
+	assert.True(t, ci.RequiresStorageV3())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	assert.True(t, ci.AllowGrowingSourceFlush())
 }
 
 func TestCollectionInfoRuntimeFlushSize(t *testing.T) {

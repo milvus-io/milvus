@@ -28,9 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type IndexSuite struct {
@@ -151,15 +151,17 @@ func (s *IndexSuite) TestDescribeIndex() {
 				Status: merr.Success(),
 				IndexDescriptions: []*milvuspb.IndexDescription{
 					{IndexName: indexName, Params: []*commonpb.KeyValuePair{
-						{Key: index.IndexTypeKey, Value: string(index.HNSW)},
+						{Key: index.IndexTypeKey, Value: string(index.FMINDEX)},
 					}},
 				},
 			}, nil
 		}).Once()
 
-		index, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
+		indexDesc, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
 		s.NoError(err)
-		s.Equal(indexName, index.Name())
+		s.Equal(indexName, indexDesc.Name())
+		s.EqualValues(index.FMINDEX, indexDesc.IndexType())
+		s.EqualValues(index.FMINDEX, indexDesc.Params()[index.IndexTypeKey])
 	})
 
 	s.Run("no_index_found", func() {

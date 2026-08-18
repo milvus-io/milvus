@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
@@ -96,20 +97,18 @@ class ChunkedColumnInterface {
     virtual bool
     CellsLoaded(const int64_t* offsets, int64_t count) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -164,19 +163,7 @@ class ChunkedColumnInterface {
                    offset,
                    size,
                    chunk->RowNums());
-        auto& valid_data = chunk->Valid();
-        AssertInfo(
-            offset + size <= static_cast<int64_t>(valid_data.size()),
-            "Valid-data range out of valid-data bounds, offset: {}, size: {}, "
-            "valid-data size: {}",
-            offset,
-            size,
-            valid_data.size());
-        for (int64_t i = 0; i < size; ++i) {
-            if (!chunk->isValid(offset + i)) {
-                valid_result[i] = false;
-            }
-        }
+        chunk->ApplyValidityMask(offset, size, valid_result);
     }
 
     // Get number of rows before a specific chunk
@@ -214,7 +201,8 @@ class ChunkedColumnInterface {
     }
 
     virtual void
-    BuildValidRowIds(milvus::OpContext* op_ctx) {
+    BuildValidRowIds(milvus::OpContext* op_ctx,
+                     const OffsetMappingBuildOptions& options = {}) {
         if (!IsNullable()) {
             return;
         }
@@ -253,15 +241,16 @@ class ChunkedColumnInterface {
             num_valid_rows_until_chunk_.push_back(
                 num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
         }
-        BuildOffsetMapping();
+        BuildOffsetMapping(options);
         valid_row_ids_built_.store(true, std::memory_order_release);
     }
 
     // Build offset mapping from valid_data
     void
-    BuildOffsetMapping() {
+    BuildOffsetMapping(const OffsetMappingBuildOptions& options = {}) {
         if (!valid_data_.empty()) {
-            offset_mapping_.Build(valid_data_.data(), valid_data_.size());
+            offset_mapping_.Build(
+                valid_data_.data(), valid_data_.size(), options);
         }
     }
 

@@ -18,6 +18,7 @@ package memkv
 
 import (
 	"context"
+	"math"
 	"strings"
 	"sync"
 
@@ -38,6 +39,12 @@ var _ kv.TxnKV = (*MemoryKV)(nil)
 type MemoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
+}
+
+// MaxTxnOps reports no practical limit: every write is applied under the lock,
+// so any batch commits "atomically" in one shot.
+func (kv *MemoryKV) MaxTxnOps() int {
+	return math.MaxInt32
 }
 
 // NewMemoryKV returns an in-memory kvBase for testing.

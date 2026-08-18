@@ -62,7 +62,9 @@ struct ValueExtractor : public boost::static_visitor<T> {
     template <typename U>
     T
     operator()(const U&) const {
-        ThrowInfo(DataTypeInvalid, "unexpected type in data_access_type");
+        // Both types are selected from internal schema/accessor state, so a
+        // mismatch is an internal contract violation rather than bad input.
+        ThrowInfo(UnexpectedError, "unexpected type in data_access_type");
     }
 };
 
@@ -81,7 +83,9 @@ struct ValueExtractor<std::string> : public boost::static_visitor<std::string> {
     template <typename U>
     std::string
     operator()(const U&) const {
-        ThrowInfo(DataTypeInvalid, "unexpected type in data_access_type");
+        // Both types are selected from internal schema/accessor state, so a
+        // mismatch is an internal contract violation rather than bad input.
+        ThrowInfo(UnexpectedError, "unexpected type in data_access_type");
     }
 };
 }  // namespace detail
@@ -160,6 +164,7 @@ class SegmentChunkReader {
                 if (++processed_rows >= batch_size) {
                     current_chunk_id = chunk_id;
                     current_chunk_pos = i + 1;
+                    return;
                 }
             }
         }

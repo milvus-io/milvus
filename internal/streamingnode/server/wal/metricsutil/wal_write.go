@@ -74,7 +74,7 @@ func (m *WriteMetrics) StartAppend(msg message.MutableMessage) *AppendMetrics {
 	}
 }
 
-func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
+func (m *WriteMetrics) done(ctx context.Context, appendMetrics *AppendMetrics) {
 	if !appendMetrics.msg.IsPersisted() {
 		return
 	}
@@ -96,17 +96,17 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 		}
 	}
 	if appendMetrics.err != nil {
-		m.Logger().Warn(context.TODO(), "append message into wal failed", appendMetrics.IntoLogFields()...)
+		m.Logger().Warn(ctx, "append message into wal failed", appendMetrics.IntoLogFields()...)
 		return
 	}
 	if appendMetrics.appendDuration >= m.slowLogThreshold {
 		// log slow append catch
-		m.Logger().Warn(context.TODO(), "append message into wal too slow", appendMetrics.IntoLogFields()...)
+		m.Logger().Warn(ctx, "append message into wal too slow", appendMetrics.IntoLogFields()...)
 		return
 	}
 	logLV := appendMetrics.msg.MessageType().LogLevel()
 	if m.Logger().LevelEnabled(logLV) {
-		m.Logger().Log(context.TODO(), logLV, "append message into wal", appendMetrics.IntoLogFields()...)
+		m.Logger().Log(ctx, logLV, "append message into wal", appendMetrics.IntoLogFields()...)
 	}
 }
 

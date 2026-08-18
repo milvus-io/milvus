@@ -72,33 +72,39 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 			mlog.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:       segment.ID,
-		PartitionID:     segment.PartitionID,
-		CollectionID:    segment.CollectionID,
-		BinlogPaths:     segment.Binlogs,
-		NumOfRows:       segment.NumOfRows,
-		InsertChannel:   segment.InsertChannel,
-		IndexInfos:      indexes,
-		StartPosition:   segment.GetStartPosition(),
-		DeltaPosition:   channelCheckpoint,
-		Level:           segment.GetLevel(),
-		StorageVersion:  segment.GetStorageVersion(),
-		IsSorted:        segment.GetIsSorted(),
-		ManifestPath:    segment.GetManifestPath(),
-		CommitTimestamp: segment.GetCommitTimestamp(),
-		DataVersion:     segment.GetDataVersion(),
+		SegmentID:      segment.ID,
+		PartitionID:    segment.PartitionID,
+		CollectionID:   segment.CollectionID,
+		BinlogPaths:    segment.Binlogs,
+		NumOfRows:      segment.NumOfRows,
+		InsertChannel:  segment.InsertChannel,
+		IndexInfos:     indexes,
+		StartPosition:  segment.GetStartPosition(),
+		DeltaPosition:  channelCheckpoint,
+		Level:          segment.GetLevel(),
+		StorageVersion: segment.GetStorageVersion(),
+		IsSorted:       segment.GetIsSorted(),
+		ManifestPath:   segment.GetManifestPath(),
+		// Fallback parent loads use ChildManifestPaths to carry compact-to V3
+		// delete sources that are not representable as legacy Deltalogs.
+		ChildManifestPaths: segment.GetChildManifestPaths(),
+		CommitTimestamp:    segment.GetCommitTimestamp(),
+		DataVersion:        segment.GetDataVersion(),
+		Stats:              segment.GetStats(),
+		TextStatsLogs:      segment.GetTextStatsLogs(),
+		JsonKeyStatsLogs:   segment.GetJsonKeyStats(),
 	}
 
-	// Deltalogs are always populated (delta log loading has its own manifest path)
+	// Preserve legacy deltalog metadata when available. Manifest-backed internal
+	// V3 loads resolve their own delta paths from the manifest.
 	loadInfo.Deltalogs = segment.Deltalogs
 
 	// When manifest_path is set, stats are stored in the manifest.
-	// Skip populating legacy stats fields - the reader will load from manifest.
+	// Skip populating legacy stats fields. Text and JSON stats metadata stays in
+	// the load info so QueryNode can resolve the corresponding manifest entries.
 	if segment.GetManifestPath() == "" {
 		loadInfo.Statslogs = segment.Statslogs
 		loadInfo.Bm25Logs = segment.Bm25Statslogs
-		loadInfo.TextStatsLogs = segment.GetTextStatsLogs()
-		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
 	}
 
 	return loadInfo

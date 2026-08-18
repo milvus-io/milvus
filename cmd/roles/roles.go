@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -210,6 +211,21 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *conc.Fut
 
 func (mr *MilvusRoles) runCDC(ctx context.Context, localMsg bool) *conc.Future[component] {
 	return runComponent(ctx, localMsg, components.NewCDC, metrics.RegisterCDC)
+}
+
+func (mr *MilvusRoles) resolveFileResourceMode() fileresource.Mode {
+	params := paramtable.Get()
+	modes := make([]fileresource.Mode, 0, 3)
+	if mr.EnableQueryNode || mr.EnableStreamingNode {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.QNFileResourceMode.GetValue()))
+	}
+	if mr.EnableDataNode {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.DNFileResourceMode.GetValue()))
+	}
+	if mr.EnableProxy {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.ProxyFileResourceMode.GetValue()))
+	}
+	return fileresource.ResolveMode(modes...)
 }
 
 // waitForAllComponentsReady waits for all components to be ready.
@@ -416,10 +432,14 @@ func (mr *MilvusRoles) Run() {
 
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
-		// Initialize the actual walName instead of default
-		util.InitAndSelectWALName()
-		// persist immutable configs if necessary
-		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(); err != nil {
+		// Resolve the actual walName instead of default
+		walName := util.InitAndSelectWALName()
+		// persist immutable configs if necessary; mq.type's literal "default" is
+		// rendered to the resolved walName so the value pinned in etcd is always
+		// a concrete WAL name (issue #51497)
+		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(map[string]func(string) string{
+			paramtable.Get().MQCfg.Type.Key: func(string) string { return walName.String() },
+		}); err != nil {
 			mlog.Error(context.TODO(), "failed to process immutable configs", mlog.Err(err))
 			return
 		}
@@ -477,6 +497,10 @@ func (mr *MilvusRoles) Run() {
 			}
 		}()
 	}
+
+	effectiveFileResourceMode := mr.resolveFileResourceMode()
+	fileresource.SetLocalMode(effectiveFileResourceMode)
+	mlog.Info(ctx, "resolved process file resource mode", mlog.String("mode", effectiveFileResourceMode.String()))
 
 	local := mr.Local
 	componentFutureMap := make(map[string]*conc.Future[component])

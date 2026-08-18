@@ -8,6 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
@@ -155,4 +160,95 @@ func TestProducer(t *testing.T) {
 	assert.True(t, producer.IsAvailable())
 	producer.Close()
 	assert.False(t, producer.IsAvailable())
+}
+
+func TestProducerAppendOverwritesTraceContextDuringSerialization(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	c := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	cc := mock_streamingpb.NewMockStreamingNodeHandlerService_ProduceClient(t)
+	recvCh := make(chan *streamingpb.ProduceResponse, 10)
+	cc.EXPECT().Recv().RunAndReturn(func() (*streamingpb.ProduceResponse, error) {
+		msg, ok := <-recvCh
+		if !ok {
+			return nil, io.EOF
+		}
+		return msg, nil
+	})
+	sendCh := make(chan *streamingpb.ProduceRequest, 1)
+	cc.EXPECT().Send(mock.Anything).RunAndReturn(func(pr *streamingpb.ProduceRequest) error {
+		sendCh <- pr
+		return nil
+	})
+	c.EXPECT().Produce(mock.Anything, mock.Anything).Return(cc, nil)
+	cc.EXPECT().CloseSend().RunAndReturn(func() error {
+		recvCh <- &streamingpb.ProduceResponse{Response: &streamingpb.ProduceResponse_Close{}}
+		close(recvCh)
+		return nil
+	})
+
+	opts := &ProducerOptions{
+		Assignment: &types.PChannelInfoAssigned{
+			Channel: types.PChannelInfo{Name: "test", Term: 1},
+			Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+		},
+	}
+
+	recvCh <- &streamingpb.ProduceResponse{
+		Response: &streamingpb.ProduceResponse_Create{
+			Create: &streamingpb.CreateProducerResponse{},
+		},
+	}
+	producer, err := CreateProducer(context.Background(), opts, c)
+	require.NoError(t, err)
+
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), "source")
+	sourceSpan.End()
+	distCtx, distSpan := otel.Tracer("test").Start(sourceCtx, message.SpanNameWALDistAppend)
+	distSC := trace.SpanContextFromContext(distCtx)
+
+	msg := message.CreateTestEmptyInsertMesage(1, nil)
+	message.InjectTraceContext(sourceCtx, msg)
+	appendDone := make(chan struct{})
+	go func() {
+		defer close(appendDone)
+		result, err := producer.Append(distCtx, msg)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+	}()
+
+	req := <-sendCh
+	serializedMsg := req.GetProduce().GetMessage()
+	serializedImmutable := message.NewImmutableMesasge(
+		walimplstest.NewTestMessageID(1),
+		serializedMsg.GetPayload(),
+		serializedMsg.GetProperties(),
+	)
+	serializedSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), serializedImmutable))
+	assert.Equal(t, distSC.TraceID(), serializedSC.TraceID())
+	assert.Equal(t, distSC.SpanID(), serializedSC.SpanID())
+
+	recvCh <- &streamingpb.ProduceResponse{
+		Response: &streamingpb.ProduceResponse_Produce{
+			Produce: &streamingpb.ProduceMessageResponse{
+				RequestId: req.GetProduce().GetRequestId(),
+				Response: &streamingpb.ProduceMessageResponse_Result{
+					Result: &streamingpb.ProduceMessageResponseResult{
+						Id:              walimplstest.NewTestMessageID(1).IntoProto(),
+						LastConfirmedId: walimplstest.NewTestMessageID(1).IntoProto(),
+					},
+				},
+			},
+		},
+	}
+	<-appendDone
+	distSpan.End()
+	producer.Close()
 }

@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -168,7 +168,7 @@ func CreateMilvusClient(ctx context.Context, t *testing.T, cfg *client.ClientCon
 		mc  *base.MilvusClient
 		err error
 	)
-	mc, err = base.NewMilvusClient(ctx, cfg)
+	mc, err = base.NewMilvusClient(ctx, inheritDefaultConnectionConfig(cfg))
 	common.CheckErr(t, err, true)
 
 	t.Cleanup(func() {

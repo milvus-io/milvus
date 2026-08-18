@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
@@ -1031,6 +1032,84 @@ func (s *MergeHelperTestSuite) TestMergeWithEmptyChunk() {
 	defer result.Release()
 
 	s.Equal(2, result.NumChunks())
+}
+
+// buildVarCharIDDataFrame builds a VarChar-PK DataFrame whose first query has
+// hits and whose second query returns nothing (topks = [len(ids), 0]).
+func (s *MergeHelperTestSuite) buildVarCharIDDataFrame(ids []string, scores []float32) *DataFrame {
+	builder := NewDataFrameBuilder()
+	builder.SetChunkSizes([]int64{int64(len(ids)), 0})
+
+	idB := array.NewStringBuilder(s.pool)
+	idB.AppendValues(ids, nil)
+	idArr := idB.NewArray()
+	idB.Release()
+
+	idB2 := array.NewStringBuilder(s.pool)
+	idArr2 := idB2.NewArray()
+	idB2.Release()
+
+	scoreB := array.NewFloat32Builder(s.pool)
+	scoreB.AppendValues(scores, nil)
+	scoreArr := scoreB.NewArray()
+	scoreB.Release()
+
+	scoreB2 := array.NewFloat32Builder(s.pool)
+	scoreArr2 := scoreB2.NewArray()
+	scoreB2.Release()
+
+	s.Require().NoError(builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idArr, idArr2}))
+	s.Require().NoError(builder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{scoreArr, scoreArr2}))
+	return builder.Build()
+}
+
+// A zero-hit chunk must adopt the ID type of the other chunks. Building it as
+// Int64 while the chunks with hits are utf8 makes arrow.NewChunked reject the
+// column ("mismatch data type int64 vs utf8"), which panics the proxy for any
+// VarChar-PK collection where one query of the batch returns nothing (#51372).
+func (s *MergeHelperTestSuite) TestMergeWithEmptyChunkVarCharIDs() {
+	df := s.buildVarCharIDDataFrame([]string{"a", "b"}, []float32{0.9, 0.8})
+	defer df.Release()
+
+	op := NewMergeOp(MergeStrategyRRF, WithNormalize(false))
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+
+	result, err := op.Execute(ctx, df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	s.Equal(2, result.NumChunks())
+	s.Equal(int64(2), result.NumRows())
+
+	idType, ok := result.FieldType(types.IDFieldName)
+	s.Require().True(ok)
+	s.Equal(schemapb.DataType_VarChar, idType)
+
+	idCol := result.Column(types.IDFieldName)
+	s.Require().NotNil(idCol)
+	s.Equal(arrow.STRING, idCol.DataType().ID())
+	s.Equal(2, idCol.Chunk(0).Len())
+	s.Equal(0, idCol.Chunk(1).Len())
+}
+
+// Same for multi-input merge (hybrid search): one leg is entirely empty, the
+// other carries VarChar IDs with a zero-hit query.
+func (s *MergeHelperTestSuite) TestMergeMultiInputEmptyLegVarCharIDs() {
+	dfEmpty := s.buildVarCharIDDataFrame(nil, nil)
+	defer dfEmpty.Release()
+	dfHits := s.buildVarCharIDDataFrame([]string{"a", "b"}, []float32{0.9, 0.8})
+	defer dfHits.Release()
+
+	op := NewMergeOp(MergeStrategyRRF, WithNormalize(false))
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{dfEmpty, dfHits})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	s.Equal(2, result.NumChunks())
+	s.Equal(int64(2), result.NumRows())
+	s.Equal(arrow.STRING, result.Column(types.IDFieldName).DataType().ID())
 }
 
 // =============================================================================

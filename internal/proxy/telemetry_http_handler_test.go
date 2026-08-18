@@ -892,7 +892,10 @@ func TestGetTelemetryClientConfigHandler(t *testing.T) {
 		mixCoord.EXPECT().PushClientCommand(mock.Anything, mock.MatchedBy(func(req *milvuspb.PushClientCommandRequest) bool {
 			return req.CommandType == "get_config" &&
 				req.TargetClientId == "client-123" &&
-				req.TtlSeconds == 0 &&
+				// The handler resolves the default before the RPC: on the wire an absent
+				// field is indistinguishable from 0, which means "never expire", so the
+				// value has to be concrete by the time it leaves the proxy.
+				req.GetTtlSeconds() == defaultCommandTTLSeconds &&
 				req.Persistent == false
 		})).Return(&milvuspb.PushClientCommandResponse{
 			Status:    merr.Success(),

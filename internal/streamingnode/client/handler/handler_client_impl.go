@@ -77,7 +77,7 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "replicate checkpoint"))
 	cp, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, status.NewInvalidArgument("replicate checkpoint can only be read for RW channel")
+			return nil, status.NewInner("replicate checkpoint can only be read for RW channel")
 		}
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -114,7 +114,7 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "salvage checkpoint"))
 	cps, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, status.NewInvalidArgument("salvage checkpoint can only be read for RW channel")
+			return nil, status.NewInner("salvage checkpoint can only be read for RW channel")
 		}
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -149,52 +149,35 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 	return cps.([]*wal.ReplicateCheckpoint), nil
 }
 
-// PrepareReleaseManualFlush appends a normal ManualFlush and prepares local growing-source retention.
-func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+// PrepareReleaseManualFlushIfLocal appends a normal ManualFlush and prepares local growing-source retention if the WAL is local.
+func (hc *handlerClientImpl) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return false, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
 
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	logger := mlog.With(
-		mlog.String("pchannel", pchannel),
-		mlog.String("vchannel", vchannel),
-		mlog.Int64("collectionID", collectionID),
-		mlog.Int64s("releaseSegmentIDs", releaseSegmentIDs),
-		mlog.String("handler", "prepare release manual flush"),
-	)
-	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
-		if assign.Channel.AccessMode != types.AccessModeRW {
-			logger.Info(ctx, "skip release manual flush prepare because channel is not RW",
-				mlog.String("accessMode", assign.Channel.AccessMode.String()))
-			return false, nil
-		}
-
-		_, err := registry.GetLocalAvailableWAL(assign.Channel)
-		if err != nil {
-			if errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
-				status.AsStreamingError(err).IsWrongStreamingNode() {
-				logger.Info(ctx, "skip release manual flush prepare because channel is not owned by local streaming node",
-					mlog.Err(err))
-				return false, nil
-			}
+	assign := hc.watcher.Get(ctx, pchannel)
+	for assign == nil {
+		if err := hc.watcher.Watch(ctx, pchannel, nil); err != nil {
 			return false, err
 		}
+		assign = hc.watcher.Get(ctx, pchannel)
+	}
 
-		preparer, err := registry.GetLocalReleaseManualFlushPreparer()
-		if err != nil {
-			return false, err
-		}
-		return preparer.PrepareReleaseManualFlush(ctx, assign.Channel, collectionID, vchannel, releaseSegmentIDs)
-	})
+	w, err := registry.GetLocalAvailableWAL(assign.Channel)
 	if err != nil {
 		return false, err
 	}
-	if result == nil {
-		return false, nil
+	if w.Channel().AccessMode != types.AccessModeRW {
+		return false, ErrReadOnlyWAL
 	}
-	return result.(bool), nil
+
+	preparer, err := registry.GetLocalReleaseManualFlushPreparer()
+	if err != nil {
+		return false, err
+	}
+	return preparer.PrepareReleaseManualFlush(ctx, assign.Channel, collectionID, vchannel, releaseSegmentIDs)
 }
 
 // GetWALMetricsIfLocal gets the metrics of the local wal.
@@ -217,7 +200,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.String("handler", "producer"))
 	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, status.NewInvalidArgument("producer can only be created for RW channel")
+			return nil, status.NewInner("producer can only be created for RW channel")
 		}
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)

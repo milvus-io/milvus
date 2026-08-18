@@ -32,10 +32,11 @@ impl IndexWriterWrapperImpl {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
+        enable_background_merge: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
-            "create text index writer, field_name: {}, tantivy_index_version 7",
-            field_name
+            "create text index writer, field_name: {}, tantivy_index_version 7, enable_background_merge: {}",
+            field_name, enable_background_merge
         );
 
         let analyzer = create_analyzer(analyzer_params, analyzer_extra_info)?;
@@ -49,6 +50,13 @@ impl IndexWriterWrapperImpl {
         index.tokenizers().register(analyzer_name, analyzer);
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        if !enable_background_merge {
+            // Sealed text index builds end with an explicit merge-all in
+            // finish(); disable background policy merges for them. Growing
+            // segments keep the default policy, otherwise the segment count
+            // grows unbounded across periodic commits.
+            index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
+        }
 
         Ok(IndexWriterWrapperImpl {
             field,
@@ -56,6 +64,7 @@ impl IndexWriterWrapperImpl {
             index: Arc::new(index),
             id_field: None,
             enable_user_specified_doc_id: true,
+            enable_background_merge,
         })
     }
 }

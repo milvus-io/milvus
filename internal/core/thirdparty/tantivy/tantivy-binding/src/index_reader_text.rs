@@ -146,6 +146,7 @@ mod tests {
             1,
             50_000_000,
             false,
+            false,
             TantivyIndexVersion::default_version(),
         )
         .unwrap();
@@ -184,6 +185,7 @@ mod tests {
             1,
             50_000_000,
             false,
+            false,
             TantivyIndexVersion::default_version(),
         )
         .unwrap();
@@ -213,6 +215,7 @@ mod tests {
             "",
             1,
             50_000_000,
+            false,
             false,
             TantivyIndexVersion::default_version(),
         )

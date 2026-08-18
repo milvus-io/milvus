@@ -26,6 +26,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,6 +49,15 @@ func createTestRefreshMeta(t *testing.T) *externalCollectionRefreshMeta {
 }
 
 func createTestRefreshMetaWithJobs(t *testing.T, jobs []*datapb.ExternalCollectionRefreshJob, tasks []*datapb.ExternalCollectionRefreshTask) *externalCollectionRefreshMeta {
+	jobsByID := make(map[int64]*datapb.ExternalCollectionRefreshJob, len(jobs))
+	for _, job := range jobs {
+		jobsByID[job.GetJobId()] = job
+	}
+	for _, task := range tasks {
+		if job := jobsByID[task.GetJobId()]; job != nil {
+			job.TaskIds = append(job.TaskIds, task.GetTaskId())
+		}
+	}
 	catalog := &stubCatalog{
 		jobs:  jobs,
 		tasks: tasks,
@@ -53,6 +65,64 @@ func createTestRefreshMetaWithJobs(t *testing.T, jobs []*datapb.ExternalCollecti
 	meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 	assert.NoError(t, err)
 	return meta
+}
+
+func publishManagerTestTasks(
+	t *testing.T,
+	refreshMeta *externalCollectionRefreshMeta,
+	jobID int64,
+	collectionID int64,
+	taskIDs ...int64,
+) {
+	assert.NoError(t, refreshMeta.AddJob(&datapb.ExternalCollectionRefreshJob{
+		JobId:        jobID,
+		CollectionId: collectionID,
+		TaskIds:      taskIDs,
+	}))
+}
+
+func addManagerOwnershipTask(
+	t *testing.T,
+	refreshMeta *externalCollectionRefreshMeta,
+	task *datapb.ExternalCollectionRefreshTask,
+	ownedSegmentIDs ...int64,
+) {
+	t.Helper()
+	task = proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
+	state := task.GetState()
+	failReason := task.GetFailReason()
+	resultReady := task.GetResultReady()
+	keptSegments := append([]int64(nil), task.GetKeptSegments()...)
+	updatedSegments := cloneProtoSegments(task.GetUpdatedSegments())
+
+	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersion
+	task.OwnedSegmentIds = append([]int64(nil), ownedSegmentIDs...)
+	task.KeptSegments = nil
+	task.UpdatedSegments = nil
+	task.ResultReady = false
+	task.ResultStorageVersion = 0
+	task.ResultPath = ""
+	task.ResultChecksum = nil
+	if resultReady {
+		if refreshMeta.resultStore == nil {
+			resultStore, _ := createMetaTestRefreshResultStore(t)
+			refreshMeta.resultStore = resultStore
+		}
+		task.State = indexpb.JobState_JobStateInProgress
+		task.FailReason = ""
+		task.Progress = 0
+	}
+
+	require.NoError(t, refreshMeta.AddTask(task))
+	if resultReady {
+		require.NoError(t, refreshMeta.UpdateTaskResult(
+			task.GetTaskId(),
+			state,
+			failReason,
+			keptSegments,
+			updatedSegments,
+		))
+	}
 }
 
 func testCollectionGetter(mt *meta) func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
@@ -102,6 +172,7 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	}
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
 	}
 	mt.collections.Insert(collectionID, &collectionInfo{
 		ID:            collectionID,
@@ -134,8 +205,12 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	mgr.Stop()
 }
 
-func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
+func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 	ctx := context.Background()
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.Key)
+
 	collectionID := int64(100)
 	schema := &schemapb.CollectionSchema{
 		Name:           "ext",
@@ -146,8 +221,16 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 			{FieldID: 100, Name: "id", ExternalField: "id"},
 		},
 	}
+	segments := NewSegmentsInfo()
+	segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: "manifest-10",
+	}))
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    segments,
 	}
 	mt.collections.Insert(collectionID, &collectionInfo{
 		ID:            collectionID,
@@ -161,9 +244,24 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Return([]*datapb.ExternalFileInfo{
+			{FilePath: "f0.parquet", NumRows: 10},
+			{FilePath: "f1.parquet", NumRows: 10},
+			{FilePath: "f2.parquet", NumRows: 10},
+			{FilePath: "f3.parquet", NumRows: 10},
+		}, "manifest-path", nil).
 		Build()
 	defer mockExplore.UnPatch()
+	mockReadFragments := mockey.Mock(packed.ReadFragmentsFromManifest).
+		To(func(manifestPath string, _ *indexpb.StorageConfig, _ []string) ([]packed.Fragment, error) {
+			switch manifestPath {
+			case "manifest-10":
+				return []packed.Fragment{{FilePath: "f1.parquet"}, {FilePath: "f2.parquet"}}, nil
+			default:
+				return nil, errors.New("unexpected manifest path")
+			}
+		}).Build()
+	defer mockReadFragments.UnPatch()
 
 	job := &datapb.ExternalCollectionRefreshJob{
 		JobId:          1001,
@@ -177,10 +275,223 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 
 	tasks, err := mgr.createTasksForJob(ctx, job)
 	assert.NoError(t, err)
-	assert.Len(t, tasks, 1)
-	assert.Equal(t, collectionID, tasks[0].GetCollectionId())
-	assert.Equal(t, "s3://bucket/path", tasks[0].GetExternalSource())
-	assert.Equal(t, `{"format":"parquet"}`, tasks[0].GetExternalSpec())
+	require.Len(t, tasks, 1)
+
+	committedTasks, err := refreshMeta.GetCommittedTasksByJobID(job.GetJobId())
+	assert.NoError(t, err)
+	require.Len(t, committedTasks, 1)
+	persistedTask := committedTasks[0]
+	assert.Equal(t, int64(0), persistedTask.GetFileIndexBegin())
+	assert.Equal(t, int64(4), persistedTask.GetFileIndexEnd())
+	assert.Equal(t, []int64{10}, persistedTask.GetOwnedSegmentIds())
+
+	cluster := &stubCluster{}
+	mgr.wrapTask(persistedTask).CreateTaskOnWorker(1, cluster)
+	require.NotNil(t, cluster.refreshReq)
+	assert.Equal(t, "manifest-path", cluster.refreshReq.GetExploreManifestPath())
+	assert.Equal(t, int64(0), cluster.refreshReq.GetFileIndexBegin())
+	assert.Equal(t, int64(4), cluster.refreshReq.GetFileIndexEnd())
+	require.Len(t, cluster.refreshReq.GetCurrentSegments(), 1)
+	assert.Equal(t, int64(10), cluster.refreshReq.GetCurrentSegments()[0].GetID())
+}
+
+func TestExploreExternalFiles_UsesUniqueAttemptDirectories(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collectionID, &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID:       100,
+			Name:          "id",
+			ExternalField: "id",
+		}}},
+	})
+	mgr := &externalCollectionRefreshManager{
+		mt:        &meta{collections: collections},
+		allocator: &stubAllocator{nextID: 300},
+	}
+
+	baseDirs := make([]string, 0, 2)
+	mockExplore := mockey.Mock(packed.ExploreFilesReturnManifestPath).
+		To(func(_ []string, _ string, baseDir, _ string, _ *indexpb.StorageConfig, _ packed.ExternalSpecContext) ([]packed.FileInfo, string, error) {
+			baseDirs = append(baseDirs, baseDir)
+			return []packed.FileInfo{{FilePath: "f.parquet", NumRows: 1}}, baseDir + "/manifest", nil
+		}).Build()
+	defer mockExplore.UnPatch()
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:          42,
+		CollectionId:   collectionID,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+	for range 2 {
+		_, _, err := mgr.exploreExternalFiles(ctx, job)
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, []string{
+		"__explore_temp__/coord_42/attempt_301",
+		"__explore_temp__/coord_42/attempt_302",
+	}, baseDirs)
+}
+
+func TestCreateTasksForJob_UnreadableBaselineManifest(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	jobID := int64(1001)
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: "baseline-manifest",
+	}})
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    segments,
+	}
+	refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
+	alloc := &stubAllocator{nextID: 2000}
+	mgr := NewExternalCollectionRefreshManager(
+		ctx, mt, newStubScheduler(), alloc,
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+	mockRead := mockey.Mock(packed.ReadFragmentsFromManifest).
+		Return(nil, errors.New("manifest read failed")).
+		Build()
+	defer mockRead.UnPatch()
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:        jobID,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddJob(job))
+
+	tasks, err := mgr.createTasksForJob(ctx, job)
+	assert.ErrorContains(t, err, "read external refresh baseline manifests")
+	assert.Empty(t, tasks)
+	assert.Equal(t, int64(2000), alloc.nextID)
+	assert.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+	assert.Empty(t, refreshMeta.GetJob(jobID).GetTaskIds())
+}
+
+func TestCreateTasksForJob_CompositePersistenceFailureIsUnpublished(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.Key)
+
+	const (
+		jobID        = int64(1001)
+		collectionID = int64(100)
+	)
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:        jobID,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddJob(job))
+
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+	}
+	cm := &recordingChunkManager{}
+	mgr := NewExternalCollectionRefreshManager(
+		ctx,
+		mt,
+		newStubScheduler(),
+		&stubAllocator{nextID: 2000},
+		refreshMeta,
+		nil,
+		testCollectionGetter(mt),
+		nil,
+		cm,
+	).(*externalCollectionRefreshManager)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{
+			{FilePath: "s3://bucket/path/a.parquet", NumRows: 10},
+			{FilePath: "s3://bucket/path/b.parquet", NumRows: 10},
+		}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+	catalog.updateErr = errors.New("save task plan failed")
+
+	tasks, err := mgr.createTasksForJob(ctx, job)
+	assert.ErrorContains(t, err, "save task plan failed")
+	assert.Empty(t, tasks)
+	assert.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+	assert.Empty(t, refreshMeta.GetJob(jobID).GetTaskIds())
+	assert.Len(t, catalog.updateActions, 1)
+	prefixes, removes := cm.snapshot()
+	assert.Empty(t, prefixes)
+	assert.Empty(t, removes)
+}
+
+func TestCreateTasksForJob_TerminalJobRejectsLatePlanAndCleansExplore(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	const (
+		jobID        = int64(1001)
+		collectionID = int64(100)
+	)
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	staleJob := &datapb.ExternalCollectionRefreshJob{
+		JobId:        jobID,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddJob(staleJob))
+	applied, err := refreshMeta.UpdateJobState(jobID, indexpb.JobState_JobStateFailed, "timeout")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+	}
+	cm := &recordingChunkManager{}
+	mgr := NewExternalCollectionRefreshManager(
+		ctx,
+		mt,
+		newStubScheduler(),
+		&stubAllocator{nextID: 2000},
+		refreshMeta,
+		nil,
+		testCollectionGetter(mt),
+		nil,
+		cm,
+	).(*externalCollectionRefreshManager)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+
+	tasks, err := mgr.createTasksForJob(ctx, staleJob)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
+	assert.Empty(t, tasks)
+	assert.Empty(t, catalog.updateActions)
+	assert.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+	assert.Empty(t, refreshMeta.GetJob(jobID).GetTaskIds())
+	prefixes, removes := cm.snapshot()
+	assert.Equal(t, []string{"__explore_temp__/coord_1001/"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_1001"}, removes)
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
@@ -189,7 +500,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
 		CollectionId:    100,
@@ -197,16 +508,16 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
-	}))
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	}, 1)
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
-		KeptSegments:    []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
-	}))
+	}, 2)
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
 	segments := NewSegmentsInfo()
 	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -220,6 +531,12 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		CollectionID: 100,
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    6,
+	}})
+	segments.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           3,
+		CollectionID: 100,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    9,
 	}})
 	mt := &meta{
 		catalog:     catalog,
@@ -239,10 +556,100 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(1).GetState())
 	assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(2).GetState())
+	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(3).GetState())
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(20).GetState())
 	assert.Equal(t, int64(7), mt.segments.GetSegment(10).GetNumOfRows())
 	assert.Equal(t, int64(7), mt.segments.GetSegment(20).GetNumOfRows())
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsCrossTaskResult(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		keptSegments    []int64
+		updatedSegments []*datapb.SegmentInfo
+	}{
+		{name: "kept", keptSegments: []int64{2}},
+		{name: "updated", updatedSegments: []*datapb.SegmentInfo{{ID: 2, CollectionID: 100}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			refreshMeta := createTestRefreshMeta(t)
+			addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+				TaskId:          1001,
+				JobId:           1,
+				CollectionId:    100,
+				State:           indexpb.JobState_JobStateFinished,
+				ResultReady:     true,
+				KeptSegments:    test.keptSegments,
+				UpdatedSegments: test.updatedSegments,
+			}, 1)
+			addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+				TaskId:       1002,
+				JobId:        1,
+				CollectionId: 100,
+				State:        indexpb.JobState_JobStateFinished,
+				ResultReady:  true,
+			}, 2)
+			publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
+
+			mgr := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
+			err := mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+				JobId:        1,
+				CollectionId: 100,
+			})
+			assert.ErrorContains(t, err, "owned by task 1002")
+		})
+	}
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsLegacyTask(t *testing.T) {
+	ctx := context.Background()
+	refreshMeta := createTestRefreshMeta(t)
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       1001,
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateFinished,
+		ResultReady:  true,
+	}))
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
+
+	mgr := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
+	err := mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.ErrorContains(t, err, "unsupported ownership plan version 0")
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaseline(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+		TaskId:          1001,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
+		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+	mgr := &externalCollectionRefreshManager{mt: mt, refreshMeta: refreshMeta}
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsNotifiesUpdatedSegments(t *testing.T) {
@@ -256,7 +663,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsNotifiesUpdate
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
 		CollectionId:    100,
@@ -264,7 +671,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsNotifiesUpdate
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
-	}))
+	}, 1)
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	segments := NewSegmentsInfo()
 	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -299,20 +707,21 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFini
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
-	}))
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	})
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:       1002,
 		JobId:        1,
 		CollectionId: 100,
 		State:        indexpb.JobState_JobStateInProgress,
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
 	mt := &meta{
 		catalog:     catalog,
@@ -346,22 +755,23 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsDuplica
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
-	}))
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	})
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 8}},
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
 	mt := &meta{
 		catalog:     catalog,
@@ -395,13 +805,13 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:       1001,
 		JobId:        1,
 		CollectionId: 100,
 		State:        indexpb.JobState_JobStateFinished,
-	}))
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	})
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
 		JobId:           1,
 		CollectionId:    100,
@@ -409,7 +819,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 7}},
-	}))
+	}, 1)
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
 	mt := &meta{
 		catalog:     catalog,
@@ -573,7 +984,10 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 				ExternalSpec:   `{"format":"parquet"}`,
 			},
 		})
-		mt := &meta{collections: collections}
+		mt := &meta{
+			collections: collections,
+			segments:    NewSegmentsInfo(),
+		}
 
 		// Mock IsExternalCollection to return true
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
@@ -596,6 +1010,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.NotNil(t, job)
 		assert.Equal(t, int64(1), job.GetJobId())
 		assert.Equal(t, int64(100), job.GetCollectionId())
+		manager.Stop()
 	})
 
 	t.Run("idempotent_job_exists", func(t *testing.T) {
@@ -680,14 +1095,21 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			Schema: &schemapb.CollectionSchema{
 				Name:           "test_collection",
 				ExternalSource: "s3://bucket/path",
-				ExternalSpec:   "iceberg",
+				ExternalSpec:   `{"format":"parquet"}`,
 			},
 		})
-		mt := &meta{collections: collections}
+		mt := &meta{
+			collections: collections,
+			segments:    NewSegmentsInfo(),
+		}
 
 		// Mock IsExternalCollection to return true
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
 		defer mockIsExternal.UnPatch()
+		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+			Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/file.parquet", NumRows: 100}}, "manifest", nil).
+			Build()
+		defer mockExplore.UnPatch()
 
 		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
 
@@ -752,6 +1174,55 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Contains(t, job.GetFailReason(), "explore external files failed")
 		assert.Contains(t, job.GetFailReason(), "NO_SUCH_BUCKET",
 			"underlying error must be surfaced to operators")
+	})
+
+	t.Run("empty_explore_result_marks_job_failed_without_eager_cleanup", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		alloc := &stubAllocator{nextID: 1000}
+		scheduler := newStubScheduler()
+		chunkManager := &recordingChunkManager{}
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Name:           "test_collection",
+				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
+			},
+		})
+		mt := &meta{collections: collections}
+
+		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
+		defer mockIsExternal.UnPatch()
+		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+			Return([]*datapb.ExternalFileInfo{}, "__explore_temp__/coord_1/attempt_1001/manifest", nil).
+			Build()
+		defer mockExplore.UnPatch()
+
+		manager := NewExternalCollectionRefreshManager(
+			ctx,
+			mt,
+			scheduler,
+			alloc,
+			refreshMeta,
+			nil,
+			testCollectionGetter(mt),
+			nil,
+			chunkManager,
+		)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.NoError(t, err)
+		manager.Stop()
+
+		job := refreshMeta.GetJob(1)
+		require.NotNil(t, job)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
+		assert.Contains(t, job.GetFailReason(), "no files found")
+		prefixes, removes := chunkManager.snapshot()
+		assert.Empty(t, prefixes)
+		assert.Empty(t, removes)
 	})
 
 	t.Run("milvus_table_schema_error_marks_job_failed_non_retriable", func(t *testing.T) {
@@ -930,6 +1401,38 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		assert.Equal(t, "apply failed", job.GetFailReason())
 	})
 
+	t.Run("terminal_job_with_missing_committed_task_returns_error", func(t *testing.T) {
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateFailed,
+			Progress:     40,
+			FailReason:   "committed task missing",
+			TaskIds:      []int64{1001},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(
+			t,
+			[]*datapb.ExternalCollectionRefreshJob{existingJob},
+			nil,
+		)
+		manager := NewExternalCollectionRefreshManager(
+			ctx,
+			nil,
+			newStubScheduler(),
+			&stubAllocator{},
+			refreshMeta,
+			nil,
+			nil,
+			nil,
+			nil,
+		)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.Nil(t, job)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "job 1 references missing task 1001")
+	})
+
 	t.Run("job_not_found", func(t *testing.T) {
 		refreshMeta := createTestRefreshMeta(t)
 		alloc := &stubAllocator{}
@@ -1012,6 +1515,52 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		assert.Len(t, result, 1)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, result[0].GetState())
 		assert.Equal(t, int64(99), result[0].GetProgress())
+	})
+
+	t.Run("broken_job_returns_error", func(t *testing.T) {
+		now := time.Now().UnixMilli()
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{
+				JobId:        1,
+				CollectionId: 100,
+				State:        indexpb.JobState_JobStateFailed,
+				Progress:     20,
+				FailReason:   "terminal task missing",
+				TaskIds:      []int64{1001},
+				StartTime:    now - 2000,
+			},
+			{
+				JobId:        2,
+				CollectionId: 100,
+				State:        indexpb.JobState_JobStateInProgress,
+				Progress:     30,
+				StartTime:    now - 1000,
+			},
+			{
+				JobId:        3,
+				CollectionId: 100,
+				State:        indexpb.JobState_JobStateFinished,
+				Progress:     100,
+				StartTime:    now,
+			},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, jobs, nil)
+		manager := NewExternalCollectionRefreshManager(
+			ctx,
+			nil,
+			newStubScheduler(),
+			&stubAllocator{},
+			refreshMeta,
+			nil,
+			nil,
+			nil,
+			nil,
+		)
+
+		result, err := manager.ListJobs(ctx, 100)
+		assert.Nil(t, result)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "job 1 references missing task 1001")
 	})
 
 	t.Run("empty_list", func(t *testing.T) {
@@ -1309,7 +1858,7 @@ func TestCleanupExploreTempForJob_Success(t *testing.T) {
 	mgr.cleanupExploreTempForJob(42)
 
 	prefixes, removes := cm.snapshot()
-	assert.Equal(t, []string{"__explore_temp__/coord_42"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_42/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_42"}, removes)
 }
 
@@ -1332,7 +1881,7 @@ func TestCleanupExploreTempForJob_RemoveWithPrefixError(t *testing.T) {
 		mgr.cleanupExploreTempForJob(7)
 	})
 	prefixes, removes := cm.snapshot()
-	assert.Equal(t, []string{"__explore_temp__/coord_7"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_7/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_7"}, removes)
 }
 
@@ -1344,7 +1893,7 @@ func TestCleanupExploreTempForJob_RemoveError(t *testing.T) {
 		mgr.cleanupExploreTempForJob(8)
 	})
 	prefixes, removes := cm.snapshot()
-	assert.Equal(t, []string{"__explore_temp__/coord_8"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_8/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_8"}, removes)
 }
 
@@ -1417,7 +1966,7 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 	mgr.handleJobFinished(ctx, job)
 
 	prefixes, removes := cm.snapshot()
-	assert.Equal(t, []string{"__explore_temp__/coord_555"}, prefixes, "Finished path must clean up the job-specific prefix")
+	assert.Equal(t, []string{"__explore_temp__/coord_555/"}, prefixes, "Finished path must clean up the job-specific prefix")
 	assert.Equal(t, []string{"__explore_temp__/coord_555"}, removes)
 
 	// notifiedJobs must hold an entry so forgetJob later skips redundant cleanup.
@@ -1437,7 +1986,7 @@ func TestHandleJobFailed_TriggersCleanupAndDedups(t *testing.T) {
 	mgr.handleJobFailed(777) // second call must no-op via notifiedJobs dedup
 
 	prefixes, removes := cm.snapshot()
-	assert.Equal(t, []string{"__explore_temp__/coord_777"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_777/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_777"}, removes)
 
 	mgr.notifiedMu.Lock()
@@ -1459,8 +2008,9 @@ func TestForgetJob_SkipsCleanupWhenAlreadyHandled(t *testing.T) {
 
 	mgr.forgetJob(321)
 
-	prefixes, _ := cm.snapshot()
+	prefixes, removes := cm.snapshot()
 	assert.Empty(t, prefixes, "forgetJob must skip cleanup when notifiedJobs entry is present")
+	assert.Empty(t, removes, "forgetJob must skip root removal when notifiedJobs entry is present")
 
 	mgr.notifiedMu.Lock()
 	_, stillPresent := mgr.notifiedJobs[321]
@@ -1477,7 +2027,7 @@ func TestForgetJob_CleansUpWhenNeverHandled(t *testing.T) {
 	mgr.forgetJob(654)
 
 	prefixes, removes := cm.snapshot()
-	assert.Equal(t, []string{"__explore_temp__/coord_654"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_654/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_654"}, removes)
 }
 
@@ -1502,5 +2052,5 @@ func TestCleanup_DoubleHandleJobFailedDoesNotDouble(t *testing.T) {
 	if len(prefixes) != 1 {
 		t.Fatalf("expected exactly 1 prefix cleanup for Failed+GC flow, got %d: %v", len(prefixes), prefixes)
 	}
-	assert.Equal(t, fmt.Sprintf("__explore_temp__/coord_%d", 111), prefixes[0])
+	assert.Equal(t, fmt.Sprintf("__explore_temp__/coord_%d/", 111), prefixes[0])
 }

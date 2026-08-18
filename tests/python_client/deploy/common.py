@@ -1,22 +1,27 @@
 import json
+
 from utils.util_log import test_log as log
 
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "BIN_FLAT", "BIN_IVF_FLAT"]
 
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"nlist": 128}, {"nlist": 128}]
+default_index_params = [
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16, "nbits": 8},
+    {"M": 48, "efConstruction": 500},
+    {"nlist": 128},
+    {"nlist": 128},
+]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
+
 
 def gen_index_param(index_type):
     metric_type = "L2"
     if "BIN" in index_type:
         metric_type = "HAMMING"
-    index_param = {
-        "index_type": index_type,
-        "params": index_params_map[index_type],
-        "metric_type": metric_type
-    }
+    index_param = {"index_type": index_type, "params": index_params_map[index_type], "metric_type": metric_type}
     return index_param
 
 
@@ -46,7 +51,7 @@ def gen_search_param(index_type, metric_type="L2"):
 
 def get_deploy_test_collections():
     try:
-        with open("/tmp/ci_logs/deploy_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/deploy_test_all_collections.json") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
@@ -54,9 +59,10 @@ def get_deploy_test_collections():
         return []
     return collections
 
+
 def get_chaos_test_collections():
     try:
-        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:

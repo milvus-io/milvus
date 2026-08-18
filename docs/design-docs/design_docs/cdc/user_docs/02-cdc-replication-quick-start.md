@@ -306,16 +306,20 @@ You can estimate CDC lag with the following PromQL query:
 clamp_min(
   max by (channel_name) (
     milvus_wal_last_confirmed_time_tick
+    - timestamp(milvus_wal_last_confirmed_time_tick)
   )
   -
   min by (channel_name) (
     milvus_cdc_last_replicated_time_tick
+    - timestamp(milvus_cdc_last_replicated_time_tick)
   ),
   0
 )
 ```
 
-The result is in seconds. For each source channel, the query compares the latest confirmed WAL timetick with the last timetick replicated by CDC. If a primary replicates to multiple standby clusters, the `min by (channel_name)` expression reports the slowest replication progress for that channel.
+The result is in seconds. For each source channel, the query compares the latest confirmed WAL timetick with the last timetick replicated by CDC; `min by (channel_name)` reports the slowest replication progress for that channel.
+
+The `- timestamp(...)` on each gauge subtracts that series' own scrape time, which cancels the phase difference between the two independently-scraped metrics. Without it (subtracting the two raw gauges), the value oscillates by roughly one scrape interval even when idle, because the two metrics are exposed by different scrape targets and sampled at different instants.
 
 If Prometheus scrapes multiple Milvus clusters, add label filters that match your deployment, such as `namespace` or `app_kubernetes_io_instance`, to avoid mixing metrics from different clusters.
 

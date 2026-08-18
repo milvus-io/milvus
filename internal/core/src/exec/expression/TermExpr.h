@@ -169,7 +169,6 @@ class PhyTermFilterExpr : public SegmentExpr {
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
-    std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 

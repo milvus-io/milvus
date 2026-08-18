@@ -20,6 +20,7 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -162,17 +163,19 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         AssertInfo(find_index_type == true,
                    "Can't find index type in index_params");
 
-        LoadResourceRequest request =
-            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-                field_type,
-                element_type,
-                load_index_info->index_engine_version,
-                load_index_info->index_size,
-                index_params,
-                load_index_info->enable_mmap,
-                load_index_info->num_rows,
-                load_index_info->dim);
-        return request;
+        // Segment Loader calls this API while deciding whether a segment may
+        // start loading. Keep that admission path metadata-only: exact scalar
+        // V3 directory inspection belongs to SealedIndexTranslator, where the
+        // result is used for the actual MCL loading reservation.
+        return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            field_type,
+            element_type,
+            load_index_info->index_engine_version,
+            load_index_info->index_size,
+            index_params,
+            load_index_info->enable_mmap,
+            load_index_info->num_rows,
+            load_index_info->dim);
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,
                   fmt::format("failed to estimate index load resource, "
@@ -277,11 +280,12 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
+    } catch (milvus::SegcoreError& e) {
+        return milvus::FailureCStatus(&e);
+    } catch (std::bad_alloc& e) {
+        return milvus::FailureCStatus(milvus::MemAllocateFailed, e.what());
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 

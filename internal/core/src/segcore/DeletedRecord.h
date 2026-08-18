@@ -158,14 +158,11 @@ class DeletedRecord {
                 // so only rows with insert_ts < delete_ts reach this callback.
                 // This check is therefore redundant for normal production
                 // callers and keeps direct callers/tests on the same boundary.
-                // For import segments with commit_timestamp, insert_ts is set
-                // to commit_ts so that pre-commit deletes (delete_ts < commit_ts)
-                // are correctly rejected — the row's data only becomes visible
-                // at commit_ts.
+                // Sealed-segment search callbacks perform the same check from
+                // one published snapshot before invoking this callback.
                 Timestamp insert_ts = 0;
-                if (get_insert_timestamp_func_) {
-                    insert_ts = get_insert_timestamp_func_(row_id);
-                } else if (!insert_record_->timestamps_.empty()) {
+                if (insert_record_ != nullptr &&
+                    !insert_record_->timestamps_.empty()) {
                     insert_ts = insert_record_->timestamps_[row_id];
                 }
                 if (insert_ts != 0 && delete_ts <= insert_ts) {
@@ -409,15 +406,6 @@ class DeletedRecord {
         deleted_mask_.resize(row_count);
     }
 
-    // Set a callback to read insert timestamp for a given row_id.
-    // Used by StorageV2 lazy-init path where insert_record_.timestamps_
-    // may be empty but timestamp data is available in the column.
-    void
-    set_get_insert_timestamp_func(
-        std::function<Timestamp(int64_t row_id)> func) {
-        get_insert_timestamp_func_ = std::move(func);
-    }
-
     std::vector<std::pair<Timestamp, BitsetType>>
     get_snapshots() const {
         std::shared_lock<std::shared_mutex> lock(snap_lock_);
@@ -455,10 +443,6 @@ class DeletedRecord {
     std::atomic<int64_t> dumped_entry_count_{0};
     // estimated memory size of DeletedRecord, only used for sealed segment
     int64_t estimated_memory_size_{0};
-
-    // Callback to read insert timestamp from column (StorageV2 lazy path).
-    // Used when insert_record_->timestamps_ is empty.
-    std::function<Timestamp(int64_t row_id)> get_insert_timestamp_func_;
 
     // atomic snapshot for fast path query optimization
     // when query_timestamp >= snapshot.max_ts, we can directly use the bitset

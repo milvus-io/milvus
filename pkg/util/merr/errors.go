@@ -82,6 +82,9 @@ var (
 	ErrCollectionReplicateMode         = newMilvusError("can't operate on the collection under standby mode", 108, false, WithErrorType(InputError))
 	ErrCollectionSchemaMismatch        = newMilvusError("collection schema mismatch", 109, false, WithErrorType(InputError))
 	ErrCollectionSchemaVersionNotReady = newMilvusError("collection schema version not ready", 110, true)
+	// ErrCollectionPartialUpdateConflict prevents clients from automatically
+	// replaying non-idempotent relative updates after a CAS rejection.
+	ErrCollectionPartialUpdateConflict = newMilvusError("partial update conflict", 111, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
@@ -264,7 +267,7 @@ var (
 	// import job orchestration (job not found / no vchannels / restore /
 	// job-count backpressure) and object-storage IO failures in the readers.
 	// These are the operator's concern, not the caller's, so they stay
-	// SystemError and must not be bucketed as fail_input.
+	// SystemError and must not be bucketed as a user-caused failure.
 	ErrImportSysFailed = newMilvusError("importing data failed on server side", 2101, false)
 
 	// Search/Query related

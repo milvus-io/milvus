@@ -318,16 +318,12 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 
 	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-	var segmentBinlogFields map[int64]struct{}
 
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
 			continue
 		}
-		if segmentBinlogFields == nil {
-			segmentBinlogFields = getSegmentBinlogFields(segment)
-		}
-		if !i.canCreateIndexForSegment(ctx, segment, index, segmentBinlogFields) {
+		if !i.canCreateIndexForSegment(ctx, segment, index) {
 			continue
 		}
 		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
@@ -339,46 +335,33 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 	return nil
 }
 
-// getSegmentBinlogFields returns the set of field IDs that have binlog data in the segment.
-// StorageV2/V3 column groups report real field IDs through ChildFields; legacy entries may use FieldID directly.
-func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
-	result := make(map[int64]struct{})
-	for _, binlog := range segment.GetBinlogs() {
-		if len(binlog.GetChildFields()) == 0 {
-			if segment.GetStorageVersion() == storage.StorageV1 {
-				result[binlog.GetFieldID()] = struct{}{}
-			}
-			continue
-		}
-		for _, childFieldID := range binlog.GetChildFields() {
-			result[childFieldID] = struct{}{}
-		}
-	}
-	return result
-}
-
-func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) bool {
-	_, hasField := segmentBinlogFields[index.FieldID]
-	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
-		return true
-	}
-	mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
-	return false
-}
-
-func (i *indexInspector) isFunctionOutputField(collectionID, fieldID int64) bool {
-	collection := i.meta.GetCollection(collectionID)
-	if collection == nil || collection.Schema == nil {
+// canCreateIndexForSegment reports whether the segment is ready to build the
+// index. The schema is resolved through the handler (lazy-loading on cache miss,
+// e.g. right after a datacoord restart); the check fails closed, deferring to
+// the next inspection round on an unresolvable or inconsistent view.
+func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index) bool {
+	collection, err := i.handler.GetCollection(ctx, segment.CollectionID)
+	if err != nil || collection == nil || collection.Schema == nil {
+		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
+			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
 		return false
 	}
-	for _, functionSchema := range collection.Schema.GetFunctions() {
-		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
-			if outputFieldID == fieldID {
-				return true
-			}
-		}
+	// Function outputs are materialized by schema-bump reconciliation, which
+	// advances the segment schema version. A segment behind the collection schema
+	// version may lack them, so defer the whole segment until it catches up.
+	if len(collection.Schema.GetFunctions()) > 0 &&
+		segment.GetSchemaVersion() < collection.Schema.GetVersion() {
+		mlog.Debug(ctx, "segment schema behind collection, function outputs may be unmaterialized, defer index build",
+			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID),
+			mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", collection.Schema.GetVersion()))
+		return false
 	}
-	return false
+	if typeutil.GetFieldByID(collection.Schema, index.FieldID) == nil {
+		mlog.Warn(ctx, "indexed field not found in cached collection schema, defer index build",
+			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
+		return false
+	}
+	return true
 }
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
@@ -393,7 +376,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := segment.getFieldBinlogSize(fieldID)
-	taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
+	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
 	if isVectorIndex && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -459,11 +442,9 @@ func (i *indexInspector) reloadFromMeta() {
 			}
 
 			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
-			indexType := GetIndexType(indexParams)
-			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
 			fieldSize := segment.getFieldBinlogSize(fieldID)
-			taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
+			taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 			i.scheduler.Enqueue(newIndexBuildTask(
 				model.CloneSegmentIndex(segIndex),

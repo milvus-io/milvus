@@ -32,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -56,7 +58,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 
@@ -650,6 +652,22 @@ func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collection
 	return positions, minTs, nil
 }
 
+// hasCommittedManifest reports whether a Storage V3 manifest references
+// committed files. ManifestEarliest is only the placeholder assigned to a new
+// Growing segment before its first manifest commit.
+func hasCommittedManifest(info *SegmentInfo) (bool, error) {
+	if info.GetStorageVersion() != storage.StorageV3 || info.GetManifestPath() == "" {
+		return false, nil
+	}
+
+	_, version, err := packed.UnmarshalManifestPath(info.GetManifestPath())
+	if err != nil {
+		return false, merr.WrapErrDataIntegrity(err,
+			"invalid manifest path for segment %d", info.GetID())
+	}
+	return version > packed.ManifestEarliest, nil
+}
+
 // GenSnapshot generates a point-in-time snapshot of a collection's data and metadata.
 //
 // This function captures a consistent view of a collection at a specific timestamp, including:
@@ -675,7 +693,7 @@ func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collection
 //   - collectionID: ID of collection to snapshot
 //
 // Returns:
-//   - SnapshotData: Complete snapshot with collection metadata and segment descriptions
+//   - snapshotstorage.SnapshotData: Complete snapshot with collection metadata and segment descriptions
 //   - error: If collection not found, timestamp generation fails, or binlog operations fail
 //
 // Partition filtering logic:
@@ -684,7 +702,7 @@ func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collection
 //   - Collections with partition key: Include all partitions (filtering handled elsewhere)
 //
 // Segment selection criteria:
-// - Must have data (binlogs or deltalogs present)
+// - Must have data (binlogs, deltalogs, or a committed V3 manifest present)
 // - StartPosition timestamp < channel seek timestamp (data started before snapshot)
 // - State != Dropped (still valid)
 // - Not importing (stable segments only)
@@ -704,7 +722,7 @@ func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collection
 // - Creating backup snapshots for disaster recovery
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
-func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
 	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -751,11 +769,21 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	// get segment info
 	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		return segmentHasData && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
 	segments := make([]*SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {
+		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
+		if !segmentHasData {
+			segmentHasData, err = hasCommittedManifest(info)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !segmentHasData {
+			continue
+		}
+
 		seekTs, ok := channelSeekTs[info.GetInsertChannel()]
 		if !ok {
 			return nil, merr.WrapErrServiceInternalMsg(
@@ -836,7 +864,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Value: strconv.Itoa(int(resp.GetConsistencyLevel())),
 	})
 
-	return &SnapshotData{
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			CollectionId:         collectionID,
 			PartitionIds:         partitionIDs,
@@ -847,6 +875,8 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
 			NumPartitions:       resp.GetNumPartitions(),
+			ConsistencyLevel:    resp.GetConsistencyLevel(),
+			Properties:          common.CloneKeyValuePairs(resp.GetProperties()),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},

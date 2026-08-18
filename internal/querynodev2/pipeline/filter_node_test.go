@@ -17,11 +17,14 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -198,4 +201,51 @@ func (suite *FilterNodeSuite) buildMsgPack() *msgstream.MsgPack {
 
 func TestFilterNode(t *testing.T) {
 	suite.Run(t, new(FilterNodeSuite))
+}
+
+func TestFilterNodePreservesTraceContext(t *testing.T) {
+	paramtable.Init()
+
+	expectedTraceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	expectedSpanID, err := trace.SpanIDFromHex("0102030405060708")
+	require.NoError(t, err)
+	clientCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: expectedTraceID,
+		SpanID:  expectedSpanID,
+	}))
+
+	const (
+		collectionID = int64(111)
+		partitionID  = int64(11)
+		segmentID    = int64(3)
+		channel      = "test-channel"
+	)
+
+	collection := segments.NewTestCollection(collectionID, querypb.LoadType_LoadCollection, nil)
+	collection.AddPartition(partitionID)
+	mockCollectionManager := segments.NewMockCollectionManager(t)
+	mockCollectionManager.EXPECT().Get(collectionID).Return(collection)
+
+	mockDelegator := delegator.NewMockShardDelegator(t)
+	mockDelegator.EXPECT().VerifyExcludedSegments(segmentID, mock.Anything).Return(true)
+	mockDelegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
+
+	node := newFilterNode(collectionID, channel, &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    segments.NewMockSegmentManager(t),
+	}, mockDelegator, 8)
+
+	insertMsg := buildInsertMsg(collectionID, partitionID, segmentID, channel, 1)
+	insertMsg.SetTraceCtx(clientCtx)
+	out := node.Operate(&msgstream.MsgPack{
+		BeginTs: 1,
+		EndTs:   1,
+		Msgs:    []msgstream.TsMsg{insertMsg},
+	})
+	require.NotNil(t, out)
+
+	sc := trace.SpanContextFromContext(insertMsg.TraceCtx())
+	require.Equal(t, expectedTraceID, sc.TraceID())
+	require.Equal(t, expectedSpanID, sc.SpanID())
 }

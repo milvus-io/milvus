@@ -1836,6 +1836,102 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         assert_rows_payload(rows_by_id, expected, [CONTENT_FIELD, CONTENT_ALT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_text_lob_add_collection_field(self):
+        """
+        target: verify MilvusClient.add_collection_field supports adding a TEXT field
+        method: add an analyzer-enabled nullable TEXT field after one row exists, then insert null/LOB values
+        expected: old and omitted values are null, the LOB payload is exact, and text_match finds only that row
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        added_text_field = "added_text"
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=ID_FIELD, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
+        # Passing index_params to create_collection auto-loads it; keep it unloaded until schema evolution is done.
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            consistency_level="Strong",
+            load=False,
+        )
+        self.create_index(client, collection_name, index_params=index_params)
+
+        insert_result, _ = self.insert(
+            client,
+            collection_name,
+            [{ID_FIELD: 0, VECTOR_FIELD: vector_for_pk(0)}],
+        )
+        assert insert_result["insert_count"] == 1
+
+        client.add_collection_field(
+            collection_name=collection_name,
+            field_name=added_text_field,
+            data_type=DataType.TEXT,
+            nullable=True,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params=STANDARD_ANALYZER,
+        )
+
+        desc, _ = self.describe_collection(client, collection_name)
+        added_field = next(field for field in desc["fields"] if field["name"] == added_text_field)
+        assert is_text_datatype(added_field["type"])
+        assert added_field.get("nullable") is True
+        assert str(added_field["params"].get("enable_analyzer")).lower() == "true"
+        assert str(added_field["params"].get("enable_match")).lower() == "true"
+        analyzer_params = added_field["params"]["analyzer_params"]
+        if isinstance(analyzer_params, str):
+            analyzer_params = json.loads(analyzer_params)
+        assert analyzer_params == STANDARD_ANALYZER
+
+        marker = "addedfieldmarker "
+        added_text = marker + make_text(64 * 1024 + 1 - len(marker), "added-field")
+        insert_result, _ = self.insert(
+            client,
+            collection_name,
+            [
+                {ID_FIELD: 1, VECTOR_FIELD: vector_for_pk(1)},
+                {ID_FIELD: 2, VECTOR_FIELD: vector_for_pk(2), added_text_field: added_text},
+            ],
+        )
+        assert insert_result["insert_count"] == 2
+
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        expected = {
+            0: {added_text_field: payload_meta(None)},
+            1: {added_text_field: payload_meta(None)},
+            2: {added_text_field: payload_meta(added_text)},
+        }
+        rows_by_id = query_by_ids(
+            self,
+            client,
+            collection_name,
+            expected.keys(),
+            [added_text_field],
+        )
+        assert_rows_payload(rows_by_id, expected, [added_text_field])
+        assert added_text_field in rows_by_id[0]
+        assert added_text_field in rows_by_id[1]
+        assert rows_by_id[0][added_text_field] is None
+        assert rows_by_id[1][added_text_field] is None
+
+        matched_rows, _ = self.query(
+            client,
+            collection_name,
+            filter=f"text_match({added_text_field}, 'addedfieldmarker')",
+            output_fields=[ID_FIELD],
+            consistency_level="Strong",
+        )
+        assert {row[ID_FIELD] for row in matched_rows} == {2}
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_text_lob_drop_field_sdk_support(self):
         """
         target: verify dropping a TEXT field if the MilvusClient SDK exposes the API
@@ -2345,7 +2441,7 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
         assert threshold > 0, f"MILVUS_TEXT_INLINE_THRESHOLD must be positive, got {threshold}"
         minio_client = new_minio_client(minio_host)
         ensure_minio_bucket(minio_client, minio_bucket)
-        root_path = os.getenv("MILVUS_MINIO_ROOT_PATH", "files")
+        root_path = os.getenv("MILVUS_MINIO_ROOT_PATH", "file")
 
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()

@@ -85,8 +85,7 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
-			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
 		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
@@ -287,8 +286,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
-			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
 		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
@@ -336,6 +334,10 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		mlog.Warn(ctx, "receive analyze task with invalid slot, set to 65535", mlog.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 65535
 	}
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(req.GetClusterID(), req.GetTaskID(), &index.AnalyzeTaskInfo{
@@ -347,7 +349,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		mlog.Warn(context.TODO(), "duplicated analyze task", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager)
+	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
@@ -377,6 +379,10 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		mlog.Warn(ctx, "receive stats task with invalid slot, set to 64", mlog.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 64
 	}
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &index.StatsTaskInfo{
@@ -390,15 +396,14 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
-			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
 		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		return merr.Status(err), nil
 	}
 
-	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm)
+	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))

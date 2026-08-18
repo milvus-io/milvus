@@ -21,12 +21,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
+	"github.com/cockroachdb/errors"
 
 	dcsession "github.com/milvus-io/milvus/internal/datacoord/session"
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -40,6 +42,7 @@ type NodeType int
 const (
 	QueryNode NodeType = 0 + iota
 	DataNode
+	Proxy
 )
 
 type NodeInfo struct {
@@ -60,13 +63,15 @@ type FileResourceObserver struct {
 	distribution *typeutil.ConcurrentMap[int64, *NodeInfo]
 
 	// node manager
-	qnManager *qcsession.NodeManager
-	dnManager dcsession.NodeManager
-	cluster   qcsession.Cluster
+	qnManager    *qcsession.NodeManager
+	dnManager    dcsession.NodeManager
+	cluster      qcsession.Cluster
+	proxyManager proxyutil.ProxyClientManagerInterface
 
 	// mode
-	qnMode fileresource.Mode // tips: streaming node used as query node now
-	dnMode fileresource.Mode
+	qnMode    fileresource.Mode // tips: streaming node used as query node now
+	dnMode    fileresource.Mode
+	proxyMode fileresource.Mode
 
 	notifyCh  chan struct{}
 	closeCh   chan struct{}
@@ -81,11 +86,12 @@ func NewFileResourceObserver(ctx context.Context) *FileResourceObserver {
 		ctx:          ctx,
 		distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 
-		notifyCh: make(chan struct{}, 1),
-		closeCh:  make(chan struct{}),
-		sf:       conc.Singleflight[any]{},
-		dnMode:   fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
-		qnMode:   fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()),
+		notifyCh:  make(chan struct{}, 1),
+		closeCh:   make(chan struct{}),
+		sf:        conc.Singleflight[any]{},
+		dnMode:    fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
+		qnMode:    fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()),
+		proxyMode: fileresource.ParseMode(paramtable.Get().CommonCfg.ProxyFileResourceMode.GetValue()),
 	}
 }
 
@@ -121,7 +127,7 @@ func (m *FileResourceObserver) syncLoop() {
 }
 
 func (m *FileResourceObserver) Start() {
-	if m.qnMode == fileresource.SyncMode || m.dnMode == fileresource.SyncMode {
+	if m.qnMode == fileresource.SyncMode || m.dnMode == fileresource.SyncMode || m.proxyMode == fileresource.SyncMode {
 		m.startonce.Do(func() {
 			m.wg.Add(1)
 			go m.syncLoop()
@@ -174,9 +180,9 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 	}
 
 	var err error
-	m.distribution.Range(func(nodeID int64, node *NodeInfo) bool {
+	m.distribution.Range(func(_ int64, node *NodeInfo) bool {
 		if node.NodeType == QueryNode && node.Version < version {
-			err = merr.WrapErrServiceUnavailableMsg("file resource not synced, node-%d", nodeID)
+			err = merr.WrapErrServiceUnavailableMsg("file resource not synced, node-%d", node.NodeID)
 			return false
 		}
 		return true
@@ -188,7 +194,7 @@ func (m *FileResourceObserver) Sync() error {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
 	var syncErr error
-	nodeIDs := []int64{}
+	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
 
 	// sync file resource to query node if file resource mode was Sync
@@ -222,7 +228,7 @@ func (m *FileResourceObserver) Sync() error {
 		}
 
 		for _, node := range qnnodes {
-			nodeIDs = append(nodeIDs, node.ID())
+			activeNodes[node.ID()] = struct{}{}
 		}
 	}
 
@@ -263,12 +269,49 @@ func (m *FileResourceObserver) Sync() error {
 			}
 		}
 
-		nodeIDs = append(nodeIDs, dnnodes...)
+		for _, nodeID := range dnnodes {
+			activeNodes[nodeID] = struct{}{}
+		}
+	}
+
+	// sync file resource to proxy if file resource mode was Sync
+	if m.proxyMode == fileresource.SyncMode && m.proxyManager != nil {
+		proxyClients := m.proxyManager.GetProxyClients()
+		proxyClients.Range(func(nodeID int64, client types.ProxyClient) bool {
+			if info, ok := m.distribution.Get(nodeID); !ok || info.Version < targetVersion {
+				status, err := client.SyncFileResource(m.ctx, &internalpb.SyncFileResourceRequest{
+					Resources: resources,
+					Version:   targetVersion,
+				})
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					err = nil
+				} else if err == nil {
+					err = merr.Error(status)
+				}
+				if err != nil {
+					mlog.Warn(m.ctx, "sync file resource failed", mlog.FieldNodeID(nodeID), mlog.String("nodeType", "proxy"), mlog.Err(err))
+					syncErr = err
+					return true
+				}
+				m.distribution.Insert(nodeID, &NodeInfo{
+					NodeID:   nodeID,
+					NodeType: Proxy,
+					Version:  targetVersion,
+				})
+				mlog.Info(m.ctx, "finish sync file resource to proxy", mlog.FieldNodeID(nodeID), mlog.Uint64("version", targetVersion))
+			}
+			return true
+		})
+
+		proxyClients.Range(func(nodeID int64, _ types.ProxyClient) bool {
+			activeNodes[nodeID] = struct{}{}
+			return true
+		})
 	}
 
 	// delete node from distribution if node is not in manager
-	m.distribution.Range(func(nodeID int64, node *NodeInfo) bool {
-		if !lo.Contains(nodeIDs, nodeID) {
+	m.distribution.Range(func(nodeID int64, _ *NodeInfo) bool {
+		if _, ok := activeNodes[nodeID]; !ok {
 			m.distribution.Remove(nodeID)
 		}
 		return true
@@ -291,4 +334,8 @@ func (m *FileResourceObserver) InitQueryCoord(manager *qcsession.NodeManager, cl
 
 func (m *FileResourceObserver) InitDataCoord(manager dcsession.NodeManager) {
 	m.dnManager = manager
+}
+
+func (m *FileResourceObserver) InitProxy(manager proxyutil.ProxyClientManagerInterface) {
+	m.proxyManager = manager
 }

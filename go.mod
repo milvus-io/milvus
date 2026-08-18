@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
@@ -69,8 +69,8 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260701112023-1aa0f3b3f5b6
-	github.com/milvus-io/milvus/client/v2 v2.6.2
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260806081414-16b288837fbd
+	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
 	github.com/spaolacci/murmur3 v1.1.0
@@ -98,7 +98,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ./client
+replace github.com/milvus-io/milvus/client/v3 => ./client
 
 require (
 	cel.dev/expr v0.25.1 // indirect
@@ -264,7 +264,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.1.33 // indirect
+	github.com/zilliztech/woodpecker v0.1.37 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
@@ -317,7 +317,7 @@ replace (
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93
-	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20250318084424-114f4050c3a6
+	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20260810014817-f3b338cf6824
 	github.com/milvus-io/milvus/pkg/v3 => ./pkg
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )

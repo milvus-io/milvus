@@ -228,6 +228,7 @@ func composeNodeChannels(channels ...*DmChannel) nodeChannels {
 type ChannelDistManagerInterface interface {
 	GetByFilter(filters ...ChannelDistFilter) []*DmChannel
 	Update(nodeID typeutil.UniqueID, channels ...*DmChannel) []*DmChannel
+	Patch(nodeID typeutil.UniqueID, updates []*DmChannel, removedChannels []string) []*DmChannel
 	GetShardLeader(channelName string, replica *Replica) *DmChannel
 	GetChannelDist(collectionID int64) []*metricsinfo.DmChannel
 	GetLeaderView(collectionID int64) []*metricsinfo.LeaderView
@@ -312,6 +313,60 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	}
 
 	m.channels[nodeID] = composeNodeChannels(channels...)
+	m.version++
+	return newServiceableChannels
+}
+
+func (m *ChannelDistManager) Patch(nodeID typeutil.UniqueID, updates []*DmChannel, removedChannels []string) []*DmChannel {
+	if len(updates) == 0 && len(removedChannels) == 0 {
+		return nil
+	}
+
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	existing := m.channels[nodeID]
+	updatesByName := make(map[string]*DmChannel, len(updates))
+	for _, channel := range updates {
+		updatesByName[channel.GetChannelName()] = channel
+	}
+	removedByName := make(map[string]struct{}, len(removedChannels))
+	for _, channelName := range removedChannels {
+		removedByName[channelName] = struct{}{}
+	}
+
+	channels := make([]*DmChannel, 0, len(existing.channels)+len(updates))
+	newServiceableChannels := make([]*DmChannel, 0)
+	for _, old := range existing.channels {
+		channelName := old.GetChannelName()
+		if _, ok := removedByName[channelName]; ok {
+			continue
+		}
+		channel, ok := updatesByName[channelName]
+		if !ok {
+			channels = append(channels, old)
+			continue
+		}
+
+		channel.Node = nodeID
+		if channel.IsServiceable() && !old.IsServiceable() {
+			newServiceableChannels = append(newServiceableChannels, channel)
+		}
+		channels = append(channels, channel)
+		delete(updatesByName, channelName)
+	}
+	for _, channel := range updatesByName {
+		channel.Node = nodeID
+		if channel.IsServiceable() {
+			newServiceableChannels = append(newServiceableChannels, channel)
+		}
+		channels = append(channels, channel)
+	}
+	if len(channels) == 0 {
+		delete(m.channels, nodeID)
+	} else {
+		m.channels[nodeID] = composeNodeChannels(channels...)
+	}
 	m.version++
 	return newServiceableChannels
 }

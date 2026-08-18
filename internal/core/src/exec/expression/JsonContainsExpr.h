@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -23,6 +25,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "segcore/SegmentInterface.h"
 #include "common/bson_view.h"
 #include "exec/expression/Utils.h"
@@ -41,12 +44,12 @@ class ShreddingArrayBsonContainsArrayExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -89,12 +92,12 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -134,21 +137,19 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
 template <typename GetType>
 class ShreddingArrayBsonContainsAnyExecutor {
  public:
-    ShreddingArrayBsonContainsAnyExecutor(
-        std::shared_ptr<MultiElement> arg_set,
-        std::shared_ptr<MultiElement> arg_set_double)
-        : arg_set_(std::move(arg_set)),
-          arg_set_double_(std::move(arg_set_double)) {
+    explicit ShreddingArrayBsonContainsAnyExecutor(
+        std::shared_ptr<MultiElement> arg_set)
+        : arg_set_(std::move(arg_set)) {
     }
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -163,10 +164,9 @@ class ShreddingArrayBsonContainsAnyExecutor {
             for (const auto& element : array_view.value()) {
                 if constexpr (std::is_same_v<GetType, int64_t> ||
                               std::is_same_v<GetType, double>) {
-                    auto value = milvus::BsonView::GetValueFromBsonView<double>(
-                        element.get_value());
-                    if (value.has_value() &&
-                        arg_set_double_->In(value.value())) {
+                    auto value =
+                        GetBsonNumberExact<GetType>(element.get_value());
+                    if (value.has_value() && arg_set_->In(*value)) {
                         matched = true;
                         break;
                     }
@@ -186,7 +186,6 @@ class ShreddingArrayBsonContainsAnyExecutor {
 
  private:
     std::shared_ptr<MultiElement> arg_set_;
-    std::shared_ptr<MultiElement> arg_set_double_;
 };
 
 template <typename GetType>
@@ -199,12 +198,12 @@ class ShreddingArrayBsonContainsAllExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -217,8 +216,15 @@ class ShreddingArrayBsonContainsAllExecutor {
             }
             std::set<GetType> tmp_elements(elements_);
             for (const auto& element : array_view.value()) {
-                auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
-                    element.get_value());
+                auto value = [&]() -> std::optional<GetType> {
+                    if constexpr (std::is_same_v<GetType, int64_t> ||
+                                  std::is_same_v<GetType, double>) {
+                        return GetBsonNumberExact<GetType>(element.get_value());
+                    } else {
+                        return milvus::BsonView::GetValueFromBsonView<GetType>(
+                            element.get_value());
+                    }
+                }();
                 if (!value.has_value()) {
                     continue;
                 }
@@ -246,12 +252,12 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -281,25 +287,17 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                             break;
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<int64_t>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 tmp_elements_index.erase(idx);
                             }
                             break;
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 tmp_elements_index.erase(idx);
                             }
                             break;
@@ -329,7 +327,7 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                             break;
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
@@ -359,12 +357,12 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -390,21 +388,17 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
                             break;
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<int64_t>(
-                                    sub_value.get_value());
-                            if (val.has_value() &&
-                                val.value() == element.int64_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 matched = true;
                             }
                             break;
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    sub_value.get_value());
-                            if (val.has_value() &&
-                                val.value() == element.float_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 matched = true;
                             }
                             break;
@@ -430,7 +424,7 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
                             break;
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
@@ -503,7 +497,37 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::JsonStats;
             return;
         }
+        if (expr_->column_.data_type_ == DataType::JSON &&
+            (!expr_->same_type_ ||
+             std::any_of(expr_->vals_.begin(),
+                         expr_->vals_.end(),
+                         [](const auto& value) {
+                             return value.val_case() ==
+                                    proto::plan::GenericValue::kArrayVal;
+                         }))) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+        if (expr_->column_.data_type_ == DataType::ARRAY &&
+            expr_->vals_.empty()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
         SegmentExpr::DetermineExecPath();
+        if (exec_path_ != ExprExecPath::ScalarIndex ||
+            expr_->column_.data_type_ != DataType::JSON ||
+            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
+            return;
+        }
+        const auto has_unsafe_int_literal = std::any_of(
+            expr_->vals_.begin(),
+            expr_->vals_.end(),
+            [this](const auto& value) {
+                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
+            });
+        if (has_unsafe_int_literal) {
+            exec_path_ = ExprExecPath::RawData;
+        }
     }
 
  private:
@@ -569,7 +593,6 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
-    std::shared_ptr<MultiElement> arg_set_double_;
     std::shared_ptr<void>
         arg_cached_set_;  // For caching std::set<T> or std::vector<T>
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};

@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -74,6 +74,72 @@ func TestAddCollectionField(t *testing.T) {
 			common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
 		})
 	}
+}
+
+func TestAlterCollectionSchemaFunctionField(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	previousStorageV3, err := hp.AlterServerConfig("common.storage.useLoonFFI", "true")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = hp.AlterServerConfig("common.storage.useLoonFFI", previousStorageV3)
+	})
+
+	previousSchemaBump, err := hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "true")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", previousSchemaBump)
+	})
+
+	collectionName := common.GenRandomString("alter_function_field", 6)
+	schema := entity.NewSchema().
+		WithName(collectionName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1024).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(8))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema)))
+
+	outputField := entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector)
+	function := entity.NewFunction().
+		WithName("bm25").
+		WithType(entity.FunctionTypeBM25).
+		WithInputFields("text").
+		WithOutputFields("sparse")
+	require.NoError(t, mc.AddFunctionField(ctx, client.NewAddFunctionFieldOption(collectionName, outputField, function, index.NewSparseInvertedIndex(entity.BM25, 0.2)).WithIndexName("sparse_idx")))
+
+	collection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.Contains(t, mapFieldsByName(collection.Schema.Fields), "sparse")
+	require.Contains(t, mapFunctionsByName(collection.Schema.Functions), "bm25")
+
+	require.NoError(t, mc.DropFunctionField(ctx, client.NewDropFunctionFieldOption(collectionName, "bm25")))
+	collection, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.NotContains(t, mapFieldsByName(collection.Schema.Fields), "sparse")
+	require.NotContains(t, mapFunctionsByName(collection.Schema.Functions), "bm25")
+
+	field := entity.NewField().WithName("status").WithDataType(entity.FieldTypeInt32).WithNullable(true)
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collectionName, field)))
+	require.NoError(t, mc.DropCollectionField(ctx, client.NewDropCollectionFieldOption(collectionName, "status")))
+	collection, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.NotContains(t, mapFieldsByName(collection.Schema.Fields), "status")
+}
+
+func mapFieldsByName(fields []*entity.Field) map[string]*entity.Field {
+	result := make(map[string]*entity.Field, len(fields))
+	for _, field := range fields {
+		result[field.Name] = field
+	}
+	return result
+}
+
+func mapFunctionsByName(functions []*entity.Function) map[string]*entity.Function {
+	result := make(map[string]*entity.Function, len(functions))
+	for _, function := range functions {
+		result[function.Name] = function
+	}
+	return result
 }
 
 func TestAddCollectionStructField(t *testing.T) {
@@ -271,20 +337,20 @@ func TestCollectionAddFieldExceedMaxFieldNumber(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString("addfield", 6)
-	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
-	common.CheckErr(t, err, true)
-
-	// add fields until reaching max field number (64)
-	for i := 0; i < 62; i++ {
-		newField := entity.NewField().WithName(fmt.Sprintf("%s_%d", common.DefaultNewField, i)).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
-		err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, newField))
-		common.CheckErr(t, err, true)
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
+	for i := 0; i < common.MaxFieldNum-2; i++ {
+		field := entity.NewField().WithName(fmt.Sprintf("%s_%d", common.DefaultNewField, i)).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
+		schema.WithField(field)
 	}
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
 
 	// try to add one more field to exceed max field number
 	newField := entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
 	err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, newField))
-	common.CheckErr(t, err, false, "The number of fields has reached the maximum value 64: invalid parameter")
+	common.CheckErr(t, err, false, fmt.Sprintf("The number of fields has reached the maximum value %d: invalid parameter", common.MaxFieldNum))
 }
 
 // create Inverted index for added field and drop index

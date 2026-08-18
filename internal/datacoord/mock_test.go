@@ -34,6 +34,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -1082,6 +1083,10 @@ func (s *mockMixCoord) ExportSnapshot(ctx context.Context, req *datapb.ExportSna
 	panic("implement me")
 }
 
+func (s *mockMixCoord) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	panic("implement me")
 }
@@ -1172,8 +1177,8 @@ func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
-func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
-	return &SnapshotData{
+func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Name:         "test_snapshot",
 			CollectionId: collectionID,

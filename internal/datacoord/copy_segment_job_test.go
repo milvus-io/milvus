@@ -503,3 +503,16 @@ func (s *CopySegmentJobSuite) TestJobWithEmptyOptions() {
 	options := job.GetOptions()
 	s.Nil(options)
 }
+
+func (s *CopySegmentJobSuite) TestCopyJobTimeoutTs_MatchesPhysicalTimeReader() {
+	// Regression test for the TimeoutTs unit mismatch: the deadline is read
+	// back by tryTimeoutJob via tsoutil.PhysicalTime, which expects a hybrid
+	// TSO timestamp (physical ms << 18). Storing UnixNano here made the
+	// decoded deadline land centuries in the future, so the job timeout never
+	// fired. The composed value must round-trip to now+timeout.
+	timeout := 24 * time.Hour
+	deadline := tsoutil.PhysicalTime(CopyJobTimeoutTs(timeout))
+
+	expected := time.Now().Add(timeout)
+	s.WithinDuration(expected, deadline, 10*time.Second)
+}

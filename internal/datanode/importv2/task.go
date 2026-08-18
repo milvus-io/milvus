@@ -151,6 +151,11 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				segmentsInfo[segment].Bm25Logs = mergeFn(segmentsInfo[segment].Bm25Logs, info.GetBm25Logs())
 				segmentsInfo[segment].ManifestPath = info.GetManifestPath()
+				// Stats (segment.Statistics().Publish()) is cumulative per segment,
+				// so the latest contributing file's snapshot supersedes earlier
+				// ones — refresh like ImportedRows rather than freezing the first,
+				// which would undercount every file after the first. Do NOT sum.
+				segmentsInfo[segment].Stats = info.GetStats()
 				return
 			}
 			segmentsInfo[segment] = info
@@ -170,6 +175,17 @@ func UpdateSegmentResult(result *datapb.CopySegmentResult) UpdateAction {
 			// Directly replace the segment result since each segment is only updated once
 			// The initial empty result was created in NewCopySegmentTask()
 			it.segmentResults[segment] = result
+		}
+	}
+}
+
+// UpdateCopiedFiles records target objects created by a CopySegmentTask so a
+// failed task can remove them. TaskManager serializes updates and Clone keeps
+// each published task snapshot immutable.
+func UpdateCopiedFiles(files []string) UpdateAction {
+	return func(task Task) {
+		if it, ok := task.(*CopySegmentTask); ok {
+			it.copiedFiles = append(it.copiedFiles, files...)
 		}
 	}
 }

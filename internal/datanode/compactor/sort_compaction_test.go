@@ -207,7 +207,7 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionTask() {
 	})).Return(lo.Values(kvs), nil).Once()
 
 	// Create delta log for deletion
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday(), 5)
+	deleteTs := tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), 5)
 	blob, err := getInt64DeltaBlobs(segmentID, []int64{segmentID}, []uint64{deleteTs})
 	s.Require().NoError(err)
 	deltaPath := "deltalog/1001"
@@ -448,8 +448,8 @@ func (s *SortCompactionTaskSuite) initSegBuffer(size int, seed int64) {
 	for i := 0; i < size; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(seed),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), int64(i))),
-			Value:     getRow(seed, int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), int64(i)))),
+			Timestamp: int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i))),
+			Value:     getRow(seed, int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i)))),
 		}
 		err := s.segWriter.Write(&v)
 		s.Require().NoError(err)
@@ -462,7 +462,7 @@ func (s *SortCompactionTaskSuite) initSegBufferWithBM25(seed int64) {
 
 	v := storage.Value{
 		PK:        storage.NewInt64PrimaryKey(seed),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 		Value:     genRowWithBM25(seed),
 	}
 	err := s.segWriter.Write(&v)

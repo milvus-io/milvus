@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1261,15 +1260,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	ctx := context.Background()
 
 	msgLength := 4
-	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
-		suite.collectionID,
-		suite.partitionID,
-		suite.segmentID,
-		msgLength,
-		suite.schema,
-		suite.chunkManager,
-	)
-	suite.Require().NoError(err)
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
 
 	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
 		suite.partitionID,
@@ -1277,19 +1268,6 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
-
-	segs, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:     suite.segmentID,
-		PartitionID:   suite.partitionID,
-		CollectionID:  suite.collectionID,
-		BinlogPaths:   binlogs,
-		Statslogs:     statsLogs,
-		NumOfRows:     int64(msgLength),
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	})
-	suite.Require().NoError(err)
-	suite.Require().Len(segs, 1)
-	segment := segs[0]
 
 	readerCalled := atomic.NewInt32(0)
 	manifestCalled := atomic.NewInt32(0)
@@ -1317,7 +1295,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 		Deltalogs:     deltaLogs,
 		NumOfRows:     int64(msgLength),
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-		// ManifestPath left empty → V1 path.
+		// ManifestPath left empty: V1 path.
 	}
 
 	loader := suite.loader.(*segmentLoader)
@@ -1328,67 +1306,94 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 		"GetDeltaLogPathsFromManifest must not be called when ManifestPath is empty")
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndex() {
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3ParentLoadsChildManifestDeltas() {
 	ctx := context.Background()
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{
-				IndexFilePaths: []string{},
-			},
-		},
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	}
-	segment := &LocalSegment{
-		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
-		bm25StatsHolder: newBM25StatsHolder(),
-	}
 
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.ErrorIs(err, merr.ErrIndexNotFound)
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
+	parentManifest := `{"ver":1,"base_path":"files/insert_log/1/2/1000"}`
+	childManifest := `{"ver":2,"base_path":"files/insert_log/1/2/1001"}`
+	calledManifests := make([]string, 0, 2)
+
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			calledManifests = append(calledManifests, manifestPath)
+			return nil, nil
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	err := suite.loader.(*segmentLoader).loadDeltalogs(ctx, segment, &querypb.SegmentLoadInfo{
+		SegmentID:          suite.segmentID,
+		PartitionID:        suite.partitionID,
+		CollectionID:       suite.collectionID,
+		ManifestPath:       parentManifest,
+		ChildManifestPaths: []string{childManifest},
+	})
+	suite.NoError(err)
+	suite.Equal([]string{parentManifest, childManifest}, calledManifests)
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsLegacyParentLoadsChildManifestDeltas() {
 	ctx := context.Background()
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
+
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
+	legacyReaderCalls := atomic.NewInt32(0)
+	childManifestCalls := atomic.NewInt32(0)
+	childManifest := `{"ver":3,"base_path":"files/insert_log/1/2/1002"}`
+
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			suite.Equal(childManifest, manifestPath)
+			childManifestCalls.Inc()
+			return nil, nil
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			legacyReaderCalls.Inc()
+			return storage.NewLegacyDeltalogReader(&schemapb.FieldSchema{
+				FieldID:      0,
+				DataType:     pkType,
+				IsPrimaryKey: true,
+			}, nil, nil)
+		},
+	).Build()
+	defer patchReader.UnPatch()
+
+	err := suite.loader.(*segmentLoader).loadDeltalogs(ctx, segment, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{
-				FieldID:        1,
-				IndexFilePaths: []string{},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: indexparamcheck.IndexINVERTED,
-					},
-				},
-			},
-		},
-		BinlogPaths: []*datapb.FieldBinlog{
-			{
-				FieldID: 1,
-				Binlogs: []*datapb.Binlog{
-					{
-						LogSize:    1000000000,
-						MemorySize: 1000000000,
-					},
-				},
-			},
-		},
-	}
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    "/tmp/legacy-delta",
+				EntriesNum: 1,
+			}},
+		}},
+		ChildManifestPaths: []string{childManifest},
+	})
+	suite.NoError(err)
+	suite.EqualValues(1, legacyReaderCalls.Load())
+	suite.EqualValues(1, childManifestCalls.Load())
+}
 
-	segment := &LocalSegment{
-		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
-		bm25StatsHolder: newBM25StatsHolder(),
-	}
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
-	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsChildManifestReadError() {
+	ctx := context.Background()
+
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return(nil, errors.New("manifest read failed")).Build()
+	defer patchManifest.UnPatch()
+
+	err := suite.loader.(*segmentLoader).loadDeltalogs(ctx, segment, &querypb.SegmentLoadInfo{
+		SegmentID:          suite.segmentID,
+		PartitionID:        suite.partitionID,
+		CollectionID:       suite.collectionID,
+		ChildManifestPaths: []string{`{"ver":1,"base_path":"files/insert_log/1/2/1003"}`},
+	})
 	suite.Error(err)
+	suite.Contains(err.Error(), "manifest read failed")
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
@@ -2477,6 +2482,28 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor() {
 	suite.True(usage.MemorySize >= 150000, "should include raw data factor: got %d", usage.MemorySize)
 }
 
+func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactorSkippedWithTieredEviction() {
+	loadInfo := suite.externalLoadInfo(1000, 100000)
+	factor := resourceEstimateFactor{
+		externalRawDataFactor: 2.0,
+		TieredEvictionEnabled: true,
+	}
+
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Equal(int64(100), loadInfo.EstimatedBytesPerRow)
+
+	baselineLoadInfo := suite.externalLoadInfo(1000, 100000)
+	baselineFactor := resourceEstimateFactor{
+		externalRawDataFactor: 1.0,
+		TieredEvictionEnabled: true,
+	}
+	baselineUsage, err := estimateLoadingResourceUsageOfSegment(suite.schema, baselineLoadInfo, baselineFactor)
+	suite.NoError(err)
+	suite.Equal(baselineUsage.MemorySize, usage.MemorySize)
+	suite.Equal(baselineUsage.DiskSize, usage.DiskSize)
+}
+
 func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor_NoExtraWhenFactorLe1() {
 	loadInfo := suite.externalLoadInfo(1000, 100000)
 	factor := resourceEstimateFactor{externalRawDataFactor: 0.8}
@@ -2669,9 +2696,182 @@ func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
 	})
 }
 
+func (suite *SegmentLoaderDetailSuite) TestEstimateSegmentLoadingResourceUsagePartialLoadUsesFullMetadata() {
+	schema := suite.manager.Collection.Get(suite.collectionID).Schema()
+	suite.Require().Greater(len(schema.GetFields()), 1)
+
+	partialCollectionID := rand.Int63()
+	loadFields := make([]int64, 0, len(schema.GetFields())-1)
+	for _, field := range schema.GetFields()[:len(schema.GetFields())-1] {
+		loadFields = append(loadFields, field.GetFieldID())
+	}
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: partialCollectionID,
+		PartitionIDs: []int64{suite.partitionID},
+		LoadFields:   loadFields,
+	}
+	suite.Require().NoError(suite.manager.Collection.PutOrRef(
+		partialCollectionID,
+		schema,
+		mock_segcore.GenTestIndexMeta(partialCollectionID, schema),
+		loadMeta,
+	))
+
+	descriptorFieldID := schema.GetFields()[len(schema.GetFields())-1].GetFieldID()
+	newLoadInfo := func(collectionID int64) *querypb.SegmentLoadInfo {
+		return &querypb.SegmentLoadInfo{
+			SegmentID:      rand.Int63(),
+			CollectionID:   collectionID,
+			NumOfRows:      10,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "files/manifest",
+			Statslogs: []*datapb.FieldBinlog{{
+				FieldID: descriptorFieldID,
+				Binlogs: []*datapb.Binlog{{MemorySize: 40}},
+			}},
+			Stats: &datapb.Statistics{
+				InsertBinlogSize: 100,
+				LoadResource: &datapb.LoadResourceStatistics{
+					ColumnGroups: []*datapb.ColumnGroupStatistics{{
+						GroupId:    descriptorFieldID,
+						FieldIds:   []int64{descriptorFieldID},
+						MemorySize: 100,
+					}},
+				},
+			},
+		}
+	}
+
+	loader := suite.loader
+	fullUsage, _, err := loader.estimateSegmentLoadingResourceUsage(context.Background(), newLoadInfo(suite.collectionID))
+	suite.Require().NoError(err)
+	partialUsage, _, err := loader.estimateSegmentLoadingResourceUsage(context.Background(), newLoadInfo(partialCollectionID))
+	suite.Require().NoError(err)
+	suite.Greater(fullUsage.MemorySize, uint64(0))
+	suite.Equal(fullUsage, partialUsage)
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
 	suite.Run(t, &SegmentLoaderTextIndexEstimateSuite{})
 	suite.Run(t, &ExternalSegmentEstimateSuite{})
+}
+
+func TestResolveSegmentEstimateLogs(t *testing.T) {
+	newSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_VarChar},
+			},
+		}
+	}
+	schema := newSchema()
+	newLoadInfo := func() *querypb.SegmentLoadInfo {
+		return &querypb.SegmentLoadInfo{
+			StorageVersion:   storage.StorageV3,
+			ManifestPath:     "files/manifest",
+			NumOfRows:        10,
+			IndexInfos:       []*querypb.FieldIndexInfo{{FieldID: 101}},
+			TextStatsLogs:    map[int64]*datapb.TextIndexStats{101: {MemorySize: 40}},
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{101: {MemorySize: 50}},
+			Deltalogs: []*datapb.FieldBinlog{{
+				Binlogs: []*datapb.Binlog{{MemorySize: 20}},
+			}},
+			Stats: &datapb.Statistics{
+				InsertBinlogSize: 100,
+				DeltaBinlogSize:  50,
+				LoadResource: &datapb.LoadResourceStatistics{
+					ColumnGroups: []*datapb.ColumnGroupStatistics{{
+						GroupId:    0,
+						FieldIds:   []int64{100, 101},
+						MemorySize: 100,
+					}},
+				},
+			},
+		}
+	}
+	loadInfo := newLoadInfo()
+
+	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	assert.Empty(t, loadInfo.GetBinlogPaths())
+	assert.Len(t, binlogs, 1)
+	assert.Equal(t, int64(0), binlogs[0].GetFieldID())
+	assert.Equal(t, []int64{100, 101}, binlogs[0].GetChildFields())
+	assert.Equal(t, int64(100), binlogs[0].GetBinlogs()[0].GetMemorySize())
+	assert.Len(t, loadInfo.GetDeltalogs(), 1)
+	assert.Len(t, deltalogs, 1)
+	assert.Equal(t, int64(50), deltalogs[0].GetBinlogs()[0].GetMemorySize())
+	assert.NotSame(t, loadInfo.GetDeltalogs()[0], deltalogs[0])
+	assert.Len(t, loadInfo.GetIndexInfos(), 1)
+	binlogs[0].ChildFields[0] = 999
+	assert.Equal(t, []int64{100, 101}, loadInfo.GetStats().GetLoadResource().GetColumnGroups()[0].GetFieldIds())
+
+	manual := newLoadInfo()
+	manual.Stats.LoadResource = nil
+	manual.BinlogPaths = []*datapb.FieldBinlog{{
+		FieldID:     0,
+		ChildFields: []int64{100, 101},
+		Binlogs:     []*datapb.Binlog{{EntriesNum: 10, MemorySize: 100}},
+	}}
+	manual.Deltalogs = append(manual.Deltalogs, &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{MemorySize: 30}}})
+	factor := resourceEstimateFactor{
+		deltaDataExpansionFactor:        2,
+		textIndexExpansionFactor:        1,
+		TieredEvictableMemoryCacheRatio: 1,
+		TieredEvictableDiskCacheRatio:   1,
+	}
+	adaptedUsage, err := estimateLoadingResourceUsageOfSegment(schema, newLoadInfo(), factor)
+	assert.NoError(t, err)
+	manualUsage, err := estimateLoadingResourceUsageOfSegment(schema, manual, factor)
+	assert.NoError(t, err)
+	assert.Equal(t, manualUsage, adaptedUsage)
+	adaptedUsage, err = estimateLogicalResourceUsageOfSegment(schema, newLoadInfo(), factor)
+	assert.NoError(t, err)
+	manualUsage, err = estimateLogicalResourceUsageOfSegment(schema, manual, factor)
+	assert.NoError(t, err)
+	assert.Equal(t, manualUsage, adaptedUsage)
+
+	loadInfo.GetStats().InsertBinlogSize = 99
+	binlogs, _ = resolveSegmentEstimateLogs(schema, loadInfo)
+	assert.Len(t, binlogs, 1)
+
+	for name, mutate := range map[string]func(*querypb.SegmentLoadInfo, *schemapb.CollectionSchema){
+		"existing binlogs": func(_ *querypb.SegmentLoadInfo, _ *schemapb.CollectionSchema) {},
+		"nil stats": func(info *querypb.SegmentLoadInfo, _ *schemapb.CollectionSchema) {
+			info.Stats = nil
+		},
+		"external": func(_ *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) {
+			schema.Fields[0].ExternalField = "external_id"
+		},
+		"non v3": func(info *querypb.SegmentLoadInfo, _ *schemapb.CollectionSchema) {
+			info.StorageVersion = storage.StorageV2
+		},
+		"missing manifest": func(info *querypb.SegmentLoadInfo, _ *schemapb.CollectionSchema) {
+			info.ManifestPath = ""
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			info := newLoadInfo()
+			info.BinlogPaths = []*datapb.FieldBinlog{{FieldID: 99}}
+			testSchema := newSchema()
+			mutate(info, testSchema)
+			gotBinlogs, gotDeltalogs := resolveSegmentEstimateLogs(testSchema, info)
+			assert.Equal(t, info.GetBinlogPaths(), gotBinlogs)
+			assert.Equal(t, info.GetDeltalogs(), gotDeltalogs)
+		})
+	}
+
+	t.Run("empty groups are valid for an empty segment", func(t *testing.T) {
+		info := newLoadInfo()
+		info.Stats.InsertBinlogSize = 0
+		info.Stats.LoadResource.ColumnGroups = nil
+
+		gotBinlogs, gotDeltalogs := resolveSegmentEstimateLogs(schema, info)
+		assert.Empty(t, gotBinlogs)
+		assert.Len(t, gotDeltalogs, 1)
+		assert.EqualValues(t, 50, gotDeltalogs[0].GetBinlogs()[0].GetMemorySize())
+	})
 }

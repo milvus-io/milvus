@@ -15,7 +15,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `common.enabledOptimizeExpr` | `true` | Enable query expression optimization including range simplification, IN/NOT IN merge, TEXT_MATCH merge, and all other optimizations |
+| `common.enabledOptimizeExpr` | `true` | Enable query expression optimization including ARRAY contains merge, range simplification, IN/NOT IN merge, TEXT_MATCH merge, and all other optimizations |
 
 **IMPORTANT**: IN/NOT IN value list sorting and deduplication **always** runs regardless of this configuration setting, because the execution engine depends on sorted value lists.
 
@@ -44,7 +44,19 @@ The rewriter can be configured via the following parameter (refreshable at runti
   - Example: `TEXT_MATCH(f, "A C") OR TEXT_MATCH(f, "B D")` → `TEXT_MATCH(f, "A C B D")`
 - If any `TEXT_MATCH` in the group has options (e.g., `minimum_should_match`), this optimization is skipped for that group.
 
-3) Range predicate simplification (`range.go`)
+3) ARRAY contains merge (`array_contains.go`)
+- OR on the same physical ARRAY column:
+  - `array_contains(a, x) OR array_contains(a, y)` → `array_contains_any(a, [x, y])`
+  - Existing `array_contains_any` nodes are absorbed, so arbitrarily long and nested OR chains close into one node.
+- AND on the same physical ARRAY column:
+  - `array_contains(a, x) AND array_contains(a, y)` → `array_contains_all(a, [x, y])`
+  - Existing `array_contains_all` nodes are absorbed, so arbitrarily long and nested AND chains close into one node.
+- At least two compatible source nodes are required. Values retain first-encounter order, duplicates are removed without sorting, and the merged node is emitted at the group's first position.
+- The rule is keyed by `ColumnInfo`, including nested path and element-level identity. Different fields and the opposite Any/All operator remain separate.
+- Only `ColumnInfo.DataType == Array` participates. JSON columns remain unchanged even though ARRAY and JSON predicates share `JSONContainsExpr` and either function spelling may be used on an ARRAY column.
+- Nil, array-valued, unknown, and NaN elements are excluded from merging. `ElementsSameType` is recomputed and consumed template metadata is cleared on the merged node.
+
+4) Range predicate simplification (`range.go`)
 - AND tighten (same column):
   - Lower bounds: `a > 10 AND a > 20` → `a > 20` (pick strongest lower)
   - Upper bounds: `a < 50 AND a < 60` → `a < 50` (pick strongest upper)
@@ -90,6 +102,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
 - Rewrite runs after template value filling; template placeholders do not appear here.
+- Optional visitor rewrites do not descend into `MatchExpr` or `ElementFilterExpr` predicates.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
 - Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
 - Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.
@@ -97,30 +110,33 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### Pass Ordering (current)
 - OR branch:
   1. Flatten
-  2. OR `==` → IN
-  3. TEXT_MATCH merge (no options)
-  4. Range weaken (same-direction bounds)
-  5. BinaryRangeExpr merge (overlapping/adjacent intervals)
-  6. IN with `!=` short-circuiting
-  7. IN ∪ IN union
-  8. IN vs Equal redundancy elimination
-  9. Fold back to BinaryExpr
+  2. ARRAY `Contains` / `ContainsAny` → `ContainsAny`
+  3. OR `==` → IN
+  4. TEXT_MATCH merge (no options)
+  5. Range weaken (same-direction bounds)
+  6. BinaryRangeExpr merge (overlapping/adjacent intervals)
+  7. IN with `!=` short-circuiting
+  8. IN ∪ IN union
+  9. IN vs Equal redundancy elimination
+  10. Fold back to BinaryExpr
 - AND branch:
   1. Flatten
-  2. Range tighten / interval construction
-  3. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr)
-  4. IN ∪ IN intersection (if any)
-  5. IN with `!=` filtering
-  6. IN ∩ range filtering
-  7. IN vs Equal redundancy elimination
-  8. AND `!=` → NOT IN
-  9. Fold back to BinaryExpr
+  2. ARRAY `Contains` / `ContainsAll` → `ContainsAll`
+  3. Range tighten / interval construction
+  4. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr)
+  5. IN ∪ IN intersection (if any)
+  6. IN with `!=` filtering
+  7. IN ∩ range filtering
+  8. IN vs Equal redundancy elimination
+  9. AND `!=` → NOT IN
+  10. Fold back to BinaryExpr
 
 Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 
 ### File Structure
 - `entry.go`      — rewrite entry and visitor orchestration
 - `util.go`       — shared helpers (column keying, value classification, sorting/dedup, constructors)
+- `array_contains.go` — physical ARRAY contains Any/All merges
 - `term_in.go`    — IN/NOT IN normalization and conversions
 - `text_match.go` — TEXT_MATCH OR merge (no options)
 - `range.go`      — range tightening/weakening and interval construction

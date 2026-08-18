@@ -17,7 +17,7 @@ import (
 )
 
 // asyncAllocSegment allocates a new growing segment asynchronously.
-func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSourceFlush bool) {
+func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorageV3 bool) {
 	if m.onAllocating != nil {
 		m.Logger().Debug(context.TODO(), "segment alloc worker is already on allocating")
 		// manager is already on allocating.
@@ -26,13 +26,13 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSour
 	// Create a notifier to notify the waiter when the allocation is done.
 	m.onAllocating = make(chan struct{})
 	w := &segmentAllocWorker{
-		ctx:                   m.ctx,
-		collectionID:          m.collectionID,
-		partitionID:           m.partitionID,
-		vchannel:              m.vchannel,
-		wal:                   m.wal.Get(),
-		schemaVersion:         schemaVersion,
-		useGrowingSourceFlush: useGrowingSourceFlush,
+		ctx:               m.ctx,
+		collectionID:      m.collectionID,
+		partitionID:       m.partitionID,
+		vchannel:          m.vchannel,
+		wal:               m.wal.Get(),
+		schemaVersion:     schemaVersion,
+		requiresStorageV3: requiresStorageV3,
 	}
 	w.SetLogger(m.Logger())
 	// It should always done asynchronously.
@@ -50,11 +50,11 @@ type segmentAllocWorker struct {
 	wal          wal.WAL
 	// The following fields are preserved across retries to ensure the same segment
 	// configuration is used when rebuilding the message after a failed append.
-	segmentID             uint64            // allocated segment ID
-	storageVersion        int64             // storage version determined at first attempt
-	limitation            segmentLimitation // segment limitation determined at first attempt
-	schemaVersion         int32
-	useGrowingSourceFlush bool
+	segmentID         uint64            // allocated segment ID
+	storageVersion    int64             // storage version determined at first attempt
+	limitation        segmentLimitation // segment limitation determined at first attempt
+	schemaVersion     int32
+	requiresStorageV3 bool
 }
 
 // do is the main loop of the segment allocation worker.
@@ -147,7 +147,7 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 
 	// Determine storage version.
 	w.storageVersion = storage.StorageV2
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+	if w.requiresStorageV3 || paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
 		w.storageVersion = storage.StorageV3
 	}
 

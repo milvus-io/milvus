@@ -18,7 +18,7 @@ package index
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 // index param field tag
@@ -47,9 +47,13 @@ const (
 	IvfSQ8     IndexType = "IVF_SQ8"
 	IvfRabitQ  IndexType = "IVF_RABITQ"
 	HNSW       IndexType = "HNSW"
+	HNSWSQ     IndexType = "HNSW_SQ"
+	HNSWPQ     IndexType = "HNSW_PQ"
+	HNSWPRQ    IndexType = "HNSW_PRQ"
 	IvfHNSW    IndexType = "IVF_HNSW"
 	AUTOINDEX  IndexType = "AUTOINDEX"
 	DISKANN    IndexType = "DISKANN"
+	AISAQ      IndexType = "AISAQ"
 	SCANN      IndexType = "SCANN"
 	MinHashLSH IndexType = "MINHASH_LSH"
 
@@ -67,5 +71,7 @@ const (
 	Sorted   IndexType = "STL_SORT"
 	Inverted IndexType = "INVERTED"
 	BITMAP   IndexType = "BITMAP"
+	NGRAM    IndexType = "NGRAM"
+	FMINDEX  IndexType = "FMINDEX"
 	RTREE    IndexType = "RTREE"
 )

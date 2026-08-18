@@ -16,8 +16,9 @@ class TestLog:
         self.log.setLevel(logging.DEBUG)
 
         try:
-            formatter = logging.Formatter("[%(asctime)s - %(levelname)s - %(name)s]: "
-                                          "%(message)s (%(filename)s:%(lineno)s)")
+            formatter = logging.Formatter(
+                "[%(asctime)s - %(levelname)s - %(name)s]: %(message)s (%(filename)s:%(lineno)s)"
+            )
             # [%(process)s] process NO.
             dh = logging.FileHandler(self.log_debug)
             dh.setLevel(logging.DEBUG)
@@ -53,4 +54,4 @@ log_debug = log_config.log_debug
 log_info = log_config.log_info
 log_err = log_config.log_err
 log_worker = log_config.log_worker
-test_log = TestLog('ci_test', log_debug, log_info, log_err, log_worker).log
+test_log = TestLog("ci_test", log_debug, log_info, log_err, log_worker).log

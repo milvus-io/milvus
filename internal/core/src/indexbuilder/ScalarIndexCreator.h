@@ -56,6 +56,7 @@ class ScalarIndexCreator : public IndexCreatorBase {
     Config config_;
     DataType dtype_;
     IndexType index_type_;
+    bool skip_empty_ = false;
 };
 
 using ScalarIndexCreatorPtr = std::unique_ptr<ScalarIndexCreator>;

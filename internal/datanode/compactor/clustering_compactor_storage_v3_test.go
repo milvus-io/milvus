@@ -79,7 +79,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) TestScalarAnalyzeManifestWithRo
 	initcore.InitLocalArrowFileSystem(rootPath)
 	s.task.compactionParams = compaction.GenParams()
 
-	fBinlogs, _, _, _, manifest, _, err := s.initStorageV3Segments(10240, segmentID)
+	fBinlogs, _, _, _, manifest, _, _, err := s.initStorageV3Segments(10240, segmentID)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(manifest)
 
@@ -129,7 +129,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) TestScalarCompactionWithManifes
 	initcore.InitLocalArrowFileSystem(rootPath)
 	s.task.compactionParams = compaction.GenParams()
 
-	fBinlogs, _, _, _, manifest, _, err := s.initStorageV3Segments(10240, segmentID)
+	fBinlogs, _, _, _, manifest, _, _, err := s.initStorageV3Segments(10240, segmentID)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(manifest)
 
@@ -182,6 +182,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
@@ -194,7 +195,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(int64(rows))(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
@@ -208,7 +209,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData(
 		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	pack := new(syncmgr.SyncPack).
 		WithCollectionID(CollectionID).
@@ -289,7 +290,7 @@ func (s *MixCompactionTaskStorageV3Suite) TestCompactV3ManifestSegments() {
 
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 	for _, segmentID := range []int64{10, 11} {
-		binlogs, _, _, _, manifest, _, err := s.initStorageV3Segments(1, segmentID, alloc)
+		binlogs, _, _, _, manifest, _, _, err := s.initStorageV3Segments(1, segmentID, alloc)
 		s.Require().NoError(err)
 		s.Require().NotEmpty(manifest)
 
@@ -336,7 +337,7 @@ func (s *MixCompactionTaskStorageV3Suite) TestMergeSortPreservesTextLobFiles() {
 
 	totalSourceLobFiles := 0
 	for _, segmentID := range []int64{10, 11} {
-		binlogs, _, _, _, manifest, _, err := s.initTextLOBStorageV3Segment(2, segmentID, alloc)
+		binlogs, _, _, _, manifest, _, _, err := s.initTextLOBStorageV3Segment(2, segmentID, alloc)
 		s.Require().NoError(err)
 		s.Require().NotEmpty(manifest)
 
@@ -386,6 +387,7 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
@@ -398,7 +400,7 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(int64(rows))(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
@@ -433,6 +435,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
@@ -445,7 +448,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, nil)
 	metacache.UpdateNumOfRows(int64(rows))(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
@@ -517,7 +520,7 @@ func genTextLOBCompactionSchema() *schemapb.CollectionSchema {
 
 func genTextLOBInsertData(rows int, seed int64, schema *schemapb.CollectionSchema) []*storage.InsertData {
 	buf, _ := storage.NewInsertData(schema)
-	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))
+	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
 	for i := 0; i < rows; i++ {
 		pk := seed*100 + int64(i)
 		_ = buf.Append(map[int64]interface{}{

@@ -90,17 +90,12 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 	}
 
 	// 2. check db-collection capacity
-	db2CollIDs := t.meta.ListAllAvailCollections(ctx)
-	if err := t.checkMaxCollectionsPerDB(ctx, db2CollIDs); err != nil {
+	dbCollectionCount, totalCollections, dbExists := t.meta.GetAvailableCollectionCount(ctx, t.header.DbId)
+	if err := t.checkMaxCollectionsPerDB(ctx, dbCollectionCount, dbExists); err != nil {
 		return err
 	}
 
 	// 3. check total collection number
-	totalCollections := 0
-	for _, collIDs := range db2CollIDs {
-		totalCollections += len(collIDs)
-	}
-
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
 		mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit", mlog.Int("max_collection_num", maxCollectionNum))
@@ -116,11 +111,10 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
-func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2CollIDs map[int64][]int64) error {
+func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, dbCollectionCount int, dbExists bool) error {
 	Params := paramtable.Get()
 
-	collIDs, ok := db2CollIDs[t.header.DbId]
-	if !ok {
+	if !dbExists {
 		mlog.Warn(ctx, "can not found DB ID", mlog.String("collection", t.Req.GetCollectionName()), mlog.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
@@ -132,7 +126,7 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	}
 
 	check := func(maxColNumPerDB int) error {
-		if len(collIDs) >= maxColNumPerDB {
+		if dbCollectionCount >= maxColNumPerDB {
 			mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit in DB", mlog.Int("maxCollectionNumPerDB", maxColNumPerDB))
 			return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxColNumPerDB)
 		}
@@ -230,54 +224,63 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	// check analyzer was vaild
-	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
-	for _, field := range schema.GetFields() {
-		err := validateAnalyzer(schema, field, &analyzerInfos)
-		if err != nil {
+	fileResourceIds, err := t.validateSchemaAnalyzerFileResources(ctx, schema)
+	if err != nil {
+		return err
+	}
+	schema.FileResourceIds = fileResourceIds
+
+	if len(schema.FileResourceIds) > 0 {
+		// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
+		// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
+		if err := reserveFileResourceRefs(t.meta, schema.FileResourceIds); err != nil {
 			return err
 		}
+		t.heldFileResourceIds = schema.FileResourceIds
+	}
+
+	return validateFieldDataType(schema.GetFields())
+}
+
+func (c *Core) validateSchemaAnalyzerFileResources(ctx context.Context, schema *schemapb.CollectionSchema) ([]int64, error) {
+	analyzerInfos, err := collectAnalyzerInfos(schema)
+	if err != nil {
+		return nil, err
+	}
+	return c.validateAnalyzerInfos(ctx, analyzerInfos)
+}
+
+func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*querypb.AnalyzerInfo) ([]int64, error) {
+	if len(analyzerInfos) == 0 {
+		return nil, nil
 	}
 
 	// validate analyzer params at any streaming node
 	// and set file resource ids to schema
-	if len(analyzerInfos) > 0 {
-		err := retry.Do(ctx, func() error {
-			if t.fileResourceObserver == nil {
-				return nil
-			}
-			if err := t.fileResourceObserver.CheckAllQnReady(); err != nil {
-				return err
-			}
+	err := retry.Do(ctx, func() error {
+		if c.fileResourceObserver == nil {
 			return nil
-		}, retry.Attempts(10), retry.Sleep(3*time.Second))
-		if err != nil {
+		}
+		if err := c.fileResourceObserver.CheckAllQnReady(); err != nil {
 			return err
 		}
-
-		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
-			AnalyzerInfos: analyzerInfos,
-		})
-		if err != nil {
-			return err
-		}
-
-		if err := merr.Error(resp.GetStatus()); err != nil {
-			return err
-		}
-		schema.FileResourceIds = resp.GetResourceIds()
-
-		// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
-		// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
-		if len(schema.FileResourceIds) > 0 {
-			if err := t.meta.IncFileResourceRefCnt(schema.FileResourceIds); err != nil {
-				return err
-			}
-			t.heldFileResourceIds = schema.FileResourceIds
-		}
+		return nil
+	}, retry.Attempts(10), retry.Sleep(3*time.Second))
+	if err != nil {
+		return nil, err
 	}
 
-	return validateFieldDataType(schema.GetFields())
+	resp, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+		AnalyzerInfos: analyzerInfos,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return nil, err
+	}
+	return resp.GetResourceIds(), nil
 }
 
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
@@ -563,6 +566,9 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		return &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	}
 	return &indexpb.StorageConfig{
@@ -580,6 +586,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
@@ -922,14 +929,26 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	return nil
 }
 
+func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
+	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
+	for _, field := range collSchema.GetFields() {
+		if err := validateAnalyzer(collSchema, field, &analyzerInfos); err != nil {
+			return nil, err
+		}
+	}
+	return analyzerInfos, nil
+}
+
+// validateAnalyzer validates active match/BM25 fields and fields with
+// enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !typeutil.IsBm25FunctionInputField(collSchema, fieldSchema) {
-		return nil
-	}
-
-	if !h.EnableAnalyzer() {
+	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
+	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
+	}
+	if !h.EnableAnalyzer() {
+		return nil
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {

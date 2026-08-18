@@ -30,6 +30,7 @@ extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
 extern std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE;
 extern std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION;
 extern std::atomic<bool> OPTIMIZE_EXPR_ENABLED;
+extern std::atomic<bool> ENABLE_DRIVER_PREFETCH;
 extern std::atomic<bool> JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
@@ -49,6 +50,9 @@ SetDefaultDeleteDumpBatchSize(int64_t val);
 
 void
 SetDefaultOptimizeExprEnable(bool val);
+
+void
+SetDefaultDriverPrefetchEnable(bool val);
 
 void
 SetDefaultJSONKeyStatsEnable(bool val);

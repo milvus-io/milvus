@@ -36,7 +36,8 @@ StripTextLogPrefix(const std::string& path, const std::string& base_prefix) {
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* analyzer_name,
-                               const char* analyzer_params)
+                               const char* analyzer_params,
+                               bool enable_background_merge)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
@@ -47,7 +48,11 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
         ,
         analyzer_name,
-        analyzer_params);
+        analyzer_params,
+        /*analyzer_extra_info=*/"",
+        milvus::tantivy::DEFAULT_NUM_THREADS,
+        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        enable_background_merge);
     set_is_growing(true);
 }
 

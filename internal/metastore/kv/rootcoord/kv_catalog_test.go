@@ -1332,31 +1332,14 @@ type mockSnapshotOpt func(ss *mocks.TxnKV)
 
 func newMockSnapshot(t *testing.T, opts ...mockSnapshotOpt) *mocks.TxnKV {
 	ss := mocks.NewTxnKV(t)
+	// CreateCollection/DropCollection delegate to the composite Update, whose
+	// txn.Commit reads the store's txn op limit. Stub it so the mock does not
+	// panic; a large value keeps the write on the atomic path.
+	ss.EXPECT().MaxTxnOps().Return(128).Maybe()
 	for _, opt := range opts {
 		opt(ss)
 	}
 	return ss
-}
-
-func withMockSave(saveErr error) mockSnapshotOpt {
-	return func(ss *mocks.TxnKV) {
-		ss.On(
-			"Save",
-			mock.Anything,
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string")).
-			Return(saveErr)
-	}
-}
-
-func withMockMultiSave(multiSaveErr error) mockSnapshotOpt {
-	return func(ss *mocks.TxnKV) {
-		ss.On(
-			"MultiSave",
-			mock.Anything,
-			mock.AnythingOfType("map[string]string")).
-			Return(multiSaveErr)
-	}
 }
 
 func withMockMultiSaveAndRemoveWithPrefix(err error) mockSnapshotOpt {
@@ -1380,22 +1363,10 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("failed to save fields", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(errors.New("error mock MultiSave")))
-		kc := NewCatalog(mockSnapshot)
-		ctx := context.Background()
-		coll := &model.Collection{
-			Partitions: []*model.Partition{
-				{PartitionName: "test"},
-			},
-			State: pb.CollectionState_CollectionCreated,
-		}
-		err := kc.CreateCollection(ctx, coll, 100)
-		assert.Error(t, err)
-	})
-
-	t.Run("succeed to save fields but failed to save collection key", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(errors.New("error mock Save")))
+	t.Run("failed to commit", func(t *testing.T) {
+		// CreateCollection now delegates to Update, committing children +
+		// collection key in a single atomic MultiSaveAndRemove.
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1409,7 +1380,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("no fields or partitions, only collection key", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{State: pb.CollectionState_CollectionCreated}
@@ -1418,7 +1389,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1432,7 +1403,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("create collection with function and struct array field", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1502,32 +1473,33 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("succeed to remove first, but failed to remove twice", func(t *testing.T) {
+	t.Run("removes children and collection key in one atomic txn", func(t *testing.T) {
+		// DropCollection now delegates to Update: children + collection key
+		// are removed together in a single atomic MultiSaveAndRemove.
 		mockSnapshot := newMockSnapshot(t)
-		removeOtherCalled := false
-		removeCollectionCalled := false
+		var gotSaves map[string]string
+		var gotRemovals []string
 		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
-				removeOtherCalled = true
+			RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+				gotSaves = saves
+				gotRemovals = removals
+				assert.Empty(t, preds)
 				return nil
-			}).Once()
-		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
-				removeCollectionCalled = true
-				return errors.New("error mock MultiSaveAndRemove")
 			}).Once()
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
+			CollectionID: 1,
 			Partitions: []*model.Partition{
-				{PartitionName: "test"},
+				{PartitionID: 10, PartitionName: "test"},
 			},
 			State: pb.CollectionState_CollectionDropping,
 		}
 		err := kc.DropCollection(ctx, coll, 100)
-		assert.Error(t, err)
-		assert.True(t, removeOtherCalled)
-		assert.True(t, removeCollectionCalled)
+		assert.NoError(t, err)
+		assert.Empty(t, gotSaves)
+		assert.Contains(t, gotRemovals, BuildCollectionKey(coll.DBID, coll.CollectionID))
+		assert.Contains(t, gotRemovals, BuildPartitionKey(coll.CollectionID, 10))
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -3252,6 +3224,56 @@ func TestRBACGrantSharedLegacyGranteeIDMigrationFailsClosed(t *testing.T) {
 	donorUser, err := metaKV.Load(ctx, donorPrivilegeKey)
 	require.NoError(t, err)
 	assert.Equal(t, "donor-user", donorUser)
+}
+
+func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	firstLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstEtcdKey := fmt.Sprintf("%s%s/%s/%s", granteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondEtcdKey := fmt.Sprintf("%s%s/%s/%s", granteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstLegacyID := crypto.MD5(firstLogicalKey)
+	secondLegacyID := crypto.MD5(secondLogicalKey)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
+		func(ctx context.Context, key string) []string {
+			switch {
+			case key == granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{firstEtcdKey, secondEtcdKey}
+			case strings.HasPrefix(key, granteeIDPrefix):
+				return []string{key + "PrivilegeLoad"}
+			default:
+				return nil
+			}
+		},
+		func(ctx context.Context, key string) []string {
+			switch {
+			case key == granteePrefix:
+				return []string{firstLegacyID, secondLegacyID}
+			case strings.HasPrefix(key, granteeIDPrefix):
+				return []string{"root"}
+			default:
+				return nil
+			}
+		},
+		func(ctx context.Context, key string) error {
+			return nil
+		},
+	)
+
+	policies, err := c.ListPolicy(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "ListPolicy should reuse the initially loaded grantee keys for legacy ID collision checks")
 }
 
 func TestRBACGrantMigrationIgnoresUnreferencedComputedLegacyID(t *testing.T) {

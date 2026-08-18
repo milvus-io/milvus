@@ -9,11 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <string.h>
+#include <algorithm>
 #include <exception>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string.h>
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
@@ -27,6 +28,7 @@
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/SearchBruteForce.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
 
@@ -61,8 +63,10 @@ CreateSearchPlanByExpr(CCollection c_col,
 
         auto field_index_meta =
             col_index_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
-        res->plan_node_->search_info_.metric_type_ =
-            field_index_meta.GeMetricType();
+        auto& search_info = res->plan_node_->search_info_;
+        search_info.metric_type_ = field_index_meta.GeMetricType();
+        milvus::query::PopulateBruteForceIndexParams(search_info,
+                                                     field_index_meta);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -140,6 +144,12 @@ GetMetricType(CSearchPlan plan) {
     auto search_plan = static_cast<milvus::query::Plan*>(plan);
     auto& metric_str = search_plan->plan_node_->search_info_.metric_type_;
     return strdup(metric_str.c_str());
+}
+
+bool
+HasTargetEntries(CSearchPlan plan) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    return !search_plan->target_entries_.empty();
 }
 
 void

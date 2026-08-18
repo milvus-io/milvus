@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
 )
 
 const (
@@ -47,6 +47,7 @@ const (
 	spGroupBy         = `group_by_field`
 	spGroupSize       = `group_size`
 	spStrictGroupSize = `strict_group_size`
+	spOrderByFields   = `order_by_fields`
 )
 
 type SearchOption interface {
@@ -197,8 +198,23 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 		result.Val = &schemapb.TemplateValue_BoolVal{BoolVal: v}
 	case string:
 		result.Val = &schemapb.TemplateValue_StringVal{StringVal: v}
+	case BloomFilterBlob:
+		// A client pre-built filter blob travels as raw bytes: proto3 bytes has
+		// no UTF-8 constraint, so the ~32 MB blob rides the wire with zero
+		// base64 inflation.
+		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
+	case RoaringBitmapBlob:
+		// Same raw-bytes carriage as BloomFilterBlob. The two are distinct Go
+		// types rather than one []byte alias so the builders cannot be mixed up
+		// where a concrete type is expected. Note this does NOT catch pairing a
+		// bloom blob with a roaring_match expression: WithTemplateParam takes
+		// any and the expression is a string, so nothing ties the two together
+		// at the call site. That mismatch is rejected by the Proxy on the
+		// envelope magic.
+		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
 	default:
-		if reflect.TypeOf(val).Kind() == reflect.Slice {
+		valueType := reflect.TypeOf(val)
+		if valueType != nil && valueType.Kind() == reflect.Slice {
 			return slice2TmplValue(val)
 		}
 		return nil, fmt.Errorf("unsupported template value type: %T", val)
@@ -209,6 +225,30 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 func slice2TmplValue(val any) (*schemapb.TemplateValue, error) {
 	arrVal := &schemapb.TemplateValue_ArrayVal{
 		ArrayVal: &schemapb.TemplateArrayValue{},
+	}
+
+	// Fast paths for the concrete slice types callers actually pass. The
+	// reflect path below rebuilds the slice element by element, which for a
+	// large `in {list}` membership set duplicates the whole list on the heap
+	// (~180 MiB for 24M int64) purely to change its static type.
+	//
+	// These paths alias the caller's backing array instead of copying it. The
+	// request is marshaled inside the Search/Query call, so the contract is
+	// the usual one for a value handed to a client call: do not mutate the
+	// slice while the call is in flight.
+	switch v := val.(type) {
+	case []int64:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_LongData{LongData: &schemapb.LongArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
+	case []string:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_StringData{StringData: &schemapb.StringArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
+	case []float64:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_DoubleData{DoubleData: &schemapb.DoubleArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
+	case []bool:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_BoolData{BoolData: &schemapb.BoolArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
 	}
 
 	rv := reflect.ValueOf(val)
@@ -306,6 +346,16 @@ func (r *AnnRequest) WithFilter(expr string) *AnnRequest {
 	return r
 }
 
+// A slice value (the value in `field in {the value}`) is NOT copied: the request built
+// by Request() aliases the caller's backing array for []int64, []string,
+// []float64 and []bool. This avoids duplicating a membership list that can
+// reach hundreds of megabytes, at the cost of a lifetime rule:
+//
+//	DO NOT mutate a slice passed here until the Search/Query call using it has
+//	returned. Mutating it earlier changes what the server sees, and mutating it
+//	after Request() changes an already-returned protobuf message.
+//
+// Pass a copy if the caller intends to keep writing to the slice.
 func (r *AnnRequest) WithTemplateParam(key string, val any) *AnnRequest {
 	r.templateParams[key] = val
 	return r
@@ -326,6 +376,9 @@ func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
 	return r
 }
 
+// The returned request is NOT a snapshot of slice-valued template parameters:
+// it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
+// valid only while those slices are unmodified.
 func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request, err := opt.annRequest.searchRequest()
 	if err != nil {
@@ -379,6 +432,16 @@ func (opt *searchOption) WithFilter(expr string) *searchOption {
 	return opt
 }
 
+// A slice value (the value in `field in {the value}`) is NOT copied: the request built
+// by Request() aliases the caller's backing array for []int64, []string,
+// []float64 and []bool. This avoids duplicating a membership list that can
+// reach hundreds of megabytes, at the cost of a lifetime rule:
+//
+//	DO NOT mutate a slice passed here until the Search/Query call using it has
+//	returned. Mutating it earlier changes what the server sees, and mutating it
+//	after Request() changes an already-returned protobuf message.
+//
+// Pass a copy if the caller intends to keep writing to the slice.
 func (opt *searchOption) WithTemplateParam(key string, val any) *searchOption {
 	opt.annRequest.WithTemplateParam(key, val)
 	return opt
@@ -652,6 +715,9 @@ type queryOption struct {
 	templateParams             map[string]any
 }
 
+// The returned request is NOT a snapshot of slice-valued template parameters:
+// it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
+// valid only while those slices are unmodified.
 func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
 	req := &milvuspb.QueryRequest{
 		CollectionName: opt.collectionName,
@@ -682,6 +748,16 @@ func (opt *queryOption) WithFilter(expr string) *queryOption {
 	return opt
 }
 
+// A slice value (the value in `field in {the value}`) is NOT copied: the request built
+// by Request() aliases the caller's backing array for []int64, []string,
+// []float64 and []bool. This avoids duplicating a membership list that can
+// reach hundreds of megabytes, at the cost of a lifetime rule:
+//
+//	DO NOT mutate a slice passed here until the Search/Query call using it has
+//	returned. Mutating it earlier changes what the server sees, and mutating it
+//	after Request() changes an already-returned protobuf message.
+//
+// Pass a copy if the caller intends to keep writing to the slice.
 func (opt *queryOption) WithTemplateParam(key string, val any) *queryOption {
 	opt.templateParams[key] = val
 	return opt
@@ -700,6 +776,17 @@ func (opt *queryOption) WithLimit(limit int) *queryOption {
 		opt.queryParams = make(map[string]string)
 	}
 	opt.queryParams[spLimit] = strconv.Itoa(limit)
+	return opt
+}
+
+// WithOrderByFields sorts query results by the given scalar fields.
+// Each spec is "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+// The server requires an explicit limit when order-by fields are set.
+func (opt *queryOption) WithOrderByFields(fields ...string) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams[spOrderByFields] = strings.Join(fields, ",")
 	return opt
 }
 

@@ -27,15 +27,11 @@ import "C"
 
 import (
 	"context"
-	"runtime"
-	"time"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -66,15 +62,6 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	}).Await()
 }
 
-func (li *LoadIndexInfo) cleanLocalData(ctx context.Context) error {
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.CleanLoadedIndex(li.cLoadIndexInfo)
-		return nil, nil
-	}).Await()
-	return HandleCStatus(ctx, &status, "failed to clean cached data on disk")
-}
-
 func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, info *cgopb.LoadIndexInfo) error {
 	marshaled, err := proto.Marshal(info)
 	if err != nil {
@@ -97,24 +84,4 @@ func (li *LoadIndexInfo) setShard(shard string) {
 	cShard := C.CString(shard)
 	defer C.free(unsafe.Pointer(cShard))
 	C.SetLoadIndexInfoShard(li.cLoadIndexInfo, cShard)
-}
-
-func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
-	var status C.CStatus
-	_, _ = GetLoadPool().Submit(func() (any, error) {
-		start := time.Now()
-		defer func() {
-			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				paramtable.GetStringNodeID(),
-				"AppendIndexV2",
-				"Sync",
-			).Observe(float64(time.Since(start).Milliseconds()))
-		}()
-		traceCtx := ParseCTraceContext(ctx)
-		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
-		runtime.KeepAlive(traceCtx)
-		return nil, nil
-	}).Await()
-
-	return HandleCStatus(ctx, &status, "AppendIndexV2 failed")
 }

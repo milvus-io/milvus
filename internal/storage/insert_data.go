@@ -62,7 +62,7 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 		// A nil schema here is an internal invariant violation (callers within
 		// Milvus always pass a schema), not a client-supplied missing parameter.
 		// ErrParameterMissing defaults to InputError, so mark this one site as a
-		// system error to keep it out of the client-fault (fail_input) bucket.
+		// system error to keep it out of the client-fault (cause="user") bucket.
 		return nil, merr.WrapErrAsSysError(merr.WrapErrParameterMissing("collection schema"))
 	}
 
@@ -193,6 +193,7 @@ type FieldData interface {
 	AppendValidDataRows(rows interface{}) error
 	GetDataType() schemapb.DataType
 	GetNullable() bool
+	GetValidData() []bool
 }
 
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {

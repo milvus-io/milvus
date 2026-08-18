@@ -38,23 +38,25 @@ type flusherComponents struct {
 }
 
 // WhenCreateCollection handles the create collection message.
-func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.ImmutableCreateCollectionMessageV1) {
+func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createCollectionMsg message.ImmutableCreateCollectionMessageV1) error {
 	// because we need to get the schema from the recovery storage, we need to observe the message at recovery storage first.
-	impl.rs.ObserveMessage(context.Background(), createCollectionMsg)
+	if err := impl.rs.ObserveMessage(ctx, createCollectionMsg); err != nil {
+		return err
+	}
 	if _, ok := impl.dataServices[createCollectionMsg.VChannel()]; ok {
-		impl.logger.Info(context.TODO(), "the data sync service of current vchannel is built, skip it", mlog.FieldVChannel(createCollectionMsg.VChannel()))
+		impl.logger.Info(ctx, "the data sync service of current vchannel is built, skip it", mlog.FieldVChannel(createCollectionMsg.VChannel()))
 		// May repeated consumed, so we ignore the message.
-		return
+		return nil
 	}
 	if createCollectionMsg.TimeTick() <= impl.recoveryCheckPointTimeTick {
 		// It should already be recovered from the recovery storage.
 		// if it's not in recovery storage, it means the createCollection is already dropped.
 		// so we can skip it.
-		impl.logger.Info(context.TODO(), "the create collection message is older than the recovery checkpoint, skip it",
+		impl.logger.Info(ctx, "the create collection message is older than the recovery checkpoint, skip it",
 			mlog.FieldVChannel(createCollectionMsg.VChannel()),
 			mlog.Uint64("timeTick", createCollectionMsg.TimeTick()),
 			mlog.Uint64("recoveryCheckPointTimeTick", impl.recoveryCheckPointTimeTick))
-		return
+		return nil
 	}
 
 	msgChan := make(chan *msgstream.MsgPack, 10)
@@ -100,16 +102,17 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 		},
 		nil,
 	)
-	impl.addNewDataSyncService(createCollectionMsg, msgChan, ds)
+	impl.addNewDataSyncService(ctx, createCollectionMsg, msgChan, ds)
+	return nil
 }
 
 // WhenDropCollection handles the drop collection message.
-func (impl *flusherComponents) WhenDropCollection(vchannel string) {
+func (impl *flusherComponents) WhenDropCollection(ctx context.Context, vchannel string) {
 	// flowgraph is removed by data sync service it self.
 	if ds, ok := impl.dataServices[vchannel]; ok {
 		ds.Close()
 		delete(impl.dataServices, vchannel)
-		impl.logger.Info(context.TODO(), "drop data sync service", mlog.FieldVChannel(vchannel))
+		impl.logger.Info(ctx, "drop data sync service", mlog.FieldVChannel(vchannel))
 	}
 }
 
@@ -141,6 +144,7 @@ func (impl *flusherComponents) broadcastToAllDataSyncService(ctx context.Context
 
 // addNewDataSyncService adds a new data sync service to the components when new collection is created.
 func (impl *flusherComponents) addNewDataSyncService(
+	ctx context.Context,
 	createCollectionMsg message.ImmutableCreateCollectionMessageV1,
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
@@ -148,7 +152,7 @@ func (impl *flusherComponents) addNewDataSyncService(
 	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds, createCollectionMsg.TimeTick())
 	newDS.Start()
 	impl.dataServices[createCollectionMsg.VChannel()] = newDS
-	impl.logger.Info(context.TODO(), "create data sync service done", mlog.FieldVChannel(createCollectionMsg.VChannel()))
+	impl.logger.Info(ctx, "create data sync service done", mlog.FieldVChannel(createCollectionMsg.VChannel()))
 }
 
 // Close release all the resources of components.

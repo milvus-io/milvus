@@ -40,6 +40,7 @@ const (
 	CollectionFieldCategory       = "/collections/fields/"
 	CollectionStructFieldCategory = "/collections/struct_fields/"
 	ResourceGroupCategory         = "/resource_groups/"
+	FileResourceCategory          = "/file_resources/"
 	SegmentCategory               = "/segments/"
 	QuotaCenterCategory           = "/quotacenter/"
 	CommonCategory                = "/common/"
@@ -76,7 +77,10 @@ const (
 	AddFunctionAction               = "add_function"
 	AlterFunctionAction             = "alter_function"
 	DropFunctionAction              = "drop_function"
+	AddFunctionFieldAction          = "add_function_field"
+	DropFunctionFieldAction         = "drop_function_field"
 	AddAction                       = `add`
+	RemoveAction                    = "remove"
 	DropPropertiesAction            = "drop_properties"
 	CompactAction                   = "compact"
 	CompactionStateAction           = "get_compaction_state"
@@ -85,6 +89,7 @@ const (
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	RestoreExternalAction           = "restore_external"
 	ExportAction                    = "export"
+	DescribeExportAction            = "export/describe"
 	RefreshAction                   = "refresh"
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"

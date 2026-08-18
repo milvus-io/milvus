@@ -18,8 +18,11 @@ package task
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -185,26 +188,122 @@ func (s *globalTaskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
-	var fallbackNodeID int64 = NullNodeID
-	var maxAvailable int64 = -1
+type nodeSlotEntry struct {
+	nodeID int64
+	slots  *session.WorkerSlots
+}
 
+// newNodeSlotHeap builds a max-heap of worker nodes ordered by their available
+// slots, so the most-available (least-loaded) node always sits at the top.
+func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*nodeSlotEntry] {
+	slots := make([]*nodeSlotEntry, 0, len(workerSlots))
 	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
-		}
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			fallbackNodeID = nodeID
-		}
+		slots = append(slots, &nodeSlotEntry{
+			nodeID: nodeID,
+			slots:  ws,
+		})
+	}
+	return typeutil.NewObjectArrayBasedMaximumHeap(slots, func(entry *nodeSlotEntry) int64 {
+		return entry.slots.AvailableSlots
+	})
+}
+
+// pickNode selects the least-loaded node (the one with the most available slots)
+// for a task requiring taskSlot slots, instead of the first node that happens to
+// fit. Always assigning to the most-available node spreads tasks evenly across
+// DataNodes (water-filling on available slots) rather than packing them onto
+// whichever node is iterated first.
+//
+// It returns NullNodeID when no node has any available slot for a positive-slot
+// task. Non-positive-slot tasks are scheduled on the most-available node without
+// consuming slots. When even the most-available node cannot fully satisfy
+// taskSlot, it falls back to that node on a best-effort basis and drains its
+// slots, preserving the previous behavior.
+//
+// The picked node's slots are updated in place; the caller reuses the same heap
+// across all tasks in a scheduling round so later picks observe the decremented
+// slots.
+func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	return s.pickNodeWithMinimumVersion(slotHeap, taskSlot, semver.Version{})
+}
+
+func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
+	slotHeap typeutil.Heap[*nodeSlotEntry],
+	taskSlot int64,
+	minimumVersion semver.Version,
+) int64 {
+	if slotHeap.Len() == 0 {
+		return NullNodeID
 	}
 
-	if fallbackNodeID != NullNodeID {
-		workerSlots[fallbackNodeID].AvailableSlots = 0
-		return fallbackNodeID
+	skipped := make([]*nodeSlotEntry, 0)
+	defer func() {
+		for _, entry := range skipped {
+			slotHeap.Push(entry)
+		}
+	}()
+
+	for slotHeap.Len() > 0 {
+		entry := slotHeap.Pop()
+		if !workerSupportsMinimumVersion(entry.slots.Version, minimumVersion) {
+			skipped = append(skipped, entry)
+			continue
+		}
+		// Pop the most-available node, mutate its slots, then push it back. An element
+		// must not be mutated while it stays in the heap, or the heap order breaks.
+		if taskSlot <= 0 {
+			slotHeap.Push(entry)
+			return entry.nodeID
+		}
+		if entry.slots.AvailableSlots <= 0 {
+			// The most-available compatible node has no slot, so neither does any
+			// other compatible node.
+			slotHeap.Push(entry)
+			return NullNodeID
+		}
+		if entry.slots.AvailableSlots >= taskSlot {
+			entry.slots.AvailableSlots -= taskSlot
+		} else {
+			// No compatible node can fully satisfy the request; assign to the
+			// most-available compatible node on a best-effort basis.
+			entry.slots.AvailableSlots = 0
+		}
+		slotHeap.Push(entry)
+		return entry.nodeID
 	}
 	return NullNodeID
+}
+
+func workerSupportsMinimumVersion(workerVersion string, minimumVersion semver.Version) bool {
+	if minimumVersion.Equals(semver.Version{}) {
+		return true
+	}
+	workerVersion = strings.TrimSpace(workerVersion)
+	if workerVersion == "" {
+		return false
+	}
+
+	version, err := semver.ParseTolerant(workerVersion)
+	if err != nil {
+		// Development builds report branch-date-commit strings. A non-empty
+		// version still proves the worker understands the version response field;
+		// old DataNodes decode this new field as empty.
+		return true
+	}
+	version.Pre = nil
+	version.Build = nil
+	minimumVersion.Pre = nil
+	minimumVersion.Build = nil
+	return version.GTE(minimumVersion)
+}
+
+func minimumWorkerVersion(task Task) (semver.Version, bool) {
+	constraint, ok := task.(WorkerVersionConstraint)
+	if !ok {
+		return semver.Version{}, false
+	}
+	minimumVersion := constraint.MinimumWorkerVersion()
+	return minimumVersion, !minimumVersion.Equals(semver.Version{})
 }
 
 func (s *globalTaskScheduler) schedule() {
@@ -215,6 +314,9 @@ func (s *globalTaskScheduler) schedule() {
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
+	// Build the node-slot max-heap once per round and reuse it across all picks,
+	// so each task is placed on the currently least-loaded node.
+	slotHeap := newNodeSlotHeap(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -230,8 +332,13 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(nodeSlots, taskSlot)
+		minimumVersion, versionConstrained := minimumWorkerVersion(task)
+		nodeID := s.pickNodeWithMinimumVersion(slotHeap, taskSlot, minimumVersion)
 		if nodeID == NullNodeID {
+			if versionConstrained {
+				delayed = append(delayed, task)
+				continue
+			}
 			s.pendingTasks.Push(task)
 			break
 		}

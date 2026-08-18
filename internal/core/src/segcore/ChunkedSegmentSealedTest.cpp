@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
@@ -560,6 +561,132 @@ TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
     ASSERT_EQ(search_result.unity_topK_, search_info.topk_);
     ASSERT_EQ(search_result.seg_offsets_.size(), search_info.topk_);
     ASSERT_EQ(search_result.distances_.size(), search_info.topk_);
+}
+
+TEST(test_chunk_segment,
+     SearchOnSealedColumnNullableVectorArrayUsesLogicalRowOffsets) {
+    constexpr int64_t dim = 2;
+    constexpr int64_t row_count = 6;
+    constexpr int64_t vector_count = 3;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_id =
+        schema->AddDebugVectorArrayField("profile[embedding]",
+                                         DataType::VECTOR_FLOAT,
+                                         dim,
+                                         knowhere::metric::MAX_SIM_COSINE,
+                                         true);
+    auto field_meta = schema->operator[](vec_id);
+
+    const auto bitmap_bytes = (row_count + 7) / 8;
+    const auto header_bytes = sizeof(uint32_t) * (row_count * 2 + 1);
+    const auto payload_offset =
+        static_cast<uint32_t>(bitmap_bytes + header_bytes);
+    const auto vector_bytes = static_cast<uint32_t>(dim * sizeof(float));
+    const std::array<float, vector_count * dim> payload{
+        1.0F, 0.0F, 0.0F, 1.0F, -1.0F, 0.0F};
+    std::vector<char> buffer(bitmap_bytes + header_bytes +
+                                 payload.size() * sizeof(float) +
+                                 MMAP_ARRAY_PADDING,
+                             0);
+
+    // Logical rows: [NULL, [], [A], [B], [], [C]].
+    buffer[0] = 0b00111110;
+    const std::array<uint32_t, row_count * 2 + 1> header{
+        payload_offset,
+        0,
+        payload_offset,
+        0,
+        payload_offset,
+        1,
+        payload_offset + vector_bytes,
+        1,
+        payload_offset + 2 * vector_bytes,
+        0,
+        payload_offset + 2 * vector_bytes,
+        1,
+        payload_offset + 3 * vector_bytes};
+    memcpy(buffer.data() + bitmap_bytes,
+           header.data(),
+           header.size() * sizeof(uint32_t));
+    memcpy(buffer.data() + payload_offset,
+           payload.data(),
+           payload.size() * sizeof(float));
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    auto chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    chunks.emplace_back(
+        std::make_unique<VectorArrayChunk>(dim,
+                                           row_count,
+                                           buffer.data(),
+                                           buffer.size(),
+                                           DataType::VECTOR_FLOAT,
+                                           chunk_mmap_guard,
+                                           true));
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{row_count}, "", std::move(chunks));
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    auto column = MakeChunkedColumnBase(
+        DataType::VECTOR_ARRAY, std::move(slot), field_meta);
+    ASSERT_FALSE(column->GetOffsetMapping().IsEnabled());
+    auto offsets_pw = column->VectorArrayOffsets(nullptr, 0);
+    const std::array<size_t, row_count + 1> expected_offsets{
+        0, 0, 0, 1, 2, 2, 3};
+    for (int64_t i = 0; i <= row_count; ++i) {
+        ASSERT_EQ(offsets_pw.get()[i], expected_offsets[i]);
+    }
+
+    SearchInfo search_info;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::MAX_SIM_COSINE}};
+    search_info.field_id_ = vec_id;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_COSINE;
+    search_info.topk_ = 3;
+
+    const std::array<float, dim> query{1.0F, 0.0F};
+    const std::array<size_t, 2> query_offsets{0, 1};
+    const std::map<std::string, std::string> index_info;
+    milvus::OpContext op_context;
+
+    auto run_search = [&](const BitsetView& bitset) {
+        SearchResult result;
+        query::SearchOnSealedColumn(*schema,
+                                    column.get(),
+                                    search_info,
+                                    index_info,
+                                    query.data(),
+                                    query_offsets.data(),
+                                    1,
+                                    row_count,
+                                    bitset,
+                                    &op_context,
+                                    result);
+        return result;
+    };
+
+    auto result = run_search(BitsetView{});
+    ASSERT_EQ(result.seg_offsets_.size(), 3);
+    ASSERT_EQ(result.distances_.size(), 3);
+    EXPECT_EQ(result.seg_offsets_[0], 2);
+    EXPECT_EQ(result.seg_offsets_[1], 3);
+    EXPECT_EQ(result.seg_offsets_[2], 5);
+    EXPECT_FLOAT_EQ(result.distances_[0], 1.0F);
+    EXPECT_FLOAT_EQ(result.distances_[1], 0.0F);
+    EXPECT_FLOAT_EQ(result.distances_[2], -1.0F);
+
+    // Bitsets are also in logical row space for sealed raw VECTOR_ARRAY.
+    std::array<uint8_t, 1> filtered_bits{1U << 3};
+    auto filtered_result =
+        run_search(BitsetView(filtered_bits.data(), row_count));
+    ASSERT_EQ(filtered_result.seg_offsets_.size(), 3);
+    EXPECT_EQ(filtered_result.seg_offsets_[0], 2);
+    EXPECT_EQ(filtered_result.seg_offsets_[1], 5);
+    EXPECT_EQ(filtered_result.seg_offsets_[2], INVALID_SEG_OFFSET);
+    EXPECT_FLOAT_EQ(filtered_result.distances_[0], 1.0F);
+    EXPECT_FLOAT_EQ(filtered_result.distances_[1], -1.0F);
+    EXPECT_FALSE(column->GetOffsetMapping().IsEnabled());
 }
 
 // Test search on nullable vector field with all null vectors
