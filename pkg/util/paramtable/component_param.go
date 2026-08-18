@@ -7066,7 +7066,10 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 Must be >= streaming.walBroadcaster.tombstone.maxLifetime: the BulkImport
 idempotency window is bounded by the tombstone retention, so a job GC'd earlier
 than its tombstone would let an in-window retry resolve to a jobID that
-GetImportProgress can no longer find.`,
+GetImportProgress can no longer find. Leave margin rather than matching the two
+exactly: a tombstone's age is measured from the last StreamingCoord start, so a
+restart extends its remaining life while this retention keeps counting from the
+job's own completion.`,
 		DefaultValue: "86400",
 		PanicIfEmpty: false,
 		Export:       true,

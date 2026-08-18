@@ -52,6 +52,20 @@ type BroadcastAPI interface {
 	// Broadcast broadcasts the message to all channels.
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
+	// BroadcastWithAdmission is Broadcast with an admission check that runs only when a
+	// new broadcast task is about to be created, i.e. after the idempotency lookup has
+	// already missed. A deduplicated broadcast never reaches admit.
+	//
+	// Admission over mutable cluster state (a queue depth, a quota) belongs here rather
+	// than in the caller, because the caller runs entirely before the idempotency
+	// lookup: the lookup can only happen once the resource keys are held, which is
+	// inside Broadcast. A limit checked by the caller would reject a legitimate retry
+	// whose own original is still counted against that very limit, and the retry could
+	// then never recover the original broadcast. Validation that is a pure function of
+	// the request needs no such treatment -- a retry carries the same request, so it
+	// passes exactly as the original did, and belongs in the caller.
+	BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error)
+
 	// Close releases the resource keys that broadcast api holds.
 	Close()
 }

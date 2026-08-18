@@ -2173,6 +2173,15 @@ func (m *mockBroadcastAPI) Broadcast(ctx context.Context, msg message.BroadcastM
 	return &types.BroadcastAppendResult{}, m.broadcastErr
 }
 
+func (m *mockBroadcastAPI) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
+	if admit != nil {
+		if err := admit(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return m.Broadcast(ctx, msg)
+}
+
 func (m *mockBroadcastAPI) Close() {
 	if m.closeFn != nil {
 		m.closeFn()

@@ -6874,3 +6874,17 @@ func TestCreateImportJobForwardsIdempotencyKeyWithAuth(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, merr.Code(nil), returnBody.Code)
 }
+
+// A browser sends the Idempotency-Key header cross-origin only if the preflight
+// response lists it in Access-Control-Allow-Headers; the header is otherwise blocked
+// before the actual request is ever sent, making idempotent import unusable from a
+// browser client.
+func TestRequestHandlerFuncAllowsIdempotencyKeyHeaderInCORS(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodOptions, "/v2/vectordb/jobs/import/create", nil)
+
+	RequestHandlerFunc(c)
+
+	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), HTTPHeaderIdempotencyKey)
+}

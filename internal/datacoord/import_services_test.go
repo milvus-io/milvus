@@ -438,7 +438,6 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	ctx := newImportV2IdempotentContext("run-1")
 
 	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
@@ -457,7 +456,6 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 	ctx := newImportV2IdempotentContext("run-1")
 
 	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 0, importV2RequestFilePath)
 
@@ -472,12 +470,11 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 
 func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtTheLimit() {
 	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
 	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	s.Equal(256, limit, "this test asserts the boundary of the DEFAULT limit, the one the proxy advertises")
+	s.Equal(256, limit, "this test asserts the boundary of the DEFAULT limit, the one advertised to clients")
 	atLimit := strings.Repeat("k", limit)
 
 	ctx := newImportV2IdempotentContext(atLimit)
@@ -1050,3 +1047,47 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 }
 
 // Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)
+
+// The job-count limit must not stand between a retry and its original job. While the
+// original job is still executing it is itself counted against
+// dataCoord.import.maxImportJobNum, so checking that limit before the idempotency
+// lookup would reject exactly the retry the key exists to serve, and the client would
+// never learn the original jobID. The limit is therefore handed to the broadcaster as
+// an admission callback, which only a non-deduplicated broadcast reaches: importMeta
+// here is left with no expectations at all, so any count taken on the duplicate path
+// fails this test.
+func (s *ImportServicesSuite) TestImportV2_DuplicateResolvesWhileJobLimitIsReached() {
+	old := paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue("1")
+	defer paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue(old)
+
+	importMeta := NewMockImportMeta(s.T())
+	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+
+	ctx := newImportV2IdempotentContext("run-1")
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal("4242", resp.GetJobID())
+}
+
+// The other half of the same contract: moving the limit behind the idempotency lookup
+// must not stop it applying to a request that actually creates a job.
+func (s *ImportServicesSuite) TestImportV2_JobLimitStillRejectsANewJob() {
+	old := paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue("1")
+	defer paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue(old)
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+
+	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+	// This key resolves to nothing, so the broadcast creates a new task and admission runs.
+	broadcastAPI.broadcastResult = &types.BroadcastAppendResult{BroadcastID: 12345}
+
+	ctx := newImportV2IdempotentContext("run-2")
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.NotEqual(int32(0), resp.GetStatus().GetCode())
+	s.Contains(resp.GetStatus().GetReason(), "number of jobs has reached the limit")
+}

@@ -92,6 +92,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
+//
+// Everything here must be a pure function of the request: it runs before the
+// broadcaster's idempotency lookup, so a legitimate retry has to pass it again, and it
+// does, carrying the same request. Admission checks over mutable cluster state must
+// not live here -- see the BroadcastWithAdmission call in broadcastImport.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
@@ -105,12 +110,6 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		if err != nil {
 			return err
 		}
-	}
-
-	// Validate max import job count
-	err = ValidateMaxImportJobExceed(ctx, s.importMeta)
-	if err != nil {
-		return err
 	}
 
 	if err := s.validateImportReplication(ctx, options); err != nil {
@@ -288,13 +287,19 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// itself from the message type and the resource keys this broadcast holds
 		// (SharedDBName + ExclusiveCollectionName, see startBroadcastWithCollectionID),
 		// so the collection is already part of the scope. Prefixing the key here would
-		// only eat into the length budget the proxy validates against.
+		// only eat into the length budget the broadcaster validates against.
 		WithIdempotencyKey(idempotencyKey).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
-	// Broadcast the message
-	result, err := broadcaster.Broadcast(ctx, msg)
+	// Broadcast the message. The job-count limit is checked here rather than in
+	// validateImportRequest so that a retry carrying a known idempotency key can still
+	// reach its original job: the original is itself counted against the limit while it
+	// executes, so checking before the lookup would reject the retry and leave the
+	// client without the original jobID.
+	result, err := broadcaster.BroadcastWithAdmission(ctx, msg, func(ctx context.Context) error {
+		return ValidateMaxImportJobExceed(ctx, s.importMeta)
+	})
 	if err != nil {
 		return 0, false, err
 	}
