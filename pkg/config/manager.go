@@ -145,7 +145,14 @@ type Manager struct {
 	// declaredKeys maps a declared ParamItem's separator-free identity to its
 	// dotted spelling, so the structure of the key survives a lookup made under
 	// any of its aliases.
-	declaredKeys          *typeutil.ConcurrentMap[string, string]
+	declaredKeys *typeutil.ConcurrentMap[string, string]
+	// dottedSpellings is the same map for keys nobody declared: a ParamGroup
+	// member is named by whoever wrote it, so the core cannot enumerate the
+	// members, but the sources still show both spellings of each one as they
+	// load. Learning the pairing there is what lets a lookup made under the
+	// collapsed identity be classified against the namespace it belongs to
+	// rather than against a name with no structure left in it.
+	dottedSpellings       *typeutil.ConcurrentMap[string, string]
 	registeredKeyPrefixes *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
@@ -167,6 +174,7 @@ func NewManager() *Manager {
 		nonSensitiveKeys:              typeutil.NewConcurrentSet[string](),
 		nonSensitiveSuffixes:          typeutil.NewConcurrentSet[string](),
 		declaredKeys:                  typeutil.NewConcurrentMap[string, string](),
+		dottedSpellings:               typeutil.NewConcurrentMap[string, string](),
 		registeredKeyPrefixes:         typeutil.NewConcurrentSet[string](),
 		configCache:                   make(map[string]any),
 	}
@@ -349,14 +357,18 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 // happen to match, which for the empty prefix is all of them.
 func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	// Every spelling the same key can be stored under. EtcdSource keeps whatever
-	// separator the stored key used, hence the slash form; strippedKey covers
-	// the one identity formatKey refuses to produce, which is the spelling
-	// EnvSource uses for knowhere.* — see strippedKey.
-	candidates := [4]string{
+	// separator the stored key used, hence the slash form.
+	candidates := []string{
 		dotted,
 		strings.ReplaceAll(dotted, ".", "/"),
 		lookup,
-		strippedKey(dotted),
+	}
+	// The one identity formatKey refuses to produce. It differs from lookup only
+	// for knowhere.*, which formatKey exempts and the EnvSource key formatter
+	// does not — see strippedKey. Appending it unconditionally would repeat the
+	// lookup above for every other key in the table.
+	if stripped := strippedKey(dotted); stripped != lookup {
+		candidates = append(candidates, stripped)
 	}
 	sawEnvironment := false
 	for _, candidate := range candidates {
@@ -721,6 +733,38 @@ type resolvedKey struct {
 	kind   RegisteredConfigKind
 }
 
+// rememberSpelling records that one configuration key can be addressed under
+// two identities, so a later lookup made under the collapsed one can be
+// classified against the namespace it belongs to.
+//
+// Every source inserts a key twice — once as written, once collapsed — so the
+// pairing is observable here without any source having to report it. Only
+// ParamGroup members need this: a ParamItem records its own spelling in
+// declaredKeys, which is consulted first and always wins.
+//
+// The environment is excluded on purpose. Its variable names are not a
+// namespace, they are whatever the pod happens to carry, and letting one of
+// them define the structure of a collapsed identity is exactly the
+// impersonation groupMemberIsEnvironmentOnly exists to refuse.
+func (m *Manager) rememberSpelling(key, sourceName string) {
+	if sourceName == environmentSourceName {
+		return
+	}
+	// "/" is what EtcdSource keeps when a key was stored with slashes; "." is
+	// every other source. A key with neither is already the collapsed identity
+	// and has nothing to teach.
+	if !strings.ContainsAny(key, "./") {
+		return
+	}
+	dotted := lowerKey(strings.ReplaceAll(key, "/", "."))
+	collapsed := formatKey(key)
+	if collapsed == dotted {
+		// knowhere.*, which formatKey exempts from collapsing.
+		return
+	}
+	m.dottedSpellings.Insert(collapsed, dotted)
+}
+
 func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	dotted := lowerKey(strings.ReplaceAll(key, "/", "."))
 	// Format the dotted form, not the caller's spelling: formatKey leaves keys
@@ -734,6 +778,23 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	// or the separator-free identity the value is stored under.
 	if declared, ok := m.declaredKeys.Get(formattedKey); ok {
 		return resolvedKey{lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar}
+	}
+
+	// Nobody declared this key, so if the caller handed us a spelling with no
+	// namespace in it there is nothing to classify it by — and one entry would
+	// then be readable under its dotted spelling and masked under its collapsed
+	// one, in the same projection. Recover the structure the sources showed us.
+	//
+	// "." specifically, not any separator: a prefix is written with dots, so a
+	// name spelled with underscores ("kafka_producer_ssl_key_pem", the shape
+	// EnvSource uses) is as structureless here as one with nothing at all. A
+	// spelling that does carry dots is believed as given — it is the caller who
+	// knows which namespace they mean, and the environment guard below is what
+	// stops them naming one they have no business in.
+	if !strings.Contains(dotted, ".") {
+		if learned, ok := m.dottedSpellings.Get(formattedKey); ok {
+			dotted = learned
+		}
 	}
 
 	resolved := resolvedKey{lookup: formattedKey, dotted: dotted}
@@ -858,13 +919,23 @@ const (
 	prefixExempted
 )
 
-// matchSensitivePrefix must try both identities, for the same reason
-// resolveRegisteredKey admits both: a key stored under the collapsed spelling —
-// which is every alter-endpoint write, and the alias FileSource and EnvSource
-// insert beside every key they load — carries no separators to match a dotted
-// prefix against. Asking only the dotted form would classify
-// "kafka.producer.ssl.key.pem" sensitive and "kafkaproducersslkeypem", the same
-// entry, not.
+// matchSensitivePrefix classifies a key against the registered sensitive
+// prefixes, using the dotted identity whenever there is one.
+//
+// resolveRegisteredKey recovers the dotted spelling for a collapsed key
+// whenever some source has shown the manager both, so the common case —
+// "kafkaproducersslkeypem", the alias FileSource inserts beside
+// "kafka.producer.ssl.key.pem" — arrives here already carrying its structure,
+// and gets the same verdict, exemptions included, as the spelling it is an
+// alias of.
+//
+// What is left is a key whose structure nothing in the process knows: a member
+// created through /management/config/alter, under a namespace whose members are
+// open-ended by definition. There the collapsed prefixes are all there is, and
+// the group's Sensitive default has to stand — a declared NonSensitiveSuffixes
+// exemption cannot be proven against a name with no separators left in it, and
+// guessing where they used to be is not a thing to do on this side of the
+// decision.
 func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
 	verdict := prefixNoMatch
 	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
@@ -884,17 +955,15 @@ func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
 		return verdict
 	}
 
-	// Nothing matched the dotted form. Try the collapsed one, which is the only
-	// identity an alter-endpoint write leaves behind, and the alias FileSource
-	// and EnvSource insert beside every key they load.
-	//
-	// A collapsed key has no separators left to locate its leaf with, so a
-	// declared NonSensitiveSuffixes exemption cannot be proven and the group's
-	// default stands. That over-redacts an exempted leaf reached by its
-	// collapsed spelling — the value shows as ***** even though the dotted
-	// spelling of the same entry is readable. Fail-closed is the right side to
-	// err on, and the dotted spelling is what an operator types; recovering the
-	// leaf would mean guessing where the separators used to be.
+	// The key still carries its namespace and no sensitive prefix claimed it, so
+	// that is the answer. Consulting the collapsed prefixes anyway would invent
+	// matches across segment boundaries — "kafka.consumerlike.x" collapses into
+	// the "kafkaconsumer" namespace it is not a member of.
+	if strings.Contains(dotted, ".") {
+		return verdict
+	}
+
+	// No structure to work with. Fall back to the collapsed prefixes.
 	m.sensitiveKeyPrefixesCollapsed.Range(func(prefix string) bool {
 		if strings.HasPrefix(lookup, prefix) {
 			verdict = prefixSensitive
@@ -1023,6 +1092,7 @@ func (m *Manager) pullSourceConfigs(source string) error {
 
 	sourcePriority := configSource.GetPriority()
 	for key := range configs {
+		m.rememberSpelling(key, source)
 		sourceName, ok := m.keySourceMap.Get(key)
 		if !ok { // if key do not exist then add source
 			m.keySourceMap.Insert(key, source)
@@ -1060,6 +1130,7 @@ func (m *Manager) updateEvent(e *Event) error {
 	}
 	switch e.EventType {
 	case CreateType, UpdateType:
+		m.rememberSpelling(e.Key, e.EventSource)
 		sourceName, ok := m.keySourceMap.Get(e.Key)
 		if !ok {
 			m.keySourceMap.Insert(e.Key, e.EventSource)

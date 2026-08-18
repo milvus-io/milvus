@@ -54,7 +54,9 @@ var (
 	httpDBName         = "db_name"
 	HTTPCollectionName = "collection_name"
 	UnknownData        = "unknown"
-	sensitiveMark      = config.RedactedValue
+	// sensitiveMark is the redaction marker the access/trace log shares with the
+	// configuration projections, so an operator sees one shape for "withheld".
+	sensitiveMark = config.RedactedValue
 )
 
 // authorizeConfigView restricts the configuration views to root.
@@ -98,13 +100,17 @@ func authorizeConfigView() gin.HandlerFunc {
 	}
 }
 
-// getConfigs serves a configuration map that the caller has already projected
-// through the owning config.Manager. Do not redact here: only that manager
-// knows which of its keys are declared, and the hook table's keys are unknown
-// to the main one.
-func getConfigs(configs map[string]string) gin.HandlerFunc {
+// getConfigs serves a configuration projection produced by the owning
+// config.Manager. Do not redact here: only that manager knows which of its keys
+// are declared, and the hook table's keys are unknown to the main one.
+//
+// It takes a function rather than a map because the routes are registered once,
+// at startup, and a map captured there would answer every later request with
+// the configuration the process booted with — an endpoint whose whole purpose
+// is to report the configuration in force, reporting one that may no longer be.
+func getConfigs(project func() map[string]string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		bs, err := json.Marshal(configs)
+		bs, err := json.Marshal(project())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),

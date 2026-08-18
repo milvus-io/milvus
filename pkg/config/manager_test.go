@@ -670,6 +670,80 @@ func TestSensitiveGroupMemberIsRedactedUnderEverySpelling(t *testing.T) {
 	}
 }
 
+// The inverse of TestSensitiveGroupMemberIsRedactedUnderEverySpelling: an
+// exempted leaf must be VISIBLE under every spelling too.
+//
+// Sources insert every key twice, so a projection lists both spellings of each
+// entry. Deciding the collapsed one on the group default alone made the two
+// disagree — the same setting appeared once readable and once as ***** in one
+// response — and quietly reduced NonSensitiveSuffixes to a rule that held for
+// half of each key. rememberSpelling is what closes it.
+func TestExemptedGroupMemberIsVisibleUnderEverySpelling(t *testing.T) {
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile,
+		[]byte("function.textEmbedding.providers.tei.enable: true\n"+
+			"function.textEmbedding.providers.tei.credential: provider-secret\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix("function.textembedding.providers.")
+	mgr.RegisterSensitivePrefix("function.textembedding.providers.")
+	mgr.RegisterNonSensitiveSuffix("function.textembedding.providers.", "enable")
+
+	for _, spelling := range []string{
+		"function.textEmbedding.providers.tei.enable",
+		"function/textEmbedding/providers/tei/enable",
+		"functiontextembeddingprovidersteienable",
+		"FUNCTION_TEXTEMBEDDING_PROVIDERS_TEI_ENABLE",
+	} {
+		assert.False(t, mgr.IsSensitive(spelling), spelling)
+		_, value, err := mgr.GetRegisteredConfig(spelling)
+		require.NoError(t, err, spelling)
+		assert.Equal(t, "true", value, spelling)
+	}
+	// The exemption is one leaf, not the namespace.
+	assert.True(t, mgr.IsSensitive("functiontextembeddingprovidersteicredential"))
+
+	// No entry may contradict its own alias.
+	projection := mgr.GetConfigs()
+	for key, value := range projection {
+		collapsed := formatKeyUncached(key)
+		if aliased, ok := projection[collapsed]; ok {
+			assert.Equal(t, value, aliased,
+				"%s and %s are one entry and must project the same", key, collapsed)
+		}
+	}
+}
+
+// The spelling recovery only knows what a source has shown it. A member that
+// exists nowhere but etcd — which is where /management/config/alter writes,
+// under the collapsed identity and nothing else — still has no structure to be
+// classified by, and a group whose members are open-ended by definition has to
+// keep failing closed there.
+func TestUnlearnedCollapsedMemberStaysSensitive(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("function.textembedding.providers.")
+	mgr.RegisterSensitivePrefix("function.textembedding.providers.")
+	mgr.RegisterNonSensitiveSuffix("function.textembedding.providers.", "enable")
+
+	// No source ever supplied the dotted spelling of this one.
+	assert.True(t, mgr.IsSensitive("functiontextembeddingprovidersnewproviderenable"),
+		"a name with no namespace left in it cannot prove an exemption")
+	// While the dotted spelling, which can, is exempted.
+	assert.False(t, mgr.IsSensitive("function.textembedding.providers.newprovider.enable"))
+}
+
+// A namespace is matched on segment boundaries, never on the collapsed name of
+// a key that carries its structure: "kafka.consumerlike.x" is not a member of
+// "kafka.consumer." however similar the two look with the dots removed.
+func TestCollapsedPrefixDoesNotSwallowNeighbouringNamespaces(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("kafka.consumer.")
+	mgr.RegisterSensitivePrefix("kafka.consumer.")
+
+	assert.True(t, mgr.IsSensitive("kafka.consumer.x"))
+	assert.False(t, mgr.IsSensitive("kafka.consumerlike.x"))
+}
+
 // A ParamGroup member set through both overlay spellings must be reported as
 // the one ParamGroup.GetValue actually returns.
 func TestRegisteredGroupMemberMatchesGroupValue(t *testing.T) {

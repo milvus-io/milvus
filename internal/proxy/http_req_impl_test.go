@@ -34,7 +34,9 @@ func TestGetConfigs(t *testing.T) {
 
 	// The key is one the deleted hideSensitive blacklist did match, so restoring
 	// that blacklist would break this assertion rather than leave it green.
-	getConfigs(map[string]string{"my.password": "handed-to-us-in-the-clear"})(c)
+	getConfigs(func() map[string]string {
+		return map[string]string{"my.password": "handed-to-us-in-the-clear"}
+	})(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "handed-to-us-in-the-clear",
@@ -144,7 +146,7 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	getConfigs(params.GetConfigsView())(c)
+	getConfigs(params.GetConfigsView)(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NotContains(t, w.Body.String(), sentinelValue)

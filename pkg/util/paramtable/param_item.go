@@ -62,6 +62,13 @@ type ParamItem struct {
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
+	if pi.Sensitive && pi.NonSensitive {
+		// Contradictory metadata. Sensitive wins at runtime, so this would fail
+		// closed rather than leak, but it would also mean a declaration that
+		// says "reviewed, not a credential" is quietly not in force. The
+		// declaration site is where that has to be noticed.
+		panic(fmt.Sprintf("%s is declared both Sensitive and NonSensitive", pi.Key))
+	}
 	pi.manager = manager
 	pi.manager.RegisterConfigKey(pi.Key)
 	for _, key := range pi.FallbackKeys {

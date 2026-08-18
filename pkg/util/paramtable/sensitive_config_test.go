@@ -198,3 +198,93 @@ func TestSensitiveParamGroupUsesRawValuesInternally(t *testing.T) {
 	safe := mgr.GetBy(config.WithPrefix("credential."), config.RemovePrefix("credential."))
 	assert.Equal(t, config.RedactedValue, safe["provider.api_key"])
 }
+
+// Every configuration key is stored under two spellings, so a projection lists
+// each entry twice. This asserts over the whole shipped table what
+// TestExemptedGroupMemberIsVisibleUnderEverySpelling asserts for one key: an
+// entry never contradicts its own alias.
+//
+// Written as an invariant over the real ParamTable rather than as cases,
+// because the thing that goes wrong here is a group nobody thought to check:
+// when this first held, 33 of the 843 aliased pairs disagreed, all of them
+// NonSensitiveSuffixes leaves nobody had listed.
+func TestProjectionAgreesAcrossSpellings(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+	projection := params.GetAll()
+
+	aliased := 0
+	for key, value := range projection {
+		if !strings.Contains(key, ".") {
+			continue
+		}
+		collapsed := strings.NewReplacer(".", "", "_", "", "/", "").Replace(strings.ToLower(key))
+		alias, ok := projection[collapsed]
+		if !ok {
+			continue
+		}
+		aliased++
+		assert.Equal(t, value, alias,
+			"%q and %q are one configuration entry and must project the same", key, collapsed)
+	}
+	require.NotZero(t, aliased,
+		"no aliased pair was found, so this test asserted nothing about the projection")
+}
+
+// The disclosure this whole change exists for, stated once as a property
+// instead of one case per variable shape: EnvSource imports the entire process
+// environment, and nothing it brings in that Milvus does not declare may appear
+// in a projection — neither its value nor its name, since the list of variables
+// in a pod is worth withholding on its own.
+func TestProjectionOmitsEveryEnvironmentOnlyKey(t *testing.T) {
+	for _, name := range []string{
+		"AWS_SECRET_ACCESS_KEY",
+		"DATABASE_URL",
+		"SOMETHING_WITH_NO_SEPARATORS",
+		"lower_case_variable",
+		// Shaped to impersonate a member of each dynamic namespace Milvus
+		// declares, which is the way in that a prefix check alone would allow.
+		"PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL",
+		"FUNCTION_TEXTEMBEDDING_PROVIDERS_EVIL_ENABLE",
+		"KAFKA_CONSUMER_EVIL",
+		"CREDENTIAL_EVIL_APIKEY",
+		"AUTOINDEX_PARAMS_TUNING_EVIL",
+		"KNOWHERE_EVIL",
+	} {
+		t.Setenv(name, "environment-only-sentinel")
+	}
+
+	base := NewBaseTable(SkipRemote(true))
+	require.NoError(t, base.Save("localStorage.path", t.TempDir()))
+	params := &ComponentParam{}
+	params.Init(base)
+	mgr := base.Manager()
+
+	require.Contains(t, mgr.GetConfigsRaw(), "awssecretaccesskey",
+		"the environment was not imported at all, so this test proves nothing")
+
+	for name, projection := range map[string]map[string]string{
+		"GetConfigs":     mgr.GetConfigs(),
+		"GetConfigsView": mgr.GetConfigsView(),
+		"GetBy":          mgr.GetBy(config.WithSubstr("")),
+	} {
+		for key, value := range projection {
+			assert.NotContains(t, value, "environment-only-sentinel",
+				"%s published the value of an undeclared environment variable under %q", name, key)
+			assert.NotContains(t, strings.ToLower(key), "evil",
+				"%s published the name of an undeclared environment variable", name)
+		}
+	}
+
+	// And the read endpoint refuses them by name, whichever way they are spelled.
+	for _, spelling := range []string{
+		"AWS_SECRET_ACCESS_KEY",
+		"awssecretaccesskey",
+		"aws.secret.access.key",
+		"proxy.accessLog.formatters.DATABASE_URL",
+		"function.textEmbedding.providers.evil.enable",
+		"functiontextembeddingprovidersevilenable",
+	} {
+		_, _, err := mgr.GetRegisteredConfig(spelling)
+		assert.ErrorIs(t, err, config.ErrKeyUnregistered, spelling)
+	}
+}
