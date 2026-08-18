@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -101,19 +100,6 @@ func (s *CopySegmentTaskSuite) TestCopySegmentTask_GettersAndSetters() {
 	s.Equal(taskcommon.FromCopySegmentState(datapb.CopySegmentTaskState_CopySegmentTaskPending), task.GetTaskState())
 	s.Equal(int64(1), task.GetTaskSlot())
 	s.Equal(int64(1), task.GetTaskVersion())
-}
-
-func TestCopySegmentTask_MinimumWorkerVersion(t *testing.T) {
-	task := createTestCopyTask(1, 100).(*copySegmentTask)
-	copyMeta, _ := newCopySegmentTaskTestMeta(t, task)
-	ctx := context.Background()
-	require.NoError(t, copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobPending)))
-
-	assert.Equal(t, semver.Version{}, task.MinimumWorkerVersion())
-	require.NoError(t, copyMeta.UpdateJob(ctx, 100, func(job CopySegmentJob) {
-		job.(*copySegmentJob).External = true
-	}))
-	assert.Equal(t, externalSnapshotMinimumDataNodeVersion, task.MinimumWorkerVersion())
 }
 
 func (s *CopySegmentTaskSuite) TestCopySegmentTask_Clone() {

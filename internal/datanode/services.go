@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"golang.org/x/time/rate"
@@ -762,15 +761,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
 		AvailableSlots: availableSlots,
-		Version:        currentMilvusVersion(),
 	}, nil
-}
-
-func currentMilvusVersion() string {
-	if version := strings.TrimSpace(os.Getenv(metricsinfo.GitBuildTagsEnvKey)); version != "" && version != "unknown" {
-		return version
-	}
-	return common.Version.String()
 }
 
 // Not in used now
@@ -863,7 +854,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			req.ClusterID = clusterID
 		}
 		return node.createRefreshExternalCollectionTask(ctx, req)
-	case taskcommon.CopySegment:
+	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
@@ -1020,7 +1011,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(info.State)
 		resProperties.AppendReason(info.FailReason)
 		return wrapQueryTaskResult(resp, resProperties)
-	case taskcommon.CopySegment:
+	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		resp, err := node.QueryCopySegment(ctx, &datapb.QueryCopySegmentRequest{
 			ClusterID: clusterID,
 			TaskID:    taskID,
@@ -1059,7 +1050,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	switch taskType {
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
-	case taskcommon.CopySegment:
+	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:
 		return node.DropCompactionPlan(ctx, &datapb.DropCompactionPlanRequest{PlanID: taskID})

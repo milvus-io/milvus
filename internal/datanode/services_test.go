@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
@@ -110,13 +111,6 @@ func TestFirstExternalSourceURI(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("firstExternalSourceURI should validate the first source root")
-	}
-}
-
-func TestCurrentMilvusVersion(t *testing.T) {
-	t.Setenv(metricsinfo.GitBuildTagsEnvKey, "3.0.1")
-	if version := currentMilvusVersion(); version != "3.0.1" {
-		t.Fatalf("currentMilvusVersion() = %q, want 3.0.1", version)
 	}
 }
 
@@ -517,7 +511,6 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		s.NoError(merr.Error(resp.GetStatus()))
-		s.NotEmpty(resp.GetVersion())
 	})
 }
 
@@ -640,13 +633,13 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
 
-	s.Run("invalid task type", func() {
+	s.Run("unknown task type is rejected before payload decoding", func() {
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
 				taskcommon.ClusterIDKey: "cluster-0",
 				taskcommon.TypeKey:      "invalid",
 			},
-			Payload: []byte{},
+			Payload: []byte{0xff},
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(err)
@@ -654,6 +647,7 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
 		// an internal protocol violation, not user input.
 		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
+		s.Contains(status.GetReason(), "unrecognized task type")
 	})
 }
 
@@ -1541,42 +1535,52 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 }
 
 func (s *DataNodeServicesSuite) TestCreateTaskCopySegment() {
-	s.Run("create copy segment task", func() {
-		copyReq := &datapb.CopySegmentRequest{
-			JobID:         500,
-			TaskID:        501,
-			TaskSlot:      1,
-			StorageConfig: s.storageConfig,
-			Sources: []*datapb.CopySegmentSource{
-				{
-					CollectionId: 111,
-					PartitionId:  222,
-					SegmentId:    333,
+	tests := []struct {
+		name     string
+		taskID   int64
+		taskType taskcommon.Type
+	}{
+		{name: "legacy copy segment", taskID: 501, taskType: taskcommon.CopySegment},
+		{name: "external copy segment", taskID: 502, taskType: taskcommon.ExternalCopySegment},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			copyReq := &datapb.CopySegmentRequest{
+				JobID:         500,
+				TaskID:        test.taskID,
+				TaskSlot:      1,
+				StorageConfig: s.storageConfig,
+				Sources: []*datapb.CopySegmentSource{
+					{
+						CollectionId: 111,
+						PartitionId:  222,
+						SegmentId:    333,
+					},
 				},
-			},
-			Targets: []*datapb.CopySegmentTarget{
-				{
-					CollectionId: 444,
-					PartitionId:  555,
-					SegmentId:    666,
+				Targets: []*datapb.CopySegmentTarget{
+					{
+						CollectionId: 444,
+						PartitionId:  555,
+						SegmentId:    666,
+					},
 				},
-			},
-		}
+			}
 
-		payload, err := proto.Marshal(copyReq)
-		s.NoError(err)
+			payload, err := proto.Marshal(copyReq)
+			s.NoError(err)
 
-		req := &workerpb.CreateTaskRequest{
-			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.CopySegment,
-				taskcommon.TaskIDKey: "501",
-			},
-			Payload: payload,
-		}
+			req := &workerpb.CreateTaskRequest{
+				Properties: map[string]string{
+					taskcommon.TypeKey:   test.taskType,
+					taskcommon.TaskIDKey: fmt.Sprint(test.taskID),
+				},
+				Payload: payload,
+			}
 
-		status, err := s.node.CreateTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(status, err))
-	})
+			status, err := s.node.CreateTask(s.ctx, req)
+			s.NoError(merr.CheckRPCCall(status, err))
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestQueryTaskCopySegment() {
@@ -1616,70 +1620,78 @@ func (s *DataNodeServicesSuite) TestQueryTaskCopySegment() {
 	status, err := s.node.CreateTask(s.ctx, createReq)
 	s.NoError(merr.CheckRPCCall(status, err))
 
-	s.Run("query copy segment task", func() {
-		queryReq := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.CopySegment,
-				taskcommon.TaskIDKey:    "601",
-			},
-		}
+	for _, taskType := range []taskcommon.Type{taskcommon.CopySegment, taskcommon.ExternalCopySegment} {
+		s.Run(taskType, func() {
+			queryReq := &workerpb.QueryTaskRequest{
+				Properties: map[string]string{
+					taskcommon.ClusterIDKey: "cluster-0",
+					taskcommon.TypeKey:      taskType,
+					taskcommon.TaskIDKey:    "601",
+				},
+			}
 
-		resp, err := s.node.QueryTask(s.ctx, queryReq)
-		s.NoError(merr.CheckRPCCall(resp.GetStatus(), err))
-		s.NotNil(resp.GetPayload())
-	})
+			resp, err := s.node.QueryTask(s.ctx, queryReq)
+			s.NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+			s.NotNil(resp.GetPayload())
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
-	// First create a copy segment task
-	copyReq := &datapb.CopySegmentRequest{
-		JobID:         700,
-		TaskID:        701,
-		TaskSlot:      1,
-		StorageConfig: s.storageConfig,
-		Sources: []*datapb.CopySegmentSource{
-			{
-				CollectionId: 111,
-				PartitionId:  222,
-				SegmentId:    333,
-			},
-		},
-		Targets: []*datapb.CopySegmentTarget{
-			{
-				CollectionId: 444,
-				PartitionId:  555,
-				SegmentId:    666,
-			},
-		},
+	tests := []struct {
+		taskID   int64
+		taskType taskcommon.Type
+	}{
+		{taskID: 701, taskType: taskcommon.CopySegment},
+		{taskID: 702, taskType: taskcommon.ExternalCopySegment},
 	}
 
-	payload, err := proto.Marshal(copyReq)
-	s.NoError(err)
+	for _, test := range tests {
+		s.Run(test.taskType, func() {
+			copyReq := &datapb.CopySegmentRequest{
+				JobID:         700,
+				TaskID:        test.taskID,
+				TaskSlot:      1,
+				StorageConfig: s.storageConfig,
+				Sources: []*datapb.CopySegmentSource{
+					{
+						CollectionId: 111,
+						PartitionId:  222,
+						SegmentId:    333,
+					},
+				},
+				Targets: []*datapb.CopySegmentTarget{
+					{
+						CollectionId: 444,
+						PartitionId:  555,
+						SegmentId:    666,
+					},
+				},
+			}
 
-	createReq := &workerpb.CreateTaskRequest{
-		Properties: map[string]string{
-			taskcommon.TypeKey:   taskcommon.CopySegment,
-			taskcommon.TaskIDKey: "701",
-		},
-		Payload: payload,
+			payload, err := proto.Marshal(copyReq)
+			s.NoError(err)
+			createReq := &workerpb.CreateTaskRequest{
+				Properties: map[string]string{
+					taskcommon.TypeKey:   test.taskType,
+					taskcommon.TaskIDKey: fmt.Sprint(test.taskID),
+				},
+				Payload: payload,
+			}
+			status, err := s.node.CreateTask(s.ctx, createReq)
+			s.NoError(merr.CheckRPCCall(status, err))
+
+			dropReq := &workerpb.DropTaskRequest{
+				Properties: map[string]string{
+					taskcommon.ClusterIDKey: "cluster-0",
+					taskcommon.TypeKey:      test.taskType,
+					taskcommon.TaskIDKey:    fmt.Sprint(test.taskID),
+				},
+			}
+			status, err = s.node.DropTask(s.ctx, dropReq)
+			s.NoError(merr.CheckRPCCall(status, err))
+		})
 	}
-
-	status, err := s.node.CreateTask(s.ctx, createReq)
-	s.NoError(merr.CheckRPCCall(status, err))
-
-	s.Run("drop copy segment task", func() {
-		dropReq := &workerpb.DropTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.CopySegment,
-				taskcommon.TaskIDKey:    "701",
-			},
-		}
-
-		status, err := s.node.DropTask(s.ctx, dropReq)
-		s.NoError(merr.CheckRPCCall(status, err))
-	})
 }
 
 func captureDataNodeLogs(t *testing.T) *mlog.TestSink {

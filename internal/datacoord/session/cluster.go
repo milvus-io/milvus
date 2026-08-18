@@ -36,7 +36,6 @@ import (
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
-	Version        string
 }
 
 // Cluster defines the interface for tasks
@@ -200,7 +199,6 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			availableNodeSlots[nodeID] = &WorkerSlots{
 				NodeID:         nodeID,
 				AvailableSlots: resp.GetAvailableSlots(),
-				Version:        resp.GetVersion(),
 			}
 		}()
 	}
@@ -702,10 +700,22 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
-	properties.AppendType(taskcommon.CopySegment)
+	properties.AppendType(copySegmentTaskType(in))
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendCollectionID(collectionID)
 	return c.createTask(nodeID, in, properties)
+}
+
+func copySegmentTaskType(in *datapb.CopySegmentRequest) taskcommon.Type {
+	if in.GetExternalSpec() != "" {
+		return taskcommon.ExternalCopySegment
+	}
+	for _, source := range in.GetSources() {
+		if source.GetSourceRootPath() != "" {
+			return taskcommon.ExternalCopySegment
+		}
+	}
+	return taskcommon.CopySegment
 }
 
 func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {

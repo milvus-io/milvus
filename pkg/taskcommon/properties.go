@@ -69,7 +69,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -117,7 +117,7 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		return p[TypeKey], nil
 	default:
 		// Task types are assigned by the coordinator; an unrecognized one means a
