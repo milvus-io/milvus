@@ -27,6 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -521,5 +523,202 @@ func TestCheckCreateDatabaseAdmissionPassesCoordThroughAtPreExecute(t *testing.T
 		assert.NoError(t, err)
 		assert.Same(t, wantResp, gotResp,
 			"the CoordClient handed to the checker via task_database.go must forward calls to the underlying mixCoord")
+	}
+}
+
+
+// adminBlockingExtension records the operation names it sees and refuses every
+// administrative RPC.
+type adminBlockingExtension struct {
+	extension.NoopProxyExtension
+	seen []string
+}
+
+func (d *adminBlockingExtension) InterceptAdminRPC(ctx context.Context, op string) *commonpb.Status {
+	d.seen = append(d.seen, op)
+	return merr.Status(merr.ErrServiceUnimplemented)
+}
+
+func installAdminBlockingExtension(t *testing.T) *adminBlockingExtension {
+	t.Helper()
+	extension.ResetForTest()
+	t.Cleanup(extension.ResetForTest)
+
+	ext := &adminBlockingExtension{}
+	assert.NoError(t, extension.SetProvider(testProvider{
+		caps: extension.Capabilities{ProxyExt: ext},
+	}))
+	return ext
+}
+
+func TestInterceptAdminRPCIsTransparentWithNoProvider(t *testing.T) {
+	extension.ResetForTest()
+	t.Cleanup(extension.ResetForTest)
+	assert.Nil(t, interceptAdminRPC(context.Background(), "CreateRole"))
+}
+
+// fakeReplicateStream is the minimum CreateReplicateStream server: the seam
+// only reads the context off it.
+type fakeReplicateStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (f fakeReplicateStream) Context() context.Context                     { return f.ctx }
+func (f fakeReplicateStream) Send(*milvuspb.ReplicateResponse) error       { return nil }
+func (f fakeReplicateStream) Recv() (*milvuspb.ReplicateRequest, error)    { return nil, nil }
+
+// Every withheld administrative RPC consults the seam at its entry - before
+// health checks, argument validation, anything - so the refusal is uniform
+// across the whole table. Each case pins its own call site by name.
+func TestEveryAdminRPCIsGuardedByTheSeam(t *testing.T) {
+	cases := []struct {
+		op   string
+		call func(node *Proxy, ctx context.Context) *commonpb.Status
+	}{
+		{"GetReplicas", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"GetFlushState", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"GetFlushAllState", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"CreateCredential", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"UpdateCredential", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.UpdateCredential(ctx, &milvuspb.UpdateCredentialRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"DeleteCredential", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"ListCredUsers", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.ListCredUsers(ctx, &milvuspb.ListCredUsersRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"CreateRole", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"DropRole", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.DropRole(ctx, &milvuspb.DropRoleRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"OperateUserRole", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"SelectRole", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"SelectUser", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.SelectUser(ctx, &milvuspb.SelectUserRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"OperatePrivilege", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"OperatePrivilegeV2", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.OperatePrivilegeV2(ctx, &milvuspb.OperatePrivilegeV2Request{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"SelectGrant", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"BackupRBAC", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"RestoreRBAC", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"CreatePrivilegeGroup", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"DropPrivilegeGroup", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"ListPrivilegeGroups", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"OperatePrivilegeGroup", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"ReplicateMessage", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"UpdateReplicateConfiguration", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.UpdateReplicateConfiguration(ctx, &milvuspb.UpdateReplicateConfigurationRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"GetReplicateConfiguration", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.GetReplicateConfiguration(ctx, &milvuspb.GetReplicateConfigurationRequest{})
+			assert.NoError(t, err)
+			return resp.GetStatus()
+		}},
+		{"GetReplicateInfo", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			_, err := node.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{})
+			assert.Error(t, err, "GetReplicateInfoResponse carries no status; the refusal must be the call error")
+			return merr.Status(err)
+		}},
+		{"CreateReplicateStream", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			err := node.CreateReplicateStream(fakeReplicateStream{ctx: ctx})
+			assert.Error(t, err)
+			return merr.Status(err)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.op, func(t *testing.T) {
+			ext := installAdminBlockingExtension(t)
+			node := &Proxy{}
+			node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+			st := tc.call(node, context.Background())
+
+			assert.NotNil(t, st)
+			assert.NotEqual(t, int32(0), st.GetCode(), "a withheld RPC must not return a success status")
+			assert.Equal(t, []string{tc.op}, ext.seen,
+				"%s must go through the admin seam; this fails if a refactor moves the call site", tc.op)
+		})
 	}
 }

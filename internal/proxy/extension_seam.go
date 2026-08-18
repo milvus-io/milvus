@@ -50,6 +50,17 @@ func interceptDML(ctx context.Context, op string, req proto.Message) *commonpb.S
 	return proxyExtension().InterceptDML(ctx, op, req)
 }
 
+// interceptAdminRPC consults the extension at the entry of the administrative
+// RPCs a deployment form may withhold from tenants (credentials, RBAC,
+// privilege groups, replication, flush/replica introspection). It runs before
+// anything else in the handler - a withheld RPC has no health or argument
+// semantics worth computing - and a non-nil status is the whole answer. The
+// handler is shared by every listener; an implementation that must let its
+// control plane through reads the internal-domain mark off ctx.
+func interceptAdminRPC(ctx context.Context, op string) *commonpb.Status {
+	return proxyExtension().InterceptAdminRPC(ctx, op)
+}
+
 // The load-semantics seams below sit at the entry of the six RPCs that decide
 // whether a collection is serviceable, each after its handler's own health
 // check and before it builds anything. A non-nil return from one of them is the

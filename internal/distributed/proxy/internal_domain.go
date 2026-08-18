@@ -81,6 +81,10 @@ func (s *Server) startInternalDomainGrpc(port int) error {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			// First in the chain: every request this listener accepts is the
+			// control plane's, and the mark is how handler-level seams -
+			// shared with the external listener - tell the two apart.
+			internalDomainMarkInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -125,6 +129,13 @@ func isGracefulStopError(err error) bool {
 	return err == nil || err == grpc.ErrServerStopped
 }
 
+// internalDomainMarkInterceptor stamps every request accepted on the
+// internal-domain gRPC listener with the internal-domain mark, so seams in
+// the shared handlers can tell the control plane's calls from tenants'.
+func internalDomainMarkInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	return handler(extension.WithInternalDomain(ctx), req)
+}
+
 // startInternalDomainRest serves /v2/vectordb with the handler-level
 // authorization forced off, plus /metrics for the deployment's scraper. No
 // authentication middleware: same posture, same isolation argument, as the
@@ -143,6 +154,10 @@ func (s *Server) startInternalDomainRest(port int) error {
 	ginHandler.Use(httpserver.RequestHandlerFunc)
 	ginHandler.Use(func(c *gin.Context) {
 		c.Set(httpserver.ContextUsername, "")
+		// The same provenance mark the gRPC listener stamps: handlers reach
+		// it through the request context whether they pass the gin context
+		// itself (gin's Value falls through to it) or Request.Context().
+		c.Request = c.Request.WithContext(extension.WithInternalDomain(c.Request.Context()))
 	})
 	ginHandler.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	appV2 := ginHandler.Group("/v2/vectordb")

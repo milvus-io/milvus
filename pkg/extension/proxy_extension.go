@@ -87,6 +87,18 @@ type ProxyExtension interface {
 	// DML request being considered.
 	InterceptDML(ctx context.Context, op string, req proto.Message) *commonpb.Status
 
+	// InterceptAdminRPC may short-circuit the administrative RPCs a deployment
+	// form withholds from its tenants - credentials, RBAC, privilege groups,
+	// replication, flush and replica introspection. op is the RPC name, e.g.
+	// "CreateRole"; a non-nil status is the whole answer to the RPC.
+	//
+	// The seam runs in the handler, which every listener shares, so an
+	// implementation that withholds an RPC from tenants while its control
+	// plane still manages accounts distinguishes the callers by provenance:
+	// ctx carries FromInternalDomain for requests that arrived on an
+	// internal-domain listener, and those are the control plane's.
+	InterceptAdminRPC(ctx context.Context, op string) *commonpb.Status
+
 	// InterceptLoadCollection is consulted at the entry of LoadCollection,
 	// after the proxy's health check and before the load task is built.
 	//
@@ -275,6 +287,10 @@ type NoopProxyExtension struct{}
 var _ ProxyExtension = NoopProxyExtension{}
 
 func (NoopProxyExtension) InterceptDML(context.Context, string, proto.Message) *commonpb.Status {
+	return nil
+}
+
+func (NoopProxyExtension) InterceptAdminRPC(context.Context, string) *commonpb.Status {
 	return nil
 }
 

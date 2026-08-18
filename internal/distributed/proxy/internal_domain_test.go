@@ -1,6 +1,7 @@
 package grpcproxy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,4 +39,18 @@ func TestInternalDomainPortsFollowTheDeclaration(t *testing.T) {
 	grpcPort, restPort := internalDomainPorts()
 	assert.Equal(t, 26330, grpcPort)
 	assert.Zero(t, restPort)
+}
+
+// Every request the internal-domain gRPC listener accepts carries the
+// provenance mark: it is how the shared handlers' admin seam tells the
+// control plane's calls from tenants'.
+func TestInternalDomainGrpcInterceptorMarksTheContext(t *testing.T) {
+	var sawMark bool
+	_, err := internalDomainMarkInterceptor(context.Background(), nil, nil,
+		func(ctx context.Context, _ any) (any, error) {
+			sawMark = extension.FromInternalDomain(ctx)
+			return nil, nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, sawMark, "the handler must see the internal-domain mark")
 }
