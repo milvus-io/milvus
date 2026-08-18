@@ -1437,6 +1437,20 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	}
 	k.ProducerMessageMaxBytes.Init(base.mgr)
 
+	// Sensitive as a group, with no NonSensitiveSuffixes, and both halves of
+	// that are deliberate.
+	//
+	// Sensitive because the name-pattern fallback cannot classify librdkafka's
+	// option names: "ssl.key.pem" carries an inline private key and matches no
+	// pattern in the list, and neither do ssl.keystore.* or oauthbearer.*. The
+	// cost is that ordinary tunables (compression.type, linger.ms) also read as
+	// ***** through ShowConfigurations; that is diagnosability, and it is the
+	// side to be wrong on when the alternative is publishing a private key.
+	//
+	// No suffix exemptions because NonSensitiveSuffixes matches a leaf name at
+	// one level of nesting: exempting "compression.type" would register the leaf
+	// "type" and let through anything under the prefix ending in it. Dotted
+	// librdkafka names are not what that mechanism is shaped for.
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
 		Version:   "2.2.0",

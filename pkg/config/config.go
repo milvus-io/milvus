@@ -88,6 +88,20 @@ func Init(opts ...Option) (*Manager, error) {
 
 var formattedKeys = typeutil.NewConcurrentMap[string, string]()
 
+// Four spellings of one configuration key travel through this package, and
+// picking the wrong one is how a check ends up guarding a name nothing uses:
+//
+//	lowerKey          "Kafka.SSL.tlsKey" -> "kafka.ssl.tlskey"   (case only)
+//	formatKey         "Kafka.SSL.tlsKey" -> "kafkassltlskey"     (memoised; internal keys only)
+//	formatKeyUncached same as formatKey, no memo                 (caller-supplied keys)
+//	strippedKey       same, without the NotFormatPrefix guard    (what EnvSource produces)
+//
+// lowerKey and formatKey both leave NotFormatPrefix ("knowhere.") keys exactly
+// as they are, because the index engine needs the case and the dots; strippedKey
+// is the one that does not, which is why the two disagree there and only there.
+// Values are stored under formatKey's identity, so that is what a lookup must
+// use; prefixes are declared with dots, so that is what a namespace test must
+// use.
 func lowerKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key

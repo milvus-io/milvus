@@ -152,8 +152,12 @@ type Manager struct {
 	// load. Learning the pairing there is what lets a lookup made under the
 	// collapsed identity be classified against the namespace it belongs to
 	// rather than against a name with no structure left in it.
-	dottedSpellings       *typeutil.ConcurrentMap[string, string]
-	registeredKeyPrefixes *typeutil.ConcurrentSet[string]
+	dottedSpellings *typeutil.ConcurrentMap[string, string]
+	// registeredKeyPrefixes maps a declared ParamGroup's prefix to the same
+	// prefix with its separators removed. Both are needed on every lookup and
+	// the collapsed one is derived, so it is derived once at registration
+	// rather than #keys x #prefixes times per projection.
+	registeredKeyPrefixes *typeutil.ConcurrentMap[string, string]
 
 	cacheMutex  sync.RWMutex
 	configCache map[string]any
@@ -175,7 +179,7 @@ func NewManager() *Manager {
 		nonSensitiveSuffixes:          typeutil.NewConcurrentSet[string](),
 		declaredKeys:                  typeutil.NewConcurrentMap[string, string](),
 		dottedSpellings:               typeutil.NewConcurrentMap[string, string](),
-		registeredKeyPrefixes:         typeutil.NewConcurrentSet[string](),
+		registeredKeyPrefixes:         typeutil.NewConcurrentMap[string, string](),
 		configCache:                   make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
@@ -229,20 +233,17 @@ func (m *Manager) EvictCacheValueByFormat(keys ...string) {
 }
 
 func (m *Manager) GetConfig(key string) (string, string, error) {
-	return m.getConfigByRealKey(formatKey(key), key)
-}
-
-func (m *Manager) getConfigByRealKey(realKey, requestedKey string) (string, string, error) {
+	realKey := formatKey(key)
 	v, ok := m.overlays.Get(realKey)
 	if ok {
 		if v == TombValue {
-			return "", "", errors.Wrap(ErrKeyNotFound, requestedKey) // fmt.Errorf("key not found %s", requestedKey)
+			return "", "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found %s", key)
 		}
 		return RuntimeSource, v, nil
 	}
 	sourceName, ok := m.keySourceMap.Get(realKey)
 	if !ok {
-		return "", "", errors.Wrap(ErrKeyNotFound, requestedKey) // fmt.Errorf("key not found: %s", requestedKey)
+		return "", "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
 	}
 	v, err := m.getConfigValueBySource(realKey, sourceName)
 	return sourceName, v, err
@@ -411,44 +412,77 @@ func (m *Manager) GetConfigsRaw() map[string]string {
 
 func (m *Manager) getConfigs(redact bool) map[string]string {
 	config := make(map[string]string)
+	m.walkProjection(!redact, nil, func(key, storedKey, value, _ string) {
+		if projected, include := m.projectValue(storedKey, value, redact); include {
+			config[key] = projected
+		}
+	})
+	return config
+}
 
-	m.keySourceMap.Range(func(key, value string) bool {
-		_, sValue, err := m.GetConfig(key)
+// walkProjection visits every configuration entry once and hands it to emit,
+// with the key both as the caller's filters rewrote it and as it is stored:
+// classification is keyed by the stored spelling, the projection by the
+// rewritten one.
+//
+// The three projections differ in what they build out of an entry, not in which
+// entries there are. That a tombstone records a deletion rather than a value,
+// and that only one of an overlay's two spellings is the one its consumer
+// reads, are properties of the configuration and not of any one caller, so they
+// are decided here instead of three times over.
+//
+// includeInertOverlays is for the Raw variants: an overlay written under the
+// spelling nothing reads is not part of the configuration in force, but it is
+// part of what the manager holds, and an internal caller asking for originals
+// is asking for the latter.
+func (m *Manager) walkProjection(includeInertOverlays bool, filters []Filter, emit func(key, storedKey, value, source string)) {
+	accept := func(key string) (string, bool) {
+		if len(filters) == 0 {
+			// filterate reports false when it is handed no filters at all.
+			return key, true
+		}
+		return filterate(key, filters...)
+	}
+
+	m.keySourceMap.Range(func(storedKey, _ string) bool {
+		key, ok := accept(storedKey)
+		if !ok {
+			return true
+		}
+		source, value, err := m.GetConfig(storedKey)
 		if err != nil {
 			return true
 		}
-
-		if projected, include := m.projectValue(key, sValue, redact); include {
-			config[key] = projected
-		}
+		emit(key, storedKey, value, source)
 		return true
 	})
 
-	m.overlays.Range(func(key, value string) bool {
+	// Last, so that a runtime overlay overwrites the source value for the same
+	// key rather than the other way round.
+	m.overlays.Range(func(storedKey, value string) bool {
+		key, ok := accept(storedKey)
+		if !ok {
+			return true
+		}
 		if value == TombValue {
-			// Deleted at runtime; it is not a key with the literal value
+			// Deleted at runtime; it is not a key whose value is the literal
 			// "TOMB_VAULE", which is what publishing it would claim.
 			return true
 		}
-		if redact && !m.overlayIsAuthoritative(key) {
+		if !includeInertOverlays && !m.overlayIsAuthoritative(storedKey) {
 			return true
 		}
-		if projected, include := m.projectValue(key, value, redact); include {
-			config[key] = projected
-		}
+		emit(key, storedKey, value, RuntimeSource)
 		return true
 	})
-
-	return config
 }
 
 // GetConfigsView returns a safe projection of all key values annotated with
 // the source that supplied them.
 func (m *Manager) GetConfigsView() map[string]string {
 	config := make(map[string]string)
-
-	annotate := func(key, value, source string) {
-		switch m.classify(key) {
+	m.walkProjection(false, nil, func(key, storedKey, value, source string) {
+		switch m.classify(storedKey) {
 		case projectionOmit:
 		case projectionRedact:
 			// Keep the annotation: which source supplies a credential is not
@@ -459,24 +493,7 @@ func (m *Manager) GetConfigsView() map[string]string {
 		default:
 			config[key] = fmt.Sprintf("%s[%s]", value, source)
 		}
-	}
-
-	m.keySourceMap.Range(func(key, value string) bool {
-		source, sValue, err := m.GetConfig(key)
-		if err != nil {
-			return true
-		}
-		annotate(key, sValue, source)
-		return true
 	})
-
-	m.overlays.Range(func(key, value string) bool {
-		if value != TombValue && m.overlayIsAuthoritative(key) {
-			annotate(key, value, RuntimeSource)
-		}
-		return true
-	})
-
 	return config
 }
 
@@ -491,37 +508,11 @@ func (m *Manager) GetByRaw(filters ...Filter) map[string]string {
 
 func (m *Manager) getBy(redact bool, filters ...Filter) map[string]string {
 	matchedConfig := make(map[string]string)
-
-	m.keySourceMap.Range(func(key string, value string) bool {
-		newkey, ok := filterate(key, filters...)
-		if !ok {
-			return true
+	m.walkProjection(!redact, filters, func(key, storedKey, value, _ string) {
+		if projected, include := m.projectValue(storedKey, value, redact); include {
+			matchedConfig[key] = projected
 		}
-		_, sValue, err := m.GetConfig(key)
-		if err != nil {
-			return true
-		}
-
-		if projected, include := m.projectValue(key, sValue, redact); include {
-			matchedConfig[newkey] = projected
-		}
-		return true
 	})
-
-	m.overlays.Range(func(key, value string) bool {
-		newkey, ok := filterate(key, filters...)
-		if !ok || value == TombValue {
-			return true
-		}
-		if redact && !m.overlayIsAuthoritative(key) {
-			return true
-		}
-		if projected, include := m.projectValue(key, value, redact); include {
-			matchedConfig[newkey] = projected
-		}
-		return true
-	})
-
 	return matchedConfig
 }
 
@@ -655,7 +646,8 @@ func (m *Manager) RegisterConfigKey(key string) {
 // environment whatever prefix matched it —
 // TestEmptyPrefixNeverPublishesTheEnvironment is the guarantee.
 func (m *Manager) RegisterConfigPrefix(prefix string) {
-	m.registeredKeyPrefixes.Insert(strings.ToLower(prefix))
+	canonicalPrefix := strings.ToLower(prefix)
+	m.registeredKeyPrefixes.Insert(canonicalPrefix, formatKeyUncached(canonicalPrefix))
 }
 
 // RegisterSensitiveKey marks a declared configuration key as sensitive.
@@ -806,7 +798,7 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 		}
 		return **cached
 	}
-	m.registeredKeyPrefixes.Range(func(prefix string) bool {
+	m.registeredKeyPrefixes.Range(func(prefix, collapsedPrefix string) bool {
 		switch {
 		case hasNamespacePrefix(dotted, prefix):
 			// The key names the namespace explicitly, separators and all. Only
@@ -817,7 +809,7 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 			}) {
 				return true
 			}
-		case hasNamespacePrefix(formattedKey, formatKeyUncached(prefix)):
+		case hasNamespacePrefix(formattedKey, collapsedPrefix):
 			// Separators already collapsed, so the namespace can only be matched
 			// fuzzily — "tlsclustersprodcapempath" against "tlsclusters". That is
 			// how AlterConfigsInEtcd stores a member, and how FileSource and

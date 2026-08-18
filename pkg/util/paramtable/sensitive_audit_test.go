@@ -456,8 +456,12 @@ func TestNoCredentialIsImmutable(t *testing.T) {
 		if _, ok := credentialImmutableAllowlist[lowerKey]; ok {
 			return
 		}
+		// Normalised the same way TestSensitiveParamItemsMarked normalises, or
+		// the two tripwires disagree about what a credential name looks like
+		// and "x.access_key" slips this one while tripping that one.
+		patternKey := strings.NewReplacer("-", "", "_", "", ".", "", "/", "").Replace(lowerKey)
 		for _, pat := range credentialPatterns {
-			if strings.Contains(lowerKey, pat) {
+			if strings.Contains(patternKey, pat) {
 				violations = append(violations, item.Key+
 					" (credential key matching \""+pat+
 					"\" must not be Immutable: ProcessImmutableConfigs would persist its cleartext"+
