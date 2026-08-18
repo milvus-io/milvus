@@ -439,8 +439,29 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    internal_index_type_ =
-        static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>("index_type"));
+    if (reader.HasMeta(INDEX_TYPE)) {
+        internal_index_type_ =
+            static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>(INDEX_TYPE));
+    } else {
+        // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
+        // indexes were built as a standalone STLSORT (or, hypothetically, other
+        // physical) file whose meta lacks the hybrid index_type key. Infer the
+        // physical index type from the file meta so existing files load.
+        if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
+            internal_index_type_ = ScalarIndexType::STLSORT;
+        } else if (reader.HasMeta("file_names")) {
+            internal_index_type_ = ScalarIndexType::INVERTED;
+        } else if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
+            internal_index_type_ = ScalarIndexType::BITMAP;
+        } else {
+            ThrowInfo(UnexpectedError,
+                      "hybrid index file has neither index_type meta nor a "
+                      "recognizable physical index meta");
+        }
+        LOG_WARN(
+            "hybrid index missing index_type meta, inferred physical type: {}",
+            ToString(internal_index_type_));
+    }
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));
