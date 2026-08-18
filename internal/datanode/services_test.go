@@ -17,7 +17,6 @@
 package datanode
 
 import (
-	"bytes"
 	"context"
 	"math/rand"
 	"strings"
@@ -1683,33 +1682,16 @@ func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
 	})
 }
 
-type dataNodeLogBuffer struct {
-	bytes.Buffer
-}
-
-func (*dataNodeLogBuffer) Sync() error {
-	return nil
-}
-
-func captureDataNodeLogs(t *testing.T) *dataNodeLogBuffer {
+func captureDataNodeLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logs := &dataNodeLogBuffer{}
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
 		Level:             "debug",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, logs)
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, props)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
-	return logs
 }
 
 type failingStorageFactory struct{}
