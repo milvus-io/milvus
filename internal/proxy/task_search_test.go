@@ -146,8 +146,8 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 
 		mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-			updateTimestamp:  100,
-			consistencyLevel: commonpb.ConsistencyLevel_Strong,
+			UpdateTimestamp:  100,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 		}, nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()

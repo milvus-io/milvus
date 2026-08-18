@@ -2808,15 +2808,15 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 	defer m.UnPatch()
 	schema := createTestSchema()
 	m = mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		updateTimestamp: 12345,
-		schema:          schema,
+		UpdateTimestamp: 12345,
+		Schema:          schema,
 	}, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
+	m = mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
 	defer m.UnPatch()
 
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
