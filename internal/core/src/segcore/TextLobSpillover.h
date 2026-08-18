@@ -25,6 +25,7 @@
 #include <string_view>
 #include <vector>
 #include <filesystem>
+#include <system_error>
 
 #include <atomic>
 #include <fcntl.h>
@@ -32,6 +33,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 
@@ -99,7 +101,14 @@ class TextLobSpillover {
         // Create parent directories if needed
         auto parent = std::filesystem::path(path_).parent_path();
         if (!parent.empty()) {
-            std::filesystem::create_directories(parent);
+            std::error_code mkdir_ec;
+            std::filesystem::create_directories(parent, mkdir_ec);
+            if (mkdir_ec) {
+                ThrowInfo(ErrorCode::FileCreateFailed,
+                          "Failed to create LOB spillover directory {}: {}",
+                          parent.string(),
+                          mkdir_ec.message());
+            }
         }
 
         fd_ =
@@ -117,8 +126,18 @@ class TextLobSpillover {
             ::close(fd_);
             fd_ = -1;
         }
-        if (std::filesystem::exists(path_)) {
-            std::filesystem::remove(path_);
+        // Destructors are implicitly noexcept: the throwing exists/remove
+        // overloads would let a filesystem_error (EACCES, EIO, stale NFS)
+        // during teardown escape and std::terminate the whole QueryNode,
+        // where no CGo catch can reach it. Cleanup is best-effort.
+        std::error_code ec;
+        if (std::filesystem::exists(path_, ec) && !ec) {
+            std::filesystem::remove(path_, ec);
+        }
+        if (ec) {
+            LOG_WARN("failed to remove LOB spillover file {}: {}",
+                     path_,
+                     ec.message());
         }
     }
 
