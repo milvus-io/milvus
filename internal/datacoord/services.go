@@ -697,9 +697,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
-	// save manifest, start positions and checkpoints
+	// Save all metadata with the manifest pointer.  V3 pointer publication is
+	// serialized by CommitSegmentManifest; older formats retain UpdateManifest.
+	manifestSegment := s.meta.GetSegment(ctx, req.GetSegmentID())
+	v3ManifestCommit := manifestSegment != nil && manifestSegment.GetStorageVersion() == storage.StorageV3 && req.GetManifestPath() != ""
+	if !v3ManifestCommit {
+		operators = append(operators, UpdateManifest(req.GetSegmentID(), req.GetManifestPath()))
+	}
 	operators = append(operators,
-		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 		// The request ships the complete cumulative Statistics published
@@ -713,9 +718,23 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// Update segment info in memory and meta. Stale updates (segment already
 	// flushed / outdated time tick) are swallowed inside UpdateSegmentsInfo as
 	// benign no-ops, so any error here is a real failure.
-	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
-		return merr.Status(err), nil
+	var updateErr error
+	if v3ManifestCommit {
+		updateErr = s.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+			SegmentID:        req.GetSegmentID(),
+			ExpectedManifest: manifestSegment.GetManifestPath(),
+			Mutation: ManifestMutation{
+				Type:         ManifestMutationNoop,
+				ManifestPath: req.GetManifestPath(),
+			},
+			CatalogMutation: SegmentCatalogMutation{Operators: operators},
+		})
+	} else {
+		updateErr = s.meta.UpdateSegmentsInfo(ctx, operators...)
+	}
+	if updateErr != nil {
+		mlog.Error(ctx, "save binlog and checkpoints failed", mlog.Err(updateErr))
+		return merr.Status(updateErr), nil
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())

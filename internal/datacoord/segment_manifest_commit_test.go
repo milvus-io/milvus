@@ -1,0 +1,466 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package datacoord
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore"
+	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             200,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, basePath, base)
+			require.EqualValues(t, 7, version)
+			require.Len(t, updates.DeltaLogs, 1)
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        200,
+		ExpectedManifest: oldManifest,
+		StorageConfig:    &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{
+				Path:       basePath + "/_delta/9001",
+				NumEntries: 3,
+			}}},
+		},
+		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{AddL0DeltalogsOperator(200, []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath + "/_delta/9001", EntriesNum: 3, MemorySize: 128}},
+		}})}},
+	})
+	require.NoError(t, err)
+
+	updated := meta.GetSegment(context.Background(), 200)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.EqualValues(t, 3, updated.GetStats().GetDeleteNumRows())
+	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	manifest9 := packed.MarshalManifestPath(basePath, 9)
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        200,
+		ExpectedManifest: newManifest,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: manifest9,
+		},
+		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+			UpdateIsImporting(200, true),
+		}},
+	}))
+	require.Equal(t, manifest9, meta.GetSegment(context.Background(), 200).GetManifestPath())
+	require.True(t, meta.GetSegment(context.Background(), 200).GetIsImporting())
+
+	// The stale caller must not publish a later transaction on the old base.
+	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        200,
+		ExpectedManifest: oldManifest,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: packed.MarshalManifestPath(basePath, 10),
+		},
+	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, manifest9, meta.GetSegment(context.Background(), 200).GetManifestPath())
+
+	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        200,
+		ExpectedManifest: manifest9,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: newManifest,
+		},
+	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, manifest9, meta.GetSegment(context.Background(), 200).GetManifestPath())
+}
+
+func TestCommitSegmentManifestNoopReusesL0CatalogMutation(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/208"
+	manifest := packed.MarshalManifestPath(basePath, 7)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             208,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifest,
+		Stats: &datapb.Statistics{
+			DeltaBinlogSize:    4096,
+			DeleteNumRows:      1000,
+			DeltaBinlogCount:   10,
+			DeltaTimestampFrom: 100,
+			DeltaTimestampTo:   900,
+		},
+	})))
+
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{
+			LogID:         9001,
+			LogPath:       basePath + "/_delta/9001",
+			EntriesNum:    50,
+			MemorySize:    256,
+			TimestampFrom: 950,
+			TimestampTo:   1000,
+		}},
+	}}
+	commit := SegmentManifestCommit{
+		SegmentID:        208,
+		ExpectedManifest: manifest,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: manifest,
+		},
+		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+			AddL0DeltalogsOperator(208, deltalogs),
+		}},
+	}
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), commit))
+	updated := meta.GetSegment(context.Background(), 208)
+	require.Equal(t, manifest, updated.GetManifestPath())
+	require.EqualValues(t, 1050, updated.GetStats().GetDeleteNumRows())
+	require.EqualValues(t, 4096+256, updated.GetStats().GetDeltaBinlogSize())
+	require.EqualValues(t, 11, updated.GetStats().GetDeltaBinlogCount())
+	require.EqualValues(t, 100, updated.GetStats().GetDeltaTimestampFrom())
+	require.EqualValues(t, 1000, updated.GetStats().GetDeltaTimestampTo())
+	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+
+	// Retrying the same Noop must retain the L0 path's deduplication semantics.
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), commit))
+	updated = meta.GetSegment(context.Background(), 208)
+	require.EqualValues(t, 1050, updated.GetStats().GetDeleteNumRows())
+	require.EqualValues(t, 4096+256, updated.GetStats().GetDeltaBinlogSize())
+	require.EqualValues(t, 11, updated.GetStats().GetDeltaBinlogCount())
+	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 1)
+}
+
+func TestCommitSegmentManifestAllowsOmittedExpectedManifest(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/209"
+	manifest7 := packed.MarshalManifestPath(basePath, 7)
+	manifest8 := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             209,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifest7,
+	})))
+
+	// No ExpectedManifest means this caller deliberately opts out of pointer
+	// CAS, while the per-segment transaction lock still serializes publication.
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID: 209,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: manifest8,
+		},
+	}))
+	require.Equal(t, manifest8, meta.GetSegment(context.Background(), 209).GetManifestPath())
+
+	manifest9 := packed.MarshalManifestPath(basePath, 9)
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID: 209,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: manifest9,
+		},
+		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+			UpdateIsImporting(209, true),
+		}},
+	}))
+	updated := meta.GetSegment(context.Background(), 209)
+	require.Equal(t, manifest9, updated.GetManifestPath())
+	require.True(t, updated.GetIsImporting())
+}
+
+func TestCommitSegmentManifestCreatesSegmentWithInitialPointer(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	manifest := packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/210", 1)
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID: 210,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: manifest,
+		},
+		CatalogMutation: SegmentCatalogMutation{NewSegment: &datapb.SegmentInfo{
+			ID:             210,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+		}},
+	}))
+
+	segment := meta.GetSegment(context.Background(), 210)
+	require.NotNil(t, segment)
+	require.Equal(t, manifest, segment.GetManifestPath())
+	require.Equal(t, storage.StorageV3, segment.GetStorageVersion())
+}
+
+func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/201"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             201,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+	catalog := metastoremocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(merr.WrapErrServiceUnavailableMsg("catalog unavailable")).Once()
+	meta.catalog = catalog
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	defer commit.UnPatch()
+
+	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        201,
+		ExpectedManifest: oldManifest,
+		StorageConfig:    &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: basePath + "/_delta/9001", NumEntries: 1}}},
+		},
+	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), 201).GetManifestPath())
+}
+
+func TestCommitSegmentManifestDoesNotSerializeDifferentSegments(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	basePaths := map[int64]string{
+		202: "/tmp/milvus/insert_log/1/10/202",
+		203: "/tmp/milvus/insert_log/1/10/203",
+	}
+	for segmentID, basePath := range basePaths {
+		require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		})))
+	}
+
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			entered <- base
+			<-release
+			return packed.MarshalManifestPath(base, version+1), nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for segmentID, basePath := range basePaths {
+		wg.Add(1)
+		go func(segmentID int64, basePath string) {
+			defer wg.Done()
+			baseManifest := packed.MarshalManifestPath(basePath, 1)
+			errs <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+				SegmentID:        segmentID,
+				ExpectedManifest: baseManifest,
+				StorageConfig:    &indexpb.StorageConfig{},
+				Mutation: ManifestMutation{
+					Type:    ManifestMutationCommitUpdates,
+					Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: basePath + "/_delta/1", NumEntries: 1}}},
+				},
+			})
+		}(segmentID, basePath)
+	}
+
+	for range basePaths {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			require.FailNow(t, "different segments blocked before manifest I/O")
+		}
+	}
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+}
+
+func TestCommitSegmentManifestDoesNotSerializeCatalogWritesForDifferentSegments(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	basePaths := map[int64]string{
+		206: "/tmp/milvus/insert_log/1/10/206",
+		207: "/tmp/milvus/insert_log/1/10/207",
+	}
+	for segmentID, basePath := range basePaths {
+		require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		})))
+	}
+
+	entered := make(chan struct{}, len(basePaths))
+	release := make(chan struct{})
+	meta.catalog = &blockingManifestCatalog{
+		entered: entered,
+		release: release,
+	}
+
+	errs := make(chan error, len(basePaths))
+	for segmentID, basePath := range basePaths {
+		go func(segmentID int64, basePath string) {
+			errs <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+				SegmentID:        segmentID,
+				ExpectedManifest: packed.MarshalManifestPath(basePath, 1),
+				Mutation: ManifestMutation{
+					Type:         ManifestMutationNoop,
+					ManifestPath: packed.MarshalManifestPath(basePath, 2),
+				},
+			})
+		}(segmentID, basePath)
+	}
+
+	for range basePaths {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			require.FailNow(t, "different segments serialized catalog writes behind segMu")
+		}
+	}
+	close(release)
+	for range basePaths {
+		require.NoError(t, <-errs)
+	}
+}
+
+type blockingManifestCatalog struct {
+	metastore.DataCoordCatalog
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (c *blockingManifestCatalog) Update(context.Context, ...metastore.UpdateAction) error {
+	c.entered <- struct{}{}
+	<-c.release
+	return nil
+}
+
+func TestCommitSegmentManifestSerializesSameSegment(t *testing.T) {
+	const segmentID = 204
+	basePath := "/tmp/milvus/insert_log/1/10/204"
+	oldManifest := packed.MarshalManifestPath(basePath, 1)
+	newManifest := packed.MarshalManifestPath(basePath, 2)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+			close(entered)
+			<-release
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	request := SegmentManifestCommit{
+		SegmentID:        segmentID,
+		ExpectedManifest: oldManifest,
+		StorageConfig:    &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{},
+		},
+	}
+	results := make(chan error, 2)
+	go func() { results <- meta.CommitSegmentManifest(context.Background(), request) }()
+	<-entered
+	go func() { results <- meta.CommitSegmentManifest(context.Background(), request) }()
+	close(release)
+
+	first, second := <-results, <-results
+	require.True(t, first == nil || second == nil)
+	stale := first
+	if stale == nil {
+		stale = second
+	}
+	require.ErrorIs(t, stale, merr.ErrServiceUnavailable)
+	require.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+}
+
+func TestUpdateManifestRejectsStorageV3(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	oldManifest := packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/205", 1)
+	newManifest := packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/205", 2)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             205,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	err = meta.UpdateSegmentsInfo(context.Background(), UpdateManifest(205, newManifest))
+	require.Error(t, err)
+	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), 205).GetManifestPath())
+}

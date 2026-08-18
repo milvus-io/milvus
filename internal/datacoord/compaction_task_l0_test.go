@@ -66,6 +66,9 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: actualDeltaPath, EntriesNum: 3}},
 		}},
 	}}
+	// A legacy/non-manifest destination continues through the compatibility
+	// operator. StorageV3 destinations are committed by meta directly.
+	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(nil).Once()
 
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, operators ...UpdateOperator) error {

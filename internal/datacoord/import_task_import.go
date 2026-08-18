@@ -156,6 +156,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 }
 
 func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
+	ctx := t.meta.ctx
 	req := &datapb.QueryImportRequest{
 		JobID:  t.GetJobID(),
 		TaskID: t.GetTaskID(),
@@ -198,7 +199,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
-			segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
+			segment := t.meta.GetSegment(ctx, info.GetSegmentID())
 			if info.GetImportedRows() <= segment.GetNumOfRows() {
 				continue // rows not changed, no need to update
 			}
@@ -249,14 +250,27 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			}
 
 			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
-			opManifest := UpdateManifest(info.GetSegmentID(), info.GetManifestPath())
 			opState := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			opPosition := UpdateImportSegmentPosition(info.GetSegmentID(), minTs, maxTs)
 			// Persist the producer-built Statistics wholesale (chained after
 			// UpdateBinlogsOperator so it wins over the array-derived value);
 			// when nil it array-derives from the arrays just set above.
 			opStats := UpdateSegmentStats(info.GetSegmentID(), info.GetStats())
-			err = t.meta.UpdateSegmentsInfo(context.TODO(), opBinlog, opManifest, opState, opPosition, opStats)
+			segment := t.meta.GetSegment(ctx, info.GetSegmentID())
+			v3ManifestCommit := segment != nil && segment.GetStorageVersion() == storage.StorageV3 && info.GetManifestPath() != ""
+			if v3ManifestCommit {
+				err = t.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+					SegmentID:        info.GetSegmentID(),
+					ExpectedManifest: segment.GetManifestPath(),
+					Mutation: ManifestMutation{
+						Type:         ManifestMutationNoop,
+						ManifestPath: info.GetManifestPath(),
+					},
+					CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{opBinlog, opState, opPosition, opStats}},
+				})
+			} else {
+				err = t.meta.UpdateSegmentsInfo(ctx, opBinlog, UpdateManifest(info.GetSegmentID(), info.GetManifestPath()), opState, opPosition, opStats)
+			}
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
