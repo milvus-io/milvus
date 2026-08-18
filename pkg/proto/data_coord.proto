@@ -855,13 +855,26 @@ message CompactionSegment {
   // equals the segment's current manifest (optimistic-concurrency CAS),
   // mirroring StatsResult.base_manifest.
   string base_manifest = 15;
-  // Aggregate footprint of this compaction output. Populated by the
-  // compactor (mix / sort / bump-schema / L0) at write completion and
-  // copied verbatim onto SegmentInfo.Stats by the DataCoord receiver,
-  // so the receiver never recomputes from FieldBinlog arrays for
-  // compaction results. For V3 outputs whose stats blob lives in the
-  // manifest, this is the only authoritative source for
-  // stats_binlog_size.
+  // Aggregate footprint of this compaction output. Its meaning depends on
+  // how the receiver adopts the result:
+  //   - receiver builds a NEW SegmentInfo (mix / sort / clustering /
+  //     schema-bump full rewrite) -> ABSOLUTE footprint, copied verbatim
+  //     onto SegmentInfo.Stats.
+  //   - receiver updates an EXISTING SegmentInfo in place (schema-bump
+  //     materialization) -> an INCREMENT, added onto that segment's current
+  //     Stats via addStatsDelta.
+  //   - L0 compaction also adopts in place, onto the existing L1
+  //     SegmentInfo(s) it targets, but today the receiver
+  //     (addDeltalogsToSegment in internal/datacoord/meta.go) does not read
+  //     this field at all: it derives its own delta Stats directly from the
+  //     deltalogs array. L0 is therefore neither of the two buckets above in
+  //     practice; do not assume this field is consumed on that path.
+  // nil always means "no change". A producer that writes only part of a
+  // segment must ship an increment: it cannot compute an absolute value,
+  // because the input's FieldBinlog arrays are empty for StorageV3 segments
+  // recovered after a DataCoord restart.
+  // For V3 outputs whose stats blob lives in the manifest, this is the only
+  // authoritative source for stats_binlog_size.
   Statistics stats = 16;
 }
 
