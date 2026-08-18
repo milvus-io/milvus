@@ -442,11 +442,13 @@ func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing
 	// because its per-row floor proves nothing and one file's range may not
 	// straddle two allocation batches. See the release note.
 	//
-	// The tightening suggested in review -- n*minRow + (n-1) <= size, giving
-	// (size+1)/(minRow+1) -- is NOT applied here: it assumes each row really
-	// occupies minRow bytes, which is false exactly when the floor was clamped.
-	// A single-column CSV of empty values is one newline per row, so n rows
-	// occupy n bytes and (n+1)/2 would under-count and fail a legal import.
+	// The tightening -- n*minRow + (n-1) <= size, giving (size+1)/(minRow+1) -- is
+	// applied only when the floor is provable, which this schema's is not: it
+	// assumes each row really occupies minRow bytes, and a single-column CSV of
+	// empty values is one newline per row, so n rows occupy n bytes and (n+1)/2
+	// would under-count and fail a legal import. Hence the refusal below stands.
+	// See Test_assignPKRangesToFiles_twoColumnCSVAboveOneBatchIsAccepted for the
+	// provable-floor case, where the same file size is accepted.
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
@@ -474,4 +476,35 @@ func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
+}
+
+func Test_assignPKRangesToFiles_twoColumnCSVAboveOneBatchIsAccepted(t *testing.T) {
+	// Mirror of the single-column refusal above. A second non-nullable source column
+	// makes the per-row floor provable -- one field separator -- so every row costs
+	// at least ",\n" and the bound charges the n-1 row separators. The same 5 GiB
+	// file that a single-column schema must refuse is accepted here, because it
+	// cannot hold more than ~2.7e9 rows.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "a", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}},
+			},
+			{
+				FieldID: 102, Name: "b", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}},
+			},
+		},
+	}
+	alloc := func(n int64) (int64, int64, error) { return 1000, 1000 + n, nil }
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, "two-col.csv").Return(int64(5)<<30, nil)
+	files := []*internalpb.ImportFile{{Paths: []string{"two-col.csv"}}}
+	require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
+
+	reserved := files[0].GetPkIdEnd() - files[0].GetPkIdBegin()
+	assert.Positive(t, reserved)
+	assert.LessOrEqual(t, reserved, maxIDsPerAllocBatch)
 }
