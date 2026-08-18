@@ -216,25 +216,12 @@ PhyRoaringFilterExpr::ExecVisitorImpl(EvalCtx& context) {
     };
 
     int64_t processed_size;
-    // TODO: teach roaring_match to skip. All three call sites in this file that
-    // accept a skip_func pass std::nullptr_t{} -- the two below and
-    // ProcessDataByOffsetsWithMask on the index path -- so SkipIndex never drops
-    // a chunk. bloom_match has no choice, an SBBF exposes no range to compare a
-    // chunk's [min, max] against, but a Roaring bitmap does.
-    //
-    // TermExpr is the model worth copying, and it does two separate things.
-    // PhyTermFilterExpr::CanSkipSegment() rejects a whole segment from its
-    // min/max before any chunk work -- reached only from the sealed-segment
-    // primary-key path (ExecPkTermImpl), not from TermExpr generally. Separately,
-    // its numeric path passes a real skip_index_func for per-chunk skipping; its
-    // Array and JSON paths pass nullptr. The segment-level half is the cheaper
-    // first step here and needs only a Minimum()/Maximum() accessor on
-    // RoaringMembership, which today exposes just Contains(), cardinality() and
-    // serialized_size().
-    //
-    // Whichever half is done first: the keys are two's-complement, so negatives
-    // sort above positives and a range spanning zero is two disjoint key ranges,
-    // not one. Getting that wrong silently drops matching rows.
+    // TODO(#52094): teach roaring_match to skip. Every skip_func in this file
+    // is std::nullptr_t{}, so SkipIndex never drops a chunk. bloom_match has no
+    // choice -- an SBBF exposes no range -- but a Roaring bitmap has
+    // Minimum()/Maximum() in O(1), and TermExpr's numeric path shows the shape.
+    // Note the keys are two's-complement: a range spanning zero is two disjoint
+    // key ranges, not one, and getting that wrong silently drops matching rows.
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(
             execute_sub_batch, std::nullptr_t{}, input, res, valid_res);

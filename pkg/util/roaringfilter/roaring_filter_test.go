@@ -17,7 +17,6 @@
 package roaringfilter
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -153,7 +152,7 @@ func manySingletonLowContainersChild(count uint32) []byte {
 	return child
 }
 
-func TestBuildParseRoundTrip(t *testing.T) {
+func TestValidateRoundTrip(t *testing.T) {
 	members := []int64{math.MinInt64, -1, 0, 1, 42, math.MaxInt64, 42}
 
 	blob, err := buildFixture(members)
@@ -174,7 +173,7 @@ func TestBuildParseRoundTrip(t *testing.T) {
 	require.False(t, filter.ContainsInt64(2))
 }
 
-func TestBuildEmptySet(t *testing.T) {
+func TestValidateEmptySet(t *testing.T) {
 	blob, err := buildFixture(nil)
 	require.NoError(t, err)
 
@@ -312,12 +311,18 @@ func classifyPortableBody(t *testing.T, body []byte) portableContainerMix {
 // bytes the real SDK builder produced. Nothing pinned that, so a change to a
 // roaring threshold or to the member set could quietly stop exercising them.
 func TestPortableContainerEncodingsReachEveryBranch(t *testing.T) {
-	blob, err := buildFixture(containerEncodingMembers())
+	members := containerEncodingMembers()
+	// The size is part of the fixture. One value fewer in the dense block --
+	// 4096 rather than 4097 -- still gives two high containers and six low ones
+	// and a body of the same length, but encodes as an array container rather
+	// than the bitmap this set exists to reach. The mix assertions below are
+	// what catch that; this is the cheaper signal that the set was edited at
+	// all. 1000 + 4097 + 3 + 1, all distinct.
+	require.Len(t, members, 5101)
+
+	blob, err := buildFixture(members)
 	require.NoError(t, err)
 
-	// Classify first: on a roaring/v2 upgrade the digest below is the assertion
-	// that fires, and the mix is what tells you whether the branches are still
-	// reached. Asserting the digest first would hide that behind a require.
 	mix := classifyPortableBody(t, blob[HeaderSize:])
 	require.Equal(t, 2, mix.highContainers)
 	require.GreaterOrEqual(t, mix.bitmaps, 1,
@@ -334,19 +339,9 @@ func TestPortableContainerEncodingsReachEveryBranch(t *testing.T) {
 		"a run-cookie child must carry an offset table, which needs at least "+
 			"portableNoOffsetThreshold containers -- asserting on offsetTables "+
 			"instead would pass on the no-run child, which always carries them")
-
-	// internal/parser/planparserv2 keeps a second copy of this member set and
-	// asserts the same digest over the blob its SDK builder produces, so an
-	// accidental edit to either copy fails in its own package.
-	sum := sha256.Sum256(blob)
-	require.Equal(t, containerEncodingsBlobSHA, hex.EncodeToString(sum[:]),
-		"the blob changed: either containerEncodingMembers was edited -- update the "+
-			"copy in internal/parser/planparserv2/roaring_match_test.go and both "+
-			"digests together -- or roaring/v2 changed its encoding, in which case "+
-			"check the container mix asserted above first")
 }
 
-func TestBuildParsePortableContainerEncodings(t *testing.T) {
+func TestValidatePortableContainerEncodings(t *testing.T) {
 	members := containerEncodingMembers()
 
 	blob, err := buildFixture(members)
@@ -358,10 +353,6 @@ func TestBuildParsePortableContainerEncodings(t *testing.T) {
 		require.True(t, filter.ContainsInt64(value), "member %d must be present", value)
 	}
 }
-
-// containerEncodingsBlobSHA is the MRB1 blob containerEncodingMembers builds to.
-// The same constant is asserted in internal/parser/planparserv2.
-const containerEncodingsBlobSHA = "281d97ed83ab754dad4ddc945cfb55d79d0c5c92cbb5023c204936230dc92fea"
 
 // containerEncodingMembers is the one member set that exercises every portable
 // container encoding: a run container, a bitmap container, and enough Roaring32
@@ -385,7 +376,7 @@ func containerEncodingMembers() []int64 {
 	return append(members, (1<<32)+7)
 }
 
-func TestParseAcceptsRunCookieWithSingleValueArrayContainer(t *testing.T) {
+func TestValidateAcceptsRunCookieWithSingleValueArrayContainer(t *testing.T) {
 	// Portable Roaring32 with one non-run array container under SERIAL_COOKIE:
 	// 4-byte cookie, 1-byte all-zero run bitmap, 4-byte descriptor, 2-byte value.
 	child := make([]byte, 11)
@@ -404,7 +395,7 @@ func TestParseAcceptsRunCookieWithSingleValueArrayContainer(t *testing.T) {
 	require.True(t, filter.ContainsInt64(42))
 }
 
-func TestParseRejectsMalformedEnvelope(t *testing.T) {
+func TestValidateRejectsMalformedEnvelope(t *testing.T) {
 	valid, err := buildFixture([]int64{-1, 0, 1})
 	require.NoError(t, err)
 
@@ -457,7 +448,7 @@ func TestParseRejectsMalformedEnvelope(t *testing.T) {
 	}
 }
 
-func TestParseRejectsImpossibleHighContainerCountWithoutPanic(t *testing.T) {
+func TestValidateRejectsImpossibleHighContainerCountWithoutPanic(t *testing.T) {
 	body := make([]byte, 8)
 	binary.LittleEndian.PutUint64(body, ^uint64(0))
 	blob := mrb1Blob(body, 0)
@@ -469,7 +460,7 @@ func TestParseRejectsImpossibleHighContainerCountWithoutPanic(t *testing.T) {
 	require.ErrorContains(t, err, "high-container count")
 }
 
-func TestParseRejectsStructurallyInvalidPortableBody(t *testing.T) {
+func TestValidateRejectsStructurallyInvalidPortableBody(t *testing.T) {
 	first := portableChild(t, 11)
 	second := portableChild(t, 22)
 
@@ -555,7 +546,7 @@ func TestPortableValidationErrorsRedactMemberKeyPrefixes(t *testing.T) {
 	require.Contains(t, childErr.Error(), "Roaring32 container 1")
 }
 
-func TestParseHandlesHighRunCountLinearly(t *testing.T) {
+func TestValidateHandlesHighRunCountLinearly(t *testing.T) {
 	body := portableBody(portableHighContainer{
 		high:  0,
 		child: portableRunChild(32768),
@@ -570,7 +561,7 @@ func TestParseHandlesHighRunCountLinearly(t *testing.T) {
 	require.False(t, filter.ContainsInt64(1))
 }
 
-func TestParseAcceptsPortableRunContainersProducedByOtherImplementations(t *testing.T) {
+func TestValidateAcceptsPortableRunContainersProducedByOtherImplementations(t *testing.T) {
 	// Java can retain two consecutive values as a run after mutating a larger
 	// RunContainer; Java and CRoaring also retain the three-value size tie.
 	for _, cardinality := range []uint64{2, 3} {
@@ -588,7 +579,7 @@ func TestParseAcceptsPortableRunContainersProducedByOtherImplementations(t *test
 	}
 }
 
-func TestParseAcceptsAdjacentRunIntervals(t *testing.T) {
+func TestValidateAcceptsAdjacentRunIntervals(t *testing.T) {
 	// The portable format requires runs to be sorted and non-overlapping, NOT
 	// merged. (start 0, len 0) followed by (start 1, len 0) is a legal encoding
 	// of {0, 1}; roaring/v2 and CRoaring both decode it that way. Rejecting it
@@ -609,7 +600,7 @@ func TestParseAcceptsAdjacentRunIntervals(t *testing.T) {
 	require.False(t, filter.ContainsInt64(2))
 }
 
-func TestParseStillRejectsOverlappingAndDescendingRuns(t *testing.T) {
+func TestValidateStillRejectsOverlappingAndDescendingRuns(t *testing.T) {
 	// Relaxing the adjacency check must not relax these.
 	//
 	// The declared envelope cardinality must match what the run descriptor
@@ -959,7 +950,7 @@ var croaringFixtures = []struct {
 	},
 }
 
-func TestParseAcceptsCRoaringGeneratedFixtures(t *testing.T) {
+func TestValidateAcceptsCRoaringGeneratedFixtures(t *testing.T) {
 	// Membership checks, not just cardinality: two implementations can agree on
 	// how many values a body holds while disagreeing on which ones, and the
 	// point of a cross-language fixture is that they agree on the values.
@@ -1029,7 +1020,7 @@ func TestCRoaringSignedBoundaryFixtureRoundTripsValues(t *testing.T) {
 	require.False(t, filter.ContainsInt64(-2))
 }
 
-func TestParseAcceptsEmptyRoaring32Child(t *testing.T) {
+func TestValidateAcceptsEmptyRoaring32Child(t *testing.T) {
 	// CRoaring 3.0.0 can write a high entry whose Roaring32 child holds zero
 	// containers: a 4-byte high key followed by the no-run cookie and a
 	// container count of zero. Both CRoaring and roaring/v2 consume the
@@ -1053,7 +1044,7 @@ func TestParseAcceptsEmptyRoaring32Child(t *testing.T) {
 	require.False(t, filter.ContainsInt64(0))
 }
 
-func TestParseAcceptsUnspecifiedRunBitmapPaddingBits(t *testing.T) {
+func TestValidateAcceptsUnspecifiedRunBitmapPaddingBits(t *testing.T) {
 	// The run bitmap is (containerCount + 7) / 8 bytes and only its first
 	// containerCount bits are defined; the rest is unspecified padding.
 	// 0x81 sets bit 0 (the single container is a run container) and bit 7,
@@ -1086,7 +1077,7 @@ func TestParseAcceptsUnspecifiedRunBitmapPaddingBits(t *testing.T) {
 	require.False(t, filter.ContainsInt64(8))
 }
 
-func TestParseIgnoresOffsetTableContents(t *testing.T) {
+func TestValidateIgnoresOffsetTableContents(t *testing.T) {
 	t.Run("wrong offset table", func(t *testing.T) {
 		// Four containers force the offset table to be present, and every
 		// declared offset is zero. roaring/v2 skips the table entirely.

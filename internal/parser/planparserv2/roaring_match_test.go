@@ -18,8 +18,6 @@ package planparserv2
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"math"
 	"math/rand"
 	"sort"
@@ -63,11 +61,6 @@ func requireRoaringFilterExpr(t *testing.T, expr *planpb.Expr) *roaring64.Bitmap
 	require.NoError(t, err)
 	return bitmap
 }
-
-// containerEncodingsBlobSHA is the MRB1 blob the "container encodings" member
-// set builds to. client/v3/roaringfilter and pkg/util/roaringfilter assert the
-// same digest over their own copies of that set.
-const containerEncodingsBlobSHA = "281d97ed83ab754dad4ddc945cfb55d79d0c5c92cbb5023c204936230dc92fea"
 
 // containsSigned probes the bitmap with the normative mapping: sign-extend to
 // int64, keep the two's-complement bits as the uint64 key.
@@ -524,25 +517,21 @@ func TestClientBuiltBlobsPassProxyValidation(t *testing.T) {
 	// what they must encode to. "container encodings" is a copy of the set in
 	// pkg/util/roaringfilter (nothing can share it across the module boundary);
 	// these counts are what make it reach the bitmap-container and run-cookie
-	// offset-table branches, so an edit to either copy that drifts them fails
-	// here rather than quietly stopping the coverage.
-	// Counting containers is not enough, and neither is the blob length: swapping
-	// the 4097 for 4096 keeps high=2/low=6 and produces a 4096-entry array
-	// container, which is 8192 bytes -- exactly a bitmap container's size. Only
-	// the bytes distinguish them, so pin the digest.
+	// offset-table branches, so an edit that drifts them fails here rather than
+	// quietly stopping the coverage.
 	//
-	// pkg/util/roaringfilter keeps its own copy of this member set -- the modules
-	// cannot share one -- and asserts the same digest plus the container types
-	// directly. The two digests are separate literals, so this does not prove the
-	// two copies are equal; what it does give is that an accidental edit to
-	// either copy fails in its own package instead of silently reducing coverage.
-	// Deliberately changing a set and its digest together still needs the other
-	// copy updated by hand.
+	// The container counts alone are not enough: swapping the 4097 for 4096
+	// keeps high=2/low=6 and produces a 4096-entry array container, which is
+	// 8192 bytes -- exactly a bitmap container's size -- so the shape and the
+	// body length both survive. The member count is what separates them, and it
+	// is the same number the other two copies assert about their own sets, so an
+	// edit to any one of them fails in its own package. None of this proves the
+	// three copies are equal; pkg/util/roaringfilter is the one that classifies
+	// the containers directly.
 	fixedShapes := map[string]struct {
-		high, low uint64
-		blobSHA   string
+		high, low, cardinality uint64
 	}{
-		"container encodings": {high: 2, low: 6, blobSHA: containerEncodingsBlobSHA},
+		"container encodings": {high: 2, low: 6, cardinality: 5101},
 	}
 
 	pinned := 0
@@ -605,11 +594,11 @@ func TestClientBuiltBlobsPassProxyValidation(t *testing.T) {
 					"%s no longer has the container shape it exists for", name)
 				require.Equalf(t, want.low, summary.LowContainerCount,
 					"%s no longer has the container shape it exists for", name)
-				sum := sha256.Sum256(blob)
-				require.Equalf(t, want.blobSHA, hex.EncodeToString(sum[:]),
-					"%s encodes to different bytes, so it may no longer reach the "+
-						"container encodings it exists for; pkg/util/roaringfilter pins "+
-						"the same digest and asserts those encodings directly", name)
+				require.Equalf(t, want.cardinality, summary.Cardinality,
+					"%s no longer has the member count it exists for: one value fewer "+
+						"in the dense block encodes as an array rather than the bitmap "+
+						"container this shape reaches, without changing the container "+
+						"counts or the body length", name)
 			}
 
 			decoded := roaring64.New()

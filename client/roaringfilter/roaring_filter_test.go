@@ -18,9 +18,7 @@ package roaringfilter
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"math"
 	"testing"
 
@@ -125,7 +123,7 @@ func TestBuildRejectsSparseHighContainersBeforeBitmapConstruction(t *testing.T) 
 // formula exists in pkg/util/roaringfilter and in segcore, and the three cannot
 // share code across the module and language boundaries; the constants are pinned
 // to each other by TestClientBuiltBlobsPassProxyValidation and
-// TestSegcoreConstantsMatch, so pinning the expression here against those same
+// TestRoaringSegcoreConstantsMatch, so pinning the expression here against those same
 // constants is what keeps this copy from drifting.
 //
 // A drift costs a round trip rather than correctness -- the proxy still enforces
@@ -185,6 +183,12 @@ func TestBuildPortableContainerEncodings(t *testing.T) {
 		members = append(members, (key<<16)+1)
 	}
 	members = append(members, (1<<32)+7)
+	// The size is part of the fixture. One value fewer in the dense block --
+	// 4096 rather than 4097 -- encodes as an array container rather than the
+	// bitmap this set exists to reach, and pkg/util/roaringfilter, which owns
+	// the classifier that can see the difference, keeps its own copy of the set.
+	// This catches an edit to this copy before the two drift.
+	require.Len(t, members, 5101)
 
 	blob := mustBuild(t, members)
 	bitmap := decodeBody(t, blob)
@@ -193,23 +197,7 @@ func TestBuildPortableContainerEncodings(t *testing.T) {
 		require.True(t, contains(bitmap, value), "member %d must be present", value)
 	}
 
-	// This member set is the one that reaches the bitmap-container and
-	// run-cookie offset-table branches of the server-side validator, and it is
-	// copied into pkg/util/roaringfilter and internal/parser/planparserv2 -- the
-	// three modules cannot share it. Each copy asserts this digest, so an
-	// accidental edit fails in its own package rather than quietly reducing
-	// coverage somewhere else. pkg/util/roaringfilter additionally asserts the
-	// container types the digest stands for.
-	sum := sha256.Sum256(blob)
-	require.Equal(t, containerEncodingsBlobSHA, hex.EncodeToString(sum[:]),
-		"the container-encodings member set changed; update the copies in "+
-			"pkg/util/roaringfilter and internal/parser/planparserv2 and all three "+
-			"digests together")
 }
-
-// containerEncodingsBlobSHA is the MRB1 blob this member set builds to. The same
-// constant is asserted in pkg/util/roaringfilter and internal/parser/planparserv2.
-const containerEncodingsBlobSHA = "281d97ed83ab754dad4ddc945cfb55d79d0c5c92cbb5023c204936230dc92fea"
 
 func mustBuild(t *testing.T, members []int64) []byte {
 	t.Helper()

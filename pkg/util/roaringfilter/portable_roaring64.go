@@ -58,7 +58,7 @@ type portableValidationSummary struct {
 // that path validates each run interval against every later interval, which
 // makes a small, attacker-controlled run container quadratic in CPU. Linearity
 // here is a security property, not a micro-optimization. Nothing asserts the
-// complexity -- TestParseHandlesHighRunCountLinearly only checks that a
+// complexity -- TestValidateHandlesHighRunCountLinearly only checks that a
 // maximum-run container is accepted correctly, and would pass against a
 // quadratic scanner -- so keep it in mind when editing this walk.
 func scanPortableRoaring64Body(body []byte) (portableValidationSummary, error) {
