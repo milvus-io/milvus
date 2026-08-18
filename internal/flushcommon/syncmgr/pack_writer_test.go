@@ -63,6 +63,22 @@ func TestAllocOneWithRetry(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+func TestAllocOneWithRetryWithoutOptions(t *testing.T) {
+	alloc := allocator.NewMockGIDAllocator()
+	calls := 0
+	patch := mockey.Mock(allocator.MockGIDAllocator.AllocOne).
+		To(func(allocator.MockGIDAllocator) (allocator.UniqueID, error) {
+			calls++
+			return 101, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	id, err := allocOneWithRetry(context.Background(), alloc)
+	require.NoError(t, err)
+	require.EqualValues(t, 101, id)
+	require.Equal(t, 1, calls)
+}
+
 func TestBulkPackWriter_Write(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 

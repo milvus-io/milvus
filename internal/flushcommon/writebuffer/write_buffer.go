@@ -968,6 +968,7 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 			}
 
 			var resyncGrowingSourceSegmentID int64
+			var terminalGrowingSourceErr error
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				wb.mut.Lock()
 				if progress, exists := wb.growingSourceProgress[growingSourceTask.SegmentID()]; exists {
@@ -986,6 +987,7 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
 						if isGrowingSourceLayoutMismatch(err) {
 							progress.markNonRetryableFailure()
+							terminalGrowingSourceErr = err
 							mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
 								mlog.Int64("segmentID", growingSourceTask.SegmentID()),
 								mlog.Int64("targetOffset", progress.targetOffset),
@@ -1020,6 +1022,9 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 					}
 				}
 				wb.mut.Unlock()
+			}
+			if terminalGrowingSourceErr != nil {
+				wb.errHandler(terminalGrowingSourceErr)
 			}
 			if resyncGrowingSourceSegmentID != 0 {
 				wb.syncSegments(context.Background(), []int64{resyncGrowingSourceSegmentID})

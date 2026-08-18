@@ -447,6 +447,33 @@ func (s *SyncTaskSuite) TestRunStorageV3RetriesTransientInsertWrite() {
 	s.GreaterOrEqual(calls.Load(), int32(2))
 }
 
+func (s *SyncTaskSuite) TestRunStorageV3NonRecoverableWriteStopsAfterOneAttempt() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	seg := s.createSegment(storage.StorageV3)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+
+	var calls atomic.Int32
+	patch := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).
+		To(func(*packed.FFIPackedWriter, arrow.Record) error {
+			calls.Add(1)
+			return errors.New("permanent writer failure")
+		}).Build()
+	defer patch.UnPatch()
+
+	var failureCalls atomic.Int32
+	task := s.getSuiteSyncTask(
+		new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
+		WithFailureCallback(func(error) { failureCalls.Add(1) }).
+		WithWriteRetryOptions(retry.Attempts(3), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond))
+
+	err := task.Run(ctx)
+	s.ErrorContains(err, "permanent writer failure")
+	s.EqualValues(1, calls.Load())
+	s.EqualValues(1, failureCalls.Load())
+}
+
 func (s *SyncTaskSuite) TestRunL0Segment() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

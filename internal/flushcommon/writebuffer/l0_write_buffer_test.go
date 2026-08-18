@@ -1025,7 +1025,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "Column group size mismatch")
 		<-done
 
-		s.EqualValues(0, errorHandlerCalls.Load())
+		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1014)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)

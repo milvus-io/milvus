@@ -31,6 +31,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -64,9 +66,6 @@ import (
 // back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
 // source of Unauthenticated, so matching the sentinel is both sufficient and
 // narrower than trusting the code.
-//
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
@@ -76,6 +75,27 @@ func IsRetriableWatchErr(err error) bool {
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
 		errors.Is(err, rpctypes.ErrAuthOldRevision)
+}
+
+// IsRetriableEtcdRequestErr reports whether an etcd request used to
+// re-establish a watch failed because the service is temporarily unavailable.
+// It deliberately excludes context.Canceled so parent shutdown terminates the
+// recovery loop, and excludes authorization/configuration errors that cannot be
+// repaired by retrying the same request.
+func IsRetriableEtcdRequestErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsRetriableWatchErr(err) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return true
+	default:
+		return false
+	}
 }
 
 type ClientOption func(*clientv3.Config)

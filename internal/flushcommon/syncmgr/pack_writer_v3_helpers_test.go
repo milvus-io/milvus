@@ -52,6 +52,15 @@ func TestClassifyStorageV3Err(t *testing.T) {
 	})
 }
 
+func TestStopStorageV3RetryAfterCommit(t *testing.T) {
+	assert.NoError(t, stopStorageV3RetryAfterCommit(nil))
+
+	err := stopStorageV3RetryAfterCommit(errors.Wrap(packed.ErrLoonTransient, "post-commit bookkeeping failed"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, packed.ErrLoonTransient))
+	assert.False(t, retry.IsRecoverable(err), "a committed manifest must never restart phase 1")
+}
+
 func TestBuildTextColumnConfigs(t *testing.T) {
 	// Required for paramtable.Get().DataNodeCfg.* to return defaults.
 	paramtable.Init()

@@ -247,7 +247,19 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// V3 feeds the tracked statsBlobSize instead of summing a stats array (it
 	// returns no stats array); finalizeStats produces the cumulative Statistics.
 	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, bw.statsBlobSize)
+	if err != nil {
+		// The manifest is already committed. Never let a later bookkeeping
+		// failure restart phase 1 and publish the same batch a second time.
+		err = stopStorageV3RetryAfterCommit(err)
+	}
 	return
+}
+
+func stopStorageV3RetryAfterCommit(err error) error {
+	if err == nil {
+		return nil
+	}
+	return retry.Unrecoverable(err)
 }
 
 // classifyStorageV3Err keeps explicitly transient Storage V3 failures

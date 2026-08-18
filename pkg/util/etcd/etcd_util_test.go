@@ -60,6 +60,30 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}
 }
 
+func TestIsRetriableEtcdRequestErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"watch leader changed", rpctypes.ErrLeaderChanged, true},
+		{"request timeout", context.DeadlineExceeded, true},
+		{"wrapped request timeout", errors.Wrap(context.DeadlineExceeded, "list sessions"), true},
+		{"grpc unavailable", status.Error(codes.Unavailable, "etcd unavailable"), true},
+		{"wrapped grpc unavailable", errors.Wrap(status.Error(codes.Unavailable, "etcd unavailable"), "list sessions"), true},
+		{"grpc deadline exceeded", status.Error(codes.DeadlineExceeded, "request timeout"), true},
+		{"parent canceled", context.Canceled, false},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"generic error", errors.New("bad session payload"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsRetriableEtcdRequestErr(c.err))
+		})
+	}
+}
+
 // freePort grabs a random unused TCP port. There's a small TOCTOU window
 // between Close and the subsequent bind, but for unit tests it's acceptable.
 func freePort(t *testing.T) int {
