@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1074,5 +1076,164 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_indexing, task.GetTaskProto().GetState())
 		s.Equal(int32(0), task.GetTaskProto().RetryTimes)
+	})
+}
+
+// The retryable-failure requeue must be recoverable in BOTH partial-failure
+// orders. It persists first and produces no worker-side effect, so a failed
+// meta write leaves the worker still holding the failed task with its
+// FailStatus and the next poll simply redoes the transition; the stale plan on
+// the previous node is dropped idempotently by doCompact right before the
+// resubmission, so a drop failure there is only a retry, never a terminal
+// state.
+func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecoverable() {
+	retryableResult := func() *datapb.CompactionPlanResult {
+		return &datapb.CompactionPlanResult{
+			PlanID:     1,
+			State:      datapb.CompactionTaskState_failed,
+			FailStatus: merr.Status(merr.SegcoreError(2034, "mem allocate failed")),
+		}
+	}
+
+	s.Run("meta write fails: task untouched, next poll retries and succeeds", func() {
+		task := s.generateBasicTask(false)
+		task.maxRetryTimes = 3
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(7))
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(int32(0), task.GetTaskProto().GetRetryTimes())
+
+		// Fault-inject: the FIRST persistence attempt fails (transient etcd),
+		// the second succeeds. No DropCompaction may be issued in this branch --
+		// the worker keeps the failed entry until doCompact drops it.
+		realCatalog := s.meta.compactionTaskMeta.catalog
+		failing := catalogmocks.NewDataCoordCatalog(s.T())
+		calls := 0
+		failing.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, t *datapb.CompactionTask) error {
+				calls++
+				if calls == 1 {
+					return merr.WrapErrIoFailed("etcd", errors.New("transient unavailability"))
+				}
+				return realCatalog.SaveCompactionTask(ctx, t)
+			})
+		s.meta.compactionTaskMeta.catalog = failing
+		defer func() { s.meta.compactionTaskMeta.catalog = realCatalog }()
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(retryableResult(), nil).Times(2)
+		// Deliberately NO DropCompaction expectation: mockery would fail the
+		// test if the requeue branch issued one.
+
+		// Poll 1: persistence fails -> in-memory task must remain exactly as
+		// it was (executing on node 7, RetryTimes 0), NOT terminally failed.
+		task.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(int64(7), task.GetTaskProto().GetNodeID())
+		s.Equal(int32(0), task.GetTaskProto().GetRetryTimes())
+		s.Empty(task.GetTaskProto().GetFailReason())
+
+		// Poll 2: the worker still holds the FailStatus, so the same branch
+		// runs again and this time persists the requeue.
+		task.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+		s.Equal(int32(1), task.GetTaskProto().GetRetryTimes())
+		// The previous node is kept so doCompact knows where to drop.
+		s.Equal(int64(7), task.GetTaskProto().GetNodeID())
+	})
+
+	s.Run("resubmission drops the stale plan on the previous node first", func() {
+		task := s.generateBasicTask(false)
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(7), setRetryTimes(1))
+
+		cluster := session.NewMockCluster(s.T())
+		// Order matters: the drop on the previous node precedes the create.
+		var seq []string
+		cluster.EXPECT().DropCompaction(int64(7), int64(1)).RunAndReturn(func(nodeID, planID int64) error {
+			seq = append(seq, "drop")
+			return nil
+		})
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).RunAndReturn(
+			func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+				seq = append(seq, "create")
+				return nil
+			})
+
+		s.NoError(task.doCompact(9, cluster))
+		s.Equal([]string{"drop", "create"}, seq)
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(int64(9), task.GetTaskProto().GetNodeID())
+	})
+
+	s.Run("drop failure at resubmission is not terminal", func() {
+		task := s.generateBasicTask(false)
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(7), setRetryTimes(1))
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(errors.New("old node unreachable"))
+		// The create still proceeds; if it lands on another node the stale
+		// entry is harmless, if it is rejected as a duplicate retryOnError
+		// brings the task back for another attempt.
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil)
+
+		s.NoError(task.doCompact(9, cluster))
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+	})
+
+	s.Run("fresh task never issues a drop", func() {
+		task := s.generateBasicTask(false)
+		// Fresh: RetryTimes 0. generateBasicTask sets a NodeID, which is fine --
+		// only the (NodeID>0 && RetryTimes>0) requeue signature triggers a drop.
+		s.Equal(int32(0), task.GetTaskProto().GetRetryTimes())
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
+
+		cluster := session.NewMockCluster(s.T())
+		// No DropCompaction expectation: mockery fails the test if one fires.
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil)
+		s.NoError(task.doCompact(9, cluster))
 	})
 }
