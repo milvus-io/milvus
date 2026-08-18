@@ -37,7 +37,7 @@ mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan2"
-chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
+chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}" 2>/dev/null || true
 
 $DOCKER_COMPOSE_COMMAND pull builder
 if [[ "${CHECK_BUILDER:-}" == "1" ]]; then

@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestVarCharPrimaryKey(t *testing.T) {
@@ -294,8 +295,7 @@ func TestParsePrimaryKeysBatch2IDs(t *testing.T) {
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, [][]byte{u1[:], u2[:]}, ids.GetUuidId().GetData())
 
-		parsedPks, err := ParseIDs2PrimaryKeysBatch(ids)
-		assert.NoError(t, err)
+		parsedPks := ParseIDs2PrimaryKeysBatch(ids)
 		assert.Equal(t, 2, parsedPks.Len())
 	})
 
