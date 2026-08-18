@@ -7382,4 +7382,3 @@ func TestResolveTimezone(t *testing.T) {
 		assert.Equal(t, common.DefaultTimezone, tz)
 	})
 }
-

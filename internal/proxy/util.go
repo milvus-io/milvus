@@ -1534,7 +1534,6 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
-
 // GetCurDBNameFromRequestOrContext returns the database a request actually
 // operates on. It prefers the DbName carried in the request body (which is
 // what downstream handlers execute against, after DatabaseInterceptor has
