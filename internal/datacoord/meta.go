@@ -97,10 +97,6 @@ type meta struct {
 
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
-	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
-	// segment. It must be acquired before segMu; segMu must never be held while
-	// a manifest transaction performs object-storage I/O.
-	segmentManifestLocks *lock.KeyLock[int64]
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -280,16 +276,15 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:                  ctx,
-		catalog:              catalog,
-		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:             NewSegmentsInfo(),
-		segmentManifestLocks: lock.NewKeyLock[int64](),
-		channelCPs:           newChannelCps(),
-		chunkManager:         chunkManager,
-		resourceIDMap:        make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion:      0,
-		resourceLock:         lock.RWMutex{},
+		ctx:             ctx,
+		catalog:         catalog,
+		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:        NewSegmentsInfo(),
+		channelCPs:      newChannelCps(),
+		chunkManager:    chunkManager,
+		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion: 0,
+		resourceLock:    lock.RWMutex{},
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -1313,9 +1308,6 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	if len(u.deltalogs) == 0 {
 		return false
 	}
-	if u.segment.GetStorageVersion() == storage.StorageV3 && u.segment.GetManifestPath() != "" {
-		return modPack.fail(merr.WrapErrServiceInternalMsg("StorageV3 L0 manifest publication must use CommitSegmentManifest, segmentID=%d", u.segmentID))
-	}
 
 	if u.segment.GetManifestPath() == "" {
 		if err := binlog.CompressFieldBinlogs(u.deltalogs); err != nil {
@@ -1420,32 +1412,9 @@ func (u *l0ManifestUpdate) apply(modPack *updateSegmentPack) bool {
 		if err := updateManifestPathIfNewer(u.segment, u.manifestPath); err != nil {
 			return modPack.fail(err)
 		}
+		clearBinlogPaths(u.deltalogs)
 	}
-	return applyL0Deltalogs(modPack, u.segmentID, u.segment, u.deltalogs)
-}
-
-// applyL0Deltalogs is the catalog half of an L0 result. Both the legacy L0
-// manifest writer and the segment-manifest commit adapter use it, so merging,
-// statistics accumulation, retry deduplication, and path elision are shared.
-func applyL0Deltalogs(modPack *updateSegmentPack, segmentID int64, segment *SegmentInfo, deltalogs []*datapb.FieldBinlog) bool {
-	if segment.GetManifestPath() != "" {
-		clearBinlogPaths(deltalogs)
-	}
-	return addDeltalogsToSegment(modPack, segmentID, segment, deltalogs)
-}
-
-// AddL0DeltalogsOperator applies an L0 result after its manifest pointer has
-// been published separately. It deliberately does not perform manifest I/O.
-func AddL0DeltalogsOperator(segmentID int64, deltalogs []*datapb.FieldBinlog) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
-		segment := modPack.Get(segmentID)
-		if segment == nil {
-			mlog.Warn(modPack.meta.ctx, "meta update: add L0 deltalog failed - segment not found",
-				mlog.Int64("segmentID", segmentID))
-			return false
-		}
-		return applyL0Deltalogs(modPack, segmentID, segment, deltalogs)
-	}
+	return addDeltalogsToSegment(modPack, u.segmentID, u.segment, u.deltalogs)
 }
 
 func AddL0DeltalogsAndUpdateManifestOperator(
@@ -1736,9 +1705,6 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 		if manifestPath == "" || segment.ManifestPath == manifestPath {
 			return false
 		}
-		if segment.GetStorageVersion() == storage.StorageV3 {
-			return modPack.fail(merr.WrapErrServiceInternalMsg("StorageV3 manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID))
-		}
 		segment.ManifestPath = manifestPath
 		return true
 	}
@@ -1776,9 +1742,6 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 					mlog.Int64("incomingVer", manifestVersion))
 			}
 			return false
-		}
-		if segment.GetStorageVersion() == storage.StorageV3 {
-			return modPack.fail(merr.WrapErrServiceInternalMsg("StorageV3 manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID))
 		}
 		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 		return true
