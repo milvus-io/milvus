@@ -94,21 +94,21 @@ type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
 	milvuspb.UnimplementedMilvusServiceServer
 
-	ctx                context.Context
-	wg                 sync.WaitGroup
-	grpcHTTPWg         sync.WaitGroup
-	proxy              types.ProxyComponent
-	httpListener       net.Listener
+	ctx          context.Context
+	wg           sync.WaitGroup
+	grpcHTTPWg   sync.WaitGroup
+	proxy        types.ProxyComponent
+	httpListener net.Listener
 	// The internal-domain listeners a form's extension declares; nil when
 	// none is installed. See internal_domain.go.
 	internalDomainGrpcServer *grpc.Server
 	internalDomainHTTPServer *http.Server
-	grpcListener       net.Listener
-	tcpServer          cmux.CMux
-	httpServer         *http.Server
-	grpcInternalServer *grpc.Server
-	grpcExternalServer *grpc.Server
-	listenerManager    *listenerManager
+	grpcListener             net.Listener
+	tcpServer                cmux.CMux
+	httpServer               *http.Server
+	grpcInternalServer       *grpc.Server
+	grpcExternalServer       *grpc.Server
+	listenerManager          *listenerManager
 
 	serverID atomic.Int64
 

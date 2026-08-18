@@ -5423,6 +5423,11 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 }
 
 func (node *Proxy) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// from tenants; with none installed the answer is nil and nothing changes.
+	if st := interceptAdminRPC(ctx, "AlterRole"); st != nil {
+		return st, nil
+	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterRole")
 	defer sp.End()
 

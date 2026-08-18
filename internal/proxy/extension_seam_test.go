@@ -23,12 +23,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -628,6 +627,11 @@ func TestEveryAdminRPCIsGuardedByTheSeam(t *testing.T) {
 		}},
 		{"DropRole", func(node *Proxy, ctx context.Context) *commonpb.Status {
 			st, err := node.DropRole(ctx, &milvuspb.DropRoleRequest{})
+			assert.NoError(t, err)
+			return st
+		}},
+		{"AlterRole", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			st, err := node.AlterRole(ctx, &milvuspb.AlterRoleRequest{})
 			assert.NoError(t, err)
 			return st
 		}},

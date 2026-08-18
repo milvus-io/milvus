@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -15,8 +16,6 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -210,9 +209,9 @@ func (p enginedProvider) Capabilities() extension.Capabilities {
 
 type inertEngine struct{}
 
-func (inertEngine) RegisterOnCoordinator(grpc.ServiceRegistrar)              {}
-func (inertEngine) Start(context.Context, extension.MixCoord) error          { return nil }
-func (inertEngine) Stop() error                                              { return nil }
+func (inertEngine) RegisterOnCoordinator(grpc.ServiceRegistrar)     {}
+func (inertEngine) Start(context.Context, extension.MixCoord) error { return nil }
+func (inertEngine) Stop() error                                     { return nil }
 
 // With nothing installed, an empty session set keeps its native reading:
 // version zero and the legacy store-path layout, exactly what a stock binary

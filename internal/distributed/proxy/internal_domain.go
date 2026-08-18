@@ -10,6 +10,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
@@ -23,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
-	"google.golang.org/grpc/credentials"
 )
 
 // This file is the proxy's seam for the internal-surfaces capability: WHERE
@@ -72,6 +72,12 @@ func (s *Server) startInternalDomainServers() error {
 // credentials nor end-user traffic.
 func (s *Server) startInternalDomainGrpc(port int) error {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
+	// All interfaces, exactly like the external listeners: netutil's OptIP is
+	// the ANNOUNCED address, not a bind address - every proxy listener binds
+	// ":port" - so this unauthenticated surface is no wider than the
+	// authenticated one, and both are confined by the same network boundary
+	// (which in this deployment is the pod network policy, not the bind).
+	// Narrowing the bind is a change to make for all of them together.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
@@ -80,6 +86,15 @@ func (s *Server) startInternalDomainGrpc(port int) error {
 	limiterOpts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
+		// The stream side needs its own chain: interceptors bind to one of
+		// gRPC's two call kinds, and without this a stream method on this
+		// listener (CreateReplicateStream) would arrive with neither the
+		// provenance mark - so the admin seam would refuse the control
+		// plane's own call - nor cluster validation.
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			internalDomainMarkStreamInterceptor,
+			interceptor.ClusterValidationStreamServerInterceptor(),
+		)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			// First in the chain: every request this listener accepts is the
 			// control plane's, and the mark is how handler-level seams -
@@ -136,11 +151,26 @@ func internalDomainMarkInterceptor(ctx context.Context, req any, _ *grpc.UnarySe
 	return handler(extension.WithInternalDomain(ctx), req)
 }
 
+// internalDomainMarkStreamInterceptor is the stream-side twin of the unary
+// mark above.
+func internalDomainMarkStreamInterceptor(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return handler(srv, markedServerStream{ServerStream: ss, ctx: extension.WithInternalDomain(ss.Context())})
+}
+
+// markedServerStream carries the internal-domain mark on a stream's context.
+type markedServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s markedServerStream) Context() context.Context { return s.ctx }
+
 // startInternalDomainRest serves /v2/vectordb with the handler-level
 // authorization forced off, plus /metrics for the deployment's scraper. No
 // authentication middleware: same posture, same isolation argument, as the
 // gRPC listener above.
 func (s *Server) startInternalDomainRest(port int) error {
+	// Same all-interfaces bind as the gRPC listener above; see there.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
@@ -154,9 +184,12 @@ func (s *Server) startInternalDomainRest(port int) error {
 	ginHandler.Use(httpserver.RequestHandlerFunc)
 	ginHandler.Use(func(c *gin.Context) {
 		c.Set(httpserver.ContextUsername, "")
-		// The same provenance mark the gRPC listener stamps: handlers reach
-		// it through the request context whether they pass the gin context
-		// itself (gin's Value falls through to it) or Request.Context().
+		// The same provenance mark the gRPC listener stamps. The v2 handlers
+		// read it through c.Request.Context(); note gin's own Context.Value
+		// does NOT fall through to the request context unless
+		// ContextWithFallback is enabled (it is not here), so a handler that
+		// passed the gin context itself as a context.Context would miss the
+		// mark - the mark lives on the http.Request, deliberately.
 		c.Request = c.Request.WithContext(extension.WithInternalDomain(c.Request.Context()))
 	})
 	ginHandler.GET("/metrics", gin.WrapH(promhttp.Handler()))

@@ -1307,10 +1307,15 @@ func (s *mixCoordImpl) GetIndexStatistics(ctx context.Context, req *indexpb.GetI
 
 func (s *mixCoordImpl) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	// Extension seam, see extension_seam.go: with none installed drainOnCommit is
-	// false and neither call does anything.
+	// false and neither call does anything. The after-report runs in a defer so
+	// that a panicking drop still closes the bracket: status stays nil then,
+	// which reads as not-committed and takes the abort branch - a drain window
+	// left open by a panic would refuse queries until the reconcile.
 	drainOnCommit := beforeDropIndex(ctx, req)
-	status, err := s.datacoordServer.DropIndex(ctx, req)
-	afterDropIndex(ctx, req, drainOnCommit, status, err)
+	var status *commonpb.Status
+	var err error
+	defer func() { afterDropIndex(ctx, req, drainOnCommit, status, err) }()
+	status, err = s.datacoordServer.DropIndex(ctx, req)
 	return status, err
 }
 

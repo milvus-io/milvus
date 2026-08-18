@@ -36,14 +36,6 @@ import (
 // provider installed every seam resolves to the inert default, so a stock
 // binary behaves exactly as the community build.
 
-// proxyExtension returns the installed proxy extension, or the inert default.
-func proxyExtension() extension.ProxyExtension {
-	if e := extension.Caps().ProxyExt; e != nil {
-		return e
-	}
-	return extension.NoopProxyExtension{}
-}
-
 // interceptDML consults the extension at the entry of a write path. A non-nil
 // status rejects the write; short-circuiting is permitted here. Nil returns
 // directly rather than through the Noop fallback, matching every other

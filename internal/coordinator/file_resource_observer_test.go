@@ -651,11 +651,10 @@ func TestCheckNodesSyncedJudgesFromTheSnapshotNotTheLock(t *testing.T) {
 		"after the first read the gate must judge from the snapshot, not re-take the DDL lock per dispatch")
 }
 
-// A query node that does not implement SyncFileResource is recorded as synced
-// at the target version: whatever it serves it served before file resources
-// existed, and holding grow actions off it forever would wedge a rolling
-// upgrade on its oldest node.
-func TestSyncRecordsAnUnimplementedNodeAsSynced(t *testing.T) {
+// A node recorded at the target version passes the gate - which is the state
+// the Unimplemented branch of Sync() leaves an old query node in. (The branch
+// itself lives in Sync and is not driven here; this pins the gate's side.)
+func TestCheckNodesSyncedPassesANodeRecordedAtTargetVersion(t *testing.T) {
 	// The snapshot path is exercised through CheckNodesSynced after a manual
 	// distribution insert, which is what the Unimplemented branch performs.
 	m := &FileResourceObserver{

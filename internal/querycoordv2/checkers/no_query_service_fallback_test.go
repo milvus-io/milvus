@@ -99,8 +99,8 @@ func (suite *ChannelCheckerTestSuite) withServingStreamingNodes(byRG map[string]
 // exactly these resource groups as serving no queries.
 func (suite *ChannelCheckerTestSuite) withNoQueryServiceResourceGroups(rgs ...string) {
 	declared := typeutil.NewSet(rgs...)
-	patch := mockey.Mock((*snmanager.StreamingNodeManager).NoQueryServiceResourceGroups).
-		Return(declared).Build()
+	patch := mockey.Mock((*snmanager.StreamingNodeManager).StreamingNodeRGView).
+		Return(declared, declared).Build()
 	suite.T().Cleanup(func() { patch.UnPatch() })
 }
 

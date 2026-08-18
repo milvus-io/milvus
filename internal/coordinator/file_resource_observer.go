@@ -242,7 +242,11 @@ func (m *FileResourceObserver) CheckNodesSynced(nodeIDs []int64) error {
 	if snap == nil {
 		resources, version := m.meta.ListFileResource(m.ctx)
 		snap = &gateState{version: version, gated: version != 0 && len(resources) > 0}
-		m.gateSnapshot.Store(snap)
+		// CAS, not Store: a Sync pass finishing right now has fresher data,
+		// and this lazy first read must not clobber it with an older view.
+		if !m.gateSnapshot.CompareAndSwap(nil, snap) {
+			snap = m.gateSnapshot.Load()
+		}
 	}
 	if !snap.gated {
 		return nil

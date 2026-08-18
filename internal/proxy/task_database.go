@@ -87,24 +87,9 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 	// RPC fallback on a miss, so there is no coordinator round trip to move
 	// off the common path here.
 	//
-	// The whole block is gated on the admission capability being installed.
-	// admissionChecker() is resolved once, through c, and that same value
-	// drives both the gate and the check itself -- there is no second
-	// consultation of extension.Caps() hiding in a wrapper function, because
-	// this path calls the checker directly rather than through one. With no
-	// provider installed PreExecute performs neither the existence lookup nor
-	// the admission call, reaching exactly the statements it reached before
-	// this task existed: installing nothing must change nothing, not even a
-	// local map read.
-	//
-	// Admission first, existence only on rejection - the same order and for
-	// the same reason as createCollectionTask: the existence probe that makes
-	// an idempotent retry pass costs a coordinator round trip on a cache miss,
-	// and a local HasDatabase peek is not a substitute (it only knows
-	// databases whose collections this proxy has already cached, so an empty
-	// or un-cached database would still be refused). GetDatabaseInfo carries
-	// the RPC fallback, so a genuine retry of an existing database gets
-	// rootcoord's own already-exists answer instead of ResourceExhausted.
+	// Gated on the admission capability: with no provider installed
+	// PreExecute reaches exactly the statements it reached before this task
+	// carried admission at all.
 	if c := admissionChecker(); c != nil {
 		if err := c.CheckCreateDatabase(ctx, mixCoordAdmissionClient{cdt.mixCoord}); err != nil {
 			if _, lookupErr := globalMetaCache.GetDatabaseInfo(ctx, cdt.GetDbName()); lookupErr != nil {

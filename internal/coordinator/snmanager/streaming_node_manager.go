@@ -198,25 +198,31 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDsByResourceGroup() map[str
 // streaming nodes declare no-query-service" - two facts with different
 // consequences for delegator placement.
 func (s *StreamingNodeManager) StreamingNodeResourceGroups() typeutil.Set[string] {
+	saw, _ := s.StreamingNodeRGView()
+	return saw
+}
+
+// StreamingNodeRGView answers both resource-group questions from ONE fetch:
+// which groups have any streaming node, and which of those declare
+// no-query-service throughout. Callers needing both must use this rather
+// than the two single-set accessors, which would fetch twice and could see
+// two different node sets.
+func (s *StreamingNodeManager) StreamingNodeRGView() (all, noQuery typeutil.Set[string]) {
 	streamingNodes := s.fetchStreamingNodes()
-	sawRG := typeutil.NewSet[string]()
+	all = typeutil.NewSet[string]()
+	serving := typeutil.NewSet[string]()
 	for _, node := range streamingNodes {
-		sawRG.Insert(node.ResourceGroup)
+		all.Insert(node.ResourceGroup)
+		if !node.NoQueryService {
+			serving.Insert(node.ResourceGroup)
+		}
 	}
-	return sawRG
+	return all, all.Complement(serving)
 }
 
 func (s *StreamingNodeManager) NoQueryServiceResourceGroups() typeutil.Set[string] {
-	streamingNodes := s.fetchStreamingNodes()
-	sawRG := typeutil.NewSet[string]()
-	servingRG := typeutil.NewSet[string]()
-	for _, node := range streamingNodes {
-		sawRG.Insert(node.ResourceGroup)
-		if !node.NoQueryService {
-			servingRG.Insert(node.ResourceGroup)
-		}
-	}
-	return sawRG.Complement(servingRG)
+	_, noQuery := s.StreamingNodeRGView()
+	return noQuery
 }
 
 // fetchStreamingNodes fetches all streaming nodes from balancer, falling back to cached nodes on error.

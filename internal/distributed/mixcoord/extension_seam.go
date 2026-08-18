@@ -18,18 +18,18 @@ package grpcmixcoord
 
 import (
 	"context"
+	"sync"
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // This file is the coordinator-side seam. It declares WHERE the coordinator
@@ -224,12 +224,25 @@ func startCoordinatorEngine(ctx context.Context, coord types.MixCoordComponent) 
 		return start()
 	}
 	notifier.OnActive(func() {
+		// Serialized against stopCoordinatorEngine: a coordinator stopping
+		// right as it activates must not run Stop concurrently with a Start
+		// still in flight. The panic below fires after the state already
+		// moved to Healthy - the engine cannot start earlier, because its
+		// recovery reads coordinator state through the health gates - so the
+		// window between Healthy and the process dying is accepted and kept
+		// as short as a panic makes it.
+		engineLifecycleMu.Lock()
+		defer engineLifecycleMu.Unlock()
 		if err := start(); err != nil {
 			mlog.Panic(ctx, "coordinator engine failed to start on activation; a coordinator serving without its engine would accept work nothing accounts for", mlog.Err(err))
 		}
 	})
 	return nil
 }
+
+// engineLifecycleMu serializes the engine's activation-time Start against
+// stopCoordinatorEngine.
+var engineLifecycleMu sync.Mutex
 
 // stopCoordinatorEngine stops the installed engine. It runs on the shutdown
 // path even when start-up failed, so an engine must tolerate being stopped
@@ -239,6 +252,9 @@ func stopCoordinatorEngine(ctx context.Context) {
 	if engine == nil {
 		return
 	}
+	// Serialized against the activation-time Start; see startCoordinatorEngine.
+	engineLifecycleMu.Lock()
+	defer engineLifecycleMu.Unlock()
 	if err := engine.Stop(); err != nil {
 		mlog.Warn(ctx, "coordinator engine stop failed", mlog.Err(err))
 	}

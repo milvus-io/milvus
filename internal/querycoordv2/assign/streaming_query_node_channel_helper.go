@@ -95,10 +95,11 @@ func QueryServingStreamingNodes() typeutil.UniqueSet {
 //     keeps its native reading - a resource group without streaming nodes
 //     gets no delegators - byte for byte.
 func ResourceGroupServesNoQueries(rgName string) bool {
-	if snmanager.StaticStreamingNodeManager.NoQueryServiceResourceGroups().Contain(rgName) {
+	all, noQuery := snmanager.StaticStreamingNodeManager.StreamingNodeRGView()
+	if noQuery.Contain(rgName) {
 		return true
 	}
-	if snmanager.StaticStreamingNodeManager.StreamingNodeResourceGroups().Contain(rgName) {
+	if all.Contain(rgName) {
 		return false
 	}
 	return extension.Caps().CoordinatorEngine != nil

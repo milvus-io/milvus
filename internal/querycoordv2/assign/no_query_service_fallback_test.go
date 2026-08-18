@@ -128,9 +128,8 @@ func withAllStreamingNodes(t *testing.T, byRG map[string][]bool) {
 			declared.Insert(rg)
 		}
 	}
-	p1 := mockey.Mock((*snmanager.StreamingNodeManager).StreamingNodeResourceGroups).Return(saw).Build()
-	p2 := mockey.Mock((*snmanager.StreamingNodeManager).NoQueryServiceResourceGroups).Return(declared).Build()
-	t.Cleanup(func() { p1.UnPatch(); p2.UnPatch() })
+	p1 := mockey.Mock((*snmanager.StreamingNodeManager).StreamingNodeRGView).Return(saw, declared).Build()
+	t.Cleanup(func() { p1.UnPatch() })
 }
 
 type engineOnlyProvider struct{}

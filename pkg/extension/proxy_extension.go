@@ -102,9 +102,14 @@ type ProxyExtension interface {
 	InterceptDML(ctx context.Context, op string, req proto.Message) *commonpb.Status
 
 	// InterceptAdminRPC may short-circuit the administrative RPCs a deployment
-	// form withholds from its tenants - credentials, RBAC, privilege groups,
-	// replication, flush and replica introspection. op is the RPC name, e.g.
-	// "CreateRole"; a non-nil status is the whole answer to the RPC.
+	// form withholds from its tenants. op is the RPC name; a non-nil status is
+	// the whole answer to the RPC. The wired table, kept in step with the
+	// impl.go call sites: GetReplicas, GetFlushState, GetFlushAllState;
+	// Create/Update/DeleteCredential, ListCredUsers; Create/Drop/AlterRole,
+	// OperateUserRole, SelectRole, SelectUser, OperatePrivilege(V2),
+	// SelectGrant, Backup/RestoreRBAC; Create/Drop/List/OperatePrivilegeGroup;
+	// ReplicateMessage, Update/GetReplicateConfiguration, GetReplicateInfo,
+	// CreateReplicateStream.
 	//
 	// The seam runs in the handler, which every listener shares, so an
 	// implementation that withholds an RPC from tenants while its control
