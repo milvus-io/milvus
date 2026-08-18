@@ -37,7 +37,13 @@ message DataViewOfShard {
 
 message DataViewOfPartition {
     int64 partition_id = 1;
-    repeated int64 segment_ids = 2;
+    // segment_ids and segment_manifest_versions are parallel packed arrays.
+    // A manifest version of 0 means the consumer must resolve SegmentInfo
+    // through Coordinator metadata. A positive version identifies a canonical
+    // StorageV3 manifest that the QueryNode can locate from collection,
+    // partition, Segment ID, and this version alone.
+    repeated int64 segment_ids = 2 [packed = true];
+    repeated int64 segment_manifest_versions = 3 [packed = true];
 }
 
 // DataViewShardTimeTick is a derived delete-retention projection.

@@ -60,9 +60,10 @@ type DataViewRef interface {
 }
 
 type LoadableSegment struct {
-	SegmentID   int64
-	VChannel    string
-	PartitionID int64
+	SegmentID       int64
+	VChannel        string
+	PartitionID     int64
+	ManifestVersion int64
 }
 
 type CreateCollectionDataViewEvent struct {
@@ -174,6 +175,9 @@ func RecoverManager(
 				"persisted DataView has invalid identity: collection=%d version=%s",
 				view.GetCollectionId(), dataVersionKey(view.GetDataVersion()),
 			)
+		}
+		if err := validatePersistedSegmentManifestVersions(view); err != nil {
+			return nil, err
 		}
 		viewsByCollection[view.GetCollectionId()] = append(viewsByCollection[view.GetCollectionId()], view)
 	}
@@ -497,22 +501,72 @@ func nextDataVersion(base *viewpb.DataViewOfCollection, advance dataViewAdvance)
 }
 
 func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
-	locations := dataViewSegmentLocations(view)
+	slots := dataViewSegmentSlots(view)
 	for _, segment := range segments {
-		if segment.SegmentID == 0 || segment.VChannel == "" {
-			return merr.WrapErrServiceInternalMsg("invalid loadable Segment descriptor: segment=%d vchannel=%q", segment.SegmentID, segment.VChannel)
+		if segment.SegmentID == 0 || segment.VChannel == "" || segment.ManifestVersion < 0 {
+			return merr.WrapErrServiceInternalMsg(
+				"invalid loadable Segment descriptor: segment=%d vchannel=%q manifestVersion=%d",
+				segment.SegmentID,
+				segment.VChannel,
+				segment.ManifestVersion,
+			)
 		}
 		location := segmentLocation{vchannel: segment.VChannel, partitionID: segment.PartitionID}
-		if known, ok := locations[segment.SegmentID]; ok {
-			if known != location {
+		if known, ok := slots[segment.SegmentID]; ok {
+			if known.location != location {
 				return merr.WrapErrDataIntegrityMsg("Segment %d has conflicting DataView locations", segment.SegmentID)
+			}
+			currentVersion := known.partition.SegmentManifestVersions[known.index]
+			if segment.ManifestVersion < currentVersion {
+				return merr.WrapErrDataIntegrityMsg(
+					"Segment %d Manifest version cannot regress from %d to %d",
+					segment.SegmentID,
+					currentVersion,
+					segment.ManifestVersion,
+				)
+			}
+			if segment.ManifestVersion > currentVersion {
+				known.partition.SegmentManifestVersions[known.index] = segment.ManifestVersion
 			}
 			continue
 		}
 		shard := findOrCreateShard(view, segment.VChannel)
 		partition := findOrCreatePartition(shard, segment.PartitionID)
 		partition.SegmentIds = append(partition.SegmentIds, segment.SegmentID)
-		locations[segment.SegmentID] = location
+		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.ManifestVersion)
+		slots[segment.SegmentID] = segmentSlot{
+			location:  location,
+			partition: partition,
+			index:     len(partition.SegmentIds) - 1,
+		}
+	}
+	return nil
+}
+
+func validatePersistedSegmentManifestVersions(view *viewpb.DataViewOfCollection) error {
+	for _, shard := range view.GetShards() {
+		for _, partition := range shard.GetPartitions() {
+			versions := partition.GetSegmentManifestVersions()
+			if len(versions) != 0 && len(versions) != len(partition.GetSegmentIds()) {
+				return merr.WrapErrDataIntegrityMsg(
+					"persisted DataView has misaligned Segment arrays: collection=%d vchannel=%q partition=%d segments=%d manifestVersions=%d",
+					view.GetCollectionId(),
+					shard.GetVchannel(),
+					partition.GetPartitionId(),
+					len(partition.GetSegmentIds()),
+					len(versions),
+				)
+			}
+			for _, version := range versions {
+				if version < 0 {
+					return merr.WrapErrDataIntegrityMsg(
+						"persisted DataView has negative Manifest version: collection=%d segmentManifestVersion=%d",
+						view.GetCollectionId(),
+						version,
+					)
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -529,13 +583,16 @@ func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64, parti
 				continue
 			}
 			keptSegments := partition.SegmentIds[:0]
-			for _, segmentID := range partition.GetSegmentIds() {
+			keptVersions := partition.SegmentManifestVersions[:0]
+			for idx, segmentID := range partition.GetSegmentIds() {
 				if _, ok := removeIDs[segmentID]; ok {
 					continue
 				}
 				keptSegments = append(keptSegments, segmentID)
+				keptVersions = append(keptVersions, partition.GetSegmentManifestVersions()[idx])
 			}
 			partition.SegmentIds = keptSegments
+			partition.SegmentManifestVersions = keptVersions
 			if len(keptSegments) > 0 {
 				keptPartitions = append(keptPartitions, partition)
 			}
@@ -549,16 +606,26 @@ type segmentLocation struct {
 	partitionID int64
 }
 
-func dataViewSegmentLocations(view *viewpb.DataViewOfCollection) map[int64]segmentLocation {
-	locations := make(map[int64]segmentLocation)
+type segmentSlot struct {
+	location  segmentLocation
+	partition *viewpb.DataViewOfPartition
+	index     int
+}
+
+func dataViewSegmentSlots(view *viewpb.DataViewOfCollection) map[int64]segmentSlot {
+	slots := make(map[int64]segmentSlot)
 	for _, shard := range view.GetShards() {
 		for _, partition := range shard.GetPartitions() {
-			for _, segmentID := range partition.GetSegmentIds() {
-				locations[segmentID] = segmentLocation{vchannel: shard.GetVchannel(), partitionID: partition.GetPartitionId()}
+			for idx, segmentID := range partition.GetSegmentIds() {
+				slots[segmentID] = segmentSlot{
+					location:  segmentLocation{vchannel: shard.GetVchannel(), partitionID: partition.GetPartitionId()},
+					partition: partition,
+					index:     idx,
+				}
 			}
 		}
 	}
-	return locations
+	return slots
 }
 
 func findOrCreateShard(view *viewpb.DataViewOfCollection, vchannel string) *viewpb.DataViewOfShard {
@@ -622,27 +689,42 @@ func canonicalizeDataView(view *viewpb.DataViewOfCollection) {
 			return shard.Partitions[i].GetPartitionId() < shard.Partitions[j].GetPartitionId()
 		})
 		for _, partition := range shard.GetPartitions() {
-			sort.Slice(partition.SegmentIds, func(i, j int) bool {
-				return partition.SegmentIds[i] < partition.SegmentIds[j]
-			})
-			partition.SegmentIds = dedupSortedInt64s(partition.SegmentIds)
+			canonicalizePartitionSegments(partition)
 		}
 	}
 }
 
-func dedupSortedInt64s(values []int64) []int64 {
-	if len(values) == 0 {
-		return values
+type canonicalSegment struct {
+	id              int64
+	manifestVersion int64
+}
+
+func canonicalizePartitionSegments(partition *viewpb.DataViewOfPartition) {
+	segments := make([]canonicalSegment, len(partition.GetSegmentIds()))
+	versions := partition.GetSegmentManifestVersions()
+	for idx, segmentID := range partition.GetSegmentIds() {
+		segments[idx].id = segmentID
+		if idx < len(versions) {
+			segments[idx].manifestVersion = versions[idx]
+		}
 	}
-	write := 1
-	for read := 1; read < len(values); read++ {
-		if values[read] == values[write-1] {
+	sort.Slice(segments, func(i, j int) bool {
+		return segments[i].id < segments[j].id
+	})
+
+	partition.SegmentIds = make([]int64, 0, len(segments))
+	partition.SegmentManifestVersions = make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		last := len(partition.SegmentIds) - 1
+		if last >= 0 && partition.SegmentIds[last] == segment.id {
+			if segment.manifestVersion > partition.SegmentManifestVersions[last] {
+				partition.SegmentManifestVersions[last] = segment.manifestVersion
+			}
 			continue
 		}
-		values[write] = values[read]
-		write++
+		partition.SegmentIds = append(partition.SegmentIds, segment.id)
+		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.manifestVersion)
 	}
-	return values[:write]
 }
 
 func dataViewMembershipEqual(left, right *viewpb.DataViewOfCollection) bool {

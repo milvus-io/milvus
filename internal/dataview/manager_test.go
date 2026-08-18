@@ -116,6 +116,15 @@ func segment(id int64, channel string, partition int64) LoadableSegment {
 	return LoadableSegment{SegmentID: id, VChannel: channel, PartitionID: partition}
 }
 
+func segmentWithManifestVersion(id int64, channel string, partition, manifestVersion int64) LoadableSegment {
+	return LoadableSegment{
+		SegmentID:       id,
+		VChannel:        channel,
+		PartitionID:     partition,
+		ManifestVersion: manifestVersion,
+	}
+}
+
 func version(streaming, compact int64) *viewpb.DataVersion {
 	return &viewpb.DataVersion{StreamingVersion: streaming, CompactVersion: compact}
 }
@@ -161,6 +170,86 @@ func TestManagerLifecycleAndRef(t *testing.T) {
 	require.NotNil(t, ref)
 	defer ref.Deref()
 	require.Equal(t, int64(10), ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds()[0])
+	require.Equal(t, int64(0), ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions()[0])
+}
+
+func TestManagerSegmentManifestVersions(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	v, err := manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 3)},
+	})
+	require.NoError(t, err)
+	requireVersion(t, v, 1, 1)
+
+	before := catalog.saveCall
+	v, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 3)},
+	})
+	require.NoError(t, err)
+	requireVersion(t, v, 1, 1)
+	require.Equal(t, before, catalog.saveCall)
+
+	v, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 4)},
+	})
+	require.NoError(t, err)
+	requireVersion(t, v, 1, 2)
+	require.Equal(t, before+1, catalog.saveCall)
+
+	afterAdvance := catalog.saveCall
+	_, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 2)},
+	})
+	require.Error(t, err)
+	require.Equal(t, afterAdvance, catalog.saveCall)
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
+	require.Equal(t, []int64{10}, partition.GetSegmentIds())
+	require.Equal(t, []int64{4}, partition.GetSegmentManifestVersions())
+}
+
+func TestManagerCanonicalizesSegmentManifestVersions(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	v, err := manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments: []LoadableSegment{
+			segmentWithManifestVersion(30, "ch-1", 100, 7),
+			segmentWithManifestVersion(10, "ch-1", 100, 5),
+			segmentWithManifestVersion(20, "ch-1", 100, 0),
+		},
+	})
+	require.NoError(t, err)
+	requireVersion(t, v, 1, 1)
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
+	require.Equal(t, []int64{10, 20, 30}, partition.GetSegmentIds())
+	require.Equal(t, []int64{5, 0, 7}, partition.GetSegmentManifestVersions())
+}
+
+func TestDataViewPartitionSegmentFieldsArePacked(t *testing.T) {
+	descriptor := (&viewpb.DataViewOfPartition{}).ProtoReflect().Descriptor()
+	require.True(t, descriptor.Fields().ByName("segment_ids").IsPacked())
+	require.True(t, descriptor.Fields().ByName("segment_manifest_versions").IsPacked())
 }
 
 func TestManagerMutationsAndVersions(t *testing.T) {
@@ -168,13 +257,13 @@ func TestManagerMutationsAndVersions(t *testing.T) {
 	manager, _ := newTestManager()
 	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1", "ch-2"}})
 	require.NoError(t, err)
-	v, err := manager.OnImport(ctx, ImportDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(1, "ch-1", 10)}})
+	v, err := manager.OnImport(ctx, ImportDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segmentWithManifestVersion(1, "ch-1", 10, 1)}})
 	require.NoError(t, err)
 	requireVersion(t, v, 1, 1)
-	v, err = manager.OnCompact(ctx, CompactDataViewEvent{CollectionID: 1, CompactFrom: []int64{1}, CompactTo: []LoadableSegment{segment(2, "ch-1", 10), segment(3, "ch-2", 20)}})
+	v, err = manager.OnCompact(ctx, CompactDataViewEvent{CollectionID: 1, CompactFrom: []int64{1}, CompactTo: []LoadableSegment{segmentWithManifestVersion(2, "ch-1", 10, 2), segmentWithManifestVersion(3, "ch-2", 20, 3)}})
 	require.NoError(t, err)
 	requireVersion(t, v, 1, 2)
-	v, err = manager.OnExternalRefresh(ctx, ExternalRefreshDataViewEvent{CollectionID: 1, AddSegments: []LoadableSegment{segment(4, "ch-1", 10)}})
+	v, err = manager.OnExternalRefresh(ctx, ExternalRefreshDataViewEvent{CollectionID: 1, AddSegments: []LoadableSegment{segmentWithManifestVersion(4, "ch-1", 10, 4)}})
 	require.NoError(t, err)
 	requireVersion(t, v, 1, 3)
 	v, err = manager.OnDropPartition(ctx, DropPartitionDataViewEvent{CollectionID: 1, PartitionIDs: []int64{20}})
@@ -191,8 +280,9 @@ func TestManagerMutationsAndVersions(t *testing.T) {
 	ids := make(map[int64]struct{})
 	for _, shard := range ref.DataView().GetShards() {
 		for _, partition := range shard.GetPartitions() {
-			for _, id := range partition.GetSegmentIds() {
+			for idx, id := range partition.GetSegmentIds() {
 				ids[id] = struct{}{}
+				require.Equal(t, int64(2), partition.GetSegmentManifestVersions()[idx])
 			}
 		}
 	}
@@ -235,13 +325,24 @@ func TestManagerRecoveryAndDrop(t *testing.T) {
 	ctx := context.Background()
 	catalog := &fakeDataViewCatalog{}
 	require.NoError(t, catalog.SaveDataView(ctx, &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(1, 0)}))
-	require.NoError(t, catalog.SaveDataView(ctx, &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(2, 0)}))
+	require.NoError(t, catalog.SaveDataView(ctx, &viewpb.DataViewOfCollection{
+		CollectionId: 1,
+		DataVersion:  version(2, 0),
+		Shards: []*viewpb.DataViewOfShard{{
+			Vchannel: "ch-1",
+			Partitions: []*viewpb.DataViewOfPartition{{
+				PartitionId: 10,
+				SegmentIds:  []int64{100, 200},
+			}},
+		}},
+	}))
 	manager, err := RecoverManager(ctx, catalog, recoverAllCollections)
 	require.NoError(t, err)
 	oldRef, err := manager.Latest(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, oldRef)
 	requireVersion(t, oldRef.Version(), 2, 0)
+	require.Equal(t, []int64{0, 0}, oldRef.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
 
 	_, err = manager.OnDropCollection(ctx, 1)
 	require.NoError(t, err)
@@ -299,6 +400,11 @@ func TestManagerAccessAndMutationEdges(t *testing.T) {
 		Segments:     []LoadableSegment{segment(1, "ch-2", 10)},
 	})
 	require.Error(t, err)
+	_, err = manager.OnFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(3, "ch-1", 10, -1)},
+	})
+	require.Error(t, err)
 
 	catalog.dropAllErr = errors.New("drop failed")
 	_, err = manager.OnDropCollection(ctx, 1)
@@ -350,6 +456,22 @@ func TestManagerRecoveryValidation(t *testing.T) {
 		{CollectionId: 1},
 		{CollectionId: 0, DataVersion: version(1, 0)},
 		{CollectionId: 1, DataVersion: version(0, 1)},
+		{
+			CollectionId: 1,
+			DataVersion:  version(1, 0),
+			Shards: []*viewpb.DataViewOfShard{{Partitions: []*viewpb.DataViewOfPartition{{
+				SegmentIds:              []int64{1, 2},
+				SegmentManifestVersions: []int64{1},
+			}}}},
+		},
+		{
+			CollectionId: 1,
+			DataVersion:  version(1, 0),
+			Shards: []*viewpb.DataViewOfShard{{Partitions: []*viewpb.DataViewOfPartition{{
+				SegmentIds:              []int64{1},
+				SegmentManifestVersions: []int64{-1},
+			}}}},
+		},
 	} {
 		_, err := RecoverManager(ctx, &fakeDataViewCatalog{views: []*viewpb.DataViewOfCollection{invalid}}, recoverAllCollections)
 		require.Error(t, err)

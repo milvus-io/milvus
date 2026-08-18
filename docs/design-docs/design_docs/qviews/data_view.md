@@ -9,27 +9,53 @@ physical Segment GC are deliberately outside this component.
 `DataViewOfCollection` is an immutable collection snapshot:
 
 ```text
-Collection -> VChannel -> Partition -> loadable Segment IDs
+Collection -> VChannel -> Partition -> loadable (Segment ID, Manifest version)
 ```
 
-The manager stores membership and the collection-level `DataVersion` only. A
+Each partition stores `segment_ids` and `segment_manifest_versions` as parallel
+packed arrays. The manager also stores the collection-level `DataVersion`. A
 caller must pass a `LoadableSegment` descriptor after its own loadability gate:
 
 ```go
 type LoadableSegment struct {
-    SegmentID   int64
-    VChannel    string
-    PartitionID int64
+    SegmentID       int64
+    VChannel        string
+    PartitionID     int64
+    ManifestVersion int64
 }
 ```
 
 The manager does not query SegmentMeta or infer state, level, visibility,
-importing, indexes, manifests, delete frontiers, or compaction lineage.
+importing, indexes, manifest versions, delete frontiers, or compaction lineage.
+The event producer supplies the Manifest version or leaves it at zero.
 Within one snapshot it keeps a Segment ID in only one VChannel/Partition:
-re-adding it at the same location is a no-op, while adding it at a different
-location is a data-integrity error. It cannot detect duplicate logical data
-stored under different Segment IDs; loadability, completeness, and lineage are
-event-producer responsibilities.
+re-adding it at the same location with the same Manifest version is a no-op, a
+higher Manifest version updates it, and a lower version is a data-integrity
+error. Changing its location is also a data-integrity error. It cannot detect
+duplicate logical data stored under different Segment IDs; loadability,
+completeness, and lineage are event-producer responsibilities.
+
+Manifest version has two modes:
+
+- `0` means indirect loading. QueryCoord watches Coordinator SegmentMeta
+  changes, resolves the latest complete `SegmentInfo`, and freezes it into the
+  corresponding QueryView/load operation. This covers current and legacy
+  Segments, non-StorageV3 Segments, unstable base paths, and manifests that are
+  not yet suitable for direct loading.
+- A positive value identifies a committed canonical StorageV3 Manifest.
+  QueryNode can construct
+  `{rootPath}/insert_log/{collectionID}/{partitionID}/{segmentID}/_metadata/manifest-{version}.avro`
+  and derive all Segment loading information from it. Such a Segment no longer
+  needs the Coordinator SegmentMeta watcher for data updates.
+
+Zero is a resolution mode, not a comparable data revision. Existing persisted
+DataViews omit `segment_manifest_versions`; recovery expands the missing values
+to zero. Manifest versions are monotonic within successive DataViews: an
+existing Segment may keep its version or advance to a higher version, but it
+cannot regress. Coordinator SegmentMeta changes alone do not rewrite DataView;
+an advance must be carried by one of the existing Segment publication events.
+There is no separate Manifest-update API. Current event producers publish zero,
+so current Segments remain on the SegmentMeta watch path.
 
 `transform_start_after_timetick` remains a wire-compatible derived field in
 the protobuf, but this manager clears it and never persists or computes it.
@@ -76,13 +102,14 @@ compact_version)`.
 | Create | first snapshot `(1,0)` |
 | Flush | `(S,C) -> (S+1,0)` |
 | Import, copy completion, compact, external refresh, drop partition, truncate | `(S,C) -> (S,C+1)` |
-| No membership change | return the current version without persisting |
+| No membership or Manifest-version change | return the current version without persisting |
 | Drop collection | delete all persisted snapshots; no new snapshot |
 
 `streaming_version` is the publication epoch used by StreamingNode to decide
 whether a flushed Segment must still participate in growing-side queries. Only
 StreamingNode Flush performs that growing-to-sealed handoff. Every other
-membership change advances `compact_version`, even when it only adds Segments.
+membership or Manifest-version change carried by an existing On event advances
+`compact_version`, even when it only adds Segments.
 
 StreamingNode Flush has a stronger completion contract: a successful `OnFlush`
 means every supplied Segment is immediately allowed to load on QueryNode and is
@@ -152,8 +179,9 @@ lifecycle record.
 
 For a valid Collection, recovery picks the maximum version as latest,
 initializes runtime ref counts to zero, and rejects conflicting snapshots with
-the same version. It does not repair or rebuild membership from SegmentMeta or
-any other metadata source.
+the same version. It expands absent legacy `segment_manifest_versions` entries
+to zero but does not repair or rebuild membership from SegmentMeta or any other
+metadata source.
 
 Recovery validates every discovered Collection against CollectionMeta before
 deleting any stale prefix. This prevents a transient validation failure from

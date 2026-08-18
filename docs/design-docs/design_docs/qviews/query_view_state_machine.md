@@ -400,9 +400,17 @@ QueryNode is fully stateless with no persistence and no recovery process. It doe
 - Received Preparing sync signal from Coord via SyncQueryView.
 
 **Automatic Behavior:**
-1. Asynchronously load segments from object storage.
-2. Subscribe to the pure delete stream from SN.
-3. Mark each segment as ready progressively; report the latest accumulated
+1. Resolve each Segment's loading metadata from the DataView Manifest version:
+   - Version `0`: Coord keeps watching Coordinator SegmentMeta, resolves the
+     complete current SegmentInfo, and freezes it into this QueryView/load
+     operation before dispatch.
+   - Positive version: QueryNode constructs the canonical StorageV3 Manifest
+     object path from Collection/Partition/Segment IDs plus the version and
+     derives all loading metadata directly from that Manifest; no Coordinator
+     SegmentMeta watch is required for this Segment.
+2. Asynchronously load segments from object storage.
+3. Subscribe to the pure delete stream from SN.
+4. Mark each segment as ready progressively; report the latest accumulated
    ready subset to Coord via `ready_segment_ids` in responses.
 
 **Transitions:**

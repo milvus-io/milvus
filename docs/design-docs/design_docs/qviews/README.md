@@ -94,6 +94,13 @@ derived by DataViewManager. The manager validates unique Segment-ID placement,
 but callers decide when a Segment is loadable and must not publish overlapping
 logical data under different Segment IDs.
 
+Each partition also carries a packed Manifest-version array parallel to its
+packed Segment-ID array. Version `0` keeps the Coordinator SegmentMeta watch
+and resolves full SegmentInfo for loading. A positive version denotes a
+canonical StorageV3 Manifest: QueryNode derives its object-storage path from
+Collection/Partition/Segment IDs and the version, loads all data metadata from
+the Manifest, and does not watch Coordinator SegmentMeta for that Segment.
+
 ### 5.2 Data Structures
 
 `DataViewOfCollection`, `DataViewOfShard`, `DataViewOfPartition`, and
@@ -112,8 +119,10 @@ The following timeline shows the current Collection-level snapshot behavior:
 | 5 | Cluster compaction or reshard | `(3,2)` | `6, 7, 8, 9` |
 | 6 | Import Segment 10 | `(3,3)` | `6, 7, 8, 9, 10` |
 
-Each row is a complete immutable snapshot. DataView does not store a per-Segment
-join version; only the Collection snapshot carries `DataVersion`.
+Each row is a complete immutable snapshot. Every Segment entry also has a
+Manifest version; the table omits the value for readability. Existing producers
+publish `0` until they can guarantee a committed canonical StorageV3 Manifest.
+The Collection snapshot is still identified and ordered by `DataVersion`.
 
 Key observations:
 - Only Flush operations cause streaming_version to increment (for example,
@@ -122,17 +131,23 @@ Key observations:
   example, `(3,0) → (3,1) → (3,2) → (3,3)`).
 - Compaction replaces its input membership with output membership in one
   snapshot.
+- A Segment's Manifest version is monotonic across DataViews. Replaying the
+  same version is a no-op, a higher version advances it, and a lower version is
+  rejected.
 
 ### 5.4 Constraints
 
-- Each DataVersion can correspond to one or more segment membership changes.
+- Each DataVersion corresponds to one or more Segment membership changes or
+  Manifest-version advances carried by the same publication event.
 - DataViewManager does not understand compaction lineage. Event producers must
   not publish a superseded input Segment again after compaction removes it.
-- The view is not affected by offline tasks such as indexing.
+- SegmentMeta and Manifest updates do not automatically rewrite DataView.
+  Version-0 Segments observe them through the Coordinator watch path. A higher
+  version may be published only through an existing DataView On event; there is
+  no standalone Manifest-update API.
 - The storage view version number is at the Collection level (laying the groundwork for future capabilities such as Shard splitting).
-- DataView tracks loadable segment membership only. Segment content changes,
-  manifest updates, segment-level data version changes, and delete frontier
-  refreshes do not advance DataVersion unless membership changes.
+- DataView tracks loadable Segment membership and monotonically increasing
+  Manifest versions. Delete-frontier refreshes do not advance DataVersion.
 
 ## 6. Query Side — Query View (QueryView)
 
