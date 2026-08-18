@@ -1955,6 +1955,51 @@ func TestLegacyAvailableSlotsFoldsCPUDominant(t *testing.T) {
 	assert.Equal(t, int64(12), legacyAvailableSlots(snap, 128))
 }
 
+// TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint pins the exact
+// arithmetic of the fold, which the two tests above cannot see.
+//
+// They both use legacyTotal=128, where the rounding error is invisible: the
+// mathematically correct answer is 12.8, so 12.799999999999997 and 12.8 both
+// truncate to 12. The error only surfaces when legacyTotal * (1 - utilization)
+// lands exactly on an integer, i.e. when legacyTotal is a multiple of 10 for a
+// 90%-consumed dimension.
+//
+// Folding the free fraction as `1 - reserved/total` costs two roundings: 900/1000
+// is the double nearest 0.9 (which is slightly ABOVE 0.9), and subtracting that
+// from 1 lands on 0.09999999999999998, slightly BELOW a tenth. 80 x that is
+// 7.999999999999998, and int64() truncates towards zero -- so a node with exactly
+// one tenth of its budget free advertised 7 slots instead of 8. Computing the
+// free fraction directly as (total-reserved)/total is one rounding instead of
+// two and lands on the double nearest 0.1, which is what this asserts.
+//
+// The lost slot is small but it is not noise: it is a systematic under-report,
+// always in the direction of hiding capacity from DataCoord, and it is exactly
+// what made TestQuerySlotReportsTheLedgersView and
+// TestGetJobStatsReportsTheLedgersView fail in CI (whose legacyTotal is 80)
+// while passing on hardware whose CalculateNodeSlots() is not a multiple of 10.
+func TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint(t *testing.T) {
+	paramtable.Init()
+
+	// Exactly one tenth of the memory budget is free; CPU is nine tenths free,
+	// so memory is the worse dimension and must win the fold.
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	}
+
+	assert.Equal(t, int64(8), legacyAvailableSlots(snap, 80),
+		"one tenth of 80 slots is 8, not 7")
+
+	// The same rounding, on the CPU arm rather than the memory arm.
+	cpuBound := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 9, Memory: 10},
+	}
+
+	assert.Equal(t, int64(8), legacyAvailableSlots(cpuBound, 80),
+		"one tenth of 80 slots is 8, not 7, whichever dimension is binding")
+}
+
 func TestLegacyAvailableSlotsZeroWhenFrozen(t *testing.T) {
 	paramtable.Init()
 
