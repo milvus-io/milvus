@@ -339,10 +339,17 @@ func TestGrpcLoggerConcurrentUpgradeStaysLoopbackOnly(t *testing.T) {
 		securedResult <- EnsureListenerMode(true)
 	}()
 
-	// Give the secured request time to overlap the deliberately blocked legacy
-	// start. Under the old singleflight implementation it joined the wildcard
-	// creation and incorrectly returned success without upgrading the listener.
-	time.Sleep(20 * time.Millisecond)
+	// The secured request must not be able to report success while the wildcard
+	// creation it has to displace is still in flight -- under the old
+	// singleflight it joined that creation and returned success without
+	// upgrading the listener. Asserted as "must not happen yet" rather than by
+	// sleeping and hoping the overlap occurred: a slow machine only gives the
+	// bug more time to show itself, so it cannot turn this into a false pass.
+	select {
+	case err := <-securedResult:
+		t.Fatalf("secured mode reported %v while the wildcard start was still blocked", err)
+	case <-time.After(50 * time.Millisecond):
+	}
 	close(releaseFirstListen)
 
 	if err := <-legacyResult; err != nil {

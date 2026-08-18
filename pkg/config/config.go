@@ -87,6 +87,21 @@ func lowerKey(key string) string {
 	return strings.ToLower(key)
 }
 
+// FormatKey is the identity a config key is stored and looked up under.
+// Callers that guard a specific key must compare against this rather than a
+// hand-rolled normalization: separators are stripped, not translated, so
+// "a.b.c", "a_b_c", "a/b/c" and "abc" are all the same key.
+func FormatKey(key string) string { return formatKey(key) }
+
+// maxFormattedKeys bounds the normalization memo. The cache exists for the
+// fixed config vocabulary, which is a few hundred keys and is resolved on every
+// ParamItem read -- but /management/config/get and /management/config/alter
+// normalize caller-supplied keys, and both answer anonymously while
+// common.security.adminAuthEnabled is off. An unbounded memo therefore lets
+// anyone who can reach the metrics port grow it without limit. Past the bound
+// the result is still correct, it is just recomputed.
+const maxFormattedKeys = 4096
+
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
@@ -95,9 +110,19 @@ func formatKey(key string) string {
 	if ok {
 		return cached
 	}
-	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
-	formattedKeys.Insert(key, result)
+	result := normalizeKey(key)
+	// Racy against a concurrent Insert, and deliberately so: the bound is a
+	// backstop against caller-driven growth, not an exact capacity.
+	if formattedKeys.Len() < maxFormattedKeys {
+		formattedKeys.Insert(key, result)
+	}
 	return result
+}
+
+// normalizeKey is the normalization itself, split out so the memoized and
+// unmemoized paths cannot drift.
+func normalizeKey(key string) string {
+	return strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
