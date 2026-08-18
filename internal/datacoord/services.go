@@ -2326,10 +2326,16 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		// told the call succeeded and any unsatisfiable condition the callback
 		// hits becomes an unbounded retry that never releases this collection's
 		// exclusive DDL resource key.
-		if err := checkSnapshotVisibilityReachable(ctx, s.meta, req.GetCollectionId()); err != nil {
-			broadcaster.Close()
-			mlog.Warn(context.TODO(), "CreateSnapshot rejected: its sort wait could never finish", mlog.Err(err))
-			return merr.Status(err), nil
+		//
+		// Only when the wait was actually asked for. Without it none of these
+		// conditions blocks anything, so refusing on them would turn an
+		// unrelated cluster state into a snapshot outage.
+		if req.GetWaitForSortedSegments() {
+			if err := checkSnapshotVisibilityReachable(ctx, s.meta, req.GetCollectionId()); err != nil {
+				broadcaster.Close()
+				mlog.Warn(context.TODO(), "CreateSnapshot rejected: its sort wait could never finish", mlog.Err(err))
+				return merr.Status(err), nil
+			}
 		}
 
 		// Broadcast CreateSnapshot message via DDL framework.
@@ -2362,6 +2368,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 				Name:                        req.GetName(),
 				Description:                 req.GetDescription(),
 				CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
+				WaitForSortedSegments:       req.GetWaitForSortedSegments(),
 			}).
 			WithBody(&message.CreateSnapshotMessageBody{}).
 			WithBroadcast(channels).

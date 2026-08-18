@@ -121,7 +121,7 @@ type SnapshotManager interface {
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, boundary *SnapshotBoundary) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, boundary *SnapshotBoundary, waitForSortedSegments bool) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -465,6 +465,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	name, description string,
 	compactionProtectionSeconds int64,
 	boundary *SnapshotBoundary,
+	waitForSortedSegments bool,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	defer sm.lockCreateSnapshot(collectionID)()
@@ -529,7 +530,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	// This runs before SetSnapshotPending, and the order is not cosmetic: pending
 	// blocks sort compaction too, so waiting under it would be waiting for tasks
 	// this call has itself forbidden.
-	if err := sm.waitForVisibleBoundary(ctx, collectionID, boundary); err != nil {
+	if err := sm.waitForBoundary(ctx, collectionID, boundary, waitForSortedSegments); err != nil {
 		return 0, err
 	}
 
@@ -588,6 +589,10 @@ func (sm *snapshotManager) CreateSnapshot(
 	snapshotData.SnapshotInfo.Id = snapshotID
 	snapshotData.SnapshotInfo.Name = name
 	snapshotData.SnapshotInfo.Description = description
+	// Recorded so a consumer can tell a backfill-ready cut from an ordinary one:
+	// without the wait the capture may hold segments whose manifests predate a
+	// concurrent schema-evolution backfill.
+	snapshotData.SnapshotInfo.WaitedForSortedSegments = waitForSortedSegments
 
 	// Set compaction protection if requested
 	if compactionProtectionSeconds > 0 {
@@ -885,7 +890,7 @@ func checkSnapshotVisibilityReachable(ctx context.Context, m *meta, collectionID
 // message is already in the WAL, so the snapshot is created eventually either
 // way, once the set can actually drain -- see the enableSortCompaction check
 // below for the one case where it structurally cannot.
-func (sm *snapshotManager) waitForVisibleBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) error {
+func (sm *snapshotManager) waitForBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary, waitForSorted bool) error {
 	// The budget is a deadline, so express it as one: the same select then covers
 	// both running out of budget and DataCoord shutting down, and both want the
 	// same thing -- give the lock back and let the scheduler come again.
@@ -904,6 +909,18 @@ func (sm *snapshotManager) waitForVisibleBoundary(ctx context.Context, collectio
 		behind := sm.channelsBehindBoundary(boundary)
 		var awaiting []int64
 		if len(behind) == 0 {
+			// Completeness is mandatory; visibility is not. Skipping the
+			// checkpoint gate above would capture a set DataCoord has not
+			// finished hearing about -- silent loss, not a trade-off. Skipping
+			// the visibility wait only means the capture may include segments
+			// that are still unindexed, whose rows are served anyway.
+			if !waitForSorted {
+				mlog.Info(ctx, "snapshot boundary complete, not waiting for sorted segments",
+					mlog.FieldCollectionID(collectionID),
+					mlog.Uint64("snapshotTs", boundary.SnapshotTs),
+					mlog.Duration("waited", time.Since(start)))
+				return nil
+			}
 			var err error
 			if awaiting, err = sm.segmentsAwaitingVisibility(ctx, collectionID, boundary); err != nil {
 				return err

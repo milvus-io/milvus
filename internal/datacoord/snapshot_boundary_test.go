@@ -206,7 +206,7 @@ func TestWaitForVisibleBoundaryWaitsForCompleteness(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key, "0")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
 
-	err := sm.waitForVisibleBoundary(context.Background(), 100, boundaryTestBoundary())
+	err := sm.waitForBoundary(context.Background(), 100, boundaryTestBoundary(), true)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
 	assert.Contains(t, err.Error(), "reach its boundary")
@@ -400,7 +400,32 @@ func TestWaitForVisibleBoundary(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		assert.NoError(t, sm.waitForVisibleBoundary(ctx, 100, boundaryTestBoundary()))
+		assert.NoError(t, sm.waitForBoundary(ctx, 100, boundaryTestBoundary(), true))
+	})
+
+	t.Run("without the opt-in, does not wait for sort", func(t *testing.T) {
+		// The default. The segment is invisible and would be awaited under the
+		// opt-in, but its rows are served anyway (as a growing segment), so the
+		// capture proceeds. A canceled context proves no waiting happened.
+		sm := boundaryTestManager(boundaryTestSegment(1))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		assert.NoError(t, sm.waitForBoundary(ctx, 100, boundaryTestBoundary(), false))
+	})
+
+	t.Run("without the opt-in, still waits for the boundary to be complete", func(t *testing.T) {
+		// Completeness is not optional: until every channel checkpoint has
+		// passed the boundary, DataCoord has not heard about the segments the
+		// fence just sealed, so capturing now would silently miss them.
+		sm := boundaryTestManagerAt(boundaryTestSeekTs - 1)
+
+		paramtable.Get().Save(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key, "0")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
+
+		err := sm.waitForBoundary(context.Background(), 100, boundaryTestBoundary(), false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "reach its boundary")
 	})
 
 	t.Run("returns a retryable error past the per-attempt budget", func(t *testing.T) {
@@ -409,7 +434,7 @@ func TestWaitForVisibleBoundary(t *testing.T) {
 		paramtable.Get().Save(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key, "0")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
 
-		err := sm.waitForVisibleBoundary(context.Background(), 100, boundaryTestBoundary())
+		err := sm.waitForBoundary(context.Background(), 100, boundaryTestBoundary(), true)
 		assert.Error(t, err)
 		// Retryable: the ack scheduler has to come back, since the message is
 		// already in the WAL and the snapshot must eventually exist. This does
@@ -430,7 +455,7 @@ func TestWaitForVisibleBoundary(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		assert.NoError(t, sm.waitForVisibleBoundary(ctx, 100, boundaryTestBoundary()))
+		assert.NoError(t, sm.waitForBoundary(ctx, 100, boundaryTestBoundary(), true))
 	})
 
 	t.Run("fails fast on segments stranded invisible with sort off", func(t *testing.T) {
@@ -445,7 +470,7 @@ func TestWaitForVisibleBoundary(t *testing.T) {
 		defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
 
 		start := time.Now()
-		err := sm.waitForVisibleBoundary(context.Background(), 100, boundaryTestBoundary())
+		err := sm.waitForBoundary(context.Background(), 100, boundaryTestBoundary(), true)
 		assert.Less(t, time.Since(start), 5*time.Second)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
@@ -465,7 +490,7 @@ func TestWaitForVisibleBoundary(t *testing.T) {
 		defer paramtable.Get().Reset(Params.DataCoordCfg.SnapshotSortWaitTimeout.Key)
 
 		start := time.Now()
-		err := sm.waitForVisibleBoundary(context.Background(), 100, boundaryTestBoundary())
+		err := sm.waitForBoundary(context.Background(), 100, boundaryTestBoundary(), true)
 		assert.Less(t, time.Since(start), 5*time.Second)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable), "got %v", err)
@@ -492,12 +517,12 @@ func TestWaitForVisibleBoundary(t *testing.T) {
 			}))
 		}()
 
-		assert.NoError(t, sm.waitForVisibleBoundary(context.Background(), 100, boundaryTestBoundary()))
+		assert.NoError(t, sm.waitForBoundary(context.Background(), 100, boundaryTestBoundary(), true))
 	})
 }
 
 // checkSnapshotVisibilityReachable is the pre-broadcast half of the same question
-// waitForVisibleBoundary asks after the fact. It has to be the one that actually
+// waitForBoundary asks after the fact. It has to be the one that actually
 // rejects: once the message is appended the client has been told the call
 // succeeded, and the callback's error only buys an unbounded retry that never
 // gives the collection's DDL resource key back.

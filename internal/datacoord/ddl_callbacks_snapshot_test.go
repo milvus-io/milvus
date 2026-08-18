@@ -64,12 +64,16 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		name, description string,
 		compactionProtectionSeconds int64,
 		boundary *SnapshotBoundary,
+		waitForSortedSegments bool,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
 		assert.Equal(t, int64(3600), compactionProtectionSeconds)
+		// The header carries the opt-in through to the callback, since the
+		// request that asked for it is long gone by the time this runs.
+		assert.True(t, waitForSortedSegments)
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -87,6 +91,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 			Name:                        "test_snapshot",
 			Description:                 "test description",
 			CompactionProtectionSeconds: 3600,
+			WaitForSortedSegments:       true,
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
@@ -121,6 +126,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		name, description string,
 		compactionProtectionSeconds int64,
 		boundary *SnapshotBoundary,
+		waitForSortedSegments bool,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()

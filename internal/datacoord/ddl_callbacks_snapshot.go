@@ -45,7 +45,7 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	}
 
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, boundary)
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, boundary, header.GetWaitForSortedSegments())
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err

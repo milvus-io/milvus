@@ -167,7 +167,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0, testCreateSnapshotBoundary())
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.NoError(t, err)
@@ -218,7 +218,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 		nil, // indexEngineVersionManager
 	)
 
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, testCreateSnapshotBoundary())
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, testCreateSnapshotBoundary(), true)
 
 	// Verify snapshot pending intent is cleared after CreateSnapshot completes
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
@@ -252,7 +252,7 @@ func TestSnapshotManager_CreateSnapshot_ReplayIsIdempotent(t *testing.T) {
 		nil, /* indexEngineVersionManager */
 	)
 
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0, testCreateSnapshotBoundary())
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(42), snapshotID)
@@ -287,7 +287,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary())
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.Error(t, err)
@@ -325,7 +325,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary())
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.Error(t, err)
@@ -371,7 +371,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary())
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.Error(t, err)
@@ -408,7 +408,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary(), true)
 	assert.Error(t, err)
 
 	// Pending comes off: it blocks sort compaction too, so holding it across the
@@ -459,7 +459,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary(), true)
 	assert.Error(t, err)
 
 	// Pending off, staging still on -- see the GenSnapshot-error case above.
@@ -515,7 +515,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0, testCreateSnapshotBoundary()) // compactionProtectionSeconds = 0
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0, testCreateSnapshotBoundary(), true) // compactionProtectionSeconds = 0
 	assert.NoError(t, err)
 
 	// After CreateSnapshot returns, the deferred ClearSnapshotPending must have run.
@@ -548,7 +548,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary(), true)
 	assert.Error(t, err)
 
 	// Pending off, staging still on -- see the GenSnapshot-error case above.
@@ -3373,7 +3373,7 @@ func TestSnapshotExportManager_LockTargetSerializesEquivalentRoots(t *testing.T)
 	<-secondDone
 }
 
-// The create lock is held across waitForVisibleBoundary, which can run for the
+// The create lock is held across waitForBoundary, which can run for the
 // whole life of a snapshot. While it was process-wide, one collection with
 // stalled sort compaction starved snapshot creation on every other collection.
 func TestLockCreateSnapshot_ScopedPerCollection(t *testing.T) {
@@ -3495,7 +3495,7 @@ func TestCreateSnapshot_DoesNotHoldPendingWhileQueuedForCaptureSlot(t *testing.T
 		// nil allocator: this panics once it gets a slot, which is fine -- the
 		// assertion below happens while it is still queued.
 		defer func() { _ = recover() }()
-		_, _ = sm.CreateSnapshot(context.Background(), 100, "queued", "", 0, testCreateSnapshotBoundary())
+		_, _ = sm.CreateSnapshot(context.Background(), 100, "queued", "", 0, testCreateSnapshotBoundary(), true)
 	}()
 
 	// Give it time to reach the slot wait.

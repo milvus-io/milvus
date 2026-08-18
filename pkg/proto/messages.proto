@@ -601,6 +601,10 @@ message CreateSnapshotMessageHeader {
     string name         = 2;
     string description  = 3;
     int64 compaction_protection_seconds = 4; // duration in seconds to protect referenced segments from compaction
+    // Carried on the message because the wait runs in the DDL ack callback,
+    // long after the request that asked for it is gone. See
+    // CreateSnapshotRequest.wait_for_sorted_segments.
+    bool wait_for_sorted_segments = 5;
 }
 
 // CreateSnapshotMessageBody is the body of create snapshot message.
