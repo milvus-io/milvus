@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	dataviewpkg "github.com/milvus-io/milvus/internal/dataview"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -6575,6 +6577,160 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 		require.Equal(t, uint64(777), infos[0].GetCreateTs())
 		require.Equal(t, uint64(777), meta.GetSegment(ctx, 1).GetCreateTs())
 	})
+}
+
+func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing.T) {
+	ctx := context.Background()
+	newMetaWithDataView := func(t *testing.T) (*meta, dataviewpkg.Manager) {
+		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+		segments := NewSegmentsInfo()
+		for _, segmentID := range []int64{1, 2} {
+			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  100,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				NumOfRows:     100,
+			}))
+		}
+		manager := dataviewpkg.NewManager(catalog)
+		_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{
+			CollectionID: 100,
+			VChannels:    []string{"ch-1"},
+		})
+		require.NoError(t, err)
+		_, err = manager.OnImport(ctx, dataviewpkg.ImportDataViewEvent{
+			CollectionID: 100,
+			Segments: []dataviewpkg.LoadableSegment{
+				{SegmentID: 1, VChannel: "ch-1", PartitionID: 10},
+				{SegmentID: 2, VChannel: "ch-1", PartitionID: 10},
+			},
+		})
+		require.NoError(t, err)
+		return &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}, manager
+	}
+	dataViewSegmentIDs := func(t *testing.T, manager dataviewpkg.Manager) []int64 {
+		ref, err := manager.Latest(ctx, 100)
+		require.NoError(t, err)
+		require.NotNil(t, ref)
+		defer ref.Deref()
+		return lo.FlatMap(ref.DataView().GetShards(), func(shard *viewpb.DataViewOfShard, _ int) []int64 {
+			return lo.FlatMap(shard.GetPartitions(), func(partition *viewpb.DataViewOfPartition, _ int) []int64 {
+				return partition.GetSegmentIds()
+			})
+		})
+	}
+	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+		SegmentID: 3,
+		NumOfRows: 100,
+	}}}
+
+	t.Run("mix publishes final output", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		_, _, err := meta.CompleteCompactionMutation(ctx, task, proto.Clone(result).(*datapb.CompactionPlanResult))
+		require.NoError(t, err)
+		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("clustering does not publish temporary output", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		_, _, err := meta.CompleteCompactionMutation(ctx, task, proto.Clone(result).(*datapb.CompactionPlanResult))
+		require.NoError(t, err)
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+	})
+}
+
+type blockingCompactDataViewManager struct {
+	dataviewpkg.Manager
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingCompactDataViewManager) OnCompact(ctx context.Context, event dataviewpkg.CompactDataViewEvent) (*viewpb.DataVersion, error) {
+	m.once.Do(func() {
+		close(m.entered)
+		<-m.release
+	})
+	return m.Manager.OnCompact(ctx, event)
+}
+
+func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch-1",
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     100,
+	}))
+	manager := dataviewpkg.NewManager(catalog)
+	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	_, err = manager.OnImport(ctx, dataviewpkg.ImportDataViewEvent{
+		CollectionID: 100,
+		Segments:     []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}},
+	})
+	require.NoError(t, err)
+	blockingManager := &blockingCompactDataViewManager{
+		Manager: manager,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	meta := &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: blockingManager}
+	compact := func(from, to int64) error {
+		_, _, err := meta.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{from},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{SegmentID: to, NumOfRows: 100}}})
+		return err
+	}
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- compact(1, 2) }()
+	<-blockingManager.entered
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- compact(2, 3) }()
+	select {
+	case err := <-secondDone:
+		require.Failf(t, "second compaction completed out of order", "error: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(blockingManager.release)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+
+	ref, err := manager.Latest(ctx, 100)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	require.Equal(t, []int64{3}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
 }
 
 func newCompactionCreateTsTestMeta(segments ...*SegmentInfo) *meta {

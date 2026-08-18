@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -6003,6 +6004,34 @@ func TestHandleCommitVchannelRPC(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp))
+}
+
+func TestGetImportDataViewSegmentsUsesFinalSegments(t *testing.T) {
+	ctx := context.Background()
+	segments := NewSegmentsInfo()
+	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
+		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: channel,
+			State:         state,
+			IsInvisible:   invisible,
+		}})
+	}
+	addSegment(10, "vchan-0", commonpb.SegmentState_Dropped, false)
+	addSegment(20, "vchan-0", commonpb.SegmentState_Flushed, true)
+	addSegment(110, "vchan-0", commonpb.SegmentState_Flushed, false)
+	addSegment(120, "vchan-0", commonpb.SegmentState_Flushed, false)
+
+	server := &Server{
+		meta: &meta{segments: segments},
+	}
+	actual := server.getImportDataViewSegments(ctx, []int64{10, 20, 110, 120})
+	require.Equal(t, []dataview.LoadableSegment{
+		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
+		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
+	}, actual)
 }
 
 func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {

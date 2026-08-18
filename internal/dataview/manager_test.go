@@ -415,6 +415,59 @@ func TestManagerMutationsAndVersions(t *testing.T) {
 	require.Equal(t, map[int64]struct{}{2: {}}, ids)
 }
 
+func TestManagerCompactValidatesReplacement(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	_, err = manager.OnImport(ctx, ImportDataViewEvent{
+		CollectionID: 1,
+		Segments: []LoadableSegment{
+			segmentWithManifestVersion(1, "ch-1", 10, 1),
+			segmentWithManifestVersion(2, "ch-1", 10, 1),
+		},
+	})
+	require.NoError(t, err)
+
+	event := CompactDataViewEvent{
+		CollectionID: 1,
+		CompactFrom:  []int64{1, 2},
+		CompactTo:    []LoadableSegment{segmentWithManifestVersion(3, "ch-1", 10, 2)},
+	}
+	version, err := manager.OnCompact(ctx, event)
+	require.NoError(t, err)
+	requireVersion(t, version, 1, 2)
+
+	// Replaying the same final replacement is idempotent.
+	version, err = manager.OnCompact(ctx, event)
+	require.NoError(t, err)
+	requireVersion(t, version, 1, 2)
+
+	// A replacement whose source and target are both absent is invalid and must
+	// leave the latest snapshot unchanged.
+	_, err = manager.OnCompact(ctx, CompactDataViewEvent{
+		CollectionID: 1,
+		CompactFrom:  []int64{4},
+		CompactTo:    []LoadableSegment{segmentWithManifestVersion(5, "ch-1", 10, 3)},
+	})
+	require.Error(t, err)
+
+	// A partial source match cannot result from an atomic DataView commit.
+	_, err = manager.OnCompact(ctx, CompactDataViewEvent{
+		CollectionID: 1,
+		CompactFrom:  []int64{3, 4},
+		CompactTo:    []LoadableSegment{segmentWithManifestVersion(6, "ch-1", 10, 3)},
+	})
+	require.Error(t, err)
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	requireVersion(t, ref.Version(), 1, 2)
+	require.Equal(t, []int64{3}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+}
+
 func TestManagerRejectsConflictingSegments(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTestManager()

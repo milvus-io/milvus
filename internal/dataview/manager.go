@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Catalog interface {
@@ -282,7 +283,14 @@ func (m *dataViewManager) OnCopySegmentComplete(ctx context.Context, event CopyS
 }
 
 func (m *dataViewManager) OnCompact(ctx context.Context, event CompactDataViewEvent) (*viewpb.DataVersion, error) {
-	return m.commit(ctx, event.CollectionID, dataViewAdvanceCompact, membershipMutation{
+	state, unlock := m.lockStateForMutation(event.CollectionID)
+	defer unlock()
+
+	base := latestView(state)
+	if err := validateCompactMutation(base, event); err != nil {
+		return nil, err
+	}
+	return m.commitLocked(ctx, state, dataViewAdvanceCompact, membershipMutation{
 		add:    event.CompactTo,
 		remove: event.CompactFrom,
 	})
@@ -600,6 +608,55 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 		}
 	}
 	return nil
+}
+
+func validateCompactMutation(view *viewpb.DataViewOfCollection, event CompactDataViewEvent) error {
+	if len(event.CompactFrom) == 0 {
+		return merr.WrapErrServiceInternalMsg("DataView compaction event has no input Segments")
+	}
+	if view == nil {
+		return merr.WrapErrDataIntegrityMsg(
+			"DataView compaction references missing collection %d",
+			event.CollectionID,
+		)
+	}
+
+	slots := dataViewSegmentSlots(view)
+	inputIDs := typeutil.NewSet(event.CompactFrom...)
+	missing := make([]int64, 0)
+	for segmentID := range inputIDs {
+		if segmentID == 0 {
+			return merr.WrapErrServiceInternalMsg("DataView compaction event has invalid input Segment 0")
+		}
+		if _, ok := slots[segmentID]; !ok {
+			missing = append(missing, segmentID)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if len(missing) == len(inputIDs) && compactTargetsPresent(slots, event.CompactTo) {
+		return nil
+	}
+	sort.Slice(missing, func(i, j int) bool { return missing[i] < missing[j] })
+	return merr.WrapErrDataIntegrityMsg(
+		"DataView compaction inputs are missing: collection=%d segments=%v",
+		event.CollectionID,
+		missing,
+	)
+}
+
+func compactTargetsPresent(slots map[int64]segmentSlot, targets []LoadableSegment) bool {
+	for _, target := range targets {
+		slot, ok := slots[target.SegmentID]
+		if !ok || slot.location != (segmentLocation{vchannel: target.VChannel, partitionID: target.PartitionID}) {
+			return false
+		}
+		if slot.partition.GetSegmentManifestVersions()[slot.index] < target.ManifestVersion {
+			return false
+		}
+	}
+	return true
 }
 
 func applyL0Compact(view *viewpb.DataViewOfCollection, event L0CompactDataViewEvent) (bool, error) {

@@ -3232,9 +3232,13 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
 	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+	var loadableSegments []dataview.LoadableSegment
 	collectionID := int64(0)
-	if s.dataViewManager != nil && len(segIDs) > 0 {
-		if segment := s.meta.GetSegment(ctx, segIDs[0]); segment != nil {
+	if s.dataViewManager != nil {
+		loadableSegments = s.getImportDataViewSegments(ctx, segIDs)
+	}
+	if len(loadableSegments) > 0 {
+		if segment := s.meta.GetSegment(ctx, loadableSegments[0].SegmentID); segment != nil {
 			collectionID = segment.GetCollectionID()
 		}
 	}
@@ -3256,20 +3260,10 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
 			return err
 		}
-		if s.dataViewManager != nil && collectionID != 0 {
-			segments := make([]dataview.LoadableSegment, 0, len(segIDs))
-			for _, segID := range segIDs {
-				if segment := s.meta.GetSegment(ctx, segID); segment != nil {
-					segments = append(segments, dataview.LoadableSegment{
-						SegmentID:   segment.GetID(),
-						VChannel:    segment.GetInsertChannel(),
-						PartitionID: segment.GetPartitionID(),
-					})
-				}
-			}
+		if collectionID != 0 {
 			if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
 				CollectionID: collectionID,
-				Segments:     segments,
+				Segments:     loadableSegments,
 			}); err != nil {
 				mlog.Warn(ctx, "failed to publish DataView after import commit",
 					mlog.FieldJobID(jobID),
@@ -3283,6 +3277,25 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
+}
+
+// getImportDataViewSegments returns the final loadable subset of the Segment
+// candidates. Import sorting leaves superseded Segments dropped or invisible,
+// so their current SegmentMeta state is the source of truth.
+func (s *Server) getImportDataViewSegments(ctx context.Context, segmentIDs []int64) []dataview.LoadableSegment {
+	segments := make([]dataview.LoadableSegment, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if !isSegmentHealthy(segment) || segment.GetIsInvisible() {
+			continue
+		}
+		segments = append(segments, dataview.LoadableSegment{
+			SegmentID:   segment.GetID(),
+			VChannel:    segment.GetInsertChannel(),
+			PartitionID: segment.GetPartitionID(),
+		})
+	}
+	return segments
 }
 
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to

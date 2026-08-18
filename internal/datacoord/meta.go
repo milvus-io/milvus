@@ -2789,24 +2789,39 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	default:
 		err = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
+	if err == nil && m.shouldPublishDataViewAfterCompactionLocked(t) {
+		m.publishDataViewAfterCompaction(ctx, t, newSegments)
+	}
 	m.segMu.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}
-	m.publishDataViewAfterCompaction(ctx, t, newSegments)
 	return newSegments, metricMutation, nil
+}
+
+func (m *meta) shouldPublishDataViewAfterCompactionLocked(task *datapb.CompactionTask) bool {
+	if m.dataViewManager == nil || task.GetType() == datapb.CompactionType_ClusteringCompaction {
+		return false
+	}
+	for _, segmentID := range task.GetInputSegments() {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil || segment.GetIsImporting() || segment.GetIsInvisible() {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *meta) publishDataViewAfterCompaction(ctx context.Context, task *datapb.CompactionTask, compactTo []*SegmentInfo) {
 	if m.dataViewManager == nil {
 		return
 	}
-	loadable := lo.Map(compactTo, func(segment *SegmentInfo, _ int) dataview.LoadableSegment {
+	loadable := lo.FilterMap(compactTo, func(segment *SegmentInfo, _ int) (dataview.LoadableSegment, bool) {
 		return dataview.LoadableSegment{
 			SegmentID:   segment.GetID(),
 			VChannel:    segment.GetInsertChannel(),
 			PartitionID: segment.GetPartitionID(),
-		}
+		}, isSegmentHealthy(segment) && !segment.GetIsInvisible()
 	})
 	if _, err := m.dataViewManager.OnCompact(ctx, CompactDataViewEvent{
 		CollectionID: task.GetCollectionID(),

@@ -136,6 +136,22 @@ retry the same `On*` event safely because membership no-ops reuse the current
 version. Recovery never hides a missed event by scanning SegmentMeta; durable
 cross-catalog delivery is a separate integration concern.
 
+Event producers pass final membership facts to the manager. `OnImport` receives
+only the final loadable Segment IDs: when an imported Segment has been sorted,
+the sorted Segment replaces the original rather than being published alongside
+it. `OnCompact` receives `CompactFrom` and the final loadable `CompactTo`,
+validates them against the latest snapshot, and persists their removal and
+addition as one DataView commit. A retry whose inputs are already absent and
+whose outputs are already present is a no-op. A partially applied or otherwise
+inconsistent replacement is rejected without changing the snapshot.
+
+Intermediate invisible Segments do not produce DataView membership events.
+In particular, clustering compaction does not publish its temporary Segments;
+it publishes exactly once after its final result Segments are visible and
+loadable. Non-clustering compaction serializes its SegmentMeta mutation and
+DataView commit under the SegmentMeta mutation lock so causal replacements on
+the same Segment chain cannot reach DataView out of order.
+
 ## Manager API
 
 Mutation APIs are the `On*` methods on `dataview.Manager`. They return a
