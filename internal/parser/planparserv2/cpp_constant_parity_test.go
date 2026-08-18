@@ -56,11 +56,22 @@ package planparserv2
 // job.
 //
 // The scanner in front of it carries the weight of that claim, so it is the
-// part to be suspicious of: it has to find the declaration the compiler
-// actually uses. That is why it accepts the same `const`/`constexpr` spellings
-// the completeness check does, why a name declared twice is a failure rather
-// than a last-match-wins, and why the name has to be the declarator rather than
-// merely mentioned.
+// part to be suspicious of: it has to find the declaration the compiler actually
+// uses, and every way of being shown the wrong one is a way to pass while the
+// two sides disagree. Three invariants close that, and they are the ones to keep
+// intact:
+//
+//   - the name must be the declarator -- the identifier immediately before the
+//     initializer -- not merely mentioned, so a derived constant does not read
+//     as a second declaration of the constants it references;
+//   - a pinned name may be *given a value* exactly once anywhere in the sources,
+//     in any form at all. This is the load-bearing one, and it does not depend
+//     on parsing a declaration. Without it, hiding the live declaration in a
+//     shape the declaration scan cannot read -- an enum member, a brace
+//     initializer -- and leaving a decoy it can read elsewhere gets the decoy
+//     graded, and the test passes over a diverged constant;
+//   - one binding in a shape that cannot be read is a failure that says so,
+//     never a guess and never a skip.
 //
 // Evaluating rather than demanding a literal is deliberate. The alternative --
 // pinning the initializer as text -- forces segcore to spell its limits as
@@ -81,11 +92,19 @@ package planparserv2
 // and passes. That is the widest gap: the pin says the two sides agree on what
 // the numbers are, not on what they are used for.
 //
-// It also only runs C++ -> classified. Nothing walks the Go constants and
-// checks each has a pin, so adding one to the Go side and forgetting the table
-// is invisible. Generating the C++ constants from the Go ones, or
-// static_asserting them against a generated header, would close both; that is
-// the upgrade path if this ever costs someone real time.
+// It also only runs C++ -> classified. Nothing walks the Go constants and checks
+// each has a pin, so adding one to the Go side and forgetting the table is
+// invisible.
+//
+// And the completeness scan reads `const`/`constexpr` declarations, so a *new*
+// constant introduced as an enum member or a #define is not caught and asked to
+// be classified. That gap is bounded to constants nobody has pinned: for a
+// pinned name, the binding invariant above covers every form, so an existing
+// constant cannot be hidden that way.
+//
+// Generating the C++ constants from the Go ones, or static_asserting them
+// against a generated header, would close all of these; that is the upgrade path
+// if this ever costs someone real time.
 //
 // # Where it runs
 //
@@ -167,6 +186,11 @@ var (
 	// `constexpr` itself.
 	cppLeadingConst = regexp.MustCompile(`^const\s+`)
 
+	// A declarator whose initializer is brace-init rather than `=`:
+	// `constexpr size_t kX{32};`. Rewritten to the `=` form before comparing, so
+	// an idiomatic respelling is not read as a missing constant.
+	cppBraceDeclarator = regexp.MustCompile(`\b(k[A-Z]\w*)\s*\{([^{}]*)\}\s*;$`)
+
 	cppBraceInit    = regexp.MustCompile(`\b\w+\s*\{\s*([^{}]*?)\s*\}`)
 	cppInnerParens  = regexp.MustCompile(`\(([^()]*)\)`)
 	cppIntegerToken = regexp.MustCompile(`^(?:0[xX][0-9a-fA-F']+|[0-9][0-9']*)[uUlL]*$`)
@@ -243,26 +267,41 @@ func assertCppConstantParity(t *testing.T, sources []string, pinned []cppConstan
 // reader looking for a problem that does not exist.
 func soleCppDeclaration(t *testing.T, bodies map[string]string, sources []string, name string) (string, bool) {
 	t.Helper()
-	declarations := cppDeclarationsOf(bodies, name)
+	// Bindings first, because this is the check that cannot be dodged by writing
+	// the declaration in a form the declaration scan does not read.
+	bindings := cppValueBindingsOf(bodies, name)
 	switch {
-	case len(declarations) == 0:
+	case len(bindings) == 0:
 		// Renaming a constant lands here, and separately trips the completeness
 		// check under its new name.
 		assert.Failf(t, "constant not declared",
-			"%v no longer declare %s in a form this check can see. Either the constant "+
-				"was renamed or removed -- keep the name, or update the pin table -- or "+
-				"it was rewritten away from the `constexpr <type> <name> = <initializer>;` "+
-				"shape this contract is pinned in.", sources, name)
+			"%v never give %s a value. It was renamed or removed -- keep the name, or "+
+				"update the pin table.", sources, name)
 		return "", false
-	case len(declarations) > 1:
-		// Not "the last match wins": a name declared twice, whether by an
-		// #ifdef pair or a decoy left at another scope, means this check cannot
-		// tell which one the compiler takes, so it would grade against a
-		// declaration that is not the live one.
-		assert.Failf(t, "constant declared more than once",
-			"%s is declared %d times across %v, so this check cannot tell which one the "+
-				"compiler takes:\n%s",
-			name, len(declarations), sources, strings.Join(declarations, "\n"))
+	case len(bindings) > 1:
+		// Not "the last match wins": a name given a value twice, whether by an
+		// #ifdef pair, an enum member alongside a constant, or a decoy left at
+		// another scope, means this check cannot tell which one the compiler
+		// takes, so it could grade one that is not the live one.
+		assert.Failf(t, "constant given a value more than once",
+			"%s is given a value %d times across %v, so this check cannot tell which one "+
+				"the compiler takes:\n%s",
+			name, len(bindings), sources, strings.Join(bindings, "\n"))
+		return "", false
+	}
+
+	declarations := cppDeclarationsOf(bodies, name)
+	if len(declarations) != 1 {
+		// Necessarily zero, not two: a declaration is also a binding, so more
+		// than one declaration would have failed the check above. So this is the
+		// one-binding-in-an-unreadable-shape case -- an enum member, or a form
+		// the regex does not cover. Do not guess at its value; say what was
+		// found.
+		assert.Failf(t, "declaration shape not recognised",
+			"%s is given a value exactly once, but not in the "+
+				"`constexpr <type> <name> = <initializer>;` shape this contract is pinned "+
+				"in, so its declared type and value cannot be read:\n%s",
+			name, strings.Join(bindings, "\n"))
 		return "", false
 	}
 	// One statement, two declarators: `constexpr uint64_t kA = 1, kB = 2;`.
@@ -353,10 +392,36 @@ func cppDeclarationsOf(bodies map[string]string, name string) []string {
 	// `const(?:expr)?` must stay in step with cppConstantName; see the note
 	// there for what an asymmetry buys an attacker.
 	declaration := regexp.MustCompile(
-		`(?:static\s+|inline\s+)*const(?:expr)?\s[^;]*?\b` + regexp.QuoteMeta(name) + `\s*=[^;]*;`)
+		`(?:static\s+|inline\s+)*const(?:expr)?\s[^;]*?\b` + regexp.QuoteMeta(name) +
+			`\s*(?:=[^;=]|\{)[^;]*;`)
 	var out []string
 	for _, source := range slices.Sorted(maps.Keys(bodies)) {
 		out = append(out, declaration.FindAllString(bodies[source], -1)...)
+	}
+	return out
+}
+
+// cppValueBindingsOf returns every place the name is given a value, in any form:
+// `name = v` and `name{v}`, whatever precedes them -- const, constexpr, an enum
+// member, or nothing this check recognises. Each is returned with leading
+// context so a failure names the line rather than only the count.
+//
+// This is the invariant that makes grading the declaration sound. The
+// declaration scan reads only forms it can parse, so on its own it can be shown
+// the wrong declaration: hide the live one in a form it cannot read -- an enum
+// member, say -- leave a decoy it can read elsewhere, and it grades the decoy
+// and passes while segcore uses the other value. Counting bindings does not
+// depend on parsing the declaration, so the two cannot be separated that way.
+func cppValueBindingsOf(bodies map[string]string, name string) []string {
+	// `=[^=]` so a comparison is not a binding. `[^;]{0,60}` is context for the
+	// message; it cannot cross a statement boundary.
+	binding := regexp.MustCompile(
+		`[^;]{0,60}\b` + regexp.QuoteMeta(name) + `\s*(?:=[^=]|\{)`)
+	var out []string
+	for _, source := range slices.Sorted(maps.Keys(bodies)) {
+		for _, m := range binding.FindAllString(bodies[source], -1) {
+			out = append(out, strings.TrimSpace(m))
+		}
 	}
 	return out
 }
@@ -399,6 +464,7 @@ func stripCppStd(s string) string {
 func canonicalCppDeclaration(decl string) string {
 	decl = cppSpecifier.ReplaceAllString(normalizeCppWhitespace(strings.TrimSpace(decl)), "")
 	decl = cppLeadingConst.ReplaceAllString(decl, "constexpr ")
+	decl = cppBraceDeclarator.ReplaceAllString(decl, "$1 = $2;")
 	decl = cppAssign.ReplaceAllString(stripCppStd(decl), " = ")
 	return strings.ReplaceAll(decl, " ;", ";")
 }
