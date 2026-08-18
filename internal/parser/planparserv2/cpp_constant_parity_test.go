@@ -301,8 +301,10 @@ func soleCppDeclaration(t *testing.T, bodies map[string]string, sources []string
 		// Renaming a constant lands here, and separately trips the completeness
 		// check under its new name.
 		assert.Failf(t, "constant not declared",
-			"%v never give %s a value. It was renamed or removed -- keep the name, or "+
-				"update the pin table.", sources, name)
+			"%v never write %s next to an initializer. Either it was renamed or removed "+
+				"-- keep the name, or update the pin table -- or it was respelled so that "+
+				"the name and its value are no longer adjacent, as `char %s[] = ...` and "+
+				"a declaration in another header both are.", sources, name, name)
 		return "", false
 	case len(bindings) > 1:
 		// Not "the last match wins": a name given a value twice, whether by an
