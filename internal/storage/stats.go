@@ -179,7 +179,7 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			}
 		} else if strFd, ok := msgs.(*StringFieldData); ok {
 			for _, str := range strFd.Data {
-				if pk, err := NewUUIDPrimaryKey(str); err == nil {
+				if pk, err := NewUUIDPrimaryKeyFromString(str); err == nil {
 					stats.UpdateMinMax(pk)
 					stats.BF.Add(pk.Value[:])
 				}

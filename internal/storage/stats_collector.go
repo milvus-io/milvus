@@ -75,10 +75,13 @@ func (c *PkStatsCollector) Collect(r Record) error {
 		case schemapb.DataType_UUID:
 			col := r.Column(c.pkstats.FieldID)
 			if fsb, ok := col.(*array.FixedSizeBinary); ok {
-				pk := NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+				pk, err := NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+				if err != nil {
+					return err
+				}
 				c.pkstats.Update(pk)
 			} else if strArr, ok := col.(*array.String); ok {
-				pk, err := NewUUIDPrimaryKey(strArr.Value(i))
+				pk, err := NewUUIDPrimaryKeyFromString(strArr.Value(i))
 				if err != nil {
 					return err
 				}

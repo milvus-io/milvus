@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // FieldStats contains statistics data for any column
@@ -350,15 +351,16 @@ func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 	case schemapb.DataType_UUID:
 		if uuidFd, ok := msgs.(*UUIDFieldData); ok {
 			for _, u := range uuidFd.Data {
-				pk := &UUIDPrimaryKey{Value: u}
+				pk := NewUUIDFieldValue(u)
 				stats.UpdateMinMax(pk)
 				stats.BF.Add(u[:])
 			}
 		} else if strFd, ok := msgs.(*StringFieldData); ok {
 			for _, str := range strFd.Data {
-				if pk, err := NewUUIDPrimaryKey(str); err == nil {
+				if u, err := typeutil.ParseUUID(str); err == nil {
+					pk := NewUUIDFieldValue(u)
 					stats.UpdateMinMax(pk)
-					stats.BF.Add(pk.Value[:])
+					stats.BF.Add(u[:])
 				}
 			}
 		}
