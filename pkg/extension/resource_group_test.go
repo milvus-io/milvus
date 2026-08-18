@@ -29,6 +29,9 @@ func (stubResourceGroupInterceptor) AfterUpdateResourceGroups(context.Context, R
 func (stubResourceGroupInterceptor) BeforeDropResourceGroup(context.Context, *milvuspb.DropResourceGroupRequest) {
 }
 
+func (stubResourceGroupInterceptor) AfterDropResourceGroupFailed(context.Context, *milvuspb.DropResourceGroupRequest) {
+}
+
 func TestResourceGroupInterceptorAbsentWithoutProvider(t *testing.T) {
 	ResetForTest()
 	assert.Nil(t, Caps().ResourceGroups,

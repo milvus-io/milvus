@@ -131,11 +131,19 @@ func SetProvider(p Provider) error {
 	return nil
 }
 
+// zeroCaps backs Caps() when no provider is installed, so the nil-provider
+// path is the same single pointer load as the installed one.
+var zeroCaps = &Capabilities{}
+
 // Caps returns the installed capability table, or the zero table when no
-// provider was installed.
-func Caps() Capabilities {
+// provider was installed. The pointer is READ-ONLY by contract: the table is
+// written once by SetProvider and shared by every caller, and it is returned
+// by pointer precisely so the hot paths (Search, Query, Insert, per-channel
+// routing) pay one atomic load and one nil comparison rather than copying an
+// eight-field struct per call.
+func Caps() *Capabilities {
 	if b := installed.Load(); b != nil {
-		return b.caps
+		return &b.caps
 	}
-	return Capabilities{}
+	return zeroCaps
 }

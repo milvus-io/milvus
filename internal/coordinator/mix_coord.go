@@ -1041,9 +1041,14 @@ func (s *mixCoordImpl) UpdateResourceGroups(ctx context.Context, req *querypb.Up
 }
 
 func (s *mixCoordImpl) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: with none installed this does nothing.
+	// Extension seam, see extension_seam.go: with none installed neither call
+	// does anything. A drop that does not commit is reported back, because the
+	// Before hook's teardown has already happened by then and cannot be
+	// undone.
 	beforeDropResourceGroup(ctx, req)
-	return s.queryCoordServer.DropResourceGroup(ctx, req)
+	status, err := s.queryCoordServer.DropResourceGroup(ctx, req)
+	afterDropResourceGroupFailed(ctx, req, status, err)
+	return status, err
 }
 
 func (s *mixCoordImpl) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {

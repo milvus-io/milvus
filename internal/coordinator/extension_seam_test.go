@@ -26,10 +26,11 @@ type recordingInterceptor struct {
 	update            extension.ResourceGroupUpdate
 	updateErr         error
 
-	seenCreate *milvuspb.CreateResourceGroupRequest
-	seenUpdate *querypb.UpdateResourceGroupsRequest
-	seenDrop   *milvuspb.DropResourceGroupRequest
-	seenAfter  []extension.ResourceGroupUpdate
+	seenCreate     *milvuspb.CreateResourceGroupRequest
+	seenUpdate     *querypb.UpdateResourceGroupsRequest
+	seenDrop       *milvuspb.DropResourceGroupRequest
+	seenAfter      []extension.ResourceGroupUpdate
+	seenFailedDrop []*milvuspb.DropResourceGroupRequest
 }
 
 func (i *recordingInterceptor) BeforeCreateResourceGroup(_ context.Context, req *milvuspb.CreateResourceGroupRequest) *milvuspb.CreateResourceGroupRequest {
@@ -44,6 +45,10 @@ func (i *recordingInterceptor) BeforeUpdateResourceGroups(_ context.Context, req
 
 func (i *recordingInterceptor) AfterUpdateResourceGroups(_ context.Context, update extension.ResourceGroupUpdate) {
 	i.seenAfter = append(i.seenAfter, update)
+}
+
+func (i *recordingInterceptor) AfterDropResourceGroupFailed(_ context.Context, req *milvuspb.DropResourceGroupRequest) {
+	i.seenFailedDrop = append(i.seenFailedDrop, req)
 }
 
 func (i *recordingInterceptor) BeforeDropResourceGroup(_ context.Context, req *milvuspb.DropResourceGroupRequest) {
@@ -101,6 +106,10 @@ func (i forbiddenInterceptor) BeforeUpdateResourceGroups(context.Context, *query
 
 func (i forbiddenInterceptor) AfterUpdateResourceGroups(context.Context, extension.ResourceGroupUpdate) {
 	i.t.Fatal("AfterUpdateResourceGroups must not run")
+}
+
+func (i forbiddenInterceptor) AfterDropResourceGroupFailed(context.Context, *milvuspb.DropResourceGroupRequest) {
+	i.t.Fatal("AfterDropResourceGroupFailed must not run")
 }
 
 func (i forbiddenInterceptor) BeforeDropResourceGroup(context.Context, *milvuspb.DropResourceGroupRequest) {
@@ -235,6 +244,38 @@ func TestDropResourceGroupReachesInterceptorBeforeQueryCoord(t *testing.T) {
 		require.NoError(t, err)
 		assert.Same(t, req, interceptor.seenDrop)
 		assert.True(t, interceptedBeforeDrop, "the interceptor must run before querycoord drops the group")
+		assert.Empty(t, interceptor.seenFailedDrop, "a committed drop must not be reported as failed")
+	})
+}
+
+// A drop the coordinator refused is reported back: the interceptor's teardown
+// already happened and cannot be undone, and without the report the group
+// milvus still holds and the group the interceptor emptied diverge silently.
+func TestDropResourceGroupFailureIsReportedToInterceptor(t *testing.T) {
+	mockey.PatchConvey("querycoord refuses the drop", t, func() {
+		interceptor := &recordingInterceptor{}
+		installInterceptor(t, interceptor)
+		mockey.Mock((*querycoordv2.Server).DropResourceGroup).Return(
+			merr.Status(merr.WrapErrServiceInternal("drop refused")), nil).Build()
+
+		s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+		req := &milvuspb.DropResourceGroupRequest{ResourceGroup: "rg"}
+		_, err := s.DropResourceGroup(context.Background(), req)
+		require.NoError(t, err)
+		require.Len(t, interceptor.seenFailedDrop, 1)
+		assert.Same(t, req, interceptor.seenFailedDrop[0])
+	})
+
+	mockey.PatchConvey("querycoord call errors", t, func() {
+		interceptor := &recordingInterceptor{}
+		installInterceptor(t, interceptor)
+		mockey.Mock((*querycoordv2.Server).DropResourceGroup).Return(nil, errors.New("unreachable")).Build()
+
+		s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+		_, err := s.DropResourceGroup(context.Background(), &milvuspb.DropResourceGroupRequest{ResourceGroup: "rg"})
+		require.Error(t, err)
+		require.Len(t, interceptor.seenFailedDrop, 1,
+			"an errored drop is reported failed; if it committed after all, the group is gone and the report is a harmless warning")
 	})
 }
 

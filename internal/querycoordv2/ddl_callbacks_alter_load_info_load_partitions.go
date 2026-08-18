@@ -55,6 +55,14 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
+	// A request that speaks only for the resource groups it names leaves the
+	// placement of the others alone - same seam, same reason as the
+	// LoadCollection callback: without it a scoped LoadPartitions would be
+	// read as the whole placement and refused for "changing" the replica
+	// number of resource groups it never mentioned. Natively this returns
+	// what AssignReplica just produced.
+	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
+		ctx, req.GetCollectionID(), resourceGroups, expectedReplicasNumber, currentLoadConfig)
 	partitionIDsSet := typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
 	// add new incoming partitionIDs.
 	for _, partition := range req.PartitionIDs {

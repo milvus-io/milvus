@@ -55,6 +55,21 @@ func beforeDropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGrou
 	interceptor.BeforeDropResourceGroup(ctx, req)
 }
 
+// afterDropResourceGroupFailed reports a drop that did not commit to the
+// interceptor, whose Before hook has already torn its own state down: without
+// this report the group milvus still holds and the group the interceptor
+// emptied diverge in silence.
+func afterDropResourceGroupFailed(ctx context.Context, req *milvuspb.DropResourceGroupRequest, status *commonpb.Status, err error) {
+	if err == nil && merr.Ok(status) {
+		return
+	}
+	interceptor := resourceGroupInterceptor()
+	if interceptor == nil {
+		return
+	}
+	interceptor.AfterDropResourceGroupFailed(ctx, req)
+}
+
 // afterUpdateResourceGroups reports the committed update to the interceptor.
 // It is called with the status the coordinator produced and drops the report
 // when the update did not commit: an interceptor acting on an update that was

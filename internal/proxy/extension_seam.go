@@ -45,9 +45,16 @@ func proxyExtension() extension.ProxyExtension {
 }
 
 // interceptDML consults the extension at the entry of a write path. A non-nil
-// status rejects the write; short-circuiting is permitted here.
+// status rejects the write; short-circuiting is permitted here. Nil returns
+// directly rather than through the Noop fallback, matching every other
+// hot-path seam in this file: with no provider this is one pointer load and
+// one nil comparison, no interface dispatch.
 func interceptDML(ctx context.Context, op string, req proto.Message) *commonpb.Status {
-	return proxyExtension().InterceptDML(ctx, op, req)
+	ext := extension.Caps().ProxyExt
+	if ext == nil {
+		return nil
+	}
+	return ext.InterceptDML(ctx, op, req)
 }
 
 // interceptAdminRPC consults the extension at the entry of the administrative
@@ -58,7 +65,11 @@ func interceptDML(ctx context.Context, op string, req proto.Message) *commonpb.S
 // handler is shared by every listener; an implementation that must let its
 // control plane through reads the internal-domain mark off ctx.
 func interceptAdminRPC(ctx context.Context, op string) *commonpb.Status {
-	return proxyExtension().InterceptAdminRPC(ctx, op)
+	ext := extension.Caps().ProxyExt
+	if ext == nil {
+		return nil
+	}
+	return ext.InterceptAdminRPC(ctx, op)
 }
 
 // The load-semantics seams below sit at the entry of the six RPCs that decide
@@ -274,6 +285,12 @@ func ensureQueryReady(ctx context.Context, node *Proxy, dbName, collectionName s
 // with no provider installed without having to check for one, and
 // ProxyResourceGroupSQLatency stays without a single series there.
 func observeResourceGroupSQLatency(ctx context.Context, queryType, dbName, collectionName string, latencyMs int64) {
+	// The provider gate saves the ctx.Value chain walk on every completed
+	// search and query of a stock binary; the context read below stays the
+	// authority on the label when a provider is installed.
+	if extension.Caps().ProxyExt == nil {
+		return
+	}
 	resourceGroup := extension.QueryResourceGroupFromContext(ctx)
 	if resourceGroup == "" {
 		return

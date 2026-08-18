@@ -96,9 +96,20 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 	// the admission call, reaching exactly the statements it reached before
 	// this task existed: installing nothing must change nothing, not even a
 	// local map read.
+	//
+	// Admission first, existence only on rejection - the same order and for
+	// the same reason as createCollectionTask: the existence probe that makes
+	// an idempotent retry pass costs a coordinator round trip on a cache miss,
+	// and a local HasDatabase peek is not a substitute (it only knows
+	// databases whose collections this proxy has already cached, so an empty
+	// or un-cached database would still be refused). GetDatabaseInfo carries
+	// the RPC fallback, so a genuine retry of an existing database gets
+	// rootcoord's own already-exists answer instead of ResourceExhausted.
 	if c := admissionChecker(); c != nil {
-		if !CheckDatabase(ctx, cdt.GetDbName()) {
-			return c.CheckCreateDatabase(ctx, mixCoordAdmissionClient{cdt.mixCoord})
+		if err := c.CheckCreateDatabase(ctx, mixCoordAdmissionClient{cdt.mixCoord}); err != nil {
+			if _, lookupErr := globalMetaCache.GetDatabaseInfo(ctx, cdt.GetDbName()); lookupErr != nil {
+				return err
+			}
 		}
 	}
 

@@ -106,4 +106,14 @@ type ResourceGroupInterceptor interface {
 	// the interceptor's own teardown succeeded: a control plane that asked for
 	// the group to go away is not served by milvus keeping it.
 	BeforeDropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest)
+
+	// AfterDropResourceGroupFailed runs when the native drop did NOT commit -
+	// milvus refused it or the call errored - after BeforeDropResourceGroup
+	// already ran. The interceptor's teardown is done by then and cannot be
+	// undone; what this call gives the implementation is the knowledge that
+	// the resource group it just emptied still exists in milvus, so its own
+	// reconciliation (or an operator) can finish the job instead of the two
+	// sides diverging in silence. A committed drop is not reported: the
+	// Before hook saw everything there was to see.
+	AfterDropResourceGroupFailed(ctx context.Context, req *milvuspb.DropResourceGroupRequest)
 }

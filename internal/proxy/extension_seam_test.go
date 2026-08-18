@@ -430,7 +430,11 @@ func TestCheckCreateDatabaseAdmissionSkippedWhenDatabaseAlreadyExists(t *testing
 
 	dbName := "already_exists_db"
 	cache := NewMockCache(t)
-	cache.On("HasDatabase", mock.Anything, dbName).Return(true)
+	// GetDatabaseInfo, not HasDatabase: the local peek only knows databases
+	// whose collections this proxy has cached, so an empty or un-cached
+	// database would be refused on an idempotent retry. GetDatabaseInfo
+	// carries the RPC fallback.
+	cache.On("GetDatabaseInfo", mock.Anything, dbName).Return(&databaseInfo{dbID: 7}, nil)
 	globalMetaCache = cache
 
 	checker := &recordingAdmissionChecker{err: errors.New("quota exhausted")}
@@ -440,7 +444,8 @@ func TestCheckCreateDatabaseAdmissionSkippedWhenDatabaseAlreadyExists(t *testing
 	err := task.PreExecute(task.ctx)
 
 	assert.NoError(t, err, "an idempotent re-create of an existing database must not be blocked by admission")
-	assert.Equal(t, 0, checker.databaseCalls, "admission must not be consulted once the database is already known to exist")
+	assert.Equal(t, 1, checker.databaseCalls,
+		"admission runs first - the existence lookup is paid only on rejection, same as the collection path")
 }
 
 func TestCheckCreateDatabaseAdmissionConsultedWhenDatabaseIsNew(t *testing.T) {
@@ -451,7 +456,7 @@ func TestCheckCreateDatabaseAdmissionConsultedWhenDatabaseIsNew(t *testing.T) {
 
 	dbName := "brand_new_db"
 	cache := NewMockCache(t)
-	cache.On("HasDatabase", mock.Anything, dbName).Return(false)
+	cache.On("GetDatabaseInfo", mock.Anything, dbName).Return(nil, errors.New("database not found"))
 	globalMetaCache = cache
 
 	sentinel := errors.New("quota exhausted for this instance")
@@ -489,7 +494,7 @@ func TestCheckCreateDatabaseAdmissionSkipsExistenceLookupWithNoProvider(t *testi
 	err := task.PreExecute(task.ctx)
 
 	assert.NoError(t, err)
-	cache.AssertNumberOfCalls(t, "HasDatabase", 0)
+	cache.AssertNumberOfCalls(t, "GetDatabaseInfo", 0)
 	mockCoord, ok := task.mixCoord.(*mocks.MockMixCoordClient)
 	if assert.True(t, ok, "test helper must build mixCoord as a MockMixCoordClient") {
 		assert.Empty(t, mockCoord.Calls, "with no provider installed PreExecute must not touch coord at all")
@@ -509,8 +514,8 @@ func TestCheckCreateDatabaseAdmissionPassesCoordThroughAtPreExecute(t *testing.T
 	t.Cleanup(func() { globalMetaCache = oldCache })
 
 	dbName := "brand_new_db_passthrough"
+	// No expectations: the checker admits, so the existence lookup never runs.
 	cache := NewMockCache(t)
-	cache.On("HasDatabase", mock.Anything, dbName).Return(false)
 	globalMetaCache = cache
 
 	checker := &recordingAdmissionChecker{}
