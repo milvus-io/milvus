@@ -1425,17 +1425,25 @@ func TestCatalog_GcConfirm(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	kc.MetaKv = txn
 
-	txn.On("LoadWithPrefix",
+	txn.On("HasPrefix",
 		mock.Anything,
 		mock.AnythingOfType("string")).
-		Return(nil, nil, errors.New("error mock LoadWithPrefix")).
+		Return(false, errors.New("error mock HasPrefix")).
 		Once()
 	assert.False(t, kc.GcConfirm(context.TODO(), 100, 10000))
 
-	txn.On("LoadWithPrefix",
+	txn.On("HasPrefix",
 		mock.Anything,
 		mock.AnythingOfType("string")).
-		Return(nil, nil, nil)
+		Return(true, nil).
+		Once()
+	assert.False(t, kc.GcConfirm(context.TODO(), 100, 10000))
+
+	txn.On("HasPrefix",
+		mock.Anything,
+		mock.AnythingOfType("string")).
+		Return(false, nil).
+		Once()
 	assert.True(t, kc.GcConfirm(context.TODO(), 100, 10000))
 }
 
