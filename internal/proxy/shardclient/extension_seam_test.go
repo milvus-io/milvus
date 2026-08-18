@@ -222,6 +222,12 @@ func TestInvalidateShardLeaderCacheDropsEveryScope(t *testing.T) {
 		"the invalidated collection must lose every scope, not only the one that happens to be looked up first")
 	assert.NotNil(t, mgr.getCachedShardLeaders(shardLeaderCacheKey{collectionID: 101, resourceGroup: "rg-a"}, "test"),
 		"a collection nobody invalidated must keep its cached leaders")
+
+	mgr.leaderMut.RLock()
+	_, indexed := mgr.scopedKeys[100]
+	mgr.leaderMut.RUnlock()
+	assert.False(t, indexed,
+		"the scope index must go with the entries it points at, or it accumulates forever")
 }
 
 // TestRoutingResourceGroupIgnoresTheContextWithNoProvider is the unit-level

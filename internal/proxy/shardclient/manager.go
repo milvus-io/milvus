@@ -75,6 +75,15 @@ type shardClientMgrImpl struct {
 	// to another. An unscoped lookup keys on the empty string and therefore keeps a cache of
 	// exactly the shape it had when the key was the bare collection id.
 	collLeader map[shardLeaderCacheKey]*shardLeaders
+	// scopedKeys indexes, per collection, the resource-group scopes that have
+	// an entry in collLeader - so invalidation can delete exactly a
+	// collection's entries instead of scanning the whole cache under the
+	// write lock. Invalidation runs on every failed search/query and on
+	// querycoord's balance broadcasts; a proxy holding tens of thousands of
+	// loaded collections cannot afford a full-table scan per failure. With no
+	// scoped entries ever written (a stock binary) this map stays empty and
+	// invalidation is the O(1) delete it was before scopes existed.
+	scopedKeys map[int64]typeutil.Set[string]
 }
 
 // shardLeaderCacheKey identifies one cached shard-leader answer: the collection
@@ -111,6 +120,7 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		expiredDuration: defaultExpiredDuration,
 
 		collLeader: make(map[shardLeaderCacheKey]*shardLeaders),
+		scopedKeys: make(map[int64]typeutil.Set[string]),
 		mixCoord:   mixCoord,
 	}
 	for _, opt := range options {
@@ -231,6 +241,14 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 
 	m.leaderMut.Lock()
 	m.collLeader[key] = newShardLeaders
+	if key.resourceGroup != "" {
+		scopes, ok := m.scopedKeys[collectionID]
+		if !ok {
+			scopes = typeutil.NewSet[string]()
+			m.scopedKeys[collectionID] = scopes
+		}
+		scopes.Insert(key.resourceGroup)
+	}
 	m.leaderMut.Unlock()
 
 	return newShardLeaders, nil
@@ -283,16 +301,21 @@ func (m *shardClientMgrImpl) RemoveDatabase(database string) {}
 // Every resource-group scope of the named collections goes, not just the collection-wide entry:
 // a caller invalidating a collection is saying its leaders moved, and leaving one scope's copy
 // behind would keep routing queries scoped to it at query nodes that no longer serve it. The
-// scan is over the whole cache because the scopes of a collection are not enumerable from the
-// id alone; the cache holds one entry per (loaded collection, scope in use), so it is small.
+// scopes come from the scopedKeys index, so the cost is O(entries of the named collections) -
+// the O(1) delete of issue #51533 when no scoped entry exists - never a scan of the whole
+// cache under the write lock, which on a proxy holding many collections would stall every
+// GetShard behind each failed query's invalidation.
 func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 	mlog.Info(context.TODO(), "Invalidate shard cache for collections", mlog.Int64s("collectionIDs", collections))
-	invalidated := typeutil.NewSet(collections...)
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
-	for key := range m.collLeader {
-		if invalidated.Contain(key.collectionID) {
-			delete(m.collLeader, key)
+	for _, collectionID := range collections {
+		delete(m.collLeader, shardLeaderCacheKey{collectionID: collectionID})
+		if scopes, ok := m.scopedKeys[collectionID]; ok {
+			for rg := range scopes {
+				delete(m.collLeader, shardLeaderCacheKey{collectionID: collectionID, resourceGroup: rg})
+			}
+			delete(m.scopedKeys, collectionID)
 		}
 	}
 }
