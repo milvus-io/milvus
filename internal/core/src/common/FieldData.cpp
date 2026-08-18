@@ -343,27 +343,28 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY ||
                     array->type()->id() == arrow::Type::type::STRING,
                 "inconsistent data type for UUID");
+            FixedVector<std::string> values(element_count);
             if (array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY) {
                 auto fsb_array =
                     std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
                         array);
-                auto field_data = std::make_shared<FieldDataImpl<std::string>>(
-                    DataType::UUID, false);
-                field_data->Reserve(element_count);
                 for (size_t index = 0; index < element_count; ++index) {
-                    if (fsb_array->IsNull(index)) {
-                        field_data->AddNullRow();
-                    } else {
-                        auto val_view = fsb_array->GetString(index);
-                        field_data->AddRow(val_view);
-                    }
+                    values[index] = fsb_array->GetString(index);
                 }
-                return field_data;
             } else {
                 auto string_array =
                     std::dynamic_pointer_cast<arrow::StringArray>(array);
-                return FillFieldData(string_array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    values[index] = string_array->GetString(index);
+                }
             }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(values.data(), element_count);
         }
         case DataType::TEXT: {
             // V3 storage: TEXT is stored as BINARY (LOBReference in parquet)
