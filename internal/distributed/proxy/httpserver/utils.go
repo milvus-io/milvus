@@ -39,6 +39,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -5587,4 +5588,25 @@ func trimStringList(values []string) []string {
 		trimmed[i] = strings.TrimSpace(value)
 	}
 	return trimmed
+}
+
+// IdempotencyKeyHandlerFunc copies the REST Idempotency-Key header into the gRPC
+// incoming metadata, so the proxy reads the key from exactly one place regardless of
+// whether the request arrived over REST or gRPC. Existing metadata is preserved.
+//
+// Registered as middleware rather than inside a handler wrapper: which operations are
+// idempotent is decided downstream, so every route — v1 and v2 alike — must carry the
+// key rather than drop it and force the next adopter to rediscover this hop.
+func IdempotencyKeyHandlerFunc(c *gin.Context) {
+	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
+	if key == "" {
+		c.Next()
+		return
+	}
+	ctx := c.Request.Context()
+	md, _ := metadata.FromIncomingContext(ctx)
+	md = md.Copy()
+	md.Set(util.HeaderIdempotencyKey, key)
+	c.Request = c.Request.WithContext(metadata.NewIncomingContext(ctx, md))
+	c.Next()
 }

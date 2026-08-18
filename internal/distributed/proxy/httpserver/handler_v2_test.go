@@ -2773,6 +2773,9 @@ func versionalV2(category string, action string) string {
 func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlersV2(proxy)
 	ginHandler := gin.Default()
+	// Mirror the middleware the real server installs, so tests exercise the same
+	// chain rather than a handler-only subset of it.
+	ginHandler.Use(IdempotencyKeyHandlerFunc)
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
 	h.RegisterRoutesToV2(appV2)
 
@@ -6795,38 +6798,49 @@ func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
 	})
 }
 
-func TestInjectIdempotencyKeySetsIncomingMetadata(t *testing.T) {
-	ctx := context.Background()
+func TestIdempotencyKeyHandlerFuncSetsIncomingMetadata(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
 	c.Request.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
 
-	got := injectIdempotencyKey(ctx, c)
-	md, ok := metadata.FromIncomingContext(got)
+	IdempotencyKeyHandlerFunc(c)
+
+	md, ok := metadata.FromIncomingContext(c.Request.Context())
 	assert.True(t, ok)
 	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
 }
 
-func TestInjectIdempotencyKeyPreservesExistingMetadata(t *testing.T) {
-	ctx := metadata.NewIncomingContext(context.Background(),
-		metadata.Pairs(util.HeaderDBName, "db1"))
+func TestIdempotencyKeyHandlerFuncPreservesExistingMetadata(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
-	c.Request.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	req = req.WithContext(metadata.NewIncomingContext(req.Context(),
+		metadata.Pairs(util.HeaderDBName, "db1")))
+	req.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	c.Request = req
 
-	got := injectIdempotencyKey(ctx, c)
-	md, _ := metadata.FromIncomingContext(got)
+	IdempotencyKeyHandlerFunc(c)
+
+	md, _ := metadata.FromIncomingContext(c.Request.Context())
 	assert.Equal(t, []string{"db1"}, md.Get(util.HeaderDBName))
 	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
 }
 
-func TestInjectIdempotencyKeyNoHeaderIsNoop(t *testing.T) {
-	ctx := context.Background()
+// A request without the header must leave the context alone: an empty metadata value
+// is not the same as an absent one for the components that read it, and every route in
+// the cluster passes through this middleware.
+func TestIdempotencyKeyHandlerFuncNoHeaderIsNoop(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/collections/list", nil)
+	before := c.Request.Context()
 
-	got := injectIdempotencyKey(ctx, c)
-	assert.Equal(t, ctx, got)
+	IdempotencyKeyHandlerFunc(c)
+
+	assert.Equal(t, before, c.Request.Context())
+	md, ok := metadata.FromIncomingContext(c.Request.Context())
+	if ok {
+		_, present := md[util.HeaderIdempotencyKey]
+		assert.False(t, present)
+	}
 }
 
 func TestCreateImportJobForwardsIdempotencyKeyWithAuth(t *testing.T) {
