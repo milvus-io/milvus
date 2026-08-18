@@ -468,7 +468,7 @@ func TestCreateTrieScalarIndex(t *testing.T) {
 				common.CheckIndex(t, descIdx, expIndex, common.TNewCheckIndexOpt(common.DefaultNb))
 			} else {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				common.CheckErr(t, err, false, "TRIE are only supported on varchar field")
+				common.CheckErr(t, err, false, "TRIE are only supported on varchar or uuid field")
 			}
 		}
 	}
@@ -503,7 +503,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 				if field.DataType == entity.FieldTypeJSON {
 					require.ErrorContains(t, err, "json index must specify cast type")
 				} else {
-					require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
+					require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar, timestamptz or uuid field")
 				}
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
@@ -668,7 +668,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 		// server now rejects with a missing-cast-type error instead of the
 		// old "not supported on field" error.
 		{index.NewSortedIndex(), "json index must specify cast type"},
-		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
+		{index.NewTrieIndex(), "TRIE are only supported on varchar or uuid field"},
 	}
 	for _, idxErr := range inxError {
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idxErr.idx).WithIndexName("json_index"))
@@ -695,8 +695,8 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
-		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
+		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar, timestamptz or uuid field"},
+		{index.NewTrieIndex(), "TRIE are only supported on varchar or uuid field"},
 	}
 
 	// create scalar and vector index on array field
