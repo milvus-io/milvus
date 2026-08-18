@@ -983,6 +983,65 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
+	records := make([]*datapb.CompactionTarget, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		record := &datapb.CompactionTarget{}
+		if err := proto.Unmarshal(value, record); err != nil {
+			return err
+		}
+		records = append(records, record)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTargetPrefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (kc *Catalog) SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+	if record == nil {
+		return nil
+	}
+	cloned := proto.Clone(record).(*datapb.CompactionTarget)
+	key, value, err := buildCompactionTargetKV(cloned)
+	if err != nil {
+		return err
+	}
+	return kc.SaveByBatch(ctx, map[string]string{key: value})
+}
+
+func (kc *Catalog) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
+	key := buildCompactionTargetPath(targetID)
+	value, err := kc.MetaKv.Load(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	record := &datapb.CompactionTarget{}
+	if err := proto.Unmarshal([]byte(value), record); err != nil {
+		return err
+	}
+	record.State = state
+	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
+		record.InactivatedAtTS = inactivatedAtTS
+	} else {
+		record.InactivatedAtTS = 0
+	}
+	return kc.SaveCompactionTarget(ctx, record)
+}
+
+func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+	if record == nil {
+		return nil
+	}
+	key := buildCompactionTargetPath(record.GetTargetID())
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 
@@ -1254,4 +1313,32 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 		return nil, err
 	}
 	return snapshots, nil
+}
+
+func (kc *Catalog) SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error {
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, buildExportSnapshotJobKey(job.GetJobId()), string(value))
+}
+
+func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error) {
+	jobs := make([]*datapb.ExportSnapshotJob, 0)
+	applyFn := func(key []byte, value []byte) error {
+		job := &datapb.ExportSnapshotJob{}
+		if err := proto.Unmarshal(value, job); err != nil {
+			return err
+		}
+		jobs = append(jobs, job)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ExportSnapshotJobPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
+	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }

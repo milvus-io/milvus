@@ -130,9 +130,13 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 		}
 		return g.producer.produceInternal(ctx, g.msgs[0])
 	}
-	// auto commit if there's only one message.
 	if len(g.msgs) == 1 {
-		return g.produceAutocommit(ctx, g.msgs[0])
+		msg := g.msgs[0]
+		// Only a local CAS message without transaction context needs wrapping.
+		// Replication already carries the source transaction and must preserve it.
+		if !message.HasPartialUpdateCAS(msg) || msg.TxnContext() != nil || msg.ReplicateHeader() != nil {
+			return g.produceAutocommit(ctx, msg)
+		}
 	}
 	// produce with transaction.
 	return g.produceTxn(ctx, g.msgs...)
@@ -170,7 +174,12 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 			return nil, ctx.Err()
 		}
 		result, err := g.produceWithTxnOnce(ctx, msgs...)
-		if err := status.AsStreamingError(err); err != nil && err.IsTxnExpired() {
+		if streamingErr := status.AsStreamingError(err); streamingErr != nil && streamingErr.IsTxnExpired() {
+			for _, msg := range msgs {
+				if message.HasPartialUpdateCAS(msg) {
+					return nil, status.NewPartialUpdateRetryable("partial update transaction expired before commit")
+				}
+			}
 			// if the transaction is expired,
 			// there may be wal is transferred to another streaming node,
 			// retry it with new transaction.
@@ -186,6 +195,14 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 
 // produceWithTxnOnce produces the messages with a transaction once.
 func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.MutableMessage) (_ *types.AppendResult, err error) {
+	partialUpdateCAS := false
+	for _, msg := range msgs {
+		if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
+			partialUpdateCAS = true
+			break
+		}
+	}
+
 	// a txn batch should always belong to one vchannel.
 	txn, err := g.beginTxn(ctx, msgs[0].VChannel())
 	if err != nil {
@@ -194,7 +211,7 @@ func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.M
 	if err := g.appendTxnBody(ctx, txn, msgs...); err != nil {
 		return nil, err
 	}
-	return g.commitTxn(ctx, msgs[0].VChannel(), txn)
+	return g.commitTxn(ctx, msgs[0].VChannel(), txn, partialUpdateCAS)
 }
 
 // beginTxn begins a new transaction.
@@ -242,13 +259,23 @@ func (g *ProduceGuard) appendTxnBody(ctx context.Context, txn *message.TxnContex
 }
 
 // commitTxn commits the transaction.
-func (g *ProduceGuard) commitTxn(ctx context.Context, vchannel string, txn *message.TxnContext) (*types.AppendResult, error) {
+func (g *ProduceGuard) commitTxn(
+	ctx context.Context,
+	vchannel string,
+	txn *message.TxnContext,
+	partialUpdateCAS bool,
+) (*types.AppendResult, error) {
 	commitTxn := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable()
 	message.InjectTraceContext(ctx, commitTxn)
+	if partialUpdateCAS {
+		if err := message.MarkPartialUpdateCASCommit(commitTxn); err != nil {
+			return nil, err
+		}
+	}
 
 	return g.producer.produceInternal(ctx, commitTxn.WithTxnContext(*txn))
 }

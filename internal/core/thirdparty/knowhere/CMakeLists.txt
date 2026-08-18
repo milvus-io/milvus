@@ -14,9 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# Pin zilliztech/knowhere#1745 until the next release; v3.0.6 still pins
-# Cardinal v3.0.3 and an older milvus-common revision.
-set( KNOWHERE_VERSION 16a71a3d )
+# Pins the short zilliztech/knowhere#1761 commit without nullable ID mapping.
+# It retains the COSINE/IP CalcDistByIDs fix for fully cached DiskANN vectors.
+set( KNOWHERE_VERSION 6a3b7df1 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")

@@ -1428,3 +1428,52 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationRejectsDropped
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrServiceInternal)
 }
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaMalformedMultiAnalyzerParamsIsDataIntegrityError() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "multi_analyzer_params", Value: "{bad"},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	_, _, err := s.task.missingFunctionInputSchema([]*schemapb.FunctionSchema{functionSchema})
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "failed to parse multi_analyzer_params for function BM25")
+	s.ErrorContains(err, "invalid character")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByFieldWrongTypeIsDataIntegrityError() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	// DDL only admits a VarChar by_field; a resolved by_field of another type
+	// is persisted-schema corruption, classified the same as the other branches.
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "multi_analyzer_params", Value: `{"by_field":"lang"}`},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			{FieldID: 103, Name: "lang", DataType: schemapb.DataType_Int64},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	_, _, err := s.task.missingFunctionInputSchema([]*schemapb.FunctionSchema{functionSchema})
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "references by_field lang of type")
+	s.ErrorContains(err, "only VarChar is allowed")
+}

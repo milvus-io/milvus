@@ -248,19 +248,17 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 	}
 
 	for _, candidate := range candidates {
-		var segments map[int64]*SegmentInfo
 		if criterion.ids != nil {
-			segments = lo.SliceToMap(lo.FilterMap(criterion.ids.Collect(), func(id int64, _ int) (*SegmentInfo, bool) {
+			for id := range criterion.ids {
 				segment, ok := candidate[id]
-				return segment, ok
-			}), func(segment *SegmentInfo) (int64, *SegmentInfo) {
-				return segment.SegmentID(), segment
-			})
-		} else {
-			segments = candidate
+				if ok && criterion.Match(segment) {
+					fn(id, segment)
+				}
+			}
+			continue
 		}
 
-		for id, segment := range segments {
+		for id, segment := range candidate {
 			if criterion.Match(segment) {
 				fn(id, segment)
 			}

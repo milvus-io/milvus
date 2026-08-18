@@ -313,6 +313,10 @@ pulsar:
 #     tlsKey:  # path to client's private key (PEM) used for authentication
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
+#   producer:
+#     message:
+#       max:
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
@@ -367,8 +371,8 @@ proxy:
   maxFieldNum: 256 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
-  maxBloomFilterSize: 67108864 # The maximum byte size of the SBBF body in a client pre-built bloom_match filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-request memory/network amplification. Must not exceed the MBF1 format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
-  maxBloomFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of bloom-bearing expression plans in one Search, HybridSearch, or Query request. The proxy checks the assembled plans before proto.Marshal, so repeated references to one bloom_match template value and Bloom filters across hybrid sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.
+  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built bloom_match or roaring_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
+  maxMembershipFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of membership-filter-bearing expression plans in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -432,6 +436,33 @@ proxy:
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
+    # high-level restful api, restore the value handling of releases that predate the REST insert
+    # validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
+    # stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
+    # through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
+    # for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.
+    compatibilityMode: false
+    # high-level restful api, the deepest nesting an expression template parameter may use. Converting a
+    # parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
+    # bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
+    # itself is the risk the setting exists to remove; values below 1 are read as 1.
+    maxExprParamsDepth: 100
+    # high-level restful api, return a JSON field as the document it holds rather than as a string.
+    # Turn this off only to keep clients written against the older shape working while they migrate: there a JSON field read
+    # back as "{\"a\":1}" while the same value in the dynamic field read back as {"a":1}. The insert path follows the same
+    # switch, so either shape can be sent back unchanged: while the field reads back as text, a JSON string is read as the
+    # document it spells; once it reads back as the document itself, a string is stored as the string it is. Rows written
+    # before the insert path stopped storing non-JSON bytes may not hold a document; if any row in a response is such a row,
+    # every JSON field in that response falls back to the string form and a warning is logged, so a caller always sees one
+    # shape or the other and never a mixture.
+    nativeJSONResponse: true
+    # high-level restful api, whether to return Array fields wrapped in the raw protobuf ScalarField shape
+    # ({"tags":{"Data":{"StringData":{"data":["a","b"]}}}}) instead of a native JSON array ({"tags":["a","b"]}).
+    # Only enable this to keep clients written against the old, incorrect shape working while they migrate;
+    # it will be removed in a future release. It covers the shape of a top-level Array field and nothing else:
+    # a struct array's sub-fields are unaffected, and so is Accept-Type-Allow-Int64, which renders an Int64 as a
+    # string wherever one appears, including inside either kind of array.
+    legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
@@ -758,6 +789,9 @@ dataCoord:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
+    enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
+    target:
+      maxEventsPerReconcile: 100 # Maximum number of compaction events emitted by one target reconciliation.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
@@ -828,6 +862,11 @@ dataCoord:
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
+    crossBucketEndpointAllowlist:  # Comma/space separated endpoint host[:port] allowlist for snapshot server-side cross-bucket copy with custom object storage endpoints. Canonical cloud endpoints derived from cloud_provider and region are allowed without this list.
+    exportCopyConcurrency: 16 # Maximum concurrent provider-side object copy requests for ExportSnapshot. Invalid or non-positive values are coerced to the default value 16.
+    exportJobTimeout: 43200 # Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time. Default 12 hours.
+    exportJobRetention: 10800 # Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.
+    exportMaxConcurrentJobs: 1 # Maximum number of snapshot export jobs executed concurrently by DataCoord.
   enableActiveStandby: false
   taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
@@ -922,6 +961,7 @@ dataNode:
     # a non-positive or unparseable value falls back to the default. Set it to at least twice
     # writeRetryInitialInterval, otherwise the effective cap is raised to twice the initial interval.
     writeRetryMaxInterval: 60
+    copyObjectTimeout: 3600 # Timeout in seconds for copying one object during snapshot restore, including retries.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -1161,6 +1201,9 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+      proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
+    maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
+    downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 

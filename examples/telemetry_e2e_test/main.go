@@ -18,11 +18,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -239,7 +238,7 @@ func registerCommandHandlers(client *milvusclient.Client) {
 		fmt.Printf("     Command ID:   %s\n", cmd.CommandId)
 		fmt.Printf("     Persistent:   %v\n", cmd.Persistent)
 		fmt.Printf("     Target Scope: %s\n", cmd.TargetScope)
-		fmt.Printf("     Timestamp:    %d\n", cmd.Timestamp)
+		fmt.Printf("     Timestamp:    %d\n", cmd.CreateTime)
 
 		// Parse and print payload
 		var payload map[string]interface{}
@@ -399,7 +398,7 @@ func connectToRootCoord(milvusAddress string) (*grpc.ClientConn, error) {
 }
 
 func pushTestCommands(ctx context.Context, conn *grpc.ClientConn) error {
-	client := milvuspb.NewRootCoordClient(conn)
+	client := milvuspb.NewClientTelemetryServiceClient(conn)
 
 	// Command 1: debug_log (one-time)
 	fmt.Println("\n  📤 Pushing 'debug_log' command...")
@@ -412,7 +411,6 @@ func pushTestCommands(ctx context.Context, conn *grpc.ClientConn) error {
 	req1 := &milvuspb.PushClientCommandRequest{
 		CommandType: "debug_log",
 		Payload:     debugLogPayload,
-		TargetScope: "global",
 		TtlSeconds:  300,
 		Persistent:  false,
 	}
@@ -434,7 +432,6 @@ func pushTestCommands(ctx context.Context, conn *grpc.ClientConn) error {
 	req2 := &milvuspb.PushClientCommandRequest{
 		CommandType: "collection_metrics",
 		Payload:     collMetricsPayload,
-		TargetScope: "global",
 		Persistent:  true,
 	}
 
@@ -458,7 +455,6 @@ func pushTestCommands(ctx context.Context, conn *grpc.ClientConn) error {
 	req3 := &milvuspb.PushClientCommandRequest{
 		CommandType: "push_config",
 		Payload:     pushConfigPayload,
-		TargetScope: "global",
 		Persistent:  true,
 	}
 

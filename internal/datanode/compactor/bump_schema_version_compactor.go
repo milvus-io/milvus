@@ -183,13 +183,13 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunc
 func additionalFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
-		return bm25AdditionalInputFields(schema, inputField)
+		return bm25AdditionalInputFields(schema, functionSchema, inputField)
 	default:
 		return nil, nil
 	}
 }
 
-func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
+func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
 	params, ok := typeutil.CreateFieldSchemaHelper(inputField).GetMultiAnalyzerParams()
 	if !ok {
 		return nil, nil
@@ -197,15 +197,25 @@ func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *sc
 	var multiAnalyzerParams struct {
 		ByField string `json:"by_field"`
 	}
+	// The params were validated at DDL time; failing to parse or resolve them
+	// here means the persisted schema itself is inconsistent, not that the
+	// compaction request is malformed.
 	if err := json.Unmarshal([]byte(params), &multiAnalyzerParams); err != nil {
-		return nil, err
+		return nil, merr.WrapErrDataIntegrity(err, "failed to parse multi_analyzer_params for function %s", functionSchema.GetName())
 	}
 	if multiAnalyzerParams.ByField == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("multi_analyzer_params missing required 'by_field' key")
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s is missing required 'by_field' key", functionSchema.GetName())
 	}
 	byField := typeutil.GetFieldByName(schema, multiAnalyzerParams.ByField)
 	if byField == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s references missing input field %s", functionSchema.GetName(), multiAnalyzerParams.ByField)
+	}
+	// DDL only admits a VarChar by_field selector (validateMultiAnalyzerParams).
+	// A resolved selector of any other type is the same class of persisted-schema
+	// corruption as the branches above, so classify it identically instead of
+	// letting it degrade into an ErrParameterInvalid downstream.
+	if byField.GetDataType() != schemapb.DataType_VarChar {
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s references by_field %s of type %s, but only VarChar is allowed", functionSchema.GetName(), multiAnalyzerParams.ByField, byField.GetDataType())
 	}
 	return []*schemapb.FieldSchema{byField}, nil
 }
@@ -861,7 +871,8 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 // The receiver (completeBumpSchemaVersionCompactionMutation in
 // internal/datacoord/meta.go) merges this array onto SegmentInfo.Binlogs,
 // which is where the materialized field's data becomes visible to the rest of
-// DataCoord — including index building.
+// DataCoord — including index building — without replacing untouched groups.
+// Index eligibility is gated separately by the segment schema version.
 // This result is therefore load-bearing: dropping it silently makes the
 // materialized field permanently un-indexable.
 func (t *bumpSchemaVersionCompactionTask) buildNewInsertLogsV3(writerResult *bumpSchemaVersionWriterResult, sparseFieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {

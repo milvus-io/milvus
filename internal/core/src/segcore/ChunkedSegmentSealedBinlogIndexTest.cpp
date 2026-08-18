@@ -790,9 +790,10 @@ TEST(test_chunk_segment,
     auto null_result = sealed->bulk_subscript(
         nullptr, vec_field_id, null_offsets.data(), null_offsets.size());
 
-    ASSERT_EQ(null_result->valid_data_size(), null_offsets.size());
-    for (int i = 0; i < null_result->valid_data_size(); ++i) {
-        EXPECT_FALSE(null_result->valid_data(i));
+    const auto& null_valid_data = GetFieldDataRowValidData(*null_result);
+    ASSERT_EQ(null_valid_data.size(), null_offsets.size());
+    for (int i = 0; i < null_valid_data.size(); ++i) {
+        EXPECT_FALSE(null_valid_data[i]);
     }
     EXPECT_TRUE(null_result->vectors().float_vector().data().empty());
 
@@ -800,11 +801,12 @@ TEST(test_chunk_segment,
     auto result = sealed->bulk_subscript(
         nullptr, vec_field_id, offsets.data(), offsets.size());
 
-    ASSERT_EQ(result->valid_data_size(), offsets.size());
-    EXPECT_FALSE(result->valid_data(0));
-    EXPECT_TRUE(result->valid_data(1));
-    EXPECT_FALSE(result->valid_data(2));
-    EXPECT_TRUE(result->valid_data(3));
+    const auto& result_valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(result_valid_data.size(), offsets.size());
+    EXPECT_FALSE(result_valid_data[0]);
+    EXPECT_TRUE(result_valid_data[1]);
+    EXPECT_FALSE(result_valid_data[2]);
+    EXPECT_TRUE(result_valid_data[3]);
 
     const auto& returned = result->vectors().float_vector().data();
     ASSERT_EQ(returned.size(), 2 * dim);

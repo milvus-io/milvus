@@ -1528,7 +1528,6 @@ func (op *organizeOperator) emptyFieldDataAccordingFieldSchema(fieldData *schema
 		FieldName: fieldData.FieldName,
 		FieldId:   fieldData.FieldId,
 		IsDynamic: fieldData.IsDynamic,
-		ValidData: make([]bool, 0),
 	}
 	if fieldData.Type == schemapb.DataType_FloatVector ||
 		fieldData.Type == schemapb.DataType_BinaryVector ||
@@ -2219,7 +2218,7 @@ func compareNulls(validData []bool, i, j int, nullsFirst bool) (int, bool) {
 // It returns the final order comparison after applying ASC/DESC to non-null values.
 func compareOrderByField(field *schemapb.FieldData, orderBy OrderByField, idxI, idxJ int, cache jsonValueCache) (int, error) {
 	if orderBy.JSONPath != "" && field.GetType() == schemapb.DataType_JSON {
-		if cmp, handled := compareNulls(field.ValidData, idxI, idxJ, orderBy.NullsFirst); handled {
+		if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), idxI, idxJ, orderBy.NullsFirst); handled {
 			return cmp, nil
 		}
 		valI := cache.getCachedJSONValue(orderBy.FieldName, orderBy.JSONPath, idxI)
@@ -2231,7 +2230,7 @@ func compareOrderByField(field *schemapb.FieldData, orderBy OrderByField, idxI, 
 		return cmp, nil
 	}
 
-	if cmp, handled := compareNulls(field.ValidData, idxI, idxJ, orderBy.NullsFirst); handled {
+	if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), idxI, idxJ, orderBy.NullsFirst); handled {
 		return cmp, nil
 	}
 	cmp, err := compareFieldDataAt(field, idxI, idxJ, orderBy.NullsFirst)
@@ -2424,7 +2423,7 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 // (see task_insert.go withNANCheck() -> validate_util.go -> typeutil.VerifyFloat).
 // Therefore, NaN values cannot exist in stored data and will never reach this comparison.
 func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (int, error) {
-	if cmp, handled := compareNulls(field.ValidData, i, j, nullsFirst); handled {
+	if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), i, j, nullsFirst); handled {
 		return cmp, nil
 	}
 
@@ -2621,7 +2620,7 @@ func (op *orderByOperator) reorderResults(result *milvuspb.SearchResults, indice
 }
 
 func prepareNullableFieldDataReorder(field *schemapb.FieldData, indices []int) ([]bool, []int, int, error) {
-	validData := field.GetValidData()
+	validData := typeutil.GetFieldDataValidData(field)
 	if len(validData) == 0 {
 		return nil, nil, 0, nil
 	}
@@ -2661,8 +2660,9 @@ func reorderNullableFloatVectorData(field *schemapb.FieldData, data []float32, w
 		return nil, merr.WrapErrServiceInternalMsg("reorderFieldData: nullable FloatVector field %s has %d elements, expected compact %d (valid=%d, dim=%d)", field.GetFieldName(), len(data), expected, validCount, width)
 	}
 	newData := make([]float32, 0, countValidRows(newValidData)*width)
+	validData := typeutil.GetFieldDataValidData(field)
 	for _, oldIdx := range indices {
-		if !field.ValidData[oldIdx] {
+		if !validData[oldIdx] {
 			continue
 		}
 		physicalIdx := logicalToPhysical[oldIdx]
@@ -2678,8 +2678,9 @@ func reorderNullableByteVectorData(field *schemapb.FieldData, typeName string, d
 		return nil, merr.WrapErrServiceInternalMsg("reorderFieldData: nullable %s field %s has %d bytes, expected compact %d (valid=%d, width=%d)", typeName, field.GetFieldName(), len(data), expected, validCount, width)
 	}
 	newData := make([]byte, 0, countValidRows(newValidData)*width)
+	validData := typeutil.GetFieldDataValidData(field)
 	for _, oldIdx := range indices {
-		if !field.ValidData[oldIdx] {
+		if !validData[oldIdx] {
 			continue
 		}
 		physicalIdx := logicalToPhysical[oldIdx]
@@ -2694,8 +2695,9 @@ func reorderNullableSparseVectorData(field *schemapb.FieldData, contents [][]byt
 		return nil, merr.WrapErrServiceInternalMsg("reorderFieldData: nullable SparseFloatVector field %s has %d elements, expected compact %d", field.GetFieldName(), len(contents), validCount)
 	}
 	newContents := make([][]byte, 0, countValidRows(newValidData))
+	validData := typeutil.GetFieldDataValidData(field)
 	for _, oldIdx := range indices {
-		if !field.ValidData[oldIdx] {
+		if !validData[oldIdx] {
 			continue
 		}
 		newContents = append(newContents, contents[logicalToPhysical[oldIdx]])
@@ -2992,7 +2994,7 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 
 	// Reorder valid data if present
 	if newValidData != nil {
-		field.ValidData = newValidData
+		typeutil.SetFieldDataValidData(field, newValidData)
 	}
 	return nil
 }
