@@ -17,6 +17,9 @@
 package paramtable
 
 import (
+	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -287,4 +290,140 @@ func TestProjectionOmitsEveryEnvironmentOnlyKey(t *testing.T) {
 		_, _, err := mgr.GetRegisteredConfig(spelling)
 		assert.ErrorIs(t, err, config.ErrKeyUnregistered, spelling)
 	}
+}
+
+// One etcd identity, one verdict.
+//
+// A configuration key has one identity — the form with every separator removed,
+// which is what values are stored under and what an alter-endpoint write
+// addresses — and many spellings that reach it. Every rule that decides whether
+// a value is a credential reads a spelling. So the invariant that actually
+// matters is not "this key is classified correctly" but "no two spellings of one
+// identity disagree", and it has to be asserted mechanically, because the
+// spellings that break it are the ones nobody thinks to write down.
+//
+// This is not a hypothetical. Four separate defects in this classifier were of
+// exactly this shape, each one a pair of spellings that reached the same stored
+// value and got opposite answers, and each was found by enumeration rather than
+// by reading the code:
+//
+//   - membership matched a collapsed prefix while sensitivity matched only a
+//     dotted one, so "kafkaconsumerssl.key.pem" was admitted as a member of a
+//     namespace declared sensitive and then classified as not sensitive;
+//   - a group's Sensitive default decided a collapsed spelling on its own, so an
+//     exempted leaf was readable under its dotted spelling and masked under its
+//     collapsed one, in the same response;
+//   - the caller's segmentation was believed, so a credential named
+//     "<provider>.credential_url" could be asked for as
+//     "<provider>credential.url" and hit a declared-safe leaf;
+//   - and the same again for an identity no source had segmented.
+//
+// Two of those returned a private key from an endpoint with no authentication in
+// front of it, and passed the write fence onto the credential's own etcd slot.
+func TestOneIdentityHasOneVerdict(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+	mgr := params.baseTable.mgr
+
+	// Seed every dynamic namespace with a member whose name is shaped like the
+	// things that go wrong: a credential-ish leaf, a declared-safe leaf, and the
+	// two run together. Groups are the interesting case because their members
+	// are named by whoever writes them, so nothing here can be enumerated in
+	// advance.
+	leaves := []string{
+		"p.credential", "p.credential_url", "p.secret_enable", "p.token_url",
+		"p.enable", "p.url", "p.resource_name", "p.api_key", "p.ssl.key.pem",
+	}
+	seeds := make([]string, 0, 64)
+	walkParamGroups(reflect.ValueOf(params).Elem(), func(group *ParamGroup) {
+		for _, leaf := range leaves {
+			seeds = append(seeds, group.KeyPrefix+leaf)
+		}
+	})
+	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
+		seeds = append(seeds, item.Key)
+	})
+	// And every key the sources actually loaded, which is where the shipped
+	// group members live — they are not ParamItems, so the walk above cannot
+	// see them, and they are the ones with an endorsed segmentation.
+	for key := range mgr.GetConfigsRaw() {
+		seeds = append(seeds, key)
+	}
+
+	byIdentity := make(map[string][]string, len(seeds)*8)
+	for _, seed := range seeds {
+		for _, spelling := range spellingsOf(seed) {
+			identity := config.EtcdConfigKey(spelling)
+			byIdentity[identity] = append(byIdentity[identity], spelling)
+		}
+	}
+
+	disagreements := make([]string, 0)
+	for identity, spellings := range byIdentity {
+		var sensitive, readable *string
+		for i := range spellings {
+			spelling := spellings[i]
+			verdict := mgr.IsSensitive(spelling)
+			if verdict && sensitive == nil {
+				sensitive = &spellings[i]
+			}
+			if !verdict && readable == nil {
+				readable = &spellings[i]
+			}
+		}
+		if sensitive != nil && readable != nil {
+			disagreements = append(disagreements, fmt.Sprintf(
+				"%s: %q is sensitive, %q is not", identity, *sensitive, *readable))
+		}
+	}
+	sort.Strings(disagreements)
+
+	require.NotEmpty(t, byIdentity, "no identities were probed, so this asserted nothing")
+	if len(disagreements) > 0 {
+		t.Errorf("%d identities are classified two ways depending on how they are spelled. "+
+			"Whichever spelling a caller sends decides the verdict, and every spelling below "+
+			"addresses one stored value and one etcd key:\n  %s",
+			len(disagreements), strings.Join(disagreements, "\n  "))
+	}
+}
+
+// spellingsOf returns ways a caller can address the same identity: the
+// separators swapped, the case changed, and the segment boundaries moved, which
+// is what a leaf-name rule is sensitive to.
+func spellingsOf(key string) []string {
+	lower := strings.ToLower(key)
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 32)
+	add := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+
+	segments := strings.Split(lower, ".")
+	for _, separator := range []string{".", "/", "_", "-", ""} {
+		joined := strings.Join(segments, separator)
+		add(joined)
+		add(strings.ToUpper(joined))
+	}
+
+	// Move each boundary, which renames the leaf without changing the identity.
+	collapsed := strings.ReplaceAll(lower, ".", "")
+	for cut := 1; cut < len(collapsed); cut++ {
+		add(collapsed[:cut] + "." + collapsed[cut:])
+	}
+	// And keep the namespace intact while re-cutting only what is below it,
+	// which is the shape that reaches a group's suffix exemption.
+	if len(segments) > 2 {
+		head := strings.Join(segments[:len(segments)-2], ".")
+		tail := strings.Join(segments[len(segments)-2:], "")
+		for cut := 1; cut < len(tail); cut++ {
+			add(head + "." + tail[:cut] + "." + tail[cut:])
+		}
+	}
+	return out
 }

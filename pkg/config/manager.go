@@ -343,6 +343,29 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 	return "", "", errors.Wrap(ErrKeyNotFound, requestedKey)
 }
 
+// isStoredKey reports whether some source other than the environment, or a
+// runtime overlay, holds a value under exactly this spelling.
+//
+// This is what vouches for a segmentation nothing declared — see
+// resolvedKey.segmented — so it excludes the environment for the same reason
+// rememberSpelling and groupMemberIsEnvironmentOnly do: environment variable
+// names are not a namespace, they are whatever the pod happens to carry, and a
+// name that arrives with dots in it ("env 'a.b=c'") would otherwise vouch for
+// its own segmentation. groupMemberIsEnvironmentOnly refuses such a key before
+// it reaches any exemption today; agreeing with it here means that stays true
+// if the two are ever reached in the other order.
+func (m *Manager) isStoredKey(dotted string) bool {
+	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
+		if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
+			return true
+		}
+		if source, ok := m.keySourceMap.Get(candidate); ok && source != environmentSourceName {
+			return true
+		}
+	}
+	return false
+}
+
 // groupMemberIsEnvironmentOnly reports whether the only thing standing behind a
 // prefix-matching key is a process environment variable that happens to
 // collapse into the group's separator-free namespace.
@@ -366,20 +389,6 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 // PATH, HOSTNAME, http_proxy. Treating "the dotted spelling exists" as proof of
 // configuration would hand every such variable to a group whose prefix they
 // happen to match, which for the empty prefix is all of them.
-// isStoredKey reports whether some source or runtime overlay holds a value under
-// exactly this spelling.
-func (m *Manager) isStoredKey(dotted string) bool {
-	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
-		if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
-			return true
-		}
-		if _, ok := m.keySourceMap.Get(candidate); ok {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	// Every spelling the same key can be stored under. EtcdSource keeps whatever
 	// separator the stored key used, hence the slash form.
@@ -796,6 +805,10 @@ func (m *Manager) rememberSpelling(key, sourceName string) {
 	// so it cannot.
 	m.spellingMutex.Lock()
 	defer m.spellingMutex.Unlock()
+	// Deliberately never unlearned, not even when the key is deleted: a learned
+	// spelling only ever endorses a segmentation, and endorsing one for an
+	// identity that no longer holds a value costs nothing, while dropping it
+	// would mean tracking which of the key's two entries went away.
 	if m.collidedSpellings.Contain(collapsed) {
 		return
 	}
@@ -882,14 +895,18 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 			// or a key written through the alter endpoint becomes invisible to
 			// the very projections this file exists to make truthful.
 			//
-			// Only for a key that has no dots left, and that restriction is
-			// load-bearing rather than tidiness. Sensitivity is decided on the
-			// dotted identity when there is one, so admitting a half-collapsed
-			// spelling here — "kafkaconsumerssl.key.pem", which matches the
-			// collapsed prefix while matching no dotted one — would admit a
-			// member that no sensitive prefix can then claim, and hand back the
-			// private key that "kafka.consumer.ssl.key.pem" refuses. Membership
-			// and sensitivity have to read the key the same way.
+			// Only for a key that has no dots left. A half-collapsed spelling
+			// — "kafkaconsumerssl.key.pem", which matches the collapsed prefix
+			// while matching no dotted one — names no namespace anybody
+			// declared, and the caller who wrote it is the only reason it looks
+			// like it does. Such a key is refused rather than admitted as a
+			// member of a namespace it only resembles.
+			//
+			// Sensitivity does not rest on this: matchSensitivePrefix consults
+			// the collapsed prefixes unconditionally, so the same spelling
+			// classifies sensitive whether or not it is admitted here. Two
+			// independent reasons, which is the point — this predicate is about
+			// what may be named, not about what may be read.
 			//
 			// Fuzzy matching is only safe on sources that hold nothing but
 			// Milvus configuration. The environment holds everything in the pod,

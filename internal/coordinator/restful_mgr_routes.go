@@ -1359,27 +1359,29 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Writes are constrained; deletes are not, beyond the security fence
-		// above. A delete does not simply remove a setting — it restores
-		// whatever the yaml or the compiled default says, which can be the more
-		// permissive of the two, so it is fenced for authorization-deciding keys
-		// exactly like a write. For everything else refusing it would strand an
-		// operator holding a key an older build wrote: a secret, or a ParamItem
-		// that a later version stopped declaring.
+		// A delete does not simply remove a setting — it restores whatever the
+		// yaml or the compiled default says, which can be the more permissive of
+		// the two. So a credential is fenced against deletion exactly as it is
+		// against a write: dropping the etcd entry that holds an operator's
+		// minio.secretAccessKey puts the compiled default back, and this
+		// endpoint has no authentication in front of it.
+		//
+		// An undeclared key is still deletable, which is where that reasoning
+		// stops: refusing it would strand an operator holding a key an older
+		// build wrote — a secret, or a ParamItem that a later version stopped
+		// declaring — with no way to remove it through this API at all.
+		if paramMgr.IsSensitive(canonicalKey) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify sensitive config",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
 		if config.Value != nil {
 			if registeredKind == pkgconfig.RegisteredConfigUnknown {
 				logger.Info(request.Context(), "HandleAlterConfig attempted to set unregistered config",
 					mlog.String("key", config.Key))
 				writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
-				return
-			}
-			// Never write a credential through the generic config endpoint:
-			// secrets have their own lifecycle and must not be copied into etcd
-			// in cleartext, even when the caller is root.
-			if paramMgr.IsSensitive(canonicalKey) {
-				logger.Info(request.Context(), "HandleAlterConfig attempted to set sensitive config",
-					mlog.String("key", config.Key))
-				writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 				return
 			}
 			configsToUpdate[canonicalKey] = *config.Value

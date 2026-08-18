@@ -388,7 +388,7 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "sensitive configuration")
 	})
 
-	t.Run("sensitive config may still be deleted", func(t *testing.T) {
+	t.Run("sensitive config cannot be deleted either", func(t *testing.T) {
 		const key = "test.alter.sensitive.delete"
 		mgr.RegisterConfigKey(key)
 		mgr.RegisterSensitiveKey(key)
@@ -397,10 +397,24 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 		coord.HandleAlterConfig(w, req)
-		// Removing a secret someone else wrote into etcd is the opposite of
-		// disclosing one, so validation must let it through. Reaching the etcd
-		// step is the proof that it did; this package has no etcd, so that step
-		// is where it stops.
+		// A delete is not a removal, it is a reversion: whatever the yaml or the
+		// compiled default says comes back, and for minio.secretAccessKey that
+		// is "minioadmin". An endpoint with no authentication in front of it
+		// does not get to do that, for the same reason it does not get to write
+		// the key.
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("undeclared config may still be deleted", func(t *testing.T) {
+		// Where the reasoning above stops. An operator holding a key an older
+		// build wrote needs some way to remove it, and nothing here can tell
+		// whether it was a secret.
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": "test.alter.undeclared.legacy"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
 		assert.NotContains(t, w.Body.String(), "sensitive configuration")
 		assert.Contains(t, w.Body.String(), "etcd source is not enabled")
 	})
