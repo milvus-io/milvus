@@ -11,13 +11,16 @@
 
 #pragma once
 
+#include <atomic>
+#include <folly/SharedMutex.h>
+#include <geos_c.h>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <shared_mutex>
 #include <string>
 #include <vector>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
-#include <geos_c.h>
 #include "pb/plan.pb.h"
 
 // Forward declaration to avoid pulling heavy field data headers here
@@ -93,6 +96,12 @@ class RTreeIndexWrapper {
     /**
      * @brief Get the total number of geometries in the index
      * @return Number of geometries
+     *
+     * Lock-free: served from entry_count_, which every mutation point
+     * publishes under rtree_mutex_. Reading rtree_.size() instead would put a
+     * shared-lock acquisition on the search path for a single integer -- and
+     * would have to rebuild a poisoned tree first (see
+     * lock_consistent_rtree_for_read) just to read its size.
      */
     int64_t
     count() const;
@@ -103,6 +112,15 @@ class RTreeIndexWrapper {
      */
     int64_t
     ByteSize() const;
+
+    // Test-only fault injection. The insert hook throws after Boost has
+    // already accepted the value, exercising the worst documented exception
+    // state. Both hooks are one-shot.
+    void
+    SetThrowAfterInsertForTesting(bool enabled);
+
+    void
+    SetThrowOnQueryForTesting(bool enabled);
 
     // Boost rtree does not use index/leaf capacities; keep only fill factor for
     // compatibility (no-op currently)
@@ -117,7 +135,10 @@ class RTreeIndexWrapper {
      * @param maxX Output maximum X coordinate
      * @param maxY Output maximum Y coordinate
      */
-    void
+    // Returns false (leaving the outputs unspecified) when GEOS cannot compute
+    // an envelope, e.g. for an empty geometry. Callers must not use the box on
+    // a false return.
+    bool
     get_bounding_box(const GEOSGeometry* geom,
                      GEOSContextHandle_t ctx,
                      double& minX,
@@ -132,16 +153,67 @@ class RTreeIndexWrapper {
     using Value = std::pair<Box, int64_t>;  // (MBR, row_offset)
     using RTree = bgi::rtree<Value, bgi::rstar<16>>;
 
-    RTree rtree_{};
+    // Insert one (box, row_offset) entry with rtree_mutex_ already held.
+    //
+    // NOT idempotent per row_offset, by design: no production path re-drives a
+    // failed batch into the same wrapper. On the insert path a failure
+    // propagates to the delegator, which panics (delegator_data.go:203); on
+    // the growing load path there is no retry loop, and a re-issued
+    // LoadSegments builds a fresh segment and a fresh wrapper. A dedup set
+    // would therefore cost one entry per row forever to guard a case that
+    // cannot occur.
+    //
+    // What IS guaranteed: values_ (the authoritative committed set) and
+    // rtree_ never diverge. Boost documents only the basic guarantee for
+    // insert, so a throw rolls values_ back and flags the tree for a rebuild
+    // from values_ before its next read or write.
+    void
+    insert_value_locked(const Box& box, int64_t row_offset);
+
+    // Boost only guarantees no leaks when insert throws; the tree itself may
+    // be inconsistent and must not be read or mutated. values_ is the
+    // authoritative committed set, so rebuild a fresh tree from it before the
+    // next operation. Caller must hold rtree_mutex_ exclusively.
+    void
+    ensure_rtree_consistent_locked() const;
+
+    std::shared_lock<folly::SharedMutexWritePriority>
+    lock_consistent_rtree_for_read() const;
+
+    mutable RTree rtree_{};
     std::vector<Value> values_;
+
+    // Number of indexed entries, mirroring values_ on the build path and
+    // rtree_.size() on the load path (load() populates only the tree). Every
+    // store below happens under an exclusive rtree_mutex_, so count() can read
+    // it without taking the lock at all. It tracks the COMMITTED set: a failed
+    // insert rolls values_ back and leaves this counter untouched, so it stays
+    // correct while rtree_ is still awaiting its rebuild.
+    std::atomic<int64_t> entry_count_{0};
     std::string index_path_;
     bool is_build_mode_;
 
     // Flag to guard against repeated invocations which could otherwise attempt to release resources multiple times (e.g. BuildWithRawDataForUT() calls finish(), and Upload() may call it again).
     bool finished_ = false;
 
-    // Serialize access to rtree_
-    mutable std::shared_mutex rtree_mutex_;
+    // Serialize access to rtree_.
+    //
+    // MUST stay write-priority. On a growing segment the single insert thread
+    // takes this lock exclusively once per row (add_geometry) while every
+    // concurrent search takes it shared (query_candidates). std::shared_mutex
+    // is a pthread rwlock, which defaults to PREFER_READER on glibc: an
+    // arriving reader barges ahead of a waiting writer, so a steady stream of
+    // overlapping searches can starve the insert thread indefinitely. That
+    // stalls the vchannel's flowgraph consumer, which freezes the channel's
+    // time-tick -- a write-path outage caused by read traffic. Write priority
+    // blocks new readers once a writer is queued, bounding each insert's wait
+    // by the in-flight readers only.
+    mutable folly::SharedMutexWritePriority rtree_mutex_;
+    mutable bool rtree_needs_rebuild_ = false;
+
+    // Guarded by rtree_mutex_.
+    bool throw_after_insert_for_testing_ = false;
+    std::atomic<bool> throw_on_query_for_testing_{false};
 
     // R-Tree parameters
     uint32_t dimension_ = 2;

@@ -11,11 +11,13 @@
 
 #include "exec/expression/GISConjunctExpr.h"
 
+#include <atomic>
 #include <mutex>
 #include <utility>
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Geometry.h"
 #include "common/GeometryCache.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
@@ -97,7 +99,7 @@ GISGroupState::~GISGroupState() {
 // Coarse node: run each predicate's R-Tree query once (segment-level), combine
 // per is_and, cache, and emit the per-batch slice.
 // -------------------------------------------------------------------------
-bool
+PhyGISCoarseConjunctExpr::CoarseOutcome
 PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // Mirrors PhyGISFunctionFilterExpr::EvalForIndexSegment's coarse query.
     // NOTE: on 2.6 the scalar index is pinned eagerly in SegmentExpr's
@@ -124,7 +126,7 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
         // The caller aggregates this across the group's predicates and warns
         // once per segment (see Eval), instead of once per predicate here.
         p.coarse = TargetBitmap(active_count_, true);
-        return true;
+        return CoarseOutcome::kIndexUnusable;
     }
 
     // GEOS objects are bound to the per-thread context.
@@ -145,25 +147,32 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // newest inserts lowers active_count_ further), and TargetBitmap's
     // operator&=/|= size check is a bare assert() that is compiled out under
     // NDEBUG. Normalize into active_count_ space: keep the first
-    // active_count_ bits. The reverse direction -- the index reporting FEWER
-    // rows than are visible -- is unreachable today (SegmentGrowingImpl
-    // appends to the index before acking rows, so index rows >= active
-    // rows); if that invariant ever breaks, pad the un-indexed tail with 1s
-    // instead of failing the query: coarse ⊇ exact still holds and Refine
-    // evaluates the exact predicate, so results stay correct and we only
-    // lose R-Tree pruning for the tail -- same defensive posture as the
-    // pin-empty degrade above.
+    // active_count_ bits.
     if (static_cast<int64_t>(tmp.size()) > active_count_) {
         TargetBitmap sliced;
         sliced.append(tmp, 0, active_count_);
         p.coarse = std::move(sliced);
-        return false;
+        return CoarseOutcome::kPruned;
     }
-    if (static_cast<int64_t>(tmp.size()) < active_count_) {
-        tmp.resize(active_count_, /*init=*/true);
+    // The reverse direction -- the index reporting FEWER rows than are
+    // visible -- is unreachable on a growing segment (SegmentGrowingImpl
+    // appends to the index before acking rows) but IS reachable on a sealed
+    // one: an R-Tree built before empty/unparseable geometries were kept as
+    // placeholder entries under-reports the row space, and its missing
+    // entries are interior holes, not a trailing suffix. Padding only the
+    // tail with 1s would leave those holes false and silently drop matching
+    // rows from `survivors &= coarse_slice` in Refine -- while the very same
+    // predicate issued alone would take the per-predicate path's self-heal
+    // and return them. Apply the one shared rule instead: promote the whole
+    // row space to candidates (coarse ⊇ exact holds trivially, Refine still
+    // evaluates the exact predicate) and lose R-Tree pruning for this
+    // segment. Same defensive posture as the pin-empty degrade above.
+    if (PromoteShortGISCoarseBitmap(tmp, active_count_)) {
+        p.coarse = std::move(tmp);
+        return CoarseOutcome::kIndexShort;
     }
     p.coarse = std::move(tmp);
-    return false;
+    return CoarseOutcome::kPruned;
 }
 
 void
@@ -182,11 +191,19 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     if (!st_->coarse_done) {
         TargetBitmap cand(active_count_, st_->is_and);  // AND -> 1s / OR -> 0s
         int unusable_index = 0;  // preds whose R-Tree pin came up empty
+        int short_index = 0;     // preds whose legacy R-Tree is short
         int no_index = 0;        // preds with no geometry index at all
         for (auto& p : st_->preds) {
             if (p.has_index) {
-                if (RunRTreeQuery(p)) {
-                    ++unusable_index;
+                switch (RunRTreeQuery(p)) {
+                    case CoarseOutcome::kIndexUnusable:
+                        ++unusable_index;
+                        break;
+                    case CoarseOutcome::kIndexShort:
+                        ++short_index;
+                        break;
+                    case CoarseOutcome::kPruned:
+                        break;
                 }
             } else {
                 // No R-Tree index: coarse degenerates to the full set; the
@@ -225,6 +242,28 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 st_->preds.size(),
                 num_index_chunk_,
                 pinned_index_.size());
+        }
+        // Same shape as the per-predicate path's short-index warning
+        // (GISFunctionFilterExpr.cpp), throttled the same way: this is an
+        // expected upgrade state, not a bug, but it silently costs a full
+        // refinement per query until the index is rebuilt.
+        if (short_index > 0) {
+            static std::atomic<int64_t> last_short_index_log_us{0};
+            if (ShouldLogGeometryThrottled(last_short_index_log_us)) {
+                LOG_WARN(
+                    "GIS coarse pruning degraded to full scan: the R-Tree "
+                    "index for field {} reports fewer rows than the segment "
+                    "holds ({}) for {} of {} predicate(s); the missing "
+                    "entries may be interior holes, so every row is treated "
+                    "as a candidate for exact refinement. This index "
+                    "predates placeholder-MBR indexing of empty/unparseable "
+                    "geometries -- rebuild it to restore pruning (further "
+                    "occurrences suppressed briefly).",
+                    st_->field_id.get(),
+                    active_count_,
+                    short_index,
+                    st_->preds.size());
+            }
         }
         if (no_index > 0) {
             LOG_DEBUG(
@@ -298,12 +337,16 @@ PhyGISRefineConjunctExpr::EvalPrepared(
     proto::plan::GISFunctionFilterExpr_GISOp op,
     const PreparedGeometry& prepared,
     const Geometry& query_geom,
-    const Geometry& left) const {
+    const Geometry& left,
+    GEOSContextHandle_t ctx) const {
     // Delegate to the shared helper so the prepared-predicate semantics (the
     // contains/within swap in particular) never drift from the per-predicate
     // path. DWithin is filtered out before grouping, so distance is unused here.
+    // Equals is NOT filtered out, and it is the helper's unprepared fallback --
+    // hence `ctx`, so it never drives GEOS through a cache-owned `left`'s
+    // shared context.
     return EvaluateGISPreparedOp(
-        op, prepared, query_geom, left, /*distance=*/0.0);
+        op, prepared, query_geom, left, /*distance=*/0.0, ctx);
 }
 
 void
@@ -369,8 +412,8 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         auto eval_all = [&](const Geometry& left) -> bool {
             bool bit = st_->is_and;
             for (size_t j = 0; j < st_->preds.size(); ++j) {
-                bool r =
-                    EvalPrepared(st_->preds[j].op, preps[j], qgeoms[j], left);
+                bool r = EvalPrepared(
+                    st_->preds[j].op, preps[j], qgeoms[j], left, qctx);
                 bit = st_->is_and ? (bit && r) : (bit || r);
                 if (st_->is_and != bit) {
                     break;  // short-circuit
@@ -395,8 +438,9 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
         }
 
-        auto* geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-            segment_->get_segment_id(), st_->field_id);
+        // shared_ptr: an in-flight query keeps the published cache snapshot
+        // alive across a concurrent sealed-segment reopen/drop.
+        auto geometry_cache = segment_->GetGeometryCache(st_->field_id);
 
         if (geometry_cache) {
             auto cache_lock = geometry_cache->AcquireReadLock();
@@ -427,7 +471,17 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     continue;
                 }
                 const auto& wkb = geometry_array->data(k);
-                Geometry left(local_ctx, wkb.data(), wkb.size());
+                // Tolerant parse, matching the per-predicate path: a non-null
+                // row whose WKB is empty or corrupt is now KEPT by both write
+                // paths and indexed with a placeholder MBR, so it does reach
+                // refinement whenever the query bbox covers the origin. The
+                // throwing Geometry(ctx, wkb) ctor would fail the entire query
+                // on such a row; it can never satisfy the predicate, so
+                // evaluate it to false instead.
+                Geometry left;
+                if (!left.TryParseFromWkb(local_ctx, wkb.data(), wkb.size())) {
+                    continue;
+                }
                 if (eval_all(left)) {
                     res.set(hit_local[k]);
                 }
