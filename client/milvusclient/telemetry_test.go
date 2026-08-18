@@ -39,7 +39,7 @@ import (
 func TestDefaultTelemetryConfig(t *testing.T) {
 	config := DefaultTelemetryConfig()
 	assert.True(t, config.Enabled)
-	assert.Equal(t, 30*time.Second, config.HeartbeatInterval)
+	assert.Equal(t, 10*time.Second, config.HeartbeatInterval, "默认心跳=窗口长度，改动会影响服务端负载与数据新鲜度")
 	assert.Equal(t, 1.0, config.SamplingRate)
 	assert.Equal(t, 100, config.ErrorMaxCount)
 }
@@ -121,7 +121,7 @@ func TestClientTelemetryManager(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, nil)
 		assert.NotNil(t, manager)
 		assert.True(t, manager.config.Enabled)
-		assert.Equal(t, 30*time.Second, manager.config.HeartbeatInterval)
+		assert.Equal(t, DefaultTelemetryConfig().HeartbeatInterval, manager.config.HeartbeatInterval)
 	})
 
 	t.Run("creation with custom config", func(t *testing.T) {
@@ -1946,7 +1946,7 @@ func TestGetHeartbeatInterval(t *testing.T) {
 		})
 
 		interval := manager.getHeartbeatInterval()
-		assert.Equal(t, 30*time.Second, interval)
+		assert.Equal(t, DefaultTelemetryConfig().HeartbeatInterval, interval)
 	})
 
 	t.Run("returns default for negative interval", func(t *testing.T) {
@@ -1956,7 +1956,7 @@ func TestGetHeartbeatInterval(t *testing.T) {
 		})
 
 		interval := manager.getHeartbeatInterval()
-		assert.Equal(t, 30*time.Second, interval)
+		assert.Equal(t, DefaultTelemetryConfig().HeartbeatInterval, interval)
 	})
 }
 

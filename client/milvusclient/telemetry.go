@@ -43,8 +43,13 @@ import (
 type TelemetryConfig struct {
 	// Enabled controls whether telemetry collection is active
 	Enabled bool
-	// HeartbeatInterval is how often to send heartbeats to server (default: 30 seconds)
-	// Snapshot period aligns with heartbeat interval
+	// HeartbeatInterval is how often to send heartbeats to server (default: 10 seconds).
+	//
+	// It is also the metrics window: each heartbeat carries the operations since the last
+	// one. The coordinator answers a telemetry query from the window before the newest, so
+	// what a caller reads is between one and two intervals old -- ten to twenty seconds at
+	// the default. Raising it cuts the coordinator's heartbeat load, which scales with the
+	// number of connected clients rather than with traffic, at the cost of that staleness.
 	HeartbeatInterval time.Duration
 	// SamplingRate is the sampling rate for all operations (0.0-1.0, default: 1.0 = 100%)
 	// Can be dynamically adjusted
@@ -65,7 +70,7 @@ type TelemetryConfig struct {
 func DefaultTelemetryConfig() *TelemetryConfig {
 	return &TelemetryConfig{
 		Enabled:           true,
-		HeartbeatInterval: 30 * time.Second,
+		HeartbeatInterval: 10 * time.Second,
 		SamplingRate:      1.0, // 100% sampling by default
 		ErrorMaxCount:     100,
 	}
@@ -789,7 +794,10 @@ func (m *ClientTelemetryManager) getHeartbeatInterval() time.Duration {
 	interval := m.config.HeartbeatInterval
 	m.configMu.RUnlock()
 	if interval <= 0 {
-		return 30 * time.Second
+		// Matches DefaultTelemetryConfig: a config built field by field can leave this
+		// zero, and falling back to a different number than the documented default would
+		// make the interval depend on how the config was constructed.
+		return DefaultTelemetryConfig().HeartbeatInterval
 	}
 	return interval
 }
