@@ -153,6 +153,11 @@ type Manager struct {
 	// collapsed identity be classified against the namespace it belongs to
 	// rather than against a name with no structure left in it.
 	dottedSpellings *typeutil.ConcurrentMap[string, string]
+	// collidedSpellings remembers identities two different keys have been seen
+	// under, so the refusal to learn one survives the events that arrive after
+	// the initial load. Without it a later updateEvent re-learns whichever
+	// spelling it happens to carry.
+	collidedSpellings *typeutil.ConcurrentSet[string]
 	// registeredKeyPrefixes maps a declared ParamGroup's prefix to the same
 	// prefix with its separators removed. Both are needed on every lookup and
 	// the collapsed one is derived, so it is derived once at registration
@@ -179,6 +184,7 @@ func NewManager() *Manager {
 		nonSensitiveSuffixes:          typeutil.NewConcurrentSet[string](),
 		declaredKeys:                  typeutil.NewConcurrentMap[string, string](),
 		dottedSpellings:               typeutil.NewConcurrentMap[string, string](),
+		collidedSpellings:             typeutil.NewConcurrentSet[string](),
 		registeredKeyPrefixes:         typeutil.NewConcurrentMap[string, string](),
 		configCache:                   make(map[string]any),
 	}
@@ -757,11 +763,16 @@ func (m *Manager) rememberSpelling(key, sourceName string) {
 	// Two different keys can collapse to one identity ("a.bc" and "ab.c"), and
 	// the order sources are walked in is a Go map iteration order. Letting the
 	// last writer decide would make the classification of both of them depend on
-	// it. Learn nothing instead: with no spelling recovered, the collapsed
-	// identity falls back to the collapsed prefixes, which claim rather than
-	// exempt. TestDeclaredKeysDoNotCollide rules this out among declared keys;
-	// group members are named by whoever wrote them, so it cannot.
+	// it. Learn nothing instead, and keep learning nothing: with no spelling
+	// recovered, the collapsed identity falls back to the collapsed prefixes,
+	// which claim rather than exempt. TestDeclaredKeysDoNotCollide rules this
+	// out among declared keys; group members are named by whoever wrote them,
+	// so it cannot.
+	if m.collidedSpellings.Contain(collapsed) {
+		return
+	}
 	if previous, loaded := m.dottedSpellings.GetOrInsert(collapsed, dotted); loaded && previous != dotted {
+		m.collidedSpellings.Insert(collapsed)
 		m.dottedSpellings.Remove(collapsed)
 	}
 }
@@ -781,21 +792,27 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 		return resolvedKey{lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar}
 	}
 
-	// Nobody declared this key, so if the caller handed us a spelling with no
-	// namespace in it there is nothing to classify it by — and one entry would
-	// then be readable under its dotted spelling and masked under its collapsed
-	// one, in the same projection. Recover the structure the sources showed us.
+	// Nobody declared this key, so use the spelling the sources showed us for
+	// this identity, whatever spelling the caller reached it by.
 	//
-	// "." specifically, not any separator: a prefix is written with dots, so a
-	// name spelled with underscores ("kafka_producer_ssl_key_pem", the shape
-	// EnvSource uses) is as structureless here as one with nothing at all. A
-	// spelling that does carry dots is believed as given — it is the caller who
-	// knows which namespace they mean, and the environment guard below is what
-	// stops them naming one they have no business in.
-	if !strings.Contains(dotted, ".") {
-		if learned, ok := m.dottedSpellings.Get(formattedKey); ok {
-			dotted = learned
-		}
+	// Unconditionally, and that is the whole point. A key's identity is the
+	// collapsed form — it is what values are stored under and what an etcd write
+	// addresses — so where the separators fall within it is not the caller's to
+	// decide. Believing a caller who supplies dots means believing their
+	// segmentation, and every rule below reads the segments: a namespace prefix,
+	// and the leaf name a NonSensitiveSuffixes exemption is granted to. So
+	// "…providers.myprov.credential_url", a credential, could be asked for as
+	// "…providers.myprovcredential.url", which is the same stored entry with its
+	// leaf renamed to one the group declared safe, and it came back in the clear.
+	//
+	// Recovery cannot widen anything, because it only fires when the two
+	// spellings collapse to the same identity — which is to say, when they are
+	// the same entry. It can only put the segments back where the source had
+	// them. When nothing was learned (a member that exists only in etcd, or an
+	// identity two keys collide on) there is no segmentation to trust, and the
+	// collapsed prefixes below claim it.
+	if learned, ok := m.dottedSpellings.Get(formattedKey); ok {
+		dotted = learned
 	}
 
 	resolved := resolvedKey{lookup: formattedKey, dotted: dotted}

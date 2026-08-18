@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestGetConfigs(t *testing.T) {
+func TestGetProjectedConfigs(t *testing.T) {
 	// getConfigs serves whatever projection the caller passed in, verbatim.
 	// Redaction belongs to the config.Manager that owns the keys: only it knows
 	// which are declared, and the hook table's keys are unknown to the main one.
@@ -34,7 +34,7 @@ func TestGetConfigs(t *testing.T) {
 
 	// The key is one the deleted hideSensitive blacklist did match, so restoring
 	// that blacklist would break this assertion rather than leave it green.
-	getConfigs(func() map[string]string {
+	getProjectedConfigs(func() map[string]string {
 		return map[string]string{"my.password": "handed-to-us-in-the-clear"}
 	})(c)
 
@@ -146,7 +146,7 @@ func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	getConfigs(params.GetConfigsView)(c)
+	getProjectedConfigs(params.GetConfigsView)(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NotContains(t, w.Body.String(), sentinelValue)

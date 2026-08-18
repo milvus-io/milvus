@@ -753,42 +753,80 @@ func TestHalfCollapsedSpellingCannotReachASensitiveMember(t *testing.T) {
 	mgr.RegisterConfigPrefix("kafka.consumer.")
 	mgr.RegisterSensitivePrefix("kafka.consumer.")
 
-	// Well-formed names for the same member — the two spellings a source stores,
-	// and one that names the namespace properly but runs the leaf together.
-	// Admitted as members, and redacted as members of a sensitive namespace.
-	for _, canonical := range []string{
-		"kafka.consumer.ssl.key.pem",
-		"kafkaconsumersslkeypem",
-		"kafka.consumer.sslkeypem",
-	} {
-		_, _, err := mgr.GetRegisteredConfig(canonical)
-		require.ErrorIs(t, err, ErrKeySensitive, canonical)
-	}
-
-	// Everything in between belongs to no namespace: refused outright, and
-	// classified sensitive even so, because either alone would have been enough.
-	for _, malformed := range []string{
-		"kafkaconsumerssl.key.pem",
+	// Every spelling that collapses to the stored identity, however the caller
+	// chose to place the separators. Each is refused and classified sensitive,
+	// and none of them returns the key.
+	for _, spelling := range []string{
+		"kafka.consumer.ssl.key.pem", // as the file wrote it
+		"kafkaconsumersslkeypem",     // as the source stores it
+		"kafka.consumer.sslkeypem",   // namespace named, leaf run together
+		"kafkaconsumerssl.key.pem",   // namespace collapsed, leaf spelled out
 		"KAFKACONSUMERSSL.KEY.PEM",
 		"kafka.consumersslkeypem",
 		"kafkaconsumer.sslkey.pem",
+		"kafka/consumer/ssl/key/pem",
 	} {
-		_, kind := mgr.ResolveRegisteredConfigKey(malformed)
-		assert.Equal(t, RegisteredConfigUnknown, kind, malformed)
-		assert.True(t, mgr.IsSensitive(malformed), malformed)
-		_, _, err := mgr.GetRegisteredConfig(malformed)
-		require.ErrorIs(t, err, ErrKeyUnregistered, malformed)
-	}
+		require.Equal(t, "kafkaconsumersslkeypem", formatKeyUncached(strings.ReplaceAll(strings.ToLower(spelling), "/", ".")),
+			"%s does not address the stored entry, so it proves nothing", spelling)
 
-	// However it was spelled, the secret never came back.
-	for _, spelling := range []string{
-		"kafka.consumer.ssl.key.pem", "kafkaconsumersslkeypem", "kafka.consumer.sslkeypem",
-		"kafkaconsumerssl.key.pem", "KAFKACONSUMERSSL.KEY.PEM", "kafka.consumersslkeypem",
-		"kafkaconsumer.sslkey.pem",
-	} {
-		_, value, _ := mgr.GetRegisteredConfig(spelling)
+		assert.True(t, mgr.IsSensitive(spelling), spelling)
+		_, value, err := mgr.GetRegisteredConfig(spelling)
+		require.Error(t, err, spelling)
 		assert.NotContains(t, value, secret, spelling)
 	}
+
+	// The same holds for an identity no source ever spelled out, which is what
+	// an alter-endpoint write leaves behind: nothing to recover the segments
+	// from, so the collapsed prefix claims it rather than letting it through.
+	assert.True(t, mgr.IsSensitive("kafkaconsumernevertaught"))
+}
+
+// A caller does not get to re-segment a key that already exists.
+//
+// Where the separators fall inside an identity decides two things every rule
+// below reads: which namespace the key is in, and which leaf name a
+// NonSensitiveSuffixes exemption is being claimed for. So a credential named
+// "<provider>.credential_url" could be asked for as "<provider>credential.url",
+// the same stored entry with its leaf renamed to one the group declared safe,
+// and it came back in the clear from an endpoint with no authentication. The
+// same spelling passed the write fence, and addresses the credential's own etcd
+// identity.
+func TestCallerCannotResegmentAKeyOntoAnExemptedLeaf(t *testing.T) {
+	const secret = "provider-secret"
+	const prefix = "function.textembedding.providers."
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile,
+		[]byte("function.textEmbedding.providers.myprov.credential_url: "+secret+"\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix(prefix)
+	mgr.RegisterSensitivePrefix(prefix)
+	for _, suffix := range []string{"enable", "url", "resource_name"} {
+		mgr.RegisterNonSensitiveSuffix(prefix, suffix)
+	}
+
+	const identity = "functiontextembeddingprovidersmyprovcredentialurl"
+	for _, spelling := range []string{
+		"function.textEmbedding.providers.myprov.credential_url",
+		"functiontextembeddingprovidersmyprovcredentialurl",
+		// Re-segmented so the leaf reads as the exempted "url".
+		"function.textEmbedding.providers.myprovcredential.url",
+		"function.textEmbedding.providers.myprovcredentialurl",
+		"function/textEmbedding/providers/myprovcredential/url",
+	} {
+		canonical, _ := mgr.ResolveRegisteredConfigKey(spelling)
+		require.Equal(t, identity, EtcdConfigKey(canonical),
+			"%s must address the credential's own identity, or it proves nothing", spelling)
+
+		assert.True(t, mgr.IsSensitive(spelling), spelling)
+		_, value, err := mgr.GetRegisteredConfig(spelling)
+		require.ErrorIs(t, err, ErrKeySensitive, spelling)
+		assert.NotContains(t, value, secret, spelling)
+	}
+
+	// The exemption still works for a leaf the group really declared safe.
+	assert.False(t, mgr.IsSensitive("function.textEmbedding.providers.myprov.url"))
+	assert.False(t, mgr.IsSensitive("function.textEmbedding.providers.myprov.enable"))
 }
 
 // A collapsed identity that two different keys can produce teaches nothing, so
@@ -808,6 +846,17 @@ func TestSpellingRecoveryRefusesToGuessBetweenCollidingKeys(t *testing.T) {
 	assert.True(t, mgr.IsSensitive("kafkaconsumerabc"))
 	_, _, err := mgr.GetRegisteredConfig("kafkaconsumerabc")
 	assert.ErrorIs(t, err, ErrKeySensitive)
+
+	// And it stays refused: an update arriving after the initial load must not
+	// re-teach the identity one of the two spellings.
+	mgr.OnEvent(&Event{
+		EventSource: "FileSource",
+		EventType:   UpdateType,
+		Key:         "kafkaconsumera.bc",
+		Value:       "not-a-member",
+	})
+	assert.True(t, mgr.IsSensitive("kafkaconsumerabc"),
+		"a later event re-taught a collided identity")
 }
 
 // A ParamGroup member set through both overlay spellings must be reported as
