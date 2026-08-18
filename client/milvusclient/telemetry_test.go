@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1238,6 +1240,112 @@ func TestPushConfigReplyReportsAppliedAndIgnoredKeys(t *testing.T) {
 		})
 		assert.False(t, reply.Success)
 		assert.Contains(t, reply.ErrorMessage, "must be positive")
+	})
+}
+
+// Sampling used to be a contiguous block: a counter modulo 10000, sampling while the
+// remainder was under rate*10000. The long-run ratio was right, but the ratio inside any
+// one heartbeat window -- the only unit the telemetry API reports -- was not: a window is
+// tens or hundreds of operations against a cycle of ten thousand, so windows came out
+// wholly sampled or wholly dropped. At 3 QPS that is minutes of full metrics followed by
+// three quarters of an hour reporting nothing while the client is plainly busy.
+func TestSamplingIsUniformWithinEveryWindow(t *testing.T) {
+	sampleN := func(m *ClientTelemetryManager, rate float64, n int) int {
+		count := 0
+		for i := 0; i < n; i++ {
+			if m.shouldSample(rate) {
+				count++
+			}
+		}
+		return count
+	}
+
+	t.Run("every window of a run holds the configured ratio", func(t *testing.T) {
+		const (
+			rate       = 0.25
+			windowSize = 100
+			windows    = 50
+		)
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		for w := 0; w < windows; w++ {
+			got := sampleN(manager, rate, windowSize)
+			// One either side: a window boundary can fall mid-interval, which shifts a
+			// single sample across it.
+			assert.InDelta(t, float64(windowSize)*rate, float64(got), 1,
+				"window %d sampled %d of %d", w, got, windowSize)
+		}
+	})
+
+	t.Run("a rate of one in four samples exactly every fourth operation", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		var pattern []bool
+		for i := 0; i < 12; i++ {
+			pattern = append(pattern, manager.shouldSample(0.25))
+		}
+		assert.Equal(t, []bool{
+			false, false, false, true,
+			false, false, false, true,
+			false, false, false, true,
+		}, pattern)
+	})
+
+	// The old threshold was rate*10000 truncated to an integer, so any rate below 1e-4
+	// became zero and the code then returned false forever: a configured rate silently
+	// meant "off".
+	t.Run("a very small rate still samples", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		got := sampleN(manager, 0.00001, 1_000_000)
+		assert.InDelta(t, 10, got, 1, "1e-5 over a million operations")
+	})
+
+	t.Run("the boundary rates are unchanged", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		assert.Equal(t, 100, sampleN(manager, 1.0, 100))
+		assert.Equal(t, 0, sampleN(manager, 0.0, 100))
+		assert.Equal(t, 100, sampleN(manager, 1.5, 100))
+		assert.Equal(t, 0, sampleN(manager, -0.5, 100))
+	})
+
+	// Lowering the rate from 1.0 used to hand out a burst of full sampling: the 1.0 path
+	// returns before touching the counter, so the counter sat at zero and the first
+	// rate*10000 operations after the change all fell inside the sampled block.
+	t.Run("lowering the rate from 1.0 does not start with a burst", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		sampleN(manager, 1.0, 5000)
+
+		got := sampleN(manager, 0.25, 100)
+		assert.InDelta(t, 25, got, 1)
+	})
+
+	t.Run("concurrent callers still see the configured ratio", func(t *testing.T) {
+		const (
+			rate       = 0.1
+			goroutines = 8
+			perG       = 1000
+		)
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		var wg sync.WaitGroup
+		var sampled atomic.Int64
+		for g := 0; g < goroutines; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < perG; i++ {
+					if manager.shouldSample(rate) {
+						sampled.Add(1)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+
+		// Exact, not approximate: the decision is a boundary crossing of a shared
+		// accumulator, so concurrency reorders which caller samples but never how many do.
+		assert.InDelta(t, float64(goroutines*perG)*rate, float64(sampled.Load()), 1)
 	})
 }
 

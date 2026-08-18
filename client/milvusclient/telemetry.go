@@ -513,8 +513,10 @@ type ClientTelemetryManager struct {
 	// interval elapsed. Zero until the first snapshot.
 	lastSnapshotEnd atomic.Int64
 
-	// Deterministic sampling counter
-	samplingCounter uint64
+	// samplingAccum carries the fractional sampling rate between calls, in samplingScale
+	// units: each operation adds the rate and the one that pushes it past a whole unit is
+	// the one sampled. See shouldSample.
+	samplingAccum uint64
 }
 
 // CommandHandler handles a specific command type from the server
@@ -815,8 +817,27 @@ func (m *ClientTelemetryManager) snapshotEnabledCollections() (map[string]bool, 
 	return snapshot, false
 }
 
-const samplingDenominator = 10000
+// samplingScale is the fixed-point unit for accumulating a fractional sampling rate. A
+// rate becomes an integer step of samplingScale units, so the smallest rate that still
+// samples is 1e-9 -- far below anything an operator would set, which is the point: a
+// configured rate must never round down to "off".
+const samplingScale = 1_000_000_000
 
+// shouldSample decides whether this operation is recorded, spreading the sampled ones
+// evenly rather than in runs.
+//
+// Each call adds the rate to a shared accumulator and samples on the call that carries it
+// across a whole unit: at 0.25 that is every fourth operation, at 0.1 every tenth. What
+// matters is that the ratio holds over any stretch of calls, not only over a long one --
+// metrics are reported per heartbeat window, and a window is tens or hundreds of
+// operations. A scheme that sampled a contiguous run and then dropped one would give the
+// right long-run ratio while making every individual window either complete or empty.
+//
+// The accumulator is shared, so concurrent callers reorder which of them observes a
+// crossing, but each crossing is observed exactly once: atomic.AddUint64 hands every caller
+// a distinct interval, and the step is smaller than one unit, so no interval spans two
+// crossings. The count of sampled operations is therefore exact, not statistical, which is
+// also why this needs no random source.
 func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 	if samplingRate >= 1.0 {
 		return true
@@ -825,13 +846,17 @@ func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 		return false
 	}
 
-	threshold := uint64(samplingRate * float64(samplingDenominator))
-	if threshold == 0 {
-		return false
+	step := uint64(samplingRate * float64(samplingScale))
+	if step == 0 {
+		// A rate too small to represent still means "sample rarely", never "sample never":
+		// silently disabling telemetry for a positive rate is the one outcome nobody could
+		// have intended.
+		step = 1
 	}
 
-	counter := atomic.AddUint64(&m.samplingCounter, 1)
-	return counter%samplingDenominator < threshold
+	after := atomic.AddUint64(&m.samplingAccum, step)
+	before := after - step
+	return after/samplingScale != before/samplingScale
 }
 
 // toProtoOperationMetrics converts collected metrics into their proto form, dropping
