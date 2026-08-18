@@ -213,7 +213,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		case *SegmentAction:
 			fields = append(fields, mlog.Int64("segmentID", a.SegmentID))
 		}
-		mlog.Info(context.TODO(), "task deferred: analyzer file resources not ready on node", fields...)
+		mlog.RatedInfo(context.TODO(), 0.1, "task deferred: analyzer file resources not ready on node", fields...)
 		return false
 	}
 

@@ -583,8 +583,11 @@ type taskScheduler struct {
 	channelTaskDelta *ChannelTaskDelta
 
 	// fileResourceGate holds grow actions back on a node whose analyzer file
-	// resources are behind. It is nil in a stock binary, which is the native
-	// path, and is handed to every executor this scheduler creates.
+	// resources are behind. The coordinator installs it whenever the
+	// file-resource observer exists - which is every mixcoord deployment - so
+	// "native" here is not the gate being nil but the gate answering nil,
+	// which it does whenever no file resource is registered or query-node
+	// sync is off. It is handed to every executor this scheduler creates.
 	fileResourceGate NodeFileResourceGate
 }
 

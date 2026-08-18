@@ -140,8 +140,10 @@ type FileResourceObserver interface {
 	InitQueryCoord(manager *session.NodeManager, cluster session.Cluster)
 	Notify()
 	// CheckNodesSynced reports whether the given query nodes hold the current
-	// analyzer file resources. It answers nil unconditionally unless a form
-	// took the analyzer runtime over; see analyzer_seam.go.
+	// analyzer file resources. It answers nil whenever no file resource is
+	// registered or the query-node sync mode is off, which is every deployment
+	// that does not use analyzer file resources - this barrier is part of the
+	// file-resource feature itself, not of any extension.
 	CheckNodesSynced(nodeIDs []int64) error
 }
 
