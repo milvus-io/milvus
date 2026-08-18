@@ -67,11 +67,18 @@ func nonSourceFieldIDs(schema *schemapb.CollectionSchema) typeutil.Set[int64] {
 // every field name it carries, paying {"name": per field, whereas a CSV row carries
 // only separators because its names live in the header.
 //
-// Row separators are deliberately not counted: a single-row file has none, so
-// counting one would let the floor exceed a real row and under-count the file --
-// the one direction this bound may never take. The result is floored to 1 to avoid
-// divide-by-zero downstream.
-func minRowTextBytes(schema *schemapb.CollectionSchema, ft FileType) int64 {
+// Row separators are NOT part of this floor. A single-row file has none, so
+// charging one here would let the floor exceed a real row and under-count the
+// file -- the one direction this bound may never take. Rows do still cost a
+// separator between them, but that is n-1 for n rows, an off-by-one the caller
+// applies to the whole file rather than to each row; see RowCountUpperBound.
+//
+// The second return value reports whether the floor was clamped, i.e. whether
+// nothing about this schema was actually provable and the 1 below is a
+// placeholder to avoid divide-by-zero rather than a real byte cost. The caller
+// needs the distinction: a clamped floor cannot carry the per-file separator
+// correction, because rows really can occupy fewer bytes than the floor claims.
+func minRowTextBytes(schema *schemapb.CollectionSchema, ft FileType) (int64, bool) {
 	// A JSON row is an object: braces around it, and "name": before each value.
 	jsonShaped := ft == JSON || ft == JSONLines
 	skip := nonSourceFieldIDs(schema)
@@ -124,9 +131,9 @@ func minRowTextBytes(schema *schemapb.CollectionSchema, ft FileType) int64 {
 		total += 2 // the row object's braces
 	}
 	if total < 1 {
-		total = 1
+		return 1, true
 	}
-	return total
+	return total, false
 }
 
 // RowCountUpperBound returns an upper bound on the row count of one
@@ -180,12 +187,24 @@ func RowCountUpperBound(ctx context.Context, cm storage.ChunkManager,
 		// provable per-row floor. This over-estimates heavily (the floor is 1 byte
 		// for an all-VarChar schema) and must stay an upper bound: under-estimating
 		// would exhaust the range and fail the import at the datanode guard.
-		minRow := minRowTextBytes(schema, ft)
+		minRow, clamped := minRowTextBytes(schema, ft)
 		total, err := sumSize()
 		if err != nil {
 			return 0, false, err
 		}
-		bound = total/minRow + 1
+		if clamped {
+			// Nothing about the schema was provable, so the floor is a placeholder
+			// and rows may genuinely be smaller than it: a single-column CSV of
+			// empty values is one newline per row, n rows in n bytes. Only the
+			// loose form holds.
+			bound = total/minRow + 1
+		} else {
+			// The floor is real, so n rows also pay n-1 row separators:
+			// n*minRow + (n-1) <= total, i.e. n <= (total+1)/(minRow+1). Charging
+			// the separator per row instead would over-count a single-row file,
+			// which is why it is corrected here and not inside minRowTextBytes.
+			bound = (total+1)/(minRow+1) + 1
+		}
 	default:
 		return 0, false, merr.WrapErrImportFailed("unknown import file type for PK range sizing")
 	}
