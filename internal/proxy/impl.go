@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
@@ -2983,7 +2984,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq))
+				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3215,7 +3217,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq))
+				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, newSearchReq)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3686,7 +3689,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				mlog.Strings("OutputFields", request.OutputFields),
 				mlog.Uint64("travel_timestamp", request.TravelTimestamp),
 				mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Duration("duration", span))
+				mlog.Duration("duration", span),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
