@@ -201,10 +201,13 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.LinderaDownloadUrls.Init(base.mgr)
 
 	p.ZillizProviders = ParamGroup{
-		KeyPrefix:            "function.models.zilliz.",
-		Version:              "2.6.5",
-		Sensitive:            true,
-		NonSensitiveSuffixes: []string{"enable", "url"},
+		KeyPrefix: "function.models.zilliz.",
+		Version:   "2.6.5",
+		Sensitive: true,
+		// No exemptions: unlike the two groups above, no member of this one
+		// ships in milvus.yaml, so no segmentation of it is ever endorsed and an
+		// exemption could never be claimed. Listing suffixes here would only
+		// look like it did something.
 	}
 	p.ZillizProviders.Init(base.mgr)
 

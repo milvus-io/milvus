@@ -611,6 +611,15 @@ func (m *Manager) SetConfig(key, value string) {
 }
 
 func (m *Manager) SetMapConfig(key, value string) {
+	// Learn the pairing, for the same reason isStoredKey treats an overlay as
+	// vouching for a segmentation: the two have to agree. While only isStoredKey
+	// knew about overlays, a member written here was readable under the dotted
+	// spelling and masked under the collapsed one — one identity, two verdicts,
+	// which is the shape of every classification defect this file has had.
+	//
+	// RuntimeSource, not a config source: this is written through the package's
+	// own setter by BaseTable.SaveGroup, so it is as trustworthy as a file.
+	m.rememberSpelling(key, RuntimeSource)
 	m.overlays.Insert(mapConfigKey(key), value)
 }
 
@@ -688,6 +697,22 @@ func (m *Manager) RegisterConfigKey(key string) {
 func (m *Manager) RegisterConfigPrefix(prefix string) {
 	canonicalPrefix := strings.ToLower(prefix)
 	m.registeredKeyPrefixes.Insert(canonicalPrefix, formatKeyUncached(canonicalPrefix))
+}
+
+// RegisteredConfigPrefixes returns the dynamic namespaces declared so far.
+//
+// Exported for the paramtable audits: they used to enumerate namespaces by
+// reflecting over ParamGroup fields, which made a prefix registered any other
+// way — grpc_param.go registers the two CDC namespaces directly, since nothing
+// reads them as a group — invisible to the very tests that check namespaces are
+// classified consistently.
+func (m *Manager) RegisteredConfigPrefixes() []string {
+	prefixes := make([]string, 0, m.registeredKeyPrefixes.Len())
+	m.registeredKeyPrefixes.Range(func(prefix, _ string) bool {
+		prefixes = append(prefixes, prefix)
+		return true
+	})
+	return prefixes
 }
 
 // RegisterSensitiveKey marks a declared configuration key as sensitive.
@@ -976,12 +1001,11 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string, segmented bool) boo
 		return true
 	case prefixExempted:
 		// A declared suffix exemption is explicit metadata, so it wins over the
-		// name-pattern guess below. No group shipped today both declares an
-		// exemption and has a prefix that matches a pattern, so this branch
-		// changes no current verdict; it exists so that the next one behaves as
-		// declared rather than being silently undone by its own prefix —
-		// "credential.foo.enable" collapses to "credentialfooenable", which
-		// contains "credential". TestNonSensitiveSuffixExemption pins it.
+		// name-pattern guess below. This is load-bearing today, not a provision
+		// for later: the patterns match anywhere in the key, so a provider whose
+		// own name contains one — "…providers.mycredential.url" — would be
+		// classified sensitive by the fallback despite ending in a leaf the
+		// group declared safe. TestNonSensitiveSuffixExemption pins it.
 		return false
 	}
 

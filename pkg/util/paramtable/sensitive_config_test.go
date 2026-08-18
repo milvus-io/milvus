@@ -334,11 +334,19 @@ func TestOneIdentityHasOneVerdict(t *testing.T) {
 		"p.enable", "p.url", "p.resource_name", "p.api_key", "p.ssl.key.pem",
 	}
 	seeds := make([]string, 0, 64)
-	walkParamGroups(reflect.ValueOf(params).Elem(), func(group *ParamGroup) {
+	// From the manager, not from the ParamGroup fields: a namespace registered
+	// directly with RegisterConfigPrefix has no field to reflect over, and
+	// grpc_param.go registers two that way.
+	for _, prefix := range mgr.RegisteredConfigPrefixes() {
 		for _, leaf := range leaves {
-			seeds = append(seeds, group.KeyPrefix+leaf)
+			seeds = append(seeds, prefix+leaf)
 		}
-	})
+		// A member written as a runtime overlay, which is the one way into the
+		// manager that does not go through a config source. It vouches for its
+		// own segmentation, so it has to teach one as well, or the two spellings
+		// of it disagree.
+		require.NoError(t, params.baseTable.SaveGroup(map[string]string{prefix + "overlaid.url": "x"}))
+	}
 	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
 		seeds = append(seeds, item.Key)
 	})

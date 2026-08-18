@@ -43,9 +43,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// authenticatedUsernameKey matches the trusted identity populated by the
-// distributed proxy authentication middleware. Keeping the key here avoids an
-// import cycle from internal/proxy back into internal/distributed/proxy.
+// authenticatedUsernameKey matches httpserver.ContextUsername, which the
+// distributed proxy authentication middleware populates. It is spelled out
+// again here because internal/proxy cannot import
+// internal/distributed/proxy/httpserver — that package imports this one.
 const authenticatedUsernameKey = "username"
 
 var (

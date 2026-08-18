@@ -1386,9 +1386,11 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// minio.secretAccessKey puts "minioadmin" back, on an endpoint with no
 		// authentication in front of it.
 		//
-		// A ParamGroup member is Sensitive because its namespace is open-ended,
-		// not because anyone looked at it, and it has no compiled default to
-		// revert to. Fencing its deletion would only strand entries: a
+		// A ParamGroup member is a different case: what a delete reverts it to is
+		// the yaml, and every sensitive group member Milvus ships is empty
+		// there — credential.*, function.*.credential, kafka.consumer/producer.*
+		// all default to no value — so reverting one yields nothing rather than
+		// a working credential. Fencing them would only strand entries: a
 		// kafka.consumer.* tuning value written through this endpoint before the
 		// group was marked could never be removed through it again. Undeclared
 		// keys stay deletable for the same reason, whatever their name looks
