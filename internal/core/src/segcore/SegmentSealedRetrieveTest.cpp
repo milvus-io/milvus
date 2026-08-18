@@ -341,15 +341,13 @@ TEST_P(RetrieveTest, Limit) {
         EXPECT_EQ(error.get_error_code(), RetrieveError);
         EXPECT_EQ(
             std::string(error.what()),
-            "Query result byte size exceeds the configured maximum output "
-            "size (estimated: " +
+            "Query result exceeds the byte-size limit (estimated: " +
                 std::to_string(estimated_output_size) +
                 " bytes, maximum: " + std::to_string(max_output_size) +
-                " bytes). This byte-size limit is separate from the query "
-                "row limit. Request fewer output fields; reduce the row "
-                "limit or paginate; fetch large fields separately; or, only "
-                "after evaluating the memory impact, cautiously increase "
-                "quotaAndLimits.limits.maxOutputSize.");
+                " bytes). Reduce output fields or row limit, paginate, fetch "
+                "large fields separately, or raise "
+                "quotaAndLimits.limits.maxOutputSize only after checking "
+                "memory impact.");
     }
 
     auto retrieve_results = segment->Retrieve(

@@ -23,9 +23,9 @@ import "github.com/milvus-io/milvus/pkg/v3/util/merr"
 // request's row limit.
 func NewQueryResultSizeLimitExceededError(estimatedOutputSize, maxOutputSize int64) error {
 	return merr.WrapErrParameterInvalidMsg(
-		"Query result byte size exceeds the configured maximum output size (estimated: %d bytes, maximum: %d bytes). "+
-			"This byte-size limit is separate from the query row limit. Request fewer output fields; reduce the row limit or paginate; "+
-			"fetch large fields separately; or, only after evaluating the memory impact, cautiously increase quotaAndLimits.limits.maxOutputSize.",
+		"Query result exceeds the byte-size limit (estimated: %d bytes, maximum: %d bytes). "+
+			"Reduce output fields or row limit, paginate, fetch large fields separately, or raise "+
+			"quotaAndLimits.limits.maxOutputSize only after checking memory impact.",
 		estimatedOutputSize,
 		maxOutputSize,
 	)

@@ -205,8 +205,7 @@ func TestDeduplicatePKOperator_MaxOutputSize(t *testing.T) {
 	_, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{r})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "estimated: 8 bytes, maximum: 1 bytes")
-	assert.Contains(t, err.Error(), "separate from the query row limit")
-	assert.Contains(t, err.Error(), "Request fewer output fields")
+	assert.Contains(t, err.Error(), "Reduce output fields or row limit")
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
@@ -382,6 +381,6 @@ func TestDeduplicatePKOperator_MaxOutputSize_OneBelowLimit(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "estimated: 24 bytes, maximum: 23 bytes")
 	assert.Contains(t, err.Error(), "fetch large fields separately")
-	assert.Contains(t, err.Error(), "after evaluating the memory impact")
+	assert.Contains(t, err.Error(), "only after checking memory impact")
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }

@@ -914,7 +914,6 @@ func TestReduceByPKWithTimestampOperator_MaxOutputSize_Exceeded(t *testing.T) {
 	_, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{r})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "estimated: 24 bytes, maximum: 23 bytes")
-	assert.Contains(t, err.Error(), "separate from the query row limit")
-	assert.Contains(t, err.Error(), "Request fewer output fields")
+	assert.Contains(t, err.Error(), "Reduce output fields or row limit")
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
