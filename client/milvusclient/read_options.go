@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
@@ -822,7 +823,7 @@ func pks2Expr(ids column.Column) string {
 	switch ids.Type() {
 	case entity.FieldTypeInt64:
 		expr = fmt.Sprintf("%s in %s", pkName, strings.Join(strings.Fields(fmt.Sprint(ids.FieldData().GetScalars().GetLongData().GetData())), ","))
-	case entity.FieldTypeVarChar:
+	case entity.FieldTypeVarChar, entity.FieldTypeUUID:
 		data := ids.FieldData().GetScalars().GetData().(*schemapb.ScalarField_StringData).StringData.GetData()
 		for i := range data {
 			data[i] = fmt.Sprintf("\"%s\"", data[i])
@@ -853,6 +854,21 @@ func column2IDs(ids column.Column) (*schemapb.IDs, error) {
 		result.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
 				Data: data,
+			},
+		}
+	case entity.FieldTypeUUID:
+		strData := ids.FieldData().GetScalars().GetStringData().GetData()
+		uuidBytes := make([][]byte, 0, len(strData))
+		for _, s := range strData {
+			u, err := uuid.Parse(s)
+			if err != nil {
+				return nil, fmt.Errorf("invalid UUID primary key %s: %w", s, err)
+			}
+			uuidBytes = append(uuidBytes, u[:])
+		}
+		result.IdField = &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: uuidBytes,
 			},
 		}
 	default:
