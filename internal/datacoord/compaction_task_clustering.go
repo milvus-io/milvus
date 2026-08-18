@@ -218,45 +218,28 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 				mlog.Int32("retryTimes", t.GetTaskProto().GetRetryTimes()),
 				mlog.Err(failErr))
-			// Drop the plan on the worker before requeueing: the DataNode only
-			// removes a failed task entry when DropCompactionPlan arrives, and
-			// the scheduler re-pushes a pipelining task without dropping it, so
-			// re-submitting the same planID to the same node would be rejected
-			// with ErrDuplicatedCompactionTask and the task would never leave
-			// the pending queue.
-			//
-			// The drop must SUCCEED before the requeue is persisted, otherwise
-			// the task becomes schedulable while the worker still holds the
-			// entry. It is idempotent (DropCompactionPlan -> RemoveTask is a
-			// no-op for an unknown planID and always reports success), so
-			// leaving the task untouched here just makes the next poll redo the
-			// whole transition.
-			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(),
-				t.GetTaskProto().GetPlanID()); dropErr != nil {
-				mlog.Warn(context.TODO(),
-					"failed to drop clustering compaction plan before requeue, "+
-						"leaving the task on its node for the next poll to retry",
-					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-					mlog.Int64("nodeID", t.GetTaskProto().GetNodeID()),
-					mlog.Err(dropErr))
-				return
-			}
-			err = t.updateAndSaveTaskMeta(
+			// Persist the requeue FIRST and produce no worker-side effect here.
+			// This makes the transition recoverable in both orders: if the meta
+			// write fails, nothing has changed on the worker -- it still holds
+			// the failed task with its FailStatus -- so the next poll simply
+			// redoes this branch. The stale entry on the old node is removed
+			// idempotently by doCompact right before the resubmission (see
+			// there), which is why the old NodeID is kept instead of being reset
+			// to NullNodeID: the scheduler picks the next node from the slot
+			// heap and never reads it, and doCompact needs it to know where to
+			// drop.
+			// Deliberately NOT assigned to `err`: the deferred retryOnError
+			// would treat a transient etcd failure here as a task failure and
+			// spend retry budget (or, past the budget, persist a terminal
+			// failure) for something the next poll simply redoes.
+			if saveErr := t.updateAndSaveTaskMeta(
 				setState(datapb.CompactionTaskState_pipelining),
-				setNodeID(NullNodeID),
-				setRetryTimes(t.GetTaskProto().GetRetryTimes()+1))
-			if err != nil {
-				// The plan is already gone from the worker, so the next poll
-				// gets a synthetic failed result with no FailStatus and treats
-				// this retryable failure as terminal. Closing that window needs
-				// a durable drop-pending state in the task proto; log loudly so
-				// the (narrow) occurrence is diagnosable meanwhile.
-				mlog.Error(context.TODO(),
-					"clustering compaction plan was dropped but the requeue could "+
-						"not be persisted; the task will be reported as a bare "+
-						"failure on the next poll",
+				setRetryTimes(t.GetTaskProto().GetRetryTimes()+1)); saveErr != nil {
+				mlog.Warn(context.TODO(),
+					"failed to persist clustering compaction requeue; the worker "+
+						"still holds the failed task, the next poll will retry",
 					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-					mlog.Err(err))
+					mlog.Err(saveErr))
 			}
 			return
 		}
@@ -822,6 +805,30 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 	if err != nil {
 		mlog.Warn(context.TODO(), "Failed to BuildCompactionRequest", mlog.Err(err))
 		return err
+	}
+	// A task requeued after a retryable worker failure still has its plan
+	// registered on the previous node (the DataNode only removes a failed entry
+	// on DropCompactionPlan). Drop it idempotently before resubmitting --
+	// RemoveTask is a no-op for an unknown planID and DropCompactionPlan always
+	// reports success -- so a resubmission to the same node is not rejected
+	// with ErrDuplicatedCompactionTask, and a resubmission to a different node
+	// does not leak the stale entry. A failure here is only logged: if the old
+	// node is gone its entry went with it, and if it is alive but unreachable
+	// the resubmission below either lands on another node or is rejected as a
+	// duplicate, and retryOnError brings the task back here for another go.
+	// Only a task requeued after a worker failure carries a stale plan: the
+	// requeue branch bumps RetryTimes and deliberately keeps the old NodeID,
+	// while a fresh task has RetryTimes 0 and the CreateCompaction-failed path
+	// resets NodeID to NullNodeID -- neither has anything to drop.
+	if prev := t.GetTaskProto().GetNodeID(); prev > 0 &&
+		t.GetTaskProto().GetRetryTimes() > 0 {
+		if dropErr := cluster.DropCompaction(prev, t.GetTaskProto().GetPlanID()); dropErr != nil {
+			mlog.Warn(context.TODO(),
+				"failed to drop the previous plan before resubmitting clustering compaction",
+				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+				mlog.Int64("previousNodeID", prev),
+				mlog.Err(dropErr))
+		}
 	}
 	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
