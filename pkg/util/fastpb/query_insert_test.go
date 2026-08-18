@@ -196,11 +196,11 @@ func TestEquiv_UpsertRequest(t *testing.T) {
 		SchemaTimestamp: 123456,
 		PartialUpdate:   true, // field 9 (varint)  → folded to official merge
 		Namespace:       &ns,  // field 10 (bytes)  → folded to official merge
-		RlsPrincipal:    "principal-b",
-		SkipRls:         true,
 		FieldOps: []*schemapb.FieldPartialUpdateOp{ // field 11 (message) → folded
 			{FieldName: "title"},
 		},
+		RlsPrincipal: "principal", // field 12 (bytes)  → folded to official merge
+		SkipRls:      true,        // field 13 (varint) → folded to official merge
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", "y", "z"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},

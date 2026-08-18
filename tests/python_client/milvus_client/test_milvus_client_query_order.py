@@ -1548,3 +1548,65 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
             assert ids[i] < ids[i + 1], (
                 f"id not ascending among returned equal-key rows at index {i}: {ids[i]} >= {ids[i + 1]}"
             )
+
+    # ==================== 5.14 L2: Vector Output with ORDER BY ====================
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_order_by_vector_output(self):
+        """OB-063: ORDER BY a scalar field with a vector field in output_fields.
+
+        Regression for #52463: dense vector output combined with scalar ORDER BY
+        used to fail with "unsupported data type VECTOR_FLOAT" because the vector
+        was materialized in the pre-TopK ProjectNode (single-project mode). The
+        fix defers vector outputs to late materialization. Covers both explicit
+        and wildcard output_fields.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 4
+        nb = 10
+        try:
+            schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("rank", DataType.INT64)
+            schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+
+            index_params = client.prepare_index_params()
+            index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2", M=16, efConstruction=200)
+
+            client.create_collection(
+                collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+            )
+
+            # Deterministic vectors encode the id (vec[0] == id) so we can verify
+            # each returned vector belongs to the correct row after sorting.
+            # rank = (i * 7) % nb permutes rows (7 coprime with 10), so the
+            # deferred vector reorder path is exercised rather than an identity map.
+            data = [{"id": i, "rank": (i * 7) % nb, "vec": [float(i), float(i), 0.0, 0.0]} for i in range(nb)]
+            client.insert(collection_name=collection_name, data=data)
+            client.flush(collection_name=collection_name)
+
+            # Both explicit vector output and wildcard output exercise the same
+            # single-project path because this schema has no variable-width field.
+            for output_fields in (["id", "rank", "vec"], ["*"]):
+                res = self.query(
+                    client,
+                    collection_name,
+                    filter="",
+                    output_fields=output_fields,
+                    limit=nb,
+                    order_by_fields=[{"field": "rank", "order": "asc"}],
+                    consistency_level="Strong",
+                )[0]
+
+                assert len(res) == nb, f"expected {nb} rows, got {len(res)}"
+                ranks = [r["rank"] for r in res]
+                for i in range(len(ranks) - 1):
+                    assert ranks[i] <= ranks[i + 1], f"rank not ascending at index {i}"
+                for r in res:
+                    vec = r["vec"]
+                    assert isinstance(vec, list) and len(vec) == dim, f"vec not a {dim}-dim list: {vec!r}"
+                    assert vec[0] == float(r["id"]), f"vec mismatched for id {r['id']}: vec[0]={vec[0]}"
+        finally:
+            if client.has_collection(collection_name):
+                client.drop_collection(collection_name)

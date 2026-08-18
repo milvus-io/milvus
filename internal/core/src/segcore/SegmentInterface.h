@@ -400,7 +400,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     chunk_view(milvus::OpContext* op_ctx,
                FieldId field_id,
                int64_t chunk_id,
@@ -424,16 +424,15 @@ class SegmentInternalInterface : public SegmentInterface {
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
-            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+            std::pair<std::vector<ViewType>, ValidityView> content{
                 std::move(res), std::move(valid_data)};
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+            return PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>(
                 std::move(pw), std::move(content));
         }
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     get_batch_views(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id,
@@ -761,23 +760,21 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,

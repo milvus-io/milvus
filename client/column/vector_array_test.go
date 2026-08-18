@@ -104,7 +104,8 @@ func (s *VectorArraySuite) TestFloatVectorArrayBasic() {
 	s.EqualValues(dim, va.GetDim())
 	s.Equal(schemapb.DataType_FloatVector, va.GetElementType())
 	s.Equal(4, len(va.GetData()))
-	s.Equal([]bool{true, true, false, true, true}, fd.GetValidData())
+	s.Equal([]bool{true, true, false, true, true}, getFieldDataValidData(fd))
+	s.Nil(fd.GetValidData())
 }
 
 func (s *VectorArraySuite) TestFloat16VectorArrayBasic() {
@@ -231,9 +232,9 @@ func (s *VectorArraySuite) TestParseNullableVectorArrayData() {
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_ArrayOfVector,
 		FieldName: "emb",
-		ValidData: []bool{true, false, true},
 		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-			Dim: int64(dim),
+			Dim:       int64(dim),
+			ValidData: []bool{true, false, true},
 			Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 				Dim:         int64(dim),
 				ElementType: schemapb.DataType_FloatVector,
@@ -440,10 +441,10 @@ func (s *VectorArraySuite) TestParseAllNullVectorArrayUsesOuterDim() {
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_ArrayOfVector,
 		FieldName: "emb",
-		ValidData: []bool{false, false},
 		Field: &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
-				Dim: 2,
+				Dim:       2,
+				ValidData: []bool{false, false},
 				Data: &schemapb.VectorField_VectorArray{
 					VectorArray: &schemapb.VectorArray{
 						ElementType: schemapb.DataType_FloatVector,
@@ -501,10 +502,10 @@ func (s *VectorArraySuite) TestCompactSliceDoesNotMutateSource() {
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_ArrayOfVector,
 		FieldName: "emb",
-		ValidData: []bool{false, true, true},
 		Field: &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
-				Dim: 2,
+				Dim:       2,
+				ValidData: []bool{false, true, true},
 				Data: &schemapb.VectorField_VectorArray{
 					VectorArray: &schemapb.VectorArray{
 						Dim:         2,

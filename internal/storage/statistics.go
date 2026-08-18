@@ -20,6 +20,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -62,6 +63,7 @@ type StatisticsCollector struct {
 	nullCounts         map[int64]int64
 	quantileEntries    []quantileEntry
 	columnGroups       map[int64]*datapb.ColumnGroupStatistics
+	formats            map[string]struct{}
 }
 
 // NewStatisticsCollector returns an empty collector.
@@ -104,6 +106,12 @@ func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *S
 		c.nullCounts = make(map[int64]int64, len(nc))
 		for f, n := range nc {
 			c.nullCounts[f] = n
+		}
+	}
+	if fmts := stats.GetFormats(); len(fmts) > 0 {
+		c.formats = make(map[string]struct{}, len(fmts))
+		for _, f := range fmts {
+			c.formats[f] = struct{}{}
 		}
 	}
 	// Rebuild quantile buckets from the persisted marks: bucket i carries the
@@ -240,6 +248,12 @@ func (c *StatisticsCollector) Digest(
 				c.nullCounts[f] += n
 			}
 		}
+		if fmt := strings.TrimSpace(fb.GetFormat()); fmt != "" {
+			if c.formats == nil {
+				c.formats = make(map[string]struct{})
+			}
+			c.formats[fmt] = struct{}{}
+		}
 	}
 	if len(inserts) > 0 {
 		c.columnGroups = mergeColumnGroups(c.columnGroups, inserts)
@@ -283,6 +297,14 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 			nullCounts[f] = n
 		}
 	}
+	var formats []string
+	if len(c.formats) > 0 {
+		formats = make([]string, 0, len(c.formats))
+		for f := range c.formats {
+			formats = append(formats, f)
+		}
+		slices.Sort(formats)
+	}
 	stats := &datapb.Statistics{
 		InsertBinlogSize:   c.insertBinlogSize,
 		InsertBinlogCount:  c.insertBinlogCount,
@@ -296,6 +318,7 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 		TimestampTo:        c.timestampTo,
 		NullCounts:         nullCounts,
 		TimestampQuantiles: c.quantiles(),
+		Formats:            formats,
 	}
 	if c.columnGroups != nil {
 		groups := make([]*datapb.ColumnGroupStatistics, 0, len(c.columnGroups))
@@ -350,6 +373,12 @@ func (c *StatisticsCollector) Clone() *StatisticsCollector {
 		cp.quantileEntries = append([]quantileEntry(nil), c.quantileEntries...)
 	}
 	cp.columnGroups = cloneColumnGroups(c.columnGroups)
+	if c.formats != nil {
+		cp.formats = make(map[string]struct{}, len(c.formats))
+		for f := range c.formats {
+			cp.formats[f] = struct{}{}
+		}
+	}
 	return &cp
 }
 
@@ -374,7 +403,14 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 	var tsFrom uint64 = math.MaxUint64
 	var tsTo uint64
 	var nullCounts map[int64]int64
+	var formatSet map[string]struct{}
 	for _, fb := range binlogs {
+		if fmt := strings.TrimSpace(fb.GetFormat()); fmt != "" {
+			if formatSet == nil {
+				formatSet = make(map[string]struct{})
+			}
+			formatSet[fmt] = struct{}{}
+		}
 		if len(fb.GetBinlogs()) == 0 {
 			continue
 		}
@@ -417,6 +453,14 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 	}
 	s.TimestampTo = tsTo
 	s.NullCounts = nullCounts
+	if len(formatSet) > 0 {
+		formats := make([]string, 0, len(formatSet))
+		for f := range formatSet {
+			formats = append(formats, f)
+		}
+		slices.Sort(formats)
+		s.Formats = formats
+	}
 	for _, fb := range statslogs {
 		for _, l := range fb.GetBinlogs() {
 			s.StatsBinlogSize += l.GetMemorySize()

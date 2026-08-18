@@ -518,14 +518,14 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 		return merr.Wrap(err, "failed to get collection schema")
 	}
 
-	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
+	field, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
 	if err != nil {
 		mlog.Error(ctx, "create index on non-exist field", mlog.Err(err))
 		return merr.WrapErrParameterInvalidMsg("cannot create index on non-exist field: %s", cit.req.GetFieldName())
 	}
 
 	if field.IsFunctionOutput {
-		function, err := schema.schemaHelper.GetFunctionByOutputField(field)
+		function, err := schema.SchemaHelper.GetFunctionByOutputField(field)
 		if err != nil {
 			mlog.Error(ctx, "create index failed, cannot find function of function output field", mlog.Err(err))
 			return merr.WrapErrParameterInvalidMsg("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
@@ -594,7 +594,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cit.collectionProperties = collInfo.properties
+	cit.collectionProperties = collInfo.Properties
 
 	if err = validateIndexName(cit.req.GetIndexName()); err != nil {
 		return err
@@ -863,7 +863,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, indexInfo := range resp.IndexInfos {
-		field, err := schema.schemaHelper.GetFieldFromID(indexInfo.FieldID)
+		field, err := schema.SchemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
 			mlog.Error(ctx, "failed to get collection field", mlog.Err(err))
 			return merr.WrapErrParameterInvalidMsg("failed to get collection field: %d", indexInfo.FieldID)
@@ -986,7 +986,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 		mlog.Error(ctx, "failed to get collection schema", mlog.String("collection_name", dit.GetCollectionName()), mlog.Err(err))
 		return merr.Wrap(err, "failed to get collection schema")
 	}
-	schemaHelper := schema.schemaHelper
+	schemaHelper := schema.SchemaHelper
 
 	resp, err := dit.mixCoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
 		CollectionID: dit.collectionID, IndexName: dit.IndexName,

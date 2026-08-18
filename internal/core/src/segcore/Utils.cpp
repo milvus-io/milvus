@@ -373,13 +373,12 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
 
-    if (field_meta.is_nullable()) {
-        data_array->mutable_valid_data()->Resize(count, false);
-    }
-
     auto scalar_array = data_array->mutable_scalars();
     SetUpScalarFieldData(
         scalar_array, data_type, field_meta.get_element_type(), count);
+    if (field_meta.is_nullable()) {
+        scalar_array->mutable_valid_data()->Resize(count, false);
+    }
     return data_array;
 }
 
@@ -391,11 +390,11 @@ CreateScalarDataArray(DataArray& data_array,
                       bool nullable) {
     data_array.set_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
-    if (nullable) {
-        data_array.mutable_valid_data()->Resize(count, false);
-    }
     auto scalar_array = data_array.mutable_scalars();
     SetUpScalarFieldData(scalar_array, data_type, element_type, count);
+    if (nullable) {
+        scalar_array->mutable_valid_data()->Resize(count, false);
+    }
 }
 
 void
@@ -570,7 +569,7 @@ CreateEmptyVectorDataArray(int64_t count,
                              : count;
     auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
-        auto obj = data_array->mutable_valid_data();
+        auto obj = MutableFieldDataRowValidData(data_array.get());
         auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
         obj->Add(valid_data_bool, valid_data_bool + count);
     }
@@ -587,18 +586,17 @@ CreateScalarDataArrayFrom(const void* data_raw,
     data_array->set_field_id(field_meta.get_id().get());
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    auto scalar_array = data_array->mutable_scalars();
     if (field_meta.is_nullable() && valid_data != nullptr) {
         auto valid_data_ = reinterpret_cast<const bool*>(valid_data);
-        auto obj = data_array->mutable_valid_data();
+        auto obj = scalar_array->mutable_valid_data();
         obj->Add(valid_data_, valid_data_ + count);
     } else {
         FixedVector<bool> always_valid(count, true);
-        auto obj = data_array->mutable_valid_data();
+        auto obj = scalar_array->mutable_valid_data();
         obj->Add(reinterpret_cast<const bool*>(always_valid.data()),
                  reinterpret_cast<const bool*>(always_valid.data()) + count);
     }
-
-    auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
             auto data = reinterpret_cast<const bool*>(data_raw);
@@ -835,7 +833,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
     auto data_array =
         CreateVectorDataArrayFrom(data_raw, valid_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
-        auto obj = data_array->mutable_valid_data();
+        auto obj = MutableFieldDataRowValidData(data_array.get());
         auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
         obj->Add(valid_data_bool, valid_data_bool + count);
     }
@@ -857,7 +855,7 @@ CreateDataArrayFrom(const void* data_raw,
     auto data_array = CreateVectorDataArrayFrom(data_raw, count, field_meta);
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
         field_meta.is_nullable() && valid_data != nullptr) {
-        auto obj = data_array->mutable_valid_data();
+        auto obj = MutableFieldDataRowValidData(data_array.get());
         auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
         obj->Add(valid_data_bool, valid_data_bool + count);
     }
@@ -882,6 +880,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
     auto nullable = field_meta.is_nullable();
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    if (field_meta.is_vector()) {
+        data_array->mutable_vectors();
+    } else {
+        data_array->mutable_scalars();
+    }
+    auto* dst_valid_data =
+        nullable ? MutableFieldDataRowValidData(data_array.get()) : nullptr;
 
     for (auto& merge_base : merge_bases) {
         auto src_field_data = merge_base.get_field_data(field_meta.get_id());
@@ -891,10 +896,9 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
         if (field_meta.is_vector()) {
             bool is_valid = true;
             if (nullable) {
-                auto data = src_field_data->valid_data().data();
-                auto obj = data_array->mutable_valid_data();
+                const auto& data = GetFieldDataRowValidData(*src_field_data);
                 is_valid = data[src_offset];
-                *(obj->Add()) = is_valid;
+                *(dst_valid_data->Add()) = is_valid;
             }
 
             if (!is_valid) {
@@ -980,9 +984,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
         }
 
         if (nullable) {
-            auto data = src_field_data->valid_data().data();
-            auto obj = data_array->mutable_valid_data();
-            *(obj->Add()) = data[src_offset];
+            const auto& data = GetFieldDataRowValidData(*src_field_data);
+            *(dst_valid_data->Add()) = data[src_offset];
         }
 
         auto scalar_array = data_array->mutable_scalars();
@@ -1301,8 +1304,8 @@ ReverseDataFromIndex(const index::IndexBase* index,
     }
 
     if (nullable) {
-        *(data_array->mutable_valid_data()) = {valid_data.begin(),
-                                               valid_data.end()};
+        *(MutableFieldDataRowValidData(data_array.get())) = {valid_data.begin(),
+                                                             valid_data.end()};
     }
 
     return data_array;

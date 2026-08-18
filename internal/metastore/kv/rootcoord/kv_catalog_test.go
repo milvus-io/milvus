@@ -2995,6 +2995,7 @@ func TestRBAC_Grant(t *testing.T) {
 					return []string{
 						crypto.MD5(key + "obj1/obj_name1"),
 						crypto.MD5(key + "obj2/obj_name2"),
+						"invalid",
 					}
 				}
 				return nil
@@ -3226,6 +3227,370 @@ func TestRBACGrantSharedLegacyGranteeIDMigrationFailsClosed(t *testing.T) {
 	assert.Equal(t, "donor-user", donorUser)
 }
 
+func TestBackupRBACLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	firstLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	secondRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role2")
+	firstLegacyID := crypto.MD5(firstLogicalKey)
+	secondLegacyID := crypto.MD5(secondLogicalKey)
+	firstIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, firstLegacyID)
+	secondIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, secondLegacyID)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1", rolePrefix + "role2"}, []string{"", ""}, nil
+			case firstRolePrefix:
+				return []string{firstLogicalKey}, []string{firstLegacyID}, nil
+			case secondRolePrefix:
+				return []string{secondLogicalKey}, []string{secondLegacyID}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{firstLogicalKey, secondLogicalKey}, []string{firstLegacyID, secondLegacyID}, nil
+			case firstIDPrefix:
+				return []string{firstIDPrefix + "PrivilegeLoad"}, []string{"grantor1"}, nil
+			case secondIDPrefix:
+				return []string{secondIDPrefix + "PrivilegeRelease"}, []string{"grantor2"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, backup.GetGrants(), 2)
+	assert.ElementsMatch(t, []string{"grantor1", "grantor2"}, lo.Map(backup.GetGrants(), func(grant *milvuspb.GrantEntity, _ int) string {
+		return grant.GetGrantor().GetUser().GetName()
+	}))
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "BackupRBAC should reuse one tenant-wide grantee scan for legacy ID collision checks")
+}
+
+func TestBackupRBACCustomRolesWithoutLegacyIDsDoesNotPreloadAllGrantees(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	roleGranteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	fullID := crypto.GranteeID(logicalKey)
+	idPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, fullID)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1"}, []string{""}, nil
+			case roleGranteePrefix:
+				return []string{logicalKey}, []string{fullID}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{logicalKey}, []string{fullID}, nil
+			case idPrefix:
+				return []string{idPrefix + "PrivilegeLoad"}, []string{"grantor1"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, backup.GetGrants(), 1)
+	assert.Equal(t, "grantor1", backup.GetGrants()[0].GetGrantor().GetUser().GetName())
+	assert.Equal(t, int32(0), granteePrefixLoads.Load(), "BackupRBAC should not preload all grantees when no grant carries a legacy ID")
+}
+
+func TestBackupRBACLegacyGranteeIDLoadsTenantSnapshotAfterRoleRead(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	objectName := funcutil.CombineObjectName(util.DefaultDBName, "coll1")
+	donorLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, objectName)
+	victimLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", objectType, objectName)
+	donorRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "donor-role")
+	victimRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "victim-role")
+	sharedLegacyID := crypto.MD5(victimLogicalKey)
+	victimIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, sharedLegacyID)
+	var roleGrantPrefixReads atomic.Int32
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "donor-role", rolePrefix + "victim-role"}, []string{"", ""}, nil
+			case donorRolePrefix:
+				roleGrantPrefixReads.Inc()
+				return nil, nil, nil
+			case victimRolePrefix:
+				roleGrantPrefixReads.Inc()
+				return []string{victimLogicalKey}, []string{sharedLegacyID}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				if roleGrantPrefixReads.Load() == 0 {
+					return []string{donorLogicalKey, victimLogicalKey}, []string{sharedLegacyID, sharedLegacyID}, nil
+				}
+				return []string{victimLogicalKey}, []string{sharedLegacyID}, nil
+			case victimIDPrefix:
+				return []string{victimIDPrefix + "PrivilegeLoad"}, []string{"victim-user"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, backup.GetGrants(), 1)
+	assert.Equal(t, "victim-user", backup.GetGrants()[0].GetGrantor().GetUser().GetName())
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "BackupRBAC should lazily load one tenant-wide grantee snapshot for legacy ID collision checks")
+}
+
+func TestBackupRBACLegacyGranteeIDReuseStillFailsClosedOnSharedID(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	objectName := funcutil.CombineObjectName(util.DefaultDBName, "shared-coll")
+	donorLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, objectName)
+	victimLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", objectType, objectName)
+	donorRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "donor-role")
+	victimRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "victim-role")
+	sharedLegacyID := crypto.MD5(donorLogicalKey)
+	donorIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, sharedLegacyID)
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "donor-role", rolePrefix + "victim-role"}, []string{"", ""}, nil
+			case donorRolePrefix:
+				return []string{donorLogicalKey}, []string{sharedLegacyID}, nil
+			case victimRolePrefix:
+				return []string{victimLogicalKey}, []string{sharedLegacyID}, nil
+			case granteePrefix:
+				return []string{donorLogicalKey, victimLogicalKey}, []string{sharedLegacyID, sharedLegacyID}, nil
+			case donorIDPrefix:
+				return []string{donorIDPrefix + "PrivilegeInsert"}, []string{"donor-user"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Nil(t, backup)
+}
+
+func TestBackupRBACLegacyGranteeIDFailsClosedOnInvalidLoadedTenantKey(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	roleGranteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	legacyID := crypto.MD5(logicalKey)
+	idPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, legacyID)
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1"}, []string{""}, nil
+			case roleGranteePrefix:
+				return []string{logicalKey}, []string{legacyID}, nil
+			case granteePrefix:
+				return []string{granteePrefix + "malformed"}, []string{legacyID}, nil
+			case idPrefix:
+				return []string{idPrefix + "PrivilegeLoad"}, []string{"grantor1"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Nil(t, backup)
+}
+
+func TestBackupRBACNoCustomRolesSkipsGranteePreload(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + util.RoleAdmin, rolePrefix + util.RolePublic}, []string{"", ""}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return nil, nil, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.NotNil(t, backup)
+	assert.Empty(t, backup.GetRoles())
+	assert.Empty(t, backup.GetGrants())
+	assert.Equal(t, int32(0), granteePrefixLoads.Load(), "BackupRBAC should not preload grantees when there are no custom roles")
+}
+
+func TestBackupRBACRejectsMismatchedLoadedGranteePreload(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	roleGranteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	legacyID := crypto.MD5(logicalKey)
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1"}, []string{""}, nil
+			case roleGranteePrefix:
+				return []string{logicalKey}, []string{legacyID}, nil
+			case granteePrefix:
+				return nil, []string{}, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Contains(t, err.Error(), "loaded grantee keys and values")
+	assert.Nil(t, backup)
+}
+
+func TestLoadGranteeIDPrefixWithLoadedGranteesRejectsMismatchedLoadedGrantees(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", commonpb.ObjectType_Collection.String(), funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	legacyID := crypto.MD5(granteeKey)
+
+	tests := []struct {
+		name          string
+		granteeKeys   []string
+		granteeValues []string
+	}{
+		{
+			name:          "keys without values",
+			granteeKeys:   []string{granteeKey},
+			granteeValues: nil,
+		},
+		{
+			name:          "values without keys",
+			granteeKeys:   nil,
+			granteeValues: []string{legacyID},
+		},
+		{
+			name:          "length mismatch",
+			granteeKeys:   []string{granteeKey},
+			granteeValues: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock).(*Catalog)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
+
+			keys, values, _, err := c.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, granteeKey, legacyID, test.granteeKeys, test.granteeValues)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.Contains(t, err.Error(), "loaded grantee keys and values")
+			assert.Nil(t, keys)
+			assert.Nil(t, values)
+		})
+	}
+}
+
 func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
 	ctx := context.Background()
 	tenant := util.DefaultTenant
@@ -3233,7 +3598,6 @@ func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
 	c := NewCatalog(kvmock)
 
 	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
-	granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
 	objectType := commonpb.ObjectType_Collection.String()
 	firstLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
 	secondLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
@@ -3245,21 +3609,25 @@ func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
 
 	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 		func(ctx context.Context, key string) []string {
-			switch {
-			case key == granteePrefix:
+			switch key {
+			case granteePrefix:
 				granteePrefixLoads.Inc()
 				return []string{firstEtcdKey, secondEtcdKey}
-			case strings.HasPrefix(key, granteeIDPrefix):
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, firstLegacyID):
+				return []string{key + "PrivilegeLoad"}
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, secondLegacyID):
 				return []string{key + "PrivilegeLoad"}
 			default:
 				return nil
 			}
 		},
 		func(ctx context.Context, key string) []string {
-			switch {
-			case key == granteePrefix:
+			switch key {
+			case granteePrefix:
 				return []string{firstLegacyID, secondLegacyID}
-			case strings.HasPrefix(key, granteeIDPrefix):
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, firstLegacyID):
+				return []string{"root"}
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, secondLegacyID):
 				return []string{"root"}
 			default:
 				return nil

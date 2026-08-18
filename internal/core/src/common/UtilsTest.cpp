@@ -44,6 +44,51 @@ TEST(Util_Common, CheckPlusOverflowKeepsSystemClassification) {
     }
 }
 
+TEST(Util_Common, FieldDataRowValidData) {
+    milvus::DataArray field_data;
+    field_data.add_valid_data(true);
+    field_data.add_valid_data(false);
+
+    EXPECT_EQ(milvus::GetFieldDataRowValidData(field_data).size(), 2);
+    EXPECT_TRUE(milvus::GetFieldDataRowValidData(field_data)[0]);
+    EXPECT_FALSE(milvus::GetFieldDataRowValidData(field_data)[1]);
+
+    field_data.clear_valid_data();
+    auto* scalar_valid_data =
+        field_data.mutable_scalars()->mutable_valid_data();
+    scalar_valid_data->Add(false);
+    scalar_valid_data->Add(true);
+
+    const auto& current = milvus::GetFieldDataRowValidData(field_data);
+    EXPECT_EQ(current.size(), 2);
+    EXPECT_FALSE(current[0]);
+    EXPECT_TRUE(current[1]);
+}
+
+TEST(Util_Common, MutableFieldDataRowValidData) {
+    milvus::DataArray scalar_field;
+    scalar_field.add_valid_data(true);
+    scalar_field.set_type(milvus::proto::schema::DataType::Int64);
+
+    auto* scalar_valid_data =
+        milvus::MutableFieldDataRowValidData(&scalar_field);
+    scalar_valid_data->Add(false);
+    EXPECT_TRUE(scalar_field.valid_data().empty());
+    ASSERT_EQ(scalar_field.scalars().valid_data_size(), 1);
+    EXPECT_FALSE(scalar_field.scalars().valid_data(0));
+
+    milvus::DataArray vector_field;
+    vector_field.add_valid_data(false);
+    vector_field.set_type(milvus::proto::schema::DataType::FloatVector);
+
+    auto* vector_valid_data =
+        milvus::MutableFieldDataRowValidData(&vector_field);
+    vector_valid_data->Add(true);
+    EXPECT_TRUE(vector_field.valid_data().empty());
+    ASSERT_EQ(vector_field.vectors().valid_data_size(), 1);
+    EXPECT_TRUE(vector_field.vectors().valid_data(0));
+}
+
 TEST(SimilarityCorelation, Naive) {
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::IP));
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::COSINE));

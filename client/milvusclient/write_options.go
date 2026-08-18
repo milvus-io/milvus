@@ -636,7 +636,7 @@ func (opt *rowBasedDataOption) WithKeepAutoIDPk(keepPk bool) *rowBasedDataOption
 }
 
 type DeleteOption interface {
-	Request() *milvuspb.DeleteRequest
+	Request() (*milvuspb.DeleteRequest, error)
 }
 
 type deleteOption struct {
@@ -644,19 +644,39 @@ type deleteOption struct {
 	partitionName  string
 	namespace      *string
 	expr           string
+	templateParams map[string]any
 }
 
-func (opt *deleteOption) Request() *milvuspb.DeleteRequest {
-	return &milvuspb.DeleteRequest{
+func (opt *deleteOption) Request() (*milvuspb.DeleteRequest, error) {
+	req := &milvuspb.DeleteRequest{
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
 		Namespace:      opt.namespace,
 		Expr:           opt.expr,
 	}
+	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue, len(opt.templateParams))
+	for key, value := range opt.templateParams {
+		tmplVal, err := any2TmplValue(value)
+		if err != nil {
+			return req, errors.Wrapf(err, "invalid delete expression template parameter %q", key)
+		}
+		req.ExprTemplateValues[key] = tmplVal
+	}
+	return req, nil
 }
 
 func (opt *deleteOption) WithExpr(expr string) *deleteOption {
 	opt.expr = expr
+	return opt
+}
+
+// WithTemplateParam binds an expression-template value for delete. Slice and
+// blob values are not copied; do not mutate them until Client.Delete returns.
+func (opt *deleteOption) WithTemplateParam(key string, val any) *deleteOption {
+	if opt.templateParams == nil {
+		opt.templateParams = make(map[string]any)
+	}
+	opt.templateParams[key] = val
 	return opt
 }
 
@@ -684,5 +704,8 @@ func (opt *deleteOption) WithNamespace(namespace string) *deleteOption {
 }
 
 func NewDeleteOption(collectionName string) *deleteOption {
-	return &deleteOption{collectionName: collectionName}
+	return &deleteOption{
+		collectionName: collectionName,
+		templateParams: make(map[string]any),
+	}
 }

@@ -1363,7 +1363,7 @@ func TestTextFieldDMLConversion(t *testing.T) {
 			require.NotNil(t, textFieldData)
 			assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
 			assert.Equal(t, []string{"short text", longText}, textFieldData.GetScalars().GetStringData().GetData())
-			assert.Equal(t, []bool{true, false, true}, textFieldData.GetValidData())
+			assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(textFieldData))
 		})
 	}
 }
@@ -1520,7 +1520,7 @@ func TestInsertWithNullableVectorFields(t *testing.T) {
 				}
 			}
 			assert.NotNil(t, vectorFieldData)
-			assert.Equal(t, []bool{false, true, false}, vectorFieldData.GetValidData())
+			assert.Equal(t, []bool{false, true, false}, typeutil.GetFieldDataValidData(vectorFieldData))
 			testcase.checkData(t, vectorFieldData)
 		})
 	}
@@ -1563,7 +1563,7 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 		assert.NoError(t, err)
 		nullableField := getFieldDataByName(fieldsData, "nullable")
 		assert.NotNil(t, nullableField)
-		assert.Equal(t, []bool{false, false}, nullableField.GetValidData())
+		assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(nullableField))
 		assert.Empty(t, nullableField.GetScalars().GetLongData().GetData())
 	})
 
@@ -1594,7 +1594,7 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 		assert.NoError(t, err)
 		nullableField := getFieldDataByName(fieldsData, "nullable")
 		assert.NotNil(t, nullableField)
-		assert.Equal(t, []bool{false, true}, nullableField.GetValidData())
+		assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(nullableField))
 		assert.Equal(t, []int64{20}, nullableField.GetScalars().GetLongData().GetData())
 	})
 
@@ -1677,7 +1677,7 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 		assert.NoError(t, err)
 		vectorFieldData := getFieldDataByName(fieldsData, FieldBookIntro)
 		assert.NotNil(t, vectorFieldData)
-		assert.Equal(t, []bool{false, false}, vectorFieldData.GetValidData())
+		assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(vectorFieldData))
 		assert.Empty(t, vectorFieldData.GetVectors().GetFloatVector().GetData())
 		assert.Equal(t, int64(2), vectorFieldData.GetVectors().GetDim())
 	})
@@ -1718,6 +1718,239 @@ func TestInsertWithDefaultValueField(t *testing.T) {
 	fieldData, err := anyToColumns(data, validData, coll, true, false)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(coll.Fields), len(fieldData))
+}
+
+// Without Accept-Type-Allow-Int64 the response renders Int64 array elements as
+// strings, so the insert path has to read that form back: a row this API emits
+// must be acceptable to it unchanged.
+func TestInsertQuotedInt64ArrayElements(t *testing.T) {
+	arrayFieldName := "array-int64"
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:        arrayFieldName,
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	})
+
+	row := func(value string) []byte {
+		return []byte(`{"data": [{"book_id": 1, "book_intro": [0.1, 0.2], "word_count": 2, "` +
+			arrayFieldName + `": ` + value + `}]}`)
+	}
+
+	t.Run("quoted elements round-trip", func(t *testing.T) {
+		// 9007199254740993 is the first integer a float64 cannot hold, which is
+		// why the response quotes it in the first place.
+		data, _, err := checkAndSetData(row(`["9007199254740993", "-1", "010"]`), coll, false)
+		require.NoError(t, err)
+		arr, ok := data[0][arrayFieldName].(*schemapb.ScalarField)
+		require.True(t, ok)
+		// "010" reads as decimal 10, matching how a quoted top-level Int64 is read.
+		assert.Equal(t, []int64{9007199254740993, -1, 10}, arr.GetLongData().GetData())
+	})
+
+	t.Run("native elements still work", func(t *testing.T) {
+		data, _, err := checkAndSetData(row(`[9007199254740993]`), coll, false)
+		require.NoError(t, err)
+		arr, _ := data[0][arrayFieldName].(*schemapb.ScalarField)
+		assert.Equal(t, []int64{9007199254740993}, arr.GetLongData().GetData())
+	})
+
+	t.Run("the two forms may be mixed", func(t *testing.T) {
+		// Each element is read on its own, the way each row of a plain Int64
+		// column is: nothing about one element decides how the next is read.
+		data, _, err := checkAndSetData(row(`[9007199254740993, "1"]`), coll, false)
+		require.NoError(t, err)
+		arr, _ := data[0][arrayFieldName].(*schemapb.ScalarField)
+		assert.Equal(t, []int64{9007199254740993, 1}, arr.GetLongData().GetData())
+	})
+
+	// Accepting the quoted form does not accept nonsense in it.
+	for _, value := range []string{
+		`["9223372036854775808"]`, // out of range
+		`["1.5"]`,
+		`["abc"]`,
+		`[""]`,
+		`[{}]`,
+	} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			_, _, err := checkAndSetData(row(value), coll, false)
+			assert.Error(t, err)
+		})
+	}
+}
+
+// An array element accepts the same quoted forms the same type accepts as a
+// plain column, and a struct array's sub-field accepts exactly what a top-level
+// Array column accepts -- the two read through one function, and this pins that
+// they cannot drift apart.
+func TestQuotedArrayElementsMatchPlainColumns(t *testing.T) {
+	for _, tc := range []struct {
+		elementType schemapb.DataType
+		quoted      string
+		want        interface{}
+		rejects     []string
+	}{
+		{schemapb.DataType_Bool, `["true", "false"]`, []bool{true, false}, []string{`["yes please"]`, `[{}]`}},
+		{schemapb.DataType_Int8, `["-8", "127"]`, []int32{-8, 127}, []string{`["128"]`, `["1.5"]`, `["abc"]`}},
+		{schemapb.DataType_Int16, `["-16", "32767"]`, []int32{-16, 32767}, []string{`["32768"]`, `["abc"]`}},
+		{schemapb.DataType_Int32, `["-32", "2147483647"]`, []int32{-32, 2147483647}, []string{`["2147483648"]`, `["abc"]`}},
+		{schemapb.DataType_Int64, `["9007199254740993", "010"]`, []int64{9007199254740993, 10}, []string{`["9223372036854775808"]`, `["abc"]`, `[""]`}},
+		// strconv reads NaN/Inf/Infinity without an error, case-insensitively,
+		// and an array element has no later check that would catch them.
+		{schemapb.DataType_Float, `["1.5", "-2"]`, []float32{1.5, -2}, []string{
+			`["3.5e38"]`, `["abc"]`, `["NaN"]`, `["nan"]`, `["Inf"]`, `["+Inf"]`, `["-inf"]`, `["Infinity"]`,
+		}},
+		{schemapb.DataType_Double, `["1.5", "-2"]`, []float64{1.5, -2}, []string{
+			`["abc"]`, `["1e400"]`, `[1e400]`, `["NaN"]`, `["Inf"]`, `["-Infinity"]`,
+		}},
+	} {
+		t.Run(tc.elementType.String(), func(t *testing.T) {
+			read := func(scalar *schemapb.ScalarField) interface{} {
+				switch tc.elementType {
+				case schemapb.DataType_Bool:
+					return scalar.GetBoolData().GetData()
+				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+					return scalar.GetIntData().GetData()
+				case schemapb.DataType_Int64:
+					return scalar.GetLongData().GetData()
+				case schemapb.DataType_Float:
+					return scalar.GetFloatData().GetData()
+				default:
+					return scalar.GetDoubleData().GetData()
+				}
+			}
+
+			// The top-level Array column.
+			coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+			coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+				Name:        "arr",
+				DataType:    schemapb.DataType_Array,
+				ElementType: tc.elementType,
+			})
+			column := func(value string) ([]map[string]interface{}, error) {
+				body := []byte(`{"data": [{"book_id": 1, "book_intro": [0.1, 0.2], "word_count": 2, "arr": ` + value + `}]}`)
+				data, _, err := checkAndSetData(body, coll, false)
+				return data, err
+			}
+
+			// The same array as a struct sub-field.
+			sub := &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_Array, ElementType: tc.elementType}
+
+			data, err := column(tc.quoted)
+			require.NoError(t, err)
+			scalar, ok := data[0]["arr"].(*schemapb.ScalarField)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, read(scalar))
+
+			subScalar, err := buildStructSubArrayScalar(sub, gjson.Parse(tc.quoted).Array(), false)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, read(subScalar))
+
+			for _, bad := range tc.rejects {
+				_, err := column(bad)
+				assert.Error(t, err, "column %s", bad)
+				_, err = buildStructSubArrayScalar(sub, gjson.Parse(bad).Array(), false)
+				assert.Error(t, err, "sub-field %s", bad)
+			}
+		})
+	}
+}
+
+// compatibilityMode restores the value handling of the releases before the REST
+// insert validation work: it decides whether a number that does not denote a
+// value of the element type is converted anyway. It says nothing about how a
+// value is spelled, so the quoted spelling -- which this API itself emits for an
+// Int64 without Accept-Type-Allow-Int64, in this mode too -- stays readable, and
+// the wrapping conversions do not spread to a column that never had them.
+func TestCompatibilityModeChangesValuesNotSpellings(t *testing.T) {
+	params := paramtable.Get()
+	key := params.HTTPCfg.CompatibilityMode.Key
+	params.Save(key, "true")
+	defer params.Reset(key)
+
+	column := func(elementType schemapb.DataType, value string) error {
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+			Name:        "arr",
+			DataType:    schemapb.DataType_Array,
+			ElementType: elementType,
+		})
+		body := []byte(`{"data": [{"book_id": 1, "book_intro": [0.1, 0.2], "word_count": 2, "arr": ` + value + `}]}`)
+		_, _, err := checkAndSetData(body, coll, false)
+		return err
+	}
+
+	// A column never converted a number it could not represent, and still does
+	// not: gjson would have stored 2 for 2.7, a wrapped numeral for one past
+	// int64, and +Inf for a magnitude past float32.
+	for _, tc := range []struct {
+		name        string
+		elementType schemapb.DataType
+		value       string
+	}{
+		{"fraction into an integer", schemapb.DataType_Int32, `[1, 2.7, 3]`},
+		{"numeral past int64", schemapb.DataType_Int64, `[1, 99999999999999999999]`},
+		{"magnitude past float32", schemapb.DataType_Float, `[1.0, 1e50, 2.0]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Error(t, column(tc.elementType, tc.value))
+		})
+	}
+
+	// The spelling this mode's own responses use is still readable.
+	t.Run("the quoted spelling round-trips", func(t *testing.T) {
+		assert.NoError(t, column(schemapb.DataType_Int64, `["9007199254740993"]`))
+	})
+
+	sub := &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32}
+
+	// The struct sub-field keeps the lenient conversions it has always had --
+	// this is the one place they ever lived.
+	scalar, err := buildStructSubArrayScalar(sub, gjson.Parse(`[1, 2.7, 3]`).Array(), true)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2, 3}, scalar.GetIntData().GetData())
+
+	// ...and reads the quoted spelling here too, on the same grounds.
+	scalar, err = buildStructSubArrayScalar(sub, gjson.Parse(`["1", "2"]`).Array(), true)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2}, scalar.GetIntData().GetData())
+}
+
+// A rejected array says which element was wrong, not just that the value was.
+func TestArrayElementErrorNamesTheElement(t *testing.T) {
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:        "arr",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int8,
+	})
+	body := []byte(`{"data": [{"book_id": 1, "book_intro": [0.1, 0.2], "word_count": 2, "arr": [1, "abc", 3]}]}`)
+	_, _, err := checkAndSetData(body, coll, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "element 1")
+	assert.Contains(t, err.Error(), "[-128, 127]")
+}
+
+// Same convention for the Int64 sub-field of a struct array.
+func TestStructSubArrayQuotedInt64(t *testing.T) {
+	sub := &schemapb.FieldSchema{
+		Name:        "scores",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	}
+
+	scalar, err := buildStructSubArrayScalar(sub, gjson.Parse(`["9007199254740993", "010"]`).Array(), false)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{9007199254740993, 10}, scalar.GetLongData().GetData())
+
+	scalar, err = buildStructSubArrayScalar(sub, gjson.Parse(`[9007199254740993]`).Array(), false)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{9007199254740993}, scalar.GetLongData().GetData())
+
+	for _, raw := range []string{`["9223372036854775808"]`, `["1.5"]`, `["abc"]`, `[""]`} {
+		_, err = buildStructSubArrayScalar(sub, gjson.Parse(raw).Array(), false)
+		assert.Error(t, err, raw)
+	}
 }
 
 func TestSerialize(t *testing.T) {
@@ -2079,9 +2312,18 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 				}
 			}
 		} else if key == "field-json" {
-			arr1 := value.(string)
-			arr2 := m2[key].([]byte)
-			if arr1 != string(arr2) {
+			// The field reads back as the document it holds, or as the text of
+			// that document when proxy.http.nativeJSONResponse is off.
+			var got []byte
+			switch v := value.(type) {
+			case string:
+				got = []byte(v)
+			case json.RawMessage:
+				got = []byte(v)
+			default:
+				return false
+			}
+			if string(got) != string(m2[key].([]byte)) {
 				return false
 			}
 		} else if key == "field-geometry" {
@@ -2129,6 +2371,692 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, nil, err)
 	exceptRows := generateSearchResult(schemapb.DataType_Int64)
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
+}
+
+func TestResultErrMessage(t *testing.T) {
+	t.Run("marked message is echoed", func(t *testing.T) {
+		err := asSafeMessage(merr.WrapErrParameterInvalidMsg(
+			"the type(%v) of field(%v) is not supported, use other sdk please",
+			schemapb.DataType_Geometry, "geo"))
+		assert.Contains(t, resultErrMessage(err), "use other sdk please")
+	})
+
+	t.Run("marked message survives field wrapping", func(t *testing.T) {
+		err := asSafeMessage(merr.WrapErrParameterInvalidMsg(
+			"the type(%v) of field(%v) is not supported, use other sdk please",
+			schemapb.DataType_Geometry, "geo"))
+		msg := resultErrMessage(wrapOutputFieldErr("geo", err))
+		assert.Contains(t, msg, "use other sdk please")
+		assert.Contains(t, msg, "geo")
+	})
+
+	// Being an InputError is not enough on its own: most ParameterInvalid errors
+	// on this path describe a server-side shape mismatch.
+	t.Run("unmarked input error is not echoed", func(t *testing.T) {
+		err := merr.WrapErrParameterInvalidMsg("field %s has %d valid rows, but data length is %d", "tags", 2, 1)
+		msg := resultErrMessage(wrapOutputFieldErr("tags", err))
+		assert.Contains(t, msg, "tags")
+		assert.NotContains(t, msg, "valid rows")
+		assert.NotContains(t, msg, "data length")
+	})
+
+	t.Run("server fault names the field and nothing else", func(t *testing.T) {
+		inner := merr.WrapErrServiceInternalMsg("array row scalar field is nil")
+		err := wrapOutputFieldErr("user_email_tags", merr.Wrapf(inner, "row %d", 3))
+		msg := resultErrMessage(err)
+		// The caller learns which output field to drop or report...
+		assert.Contains(t, msg, "user_email_tags")
+		// ...but nothing about internal structures or row offsets.
+		assert.NotContains(t, msg, "service internal error")
+		assert.NotContains(t, msg, "scalar field")
+		assert.NotContains(t, msg, "row 3")
+	})
+
+	t.Run("non-milvus error is not echoed", func(t *testing.T) {
+		err := json.Unmarshal([]byte("{bad"), &struct{}{})
+		require.Error(t, err)
+		msg := resultErrMessage(err)
+		assert.Equal(t, merr.ErrInvalidSearchResult.Error(), msg)
+	})
+
+	t.Run("stage fault names the stage and nothing else", func(t *testing.T) {
+		inner := merr.WrapErrServiceInternalMsg("search_aggregation agg_topks sum %d does not match bucket count %d", 3, 2)
+		msg := resultErrMessage(wrapResultStageErr("search aggregation result", inner))
+		assert.Contains(t, msg, "search aggregation result")
+		assert.NotContains(t, msg, "agg_topks")
+		assert.NotContains(t, msg, "bucket count")
+	})
+}
+
+// A dynamic field whose stored bytes are not one JSON document is the caller's own
+// data, so the reason reaches them. The internal $meta name does not: it is not one
+// of their output fields, so naming it would point at a column they cannot drop.
+func TestBuildQueryRespDynamicFieldNotSingleDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"trailing document", `{"a": 1}{"b": 2}`},
+		{"not json at all", `not-json`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fieldData := &schemapb.FieldData{
+				Type:      schemapb.DataType_JSON,
+				FieldName: common.MetaFieldName,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(tc.raw)}},
+						},
+					},
+				},
+			}
+			_, err := buildQueryResp(int64(0), []string{"a"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+			require.Error(t, err)
+
+			msg := resultErrMessage(err)
+			assert.Contains(t, msg, "dynamic field does not hold a single JSON document")
+			assert.NotContains(t, msg, common.MetaFieldName)
+		})
+	}
+}
+
+// proxy.http.legacyArrayResponse lets a deployment keep serving the pre-fix shape
+// while clients that parsed it migrate. Default stays off.
+func TestBuildQueryRespLegacyArrayResponse(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "tags",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_VarChar,
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b"}}}},
+						},
+					},
+				},
+			},
+		},
+	}
+	render := func() string {
+		rows, err := buildQueryResp(0, []string{"tags"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		require.NoError(t, err)
+		payload, err := json.Marshal(gin.H{"data": rows})
+		require.NoError(t, err)
+		return string(payload)
+	}
+
+	params := paramtable.Get()
+	key := params.HTTPCfg.LegacyArrayResponse.Key
+
+	// Default: native JSON array.
+	require.False(t, params.HTTPCfg.LegacyArrayResponse.GetAsBool())
+	assert.JSONEq(t, `{"data":[{"tags":["a","b"]}]}`, render())
+
+	// Switched on: the pre-fix protobuf wrapper shape. Rendered by the
+	// encoder that serves responses, since reproducing that output is the
+	// whole point of the switch.
+	params.Save(key, "true")
+	defer params.Reset(key)
+	assert.JSONEq(t, `{"data":[{"tags":{"Data":{"StringData":{"data":["a","b"]}}}}]}`, render())
+
+	// And back off again, so the switch is not one-way.
+	params.Reset(key)
+	assert.JSONEq(t, `{"data":[{"tags":["a","b"]}]}`, render())
+}
+
+// The switch restores a shape, not a rendering: Accept-Type-Allow-Int64 says
+// what the caller's JSON parser can hold, which the shape does not change, so an
+// Int64 past the JavaScript safe range still arrives as a string inside the
+// wrapper rather than as a number that would round on arrival.
+func TestLegacyArrayResponseKeepsInt64Safe(t *testing.T) {
+	longRow := func(values ...int64) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: "ids",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Int64,
+							Data: []*schemapb.ScalarField{
+								{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}}},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	params := paramtable.Get()
+	key := params.HTTPCfg.LegacyArrayResponse.Key
+	params.Save(key, "true")
+	defer params.Reset(key)
+
+	render := func(enableInt64 bool) string {
+		rows, err := buildQueryResp(0, []string{"ids"},
+			[]*schemapb.FieldData{longRow(9007199254740993, 1)}, nil, nil, enableInt64, nil)
+		require.NoError(t, err)
+		payload, err := json.Marshal(gin.H{"data": rows})
+		require.NoError(t, err)
+		return string(payload)
+	}
+
+	// Without the header the value cannot be a JSON number, in any shape.
+	assert.JSONEq(t,
+		`{"data":[{"ids":{"Data":{"LongData":{"data":["9007199254740993","1"]}}}}]}`,
+		render(false))
+	assert.NotContains(t, render(false), "9007199254740993,")
+
+	// With it, the message is rendered as it stands.
+	assert.JSONEq(t,
+		`{"data":[{"ids":{"Data":{"LongData":{"data":[9007199254740993,1]}}}}]}`,
+		render(true))
+
+	// A row with no Int64 in it is untouched either way.
+	stringRow := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "tags",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_VarChar,
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}},
+						},
+					},
+				},
+			},
+		},
+	}
+	rows, err := buildQueryResp(0, []string{"tags"}, []*schemapb.FieldData{stringRow}, nil, nil, false, nil)
+	require.NoError(t, err)
+	payload, err := json.Marshal(gin.H{"data": rows})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":[{"tags":{"Data":{"StringData":{"data":["a"]}}}}]}`, string(payload))
+}
+
+// The redaction rules must hold for the errors buildQueryResp actually produces,
+// not only for hand-built ones. Each case drives a real producer and asserts on
+// what the client would receive.
+func TestResultErrMessageFromRealProducers(t *testing.T) {
+	t.Run("valid-data shape mismatch is not echoed", func(t *testing.T) {
+		// ValidData describes 3 rows of which 2 are valid, but only 1 row exists.
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: "tags",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_VarChar,
+							Data: []*schemapb.ScalarField{
+								{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}},
+							},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, true, false},
+		}
+
+		_, err := buildQueryResp(0, []string{"tags"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		require.Error(t, err)
+		// The producer really does spell out the internal shape...
+		require.Contains(t, err.Error(), "valid rows")
+
+		// ...and the client must not see it.
+		msg := resultErrMessage(err)
+		assert.Contains(t, msg, "tags")
+		assert.NotContains(t, msg, "valid rows")
+		assert.NotContains(t, msg, "data length")
+	})
+
+	t.Run("unsupported field type is echoed", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{Type: schemapb.DataType_None, FieldName: "weird"}
+		_, err := buildQueryResp(0, []string{"weird"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		require.Error(t, err)
+		assert.Contains(t, resultErrMessage(err), "use other sdk please")
+	})
+
+	t.Run("unsupported primary key type is echoed", func(t *testing.T) {
+		_, err := buildQueryResp(0, nil, nil, &schemapb.IDs{}, nil, true, nil)
+		require.Error(t, err)
+		assert.Contains(t, resultErrMessage(err), "use other sdk please")
+	})
+}
+
+func TestScalarFieldToRESTAny(t *testing.T) {
+	testCases := []struct {
+		name        string
+		field       *schemapb.ScalarField
+		enableInt64 bool
+		expected    any
+	}{
+		{
+			name:     "bool",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true, false}}}},
+			expected: []bool{true, false},
+		},
+		{
+			name:     "int",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}},
+			expected: []int32{1, 2},
+		},
+		{
+			name:        "int64 enabled",
+			field:       &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{9007199254740993}}}},
+			enableInt64: true,
+			expected:    []int64{9007199254740993},
+		},
+		{
+			name:     "int64 disabled",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{9007199254740993}}}},
+			expected: []string{"9007199254740993"},
+		},
+		{
+			name:     "float",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{1.5}}}},
+			expected: []float32{1.5},
+		},
+		{
+			name:     "double",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{2.5}}}},
+			expected: []float64{2.5},
+		},
+		{
+			name:     "varchar",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b"}}}},
+			expected: []string{"a", "b"},
+		},
+		{
+			name:     "empty",
+			field:    &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+			expected: []string{},
+		},
+		{
+			name: "nested",
+			field: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: []*schemapb.ScalarField{
+				{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}},
+				{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}},
+			}}}},
+			enableInt64: true,
+			expected:    []any{[]int64{1, 2}, []string{"a"}},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			actual, err := scalarFieldToRESTAny(testCase.field, testCase.enableInt64)
+			require.NoError(t, err)
+			assert.Equal(t, testCase.expected, actual)
+		})
+	}
+
+	// A missing row degrades to null rather than failing the whole request: the
+	// previous implementation rendered it as null, and this change only fixes the
+	// serialization format.
+	t.Run("nil field renders as null", func(t *testing.T) {
+		value, err := scalarFieldToRESTAny(nil, true)
+		require.NoError(t, err)
+		assert.Nil(t, value)
+	})
+
+	// Likewise for a ScalarField whose oneof was never set, which is what segcore
+	// emits for an empty array with an undetermined element type.
+	t.Run("unset oneof renders as empty array", func(t *testing.T) {
+		value, err := scalarFieldToRESTAny(&schemapb.ScalarField{}, true)
+		require.NoError(t, err)
+		assert.Equal(t, []any{}, value)
+	})
+
+	// A oneof that is set but genuinely unsupported still fails loudly.
+	t.Run("unsupported field", func(t *testing.T) {
+		_, err := scalarFieldToRESTAny(&schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{}}, true)
+		require.Error(t, err)
+		assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+	})
+}
+
+// buildQueryResp must survive both degraded row shapes end to end rather than
+// failing the query, and must still tell them apart in the emitted JSON.
+func TestBuildQueryRespDegradedArrayRows(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "tags",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_VarChar,
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}},
+							nil, // missing row -> null
+							{},  // unset oneof -> []
+						},
+					},
+				},
+			},
+		},
+	}
+
+	rows, err := buildQueryResp(0, []string{"tags"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+	require.NoError(t, err)
+	payload, err := json.Marshal(gin.H{"data": rows})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":[{"tags":["a"]},{"tags":null},{"tags":[]}]}`, string(payload))
+}
+
+func TestBuildQueryRespNativeArrayValues(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "tags",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "world"}}}},
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	rows, err := buildQueryResp(0, []string{"tags"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+	require.NoError(t, err)
+	payload, err := json.Marshal(gin.H{"data": rows})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":[{"tags":["hello","world"]},{"tags":[]}]}`, string(payload))
+
+	fieldData.ValidData = []bool{true, false, true}
+	rows, err = buildQueryResp(0, []string{"tags"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+	require.NoError(t, err)
+	payload, err = json.Marshal(gin.H{"data": rows})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":[{"tags":["hello","world"]},{"tags":null},{"tags":[]}]}`, string(payload))
+
+	int64FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "ids",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{9007199254740993}}}},
+						},
+					},
+				},
+			},
+		},
+	}
+	rows, err = buildQueryResp(0, []string{"ids"}, []*schemapb.FieldData{int64FieldData}, nil, nil, false, nil)
+	require.NoError(t, err)
+	payload, err = json.Marshal(gin.H{"data": rows})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":[{"ids":["9007199254740993"]}]}`, string(payload))
+}
+
+func TestBuildQueryRespComplexNativeArrayJSON(t *testing.T) {
+	arrayField := func(name string, validData []bool, rows ...*schemapb.ScalarField) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: name,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{Data: rows},
+					},
+				},
+			},
+			ValidData: validData,
+		}
+	}
+
+	fieldData := []*schemapb.FieldData{
+		arrayField("bool_arr", []bool{true, false, true},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true, false}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{}}},
+		),
+		arrayField("int_arr", []bool{true, true, true},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{-128, 0, 127}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{42}}}},
+		),
+		arrayField("long_arr", []bool{true, true, false},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{9007199254740993, -9007199254740993}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+		),
+		arrayField("float_arr", []bool{false, true, true},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{1.25, -2.5}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{}}},
+		),
+		arrayField("double_arr", []bool{true, false, true},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{3.125, -0.0625}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{}}},
+		),
+		arrayField("string_arr", []bool{false, true, true},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "世界", "quote\" and slash\\"}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+		),
+	}
+	ids := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{9007199254740993, 2, 3}},
+		},
+	}
+	scores := []float32{0.875, 0.5, -0.25}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}
+
+	testCases := []struct {
+		name              string
+		enableInt64       bool
+		expected          string
+		expectedInt64JSON []string
+	}{
+		{
+			name: "stringify int64",
+			expectedInt64JSON: []string{
+				`"pk":"9007199254740993"`,
+				`"long_arr":["9007199254740993","-9007199254740993"]`,
+			},
+			expected: `{
+				"data": [
+					{
+						"pk": "9007199254740993",
+						"distance": 0.875,
+						"bool_arr": [true, false],
+						"int_arr": [-128, 0, 127],
+						"long_arr": ["9007199254740993", "-9007199254740993"],
+						"float_arr": null,
+						"double_arr": [3.125, -0.0625],
+						"string_arr": null
+					},
+					{
+						"pk": "2",
+						"distance": 0.5,
+						"bool_arr": null,
+						"int_arr": [],
+						"long_arr": [],
+						"float_arr": [1.25, -2.5],
+						"double_arr": null,
+						"string_arr": ["hello", "世界", "quote\" and slash\\"]
+					},
+					{
+						"pk": "3",
+						"distance": -0.25,
+						"bool_arr": [],
+						"int_arr": [42],
+						"long_arr": null,
+						"float_arr": [],
+						"double_arr": [],
+						"string_arr": []
+					}
+				]
+			}`,
+		},
+		{
+			name:        "preserve int64",
+			enableInt64: true,
+			expectedInt64JSON: []string{
+				`"pk":9007199254740993`,
+				`"long_arr":[9007199254740993,-9007199254740993]`,
+			},
+			expected: `{
+				"data": [
+					{
+						"pk": 9007199254740993,
+						"distance": 0.875,
+						"bool_arr": [true, false],
+						"int_arr": [-128, 0, 127],
+						"long_arr": [9007199254740993, -9007199254740993],
+						"float_arr": null,
+						"double_arr": [3.125, -0.0625],
+						"string_arr": null
+					},
+					{
+						"pk": 2,
+						"distance": 0.5,
+						"bool_arr": null,
+						"int_arr": [],
+						"long_arr": [],
+						"float_arr": [1.25, -2.5],
+						"double_arr": null,
+						"string_arr": ["hello", "世界", "quote\" and slash\\"]
+					},
+					{
+						"pk": 3,
+						"distance": -0.25,
+						"bool_arr": [],
+						"int_arr": [42],
+						"long_arr": null,
+						"float_arr": [],
+						"double_arr": [],
+						"string_arr": []
+					}
+				]
+			}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			rows, err := buildQueryResp(0, nil, fieldData, ids, scores, testCase.enableInt64, schema)
+			require.NoError(t, err)
+			payload, err := json.Marshal(gin.H{"data": rows})
+			require.NoError(t, err)
+			assert.JSONEq(t, testCase.expected, string(payload))
+			for _, expected := range testCase.expectedInt64JSON {
+				assert.Contains(t, string(payload), expected)
+			}
+		})
+	}
+}
+
+// Int64 elements inside an ArrayOfStruct sub-field must honor
+// Accept-Type-Allow-Int64 exactly like a top-level Array field does. Values beyond
+// the JavaScript safe-integer range are asserted against the raw JSON, because
+// assert.JSONEq decodes both sides into float64 and would pass even if the digits
+// were silently rounded.
+func TestBuildQueryRespStructArrayInt64(t *testing.T) {
+	const (
+		bigPositive = int64(9007199254740993)
+		bigNegative = int64(-9007199254740993)
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 101,
+				Name:    "my_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     102,
+						Name:        "score",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int64,
+					},
+				},
+			},
+		},
+	}
+
+	newFieldData := func() *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_ArrayOfStruct,
+			FieldName: "my_struct",
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							Type:      schemapb.DataType_Array,
+							FieldName: "score",
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_ArrayData{
+										ArrayData: &schemapb.ArrayArray{
+											ElementType: schemapb.DataType_Int64,
+											Data: []*schemapb.ScalarField{
+												{Data: &schemapb.ScalarField_LongData{
+													LongData: &schemapb.LongArray{Data: []int64{bigPositive, bigNegative}},
+												}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	testCases := []struct {
+		name        string
+		enableInt64 bool
+		expected    string
+		expectedRaw []string
+	}{
+		{
+			name:        "stringify int64",
+			enableInt64: false,
+			expected:    `{"data":[{"my_struct":[{"score":"9007199254740993"},{"score":"-9007199254740993"}]}]}`,
+			expectedRaw: []string{`"score":"9007199254740993"`, `"score":"-9007199254740993"`},
+		},
+		{
+			name:        "preserve int64",
+			enableInt64: true,
+			expected:    `{"data":[{"my_struct":[{"score":9007199254740993},{"score":-9007199254740993}]}]}`,
+			expectedRaw: []string{`"score":9007199254740993`, `"score":-9007199254740993`},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			rows, err := buildQueryResp(0, nil, []*schemapb.FieldData{newFieldData()}, nil, nil, testCase.enableInt64, schema)
+			require.NoError(t, err)
+			payload, err := json.Marshal(gin.H{"data": rows})
+			require.NoError(t, err)
+			assert.JSONEq(t, testCase.expected, string(payload))
+			for _, raw := range testCase.expectedRaw {
+				assert.Contains(t, string(payload), raw)
+			}
+		})
+	}
 }
 
 func TestBuildQueryRespDynamicFieldLargeIntPrecision(t *testing.T) {
@@ -2209,7 +3137,8 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldBookIntro,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
 							Data: []float32{0.1, 0.2, 0.3, 0.4},
@@ -2217,7 +3146,6 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true},
 		}
 
 		rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -2234,13 +3162,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldBookIntro,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{false, false},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{},
 					},
 				},
 			},
-			ValidData: []bool{false, false},
 		}
 
 		rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -2256,7 +3184,8 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldBookIntro,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
 							Data: []float32{
@@ -2268,7 +3197,6 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true},
 		}
 
 		_, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -2288,13 +3216,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_FloatVector{
 								FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3}},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -2304,13 +3232,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 16,
+							ValidData: []bool{true, false},
+							Dim:       16,
 							Data: &schemapb.VectorField_BinaryVector{
 								BinaryVector: []byte{0x01, 0x02, 0x03},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -2320,13 +3248,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_Float16Vector{
 								Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -2336,13 +3264,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_Bfloat16Vector{
 								Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -2352,13 +3280,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_Int8Vector{
 								Int8Vector: []byte{0x01, 0x02, 0x03},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 		}
@@ -2380,12 +3308,12 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldWordCount,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{false, true},
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{Data: []int64{20}},
 					},
 				},
 			},
-			ValidData: []bool{false, true},
 		}
 
 		rows, err := buildQueryResp(0, []string{FieldWordCount}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -2779,6 +3707,250 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 	case schemapb.DataType_SparseFloatVector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
+	default:
+		return []*schemapb.FieldData{
+			{
+				FieldName: "wrong-field-type",
+				Type:      firstFieldType,
+			},
+		}
+	}
+}
+
+func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.DataType) []*schemapb.FieldData {
+	fieldData1 := schemapb.FieldData{
+		Type:      schemapb.DataType_Bool,
+		FieldName: "field-bool",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: []bool{true, true, true},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData1)
+
+	fieldData2 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int8,
+		FieldName: "field-int8",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{0, 1, 2},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData2)
+
+	fieldData3 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int16,
+		FieldName: "field-int16",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{0, 1, 2},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData3)
+
+	fieldData4 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int32,
+		FieldName: "field-int32",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{0, 1, 2},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData4)
+
+	fieldData5 := schemapb.FieldData{
+		Type:      schemapb.DataType_Float,
+		FieldName: "field-float",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: []float32{0, 1, 2},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData5)
+
+	fieldData6 := schemapb.FieldData{
+		Type:      schemapb.DataType_Double,
+		FieldName: "field-double",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: []float64{0, 1, 2},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData6)
+
+	fieldData7 := schemapb.FieldData{
+		Type:      schemapb.DataType_String,
+		FieldName: "field-string",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"0", "1", "2"},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData7)
+
+	fieldData8 := schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldName: "field-varchar",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"0", "1", "2"},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData8)
+
+	fieldData9 := schemapb.FieldData{
+		Type:      schemapb.DataType_JSON,
+		FieldName: "field-json",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{
+						Data: [][]byte{[]byte(`{"XXX": 0}`), []byte(`{"XXX": 0}`), []byte(`{"XXX": 0}`)},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData9)
+
+	fieldData10 := schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "field-array",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+							{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+							{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+						},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+
+	fieldData11 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "field-int64",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{0, 1, 2},
+					},
+				},
+			},
+		},
+		IsDynamic: false,
+	}
+	fieldDatas = append(fieldDatas, &fieldData11)
+
+	switch firstFieldType {
+	case schemapb.DataType_None:
+		return fieldDatas
+	case schemapb.DataType_Bool:
+		return []*schemapb.FieldData{&fieldData1}
+	case schemapb.DataType_Int8:
+		return []*schemapb.FieldData{&fieldData2}
+	case schemapb.DataType_Int16:
+		return []*schemapb.FieldData{&fieldData3}
+	case schemapb.DataType_Int32:
+		return []*schemapb.FieldData{&fieldData4}
+	case schemapb.DataType_Float:
+		return []*schemapb.FieldData{&fieldData5}
+	case schemapb.DataType_Double:
+		return []*schemapb.FieldData{&fieldData6}
+	case schemapb.DataType_String:
+		return []*schemapb.FieldData{&fieldData7}
+	case schemapb.DataType_VarChar:
+		return []*schemapb.FieldData{&fieldData8}
+	case schemapb.DataType_BinaryVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_FloatVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Float16Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_BFloat16Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int8Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Array:
+		return []*schemapb.FieldData{&fieldData10}
+	case schemapb.DataType_JSON:
+		return []*schemapb.FieldData{&fieldData9}
+	case schemapb.DataType_SparseFloatVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int64:
+		return []*schemapb.FieldData{&fieldData11}
 	default:
 		return []*schemapb.FieldData{
 			{
@@ -3524,6 +4696,13 @@ func TestBuildSearchAggregationResp(t *testing.T) {
 	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 1, AggTopks: []int64{2}, AggBuckets: results.GetAggBuckets()}, true, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not match bucket count")
+
+	// The reduce contract detail above stays in the log; the caller gets the stage
+	// so a bad aggregation response is still distinguishable when reported.
+	msg := resultErrMessage(err)
+	require.Contains(t, msg, "search aggregation result")
+	require.NotContains(t, msg, "agg_topks")
+	require.NotContains(t, msg, "bucket count")
 }
 
 func TestGenFunctionSchem(t *testing.T) {
@@ -4081,13 +5260,13 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 
 	accessor, err := newStructArrayRowAccessor(fd, buildStructArrayTestSchema())
 	require.NoError(t, err)
-	extracted0, err := accessor.row(0)
+	extracted0, err := accessor.row(0, true)
 	require.NoError(t, err)
 	require.Len(t, extracted0, 2)
 	assert.EqualValues(t, int32(1), extracted0[0]["sub_int"])
 	assert.EqualValues(t, []float32{0.1, 0.2, 0.3, 0.4}, extracted0[0]["sub_vec"])
 
-	extracted1, err := accessor.row(1)
+	extracted1, err := accessor.row(1, true)
 	require.NoError(t, err)
 	require.Len(t, extracted1, 1)
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
@@ -4227,7 +5406,7 @@ func TestAnyToColumnsNullableStructArray(t *testing.T) {
 	subs := structFD.GetStructArrays().GetFields()
 	require.Len(t, subs, 2)
 	for _, sub := range subs {
-		assert.Equal(t, []bool{true, false, true}, sub.GetValidData())
+		assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(sub))
 	}
 	assert.Len(t, subs[0].GetScalars().GetArrayData().GetData(), 2)
 	assert.Len(t, subs[1].GetVectors().GetVectorArray().GetData(), 2)
@@ -4258,7 +5437,7 @@ func TestAnyToColumnsNullableStructArrayAllNull(t *testing.T) {
 	subs := structFD.GetStructArrays().GetFields()
 	require.Len(t, subs, 2)
 	for _, sub := range subs {
-		assert.Equal(t, []bool{false, false}, sub.GetValidData())
+		assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(sub))
 	}
 	assert.Empty(t, subs[0].GetScalars().GetArrayData().GetData())
 	assert.Empty(t, subs[1].GetVectors().GetVectorArray().GetData())
@@ -4341,7 +5520,7 @@ func TestBuildQueryRespNullableStructArrayDense(t *testing.T) {
 		structSchema, []structArrayRow{first, nullPlaceholder, third})
 	require.NoError(t, err)
 	for _, sub := range structFD.GetStructArrays().GetFields() {
-		sub.ValidData = []bool{true, false, true}
+		typeutil.SetFieldDataValidData(sub, []bool{true, false, true})
 	}
 
 	resp, err := buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
@@ -4362,8 +5541,8 @@ func TestBuildQueryRespNullableStructArrayRejectsMismatchedValidData(t *testing.
 	require.NoError(t, err)
 	subs := structFD.GetStructArrays().GetFields()
 	require.Len(t, subs, 2)
-	subs[0].ValidData = []bool{true}
-	subs[1].ValidData = []bool{false}
+	typeutil.SetFieldDataValidData(subs[0], []bool{true})
+	typeutil.SetFieldDataValidData(subs[1], []bool{false})
 
 	_, err = buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
 	require.Error(t, err)
@@ -4806,7 +5985,7 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 		},
 	}, buildStructArrayTestSchema())
 	require.NoError(t, err)
-	empty, err := accessor.row(0)
+	empty, err := accessor.row(0, true)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 
@@ -4818,7 +5997,7 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 
 	accessor, err = newStructArrayRowAccessor(fd, schema)
 	require.NoError(t, err)
-	_, err = accessor.row(2)
+	_, err = accessor.row(2, true)
 	assert.Error(t, err)
 
 	mismatch := &schemapb.FieldData{
@@ -4854,7 +6033,7 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 	}
 	accessor, err = newStructArrayRowAccessor(mismatch, schema)
 	require.NoError(t, err)
-	_, err = accessor.row(0)
+	_, err = accessor.row(0, true)
 	assert.Error(t, err)
 
 	missingDimSchema := &schemapb.CollectionSchema{
@@ -4862,7 +6041,7 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 	}
 	accessor, err = newStructArrayRowAccessor(mismatch, missingDimSchema)
 	require.NoError(t, err)
-	_, err = accessor.row(0)
+	_, err = accessor.row(0, true)
 	assert.Error(t, err)
 
 	unsupported := &schemapb.FieldData{
@@ -4887,7 +6066,7 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 	}
 	accessor, err = newStructArrayRowAccessor(unsupported, schema)
 	require.NoError(t, err)
-	_, err = accessor.row(0)
+	_, err = accessor.row(0, true)
 	assert.Error(t, err)
 }
 
@@ -4904,9 +6083,9 @@ func TestStructArrayHelperValueConversions(t *testing.T) {
 		{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"five"}}}},
 	}
 	for _, scalar := range scalars {
-		assert.Len(t, scalarArrayToInterfaces(scalar), 1)
+		assert.Len(t, scalarArrayToInterfaces(scalar, true), 1)
 	}
-	assert.Nil(t, scalarArrayToInterfaces(&schemapb.ScalarField{}))
+	assert.Nil(t, scalarArrayToInterfaces(&schemapb.ScalarField{}, true))
 
 	vectorTests := []struct {
 		name        string
@@ -5581,11 +6760,65 @@ func TestCheckAndSetDataJSONFieldUnwrapsEncodedDocument(t *testing.T) {
 		{"plain text stays quoted", `"hello"`, `"hello"`},
 	}
 
+	// While the field reads back as the text of its document, that text is the
+	// field's wire form and decoding it is how a caller sends a document.
+	params := paramtable.Get()
+	key := params.HTTPCfg.NativeJSONResponse.Key
+	params.Save(key, "false")
+	defer params.Reset(key)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stored := insertOneJSONValue(t, tt.value)
 			assert.Equal(t, tt.expected, string(stored))
 			assert.True(t, json.Valid(stored))
+		})
+	}
+}
+
+// The response returns a JSON field as the document it holds, so every document
+// it can return has to be sendable back. A document that is itself a string used
+// to fail: it came back as the string it is, and the insert path read that
+// string as the document's text and stored what it spelled -- a number for
+// "123", a boolean for "true", an object for "{\"a\":1}".
+func TestJSONFieldDocumentRoundTrips(t *testing.T) {
+	require.True(t, paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool(),
+		"the round trip below is what returning documents natively requires")
+
+	for _, document := range []string{
+		`{"a":1}`,
+		`[1,2]`,
+		`"123"`,
+		`"true"`,
+		`"null"`,
+		`"hello"`,
+		`"{\"a\": 1}"`,
+		`123`,
+		`true`,
+	} {
+		t.Run(document, func(t *testing.T) {
+			fieldData := &schemapb.FieldData{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "meta",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(document)}},
+						},
+					},
+				},
+			}
+			rows, err := buildQueryResp(int64(0), []string{"meta"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+			require.NoError(t, err)
+
+			// What the caller receives, rendered by the encoder that serves it.
+			payload, err := json.Marshal(rows[0]["meta"])
+			require.NoError(t, err)
+			assert.JSONEq(t, document, string(payload))
+
+			// ...and sent straight back.
+			stored := insertOneJSONValue(t, string(payload))
+			assert.Equal(t, document, string(stored))
 		})
 	}
 }
@@ -6273,11 +7506,16 @@ func TestCheckAndSetDataJSONFieldNullVersusNullDocument(t *testing.T) {
 		assert.Contains(t, err.Error(), "not nullable")
 	})
 
-	// A JSON string whose content is itself a JSON document is unwrapped, which
-	// predates this change, so "null" reaches storage as the null document and
-	// the string "null" cannot be expressed. Recorded rather than changed: the
-	// unwrapping is the documented way to hand over a JSON document as a string.
-	t.Run("a string holding a document is unwrapped", func(t *testing.T) {
+	// While the field reads back as the text of its document, that text is the
+	// field's wire form, so a string holding a document is unwrapped -- and the
+	// string "null" cannot be expressed. Returning the document itself is what
+	// removes that limit, which is why the unwrapping follows the same setting.
+	t.Run("a string holding a document is unwrapped in the legacy shape", func(t *testing.T) {
+		params := paramtable.Get()
+		key := params.HTTPCfg.NativeJSONResponse.Key
+		params.Save(key, "false")
+		defer params.Reset(key)
+
 		assert.Equal(t, `null`, string(insertOneJSONValue(t, `"null"`)))
 		assert.Equal(t, `true`, string(insertOneJSONValue(t, `"true"`)))
 		assert.Equal(t, `123`, string(insertOneJSONValue(t, `"123"`)))
@@ -6650,7 +7888,10 @@ func TestBuildQueryRespNativeJSON(t *testing.T) {
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.NativeJSONResponse.Key
 
-	t.Run("off by default: strings", func(t *testing.T) {
+	t.Run("switched off: strings", func(t *testing.T) {
+		paramtable.Get().Save(key, "false")
+		defer paramtable.Get().Reset(key)
+
 		rows, err := buildQueryResp(0, []string{"meta"},
 			[]*schemapb.FieldData{jsonRespFieldData(`{"a":1}`, `{"b":2}`)}, nil, nil, true, nil)
 		require.NoError(t, err)
@@ -6659,10 +7900,7 @@ func TestBuildQueryRespNativeJSON(t *testing.T) {
 		assert.Equal(t, `{"b":2}`, rows[1]["meta"])
 	})
 
-	t.Run("on: documents", func(t *testing.T) {
-		paramtable.Get().Save(key, "true")
-		defer paramtable.Get().Reset(key)
-
+	t.Run("on by default: documents", func(t *testing.T) {
 		rows, err := buildQueryResp(0, []string{"meta"},
 			[]*schemapb.FieldData{jsonRespFieldData(`{"a":1}`, `{"b":2}`)}, nil, nil, true, nil)
 		require.NoError(t, err)

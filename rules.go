@@ -477,3 +477,29 @@ func merrsentinel(m dsl.Matcher) {
 			!m.File().PkgPath.Matches(`util/merr`)).
 		Report(`don't store a merr error in a sentinel-like variable: errors.Is on merr compares codes, not identity, so any same-code error would match. Use errors.New for identity sentinels, or create the merr error at the return site`)
 }
+
+// fieldDataValidDataAccess prevents code outside the validity compatibility
+// layer from depending on protobuf storage details. Validity must be read and
+// written through typeutil so callers do not need to distinguish the legacy
+// FieldData location from the field-specific ScalarField/VectorField location.
+func fieldDataValidDataAccess(m dsl.Matcher) {
+	m.Import("github.com/milvus-io/milvus-proto/go-api/v3/schemapb")
+	isFieldDataType := func(v dsl.Var) bool {
+		return v.Type.Is("schemapb.FieldData") || v.Type.Is("*schemapb.FieldData") ||
+			v.Type.Is("schemapb.ScalarField") || v.Type.Is("*schemapb.ScalarField") ||
+			v.Type.Is("schemapb.VectorField") || v.Type.Is("*schemapb.VectorField")
+	}
+	// Match selectors as expressions so reads, writes, getter calls, and getter
+	// method values are all rejected for both pointer and value receivers.
+	m.Match("$x.ValidData", "$x.GetValidData").
+		Where(isFieldDataType(m["x"])).
+		Report("do not access protobuf valid_data directly; use typeutil.GetFieldDataValidData or typeutil.SetFieldDataValidData")
+
+	// A keyed composite literal bypasses selector matching, so reject setting
+	// ValidData while constructing any of the three protobuf message types too.
+	m.Match(`$x{$*_, ValidData: $_, $*_}`).
+		Where(m["x"].Type.Is("schemapb.FieldData") ||
+			m["x"].Type.Is("schemapb.ScalarField") ||
+			m["x"].Type.Is("schemapb.VectorField")).
+		Report("do not access protobuf valid_data directly; use typeutil.GetFieldDataValidData or typeutil.SetFieldDataValidData")
+}

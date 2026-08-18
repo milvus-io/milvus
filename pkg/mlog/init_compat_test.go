@@ -19,10 +19,12 @@ func (m compatMessage) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 }
 
 func TestInitLoggerWithWriteSyncerReplacesMlogGlobalLogger(t *testing.T) {
-	var buf bytes.Buffer
+	// The sink is installed as the global logger, so it must be concurrency
+	// safe: use TestSink rather than a bare bytes.Buffer.
+	sink := NewTestSink()
 	cfg := &Config{Level: "debug", DisableTimestamp: true}
 
-	logger, props, err := InitLoggerWithWriteSyncer(cfg, zapcore.AddSync(&buf), zap.AddCallerSkip(1))
+	logger, props, err := InitLoggerWithWriteSyncer(cfg, sink, zap.AddCallerSkip(1))
 	require.NoError(t, err)
 	ReplaceGlobals(logger, props)
 	defer resetCompatLogger()
@@ -30,9 +32,9 @@ func TestInitLoggerWithWriteSyncerReplacesMlogGlobalLogger(t *testing.T) {
 	Info(context.Background(), "mlog initialized", String("key", "value"))
 	require.NoError(t, logger.Sync())
 
-	assert.Contains(t, buf.String(), `[INFO]`)
-	assert.Contains(t, buf.String(), `["mlog initialized"]`)
-	assert.Contains(t, buf.String(), `[key=value]`)
+	assert.Contains(t, sink.String(), `[INFO]`)
+	assert.Contains(t, sink.String(), `["mlog initialized"]`)
+	assert.Contains(t, sink.String(), `[key=value]`)
 	assert.Equal(t, DebugLevel, GetLevel())
 }
 
