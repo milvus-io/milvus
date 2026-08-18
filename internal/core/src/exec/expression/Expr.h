@@ -62,6 +62,66 @@ PinIndex(milvus::OpContext* op_ctx,
     }
 }
 
+inline void
+ApplyValidMask(const bool* valid_data,
+               TargetBitmapView res,
+               TargetBitmapView valid_res,
+               const int size) {
+    if (valid_data == nullptr) {
+        return;
+    }
+    for (int i = 0; i < size; ++i) {
+        if (!valid_data[i]) {
+            res[i] = valid_res[i] = false;
+        }
+    }
+}
+
+inline void
+ApplyValidMask(ValidityView validity,
+               TargetBitmapView res,
+               TargetBitmapView valid_res,
+               const int size) {
+    if (!validity) {
+        return;
+    }
+
+    if (const auto* expanded = validity.expanded_data(); expanded != nullptr) {
+        ApplyValidMask(expanded, res, valid_res, size);
+        return;
+    }
+
+    const auto* packed = validity.packed_data();
+    AssertInfo(packed != nullptr, "Packed validity data is missing");
+
+    const auto read_word = [packed](int64_t bit_offset, int bit_count) {
+        const auto byte_offset = bit_offset >> 3;
+        const auto shift = static_cast<int>(bit_offset & 0x07);
+        const auto bytes = (shift + bit_count + 7) >> 3;
+        uint64_t word = 0;
+        const auto low_bytes = std::min(bytes, 8);
+        for (int i = 0; i < low_bytes; ++i) {
+            word |= uint64_t(packed[byte_offset + i]) << (i * 8);
+        }
+        word >>= shift;
+        if (bytes > 8) {
+            word |= uint64_t(packed[byte_offset + 8]) << (64 - shift);
+        }
+        if (bit_count < 64) {
+            word &= (uint64_t{1} << bit_count) - 1;
+        }
+        return word;
+    };
+
+    for (int i = 0; i < size; i += 64) {
+        const auto bit_count = std::min(size - i, 64);
+        auto word = read_word(validity.bit_offset() + i, bit_count);
+        TargetBitmapView validity_word(&word, bit_count);
+        res.view(i).inplace_and(validity_word, bit_count);
+        valid_res.view(i).inplace_and(validity_word, bit_count);
+    }
+}
+
 class Expr {
  public:
     Expr(DataType type,
@@ -316,17 +376,11 @@ class SegmentExpr : public Expr {
     }
 
     void
-    ApplyValidData(const bool* valid_data,
+    ApplyValidData(ValidityView validity,
                    TargetBitmapView res,
                    TargetBitmapView valid_res,
                    const int size) {
-        if (valid_data != nullptr) {
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
+        ApplyValidMask(validity, res, valid_res, size);
     }
 
     int64_t
@@ -393,7 +447,7 @@ class SegmentExpr : public Expr {
                         static_cast<int32_t>(current_data_chunk_pos_ + j);
                 }
                 func(views_info.first.data(),
-                     views_info.second.data(),
+                     views_info.second,
                      nullptr,
                      segment_offsets_array.data(),
                      need_size,
@@ -402,7 +456,7 @@ class SegmentExpr : public Expr {
                      values...);
             } else {
                 func(views_info.first.data(),
-                     views_info.second.data(),
+                     views_info.second,
                      nullptr,
                      need_size,
                      res,
@@ -410,7 +464,7 @@ class SegmentExpr : public Expr {
                      values...);
             }
         } else {
-            ApplyValidData(views_info.second.data(), res, valid_res, need_size);
+            ApplyValidData(views_info.second, res, valid_res, need_size);
         }
         current_data_chunk_pos_ += need_size;
         return need_size;
@@ -439,14 +493,17 @@ class SegmentExpr : public Expr {
         auto [data_vec, valid_data] = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
-                 valid_data.data(),
+                 ValidityView::FromExpanded(valid_data.data()),
                  nullptr,
                  input->size(),
                  res,
                  valid_res,
                  values...);
         } else {
-            ApplyValidData(valid_data.data(), res, valid_res, input->size());
+            ApplyValidData(ValidityView::FromExpanded(valid_data.data()),
+                           res,
+                           valid_res,
+                           input->size());
         }
         return input->size();
     }
@@ -506,13 +563,14 @@ class SegmentExpr : public Expr {
                 }
                 T raw_data = raw.value();
                 bool valid_data = valid_result[offset];
-                func.template operator()<FilterType::random>(&raw_data,
-                                                             &valid_data,
-                                                             nullptr,
-                                                             1,
-                                                             res + i,
-                                                             valid_res + i,
-                                                             values...);
+                func.template operator()<FilterType::random>(
+                    &raw_data,
+                    ValidityView::FromExpanded(&valid_data),
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
             }
         } else {
             for (auto i = 0; i < batch_size; ++i) {
@@ -566,7 +624,7 @@ class SegmentExpr : public Expr {
                             !skip_func(skip_index, field_id_, chunk_id)) {
                             func.template operator()<FilterType::random>(
                                 data_vec.data(),
-                                valid_data.data(),
+                                ValidityView::FromExpanded(valid_data.data()),
                                 nullptr,
                                 1,
                                 res + processed_size,
@@ -590,22 +648,20 @@ class SegmentExpr : public Expr {
                         segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + chunk_offset;
-                    const bool* valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += chunk_offset;
-                    }
+                    const auto validity =
+                        chunk.validity().Subview(chunk_offset);
                     if (!skip_func ||
                         !skip_func(skip_index, field_id_, chunk_id)) {
                         func.template operator()<FilterType::random>(
                             data,
-                            valid_data,
+                            validity,
                             nullptr,
                             1,
                             res + processed_size,
                             valid_res + processed_size,
                             values...);
                     } else {
-                        ApplyValidData(valid_data,
+                        ApplyValidData(validity,
                                        res + processed_size,
                                        valid_res + processed_size,
                                        1);
@@ -623,17 +679,17 @@ class SegmentExpr : public Expr {
                 auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, 0);
                 auto chunk = pw.get();
                 const T* data = chunk.data();
-                const bool* valid_data = chunk.valid_data();
+                const auto validity = chunk.validity();
                 if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
                     func.template operator()<FilterType::random>(data,
-                                                                 valid_data,
+                                                                 validity,
                                                                  input->data(),
                                                                  input->size(),
                                                                  res,
                                                                  valid_res,
                                                                  values...);
                 } else {
-                    ApplyValidData(valid_data, res, valid_res, input->size());
+                    ApplyValidData(validity, res, valid_res, input->size());
                 }
                 return input->size();
             }
@@ -646,21 +702,18 @@ class SegmentExpr : public Expr {
                 auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
                 const T* data = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
-                }
+                const auto validity = chunk.validity().Subview(chunk_offset);
                 if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
                     func.template operator()<FilterType::random>(
                         data,
-                        valid_data,
+                        validity,
                         nullptr,
                         1,
                         res + processed_size,
                         valid_res + processed_size,
                         values...);
                 } else {
-                    ApplyValidData(valid_data,
+                    ApplyValidData(validity,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    1);
@@ -711,10 +764,7 @@ class SegmentExpr : public Expr {
             auto& skip_index = segment_->GetSkipIndex();
             auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
             auto chunk = pw.get();
-            const bool* valid_data = chunk.valid_data();
-            if (valid_data != nullptr) {
-                valid_data += data_pos;
-            }
+            const auto validity = chunk.validity().Subview(data_pos);
 
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 const T* data = chunk.data() + data_pos;
@@ -727,7 +777,7 @@ class SegmentExpr : public Expr {
                             size_per_chunk_ * i + data_pos + j);
                     }
                     func(data,
-                         valid_data,
+                         validity,
                          nullptr,
                          segment_offsets_array.data(),
                          size,
@@ -736,7 +786,7 @@ class SegmentExpr : public Expr {
                          values...);
                 } else {
                     func(data,
-                         valid_data,
+                         validity,
                          nullptr,
                          size,
                          res + processed_size,
@@ -749,7 +799,7 @@ class SegmentExpr : public Expr {
                 // 1. Apply valid_data to handle nullable fields
                 // 2. Call func with nullptr to update internal cursors
                 //    (e.g., processed_cursor for bitmap_input indexing)
-                ApplyValidData(valid_data,
+                ApplyValidData(validity,
                                res + processed_size,
                                valid_res + processed_size,
                                size);
@@ -761,7 +811,7 @@ class SegmentExpr : public Expr {
                             size_per_chunk_ * i + data_pos + j);
                     }
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          segment_offsets_array.data(),
                          size,
@@ -770,7 +820,7 @@ class SegmentExpr : public Expr {
                          values...);
                 } else {
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          size,
                          res + processed_size,
@@ -846,7 +896,7 @@ class SegmentExpr : public Expr {
 
                         if constexpr (NeedSegmentOffsets) {
                             func(data_vec.data(),
-                                 valid_data.data(),
+                                 valid_data,
                                  nullptr,
                                  segment_offsets_array.data(),
                                  size,
@@ -855,7 +905,7 @@ class SegmentExpr : public Expr {
                                  values...);
                         } else {
                             func(data_vec.data(),
-                                 valid_data.data(),
+                                 valid_data,
                                  nullptr,
                                  size,
                                  res + processed_size,
@@ -870,15 +920,12 @@ class SegmentExpr : public Expr {
                     auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + data_pos;
-                    const bool* valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
-                    }
+                    const auto validity = chunk.validity().Subview(data_pos);
 
                     if constexpr (NeedSegmentOffsets) {
                         // For GIS functions: construct segment offsets array
                         func(data,
-                             valid_data,
+                             validity,
                              nullptr,
                              segment_offsets_array.data(),
                              size,
@@ -887,7 +934,7 @@ class SegmentExpr : public Expr {
                              values...);
                     } else {
                         func(data,
-                             valid_data,
+                             validity,
                              nullptr,
                              size,
                              res + processed_size,
@@ -901,25 +948,22 @@ class SegmentExpr : public Expr {
                 // 1. Apply valid_data to handle nullable fields
                 // 2. Call func with nullptr to update internal cursors
                 //    (e.g., processed_cursor for bitmap_input indexing)
-                const bool* valid_data;
+                ValidityView validity;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
                         op_ctx_, field_id_, i, data_pos, size);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
+                    validity = pw.get().second;
+                    ApplyValidData(validity,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
                     auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
-                    }
-                    ApplyValidData(valid_data,
+                    validity = chunk.validity().Subview(data_pos);
+                    ApplyValidData(validity,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
@@ -927,7 +971,7 @@ class SegmentExpr : public Expr {
                 // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          segment_offsets_array.data(),
                          size,
@@ -936,7 +980,7 @@ class SegmentExpr : public Expr {
                          values...);
                 } else {
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          size,
                          res + processed_size,
@@ -1285,9 +1329,9 @@ class SegmentExpr : public Expr {
                 }();
                 auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_result[i] = valid_data[chunk_offset];
+                const auto validity = chunk.validity();
+                if (validity) {
+                    valid_result[i] = validity[chunk_offset];
                 } else {
                     break;
                 }
