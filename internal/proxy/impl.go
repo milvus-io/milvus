@@ -2929,6 +2929,15 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
+	ctx, _, err = ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
 
 	optimizedSearch := true
 	resultSizeInsufficient := false
@@ -3009,6 +3018,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			Status: merr.Status(err),
 		}, false, false, false, nil
 	}
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, false, false, false, nil
+	}
 
 	method := "Search"
 	tr := timerecord.NewTimeRecorder(method)
@@ -3052,6 +3067,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			IsRecallEvaluation: isRecallEvaluation,
 		},
 		request:                request,
+		readSnapshot:           readSnapshot,
 		tr:                     timerecord.NewTimeRecorder("search"),
 		mixCoord:               node.mixCoord,
 		node:                   node,
@@ -3211,6 +3227,15 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
+	ctx, _, err = ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
@@ -3274,6 +3299,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			Status: merr.Status(err),
 		}, false, false, nil
 	}
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, false, false, nil
+	}
 
 	method := "HybridSearch"
 	tr := timerecord.NewTimeRecorder(method)
@@ -3293,6 +3324,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			IsTopkReduce: optimizedSearch,
 		},
 		request:             newSearchReq,
+		readSnapshot:        readSnapshot,
 		tr:                  timerecord.NewTimeRecorder(method),
 		mixCoord:            node.mixCoord,
 		node:                node,
@@ -3508,11 +3540,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get collection schema for validation and plan building
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
-		request.GetDbName(), request.GetCollectionName(), 0)
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
 	if err != nil {
 		return nil, err
 	}
+	collectionInfo := readSnapshot.Collection().Info()
 
 	// Get anns_field from search params, or infer from schema if only one vector field exists
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
@@ -3601,6 +3633,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			QueryLabel:       metrics.QueryLabel,
 		},
 		request:             queryReq,
+		readSnapshot:        readSnapshot,
 		plan:                plan,
 		mixCoord:            node.mixCoord,
 		lb:                  node.lbPolicy,
@@ -3913,6 +3946,16 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			Status: merr.Status(err),
 		}, nil
 	}
+
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		return &milvuspb.QueryResults{
+			Status: merr.Status(err),
+		}, nil
+	}
+	qt.ctx = ctx
+	qt.Condition = NewTaskCondition(ctx)
+	qt.readSnapshot = readSnapshot
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
 	defer sp.End()

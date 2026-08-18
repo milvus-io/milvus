@@ -1979,13 +1979,42 @@ func versionalV2(category string, action string) string {
 	return "/v2/vectordb" + category + action
 }
 
-func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
-	h := NewHandlersV2(proxy)
+func initHTTPServerV2(proxyComponent types.ProxyComponent, needAuth bool) *gin.Engine {
+	h := NewHandlersV2(proxyComponent)
 	ginHandler := gin.Default()
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
+	proxy.InitGlobalCacheFromProxyForTest(proxyComponent)
 	h.RegisterRoutesToV2(appV2)
 
 	return ginHandler
+}
+
+func TestPrepareReadRequestSnapshotWritesErrorResponse(t *testing.T) {
+	paramtable.Init()
+	proxy.InitEmptyGlobalCache()
+	t.Cleanup(proxy.InitEmptyGlobalCache)
+
+	snapshotErr := merr.WrapErrCollectionNotFound("missing_collection")
+	proxyComponent := mocks.NewMockProxy(t)
+	proxyComponent.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Status(snapshotErr)},
+		nil,
+	).Once()
+	proxy.InitGlobalCacheFromProxyForTest(proxyComponent)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	_, err := prepareReadRequestSnapshot(c.Request.Context(), c, &milvuspb.SearchRequest{
+		DbName:         DefaultDbName,
+		CollectionName: "missing_collection",
+	}, false)
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+
+	var response ReturnErrMsg
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, merr.Code(snapshotErr), response.Code)
+	assert.Equal(t, snapshotErr.Error(), response.Message)
 }
 
 /**

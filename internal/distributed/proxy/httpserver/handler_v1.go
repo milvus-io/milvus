@@ -51,12 +51,13 @@ func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) er
 		HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		return RestRequestInterceptorErr
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		return RestRequestInterceptorErr
 	}
 
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -82,9 +83,18 @@ func NewHandlersV1(proxyComponent types.ProxyComponent) *HandlersV1 {
 				if err != nil {
 					return nil, err
 				}
-				return handler(ctx, req)
+				return handler(ginCtx.Request.Context(), req)
 			})
 	}
+	h.interceptors = append(h.interceptors,
+		// Pin DQL collection metadata before REST request preprocessing. When
+		// authorization is enabled, the preceding interceptor has already
+		// resolved the same snapshot for alias-aware RBAC.
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			ctx, _, _ = proxy.EnsureReadRequestSnapshotForRequest(ctx, req)
+			ginCtx.Request = ginCtx.Request.WithContext(ctx)
+			return handler(ctx, req)
+		})
 	h.interceptors = append(h.interceptors,
 		// check database
 		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
@@ -533,7 +543,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
+		if _, err := CheckLimiter(reqCtx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -597,7 +607,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
+		collSchema, err := h.describeCollection(reqCtx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
@@ -611,7 +621,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		queryReq := req.(*milvuspb.QueryRequest)
-		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
+		if _, err := CheckLimiter(reqCtx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -999,14 +1009,14 @@ func (h *HandlersV1) search(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
+		if _, err := CheckLimiter(reqCtx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
 			})
 			return nil, err
 		}
-		return h.proxy.Search(ctx, req.(*milvuspb.SearchRequest))
+		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
 	if err == RestRequestInterceptorErr {
 		return

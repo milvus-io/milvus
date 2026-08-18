@@ -26,8 +26,10 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -61,6 +63,59 @@ func InitEmptyGlobalCache() {
 	}
 	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
 	privilege.InitPrivilegeCache(context.Background(), mixcoord)
+}
+
+type proxyComponentReadCache struct {
+	Cache
+	proxy types.ProxyComponent
+}
+
+func (c *proxyComponentReadCache) GetCollectionInfo(
+	ctx context.Context,
+	database string,
+	collectionName string,
+	collectionID int64,
+) (*collectionInfo, error) {
+	resp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		DbName:         database,
+		CollectionName: collectionName,
+		CollectionID:   collectionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, merr.WrapErrServiceInternalMsg("test proxy returned a nil DescribeCollection response")
+	}
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return nil, err
+	}
+	schema := newSchemaInfo(resp.GetSchema())
+
+	// HTTP tests historically obtain schema through the mocked Proxy instead of
+	// a real MetaCache. Supply stable non-zero identities when old mock responses
+	// omit them; production never installs this test-only adapter.
+	resolvedCollectionID := resp.GetCollectionID()
+	if resolvedCollectionID == 0 {
+		resolvedCollectionID = 1
+	}
+	return &collectionInfo{
+		dbID:             1,
+		dbName:           normalizeReadDBName(database),
+		collID:           resolvedCollectionID,
+		schema:           schema,
+		consistencyLevel: resp.GetConsistencyLevel(),
+		updateTimestamp:  resp.GetUpdateTimestamp(),
+	}, nil
+}
+
+// InitGlobalCacheFromProxyForTest lets HTTP tests exercise request-snapshot
+// preprocessing while keeping their existing Proxy DescribeCollection mocks.
+func InitGlobalCacheFromProxyForTest(proxyComponent types.ProxyComponent) {
+	globalMetaCache = &proxyComponentReadCache{
+		Cache: globalMetaCache,
+		proxy: proxyComponent,
+	}
 }
 
 func SetGlobalMetaCache(metaCache *MetaCache) {

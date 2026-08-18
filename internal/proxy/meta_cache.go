@@ -100,6 +100,8 @@ type Cache interface {
 }
 
 type collectionInfo struct {
+	dbID                  typeutil.UniqueID
+	dbName                string
 	collID                typeutil.UniqueID
 	schema                *schemaInfo
 	partInfo              *partitionInfos
@@ -862,13 +864,39 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 
-		collInfo, err := m.UpdateByName(ctx, database, collectionName)
+		var err error
+		collInfo, err = m.UpdateByName(ctx, database, collectionName)
 		if err != nil {
 			return nil, err
 		}
 
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo.partInfo, nil
+	}
+	return collInfo.partInfo, nil
+}
+
+// GetPartitionInfosByID keeps request-scoped partition routing bound to the
+// collection ID that was pinned when the request snapshot was created. The
+// 2.6 cache stores partitions inside collectionInfo, so an ID-based cache fill
+// is sufficient and avoids resolving a concurrently repointed alias again.
+func (m *MetaCache) GetPartitionInfosByID(ctx context.Context, database string, collectionID int64) (*partitionInfos, error) {
+	method := "GetPartitionInfo"
+	collInfo, ok := m.getCollection(database, "", collectionID)
+	if !ok {
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+
+		var err error
+		collInfo, err = m.UpdateByID(ctx, database, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	} else {
+		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
+	}
+	if collInfo.partInfo == nil {
+		return nil, merr.WrapErrServiceInternalMsg("partition metadata is incomplete for collection %d", collectionID)
 	}
 	return collInfo.partInfo, nil
 }
