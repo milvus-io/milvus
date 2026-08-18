@@ -6568,9 +6568,11 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Key:          "dataCoord.snapshot.sortWaitTimeoutSeconds",
 		Version:      "2.6.12",
 		DefaultValue: "180",
-		Doc: "How long snapshot creation waits for its segments to finish sort compaction before " +
-			"releasing the collection's DDL lock and retrying. Exceeding it does not abandon the " +
-			"snapshot, which is already committed to the WAL. Default 180.",
+		Doc: "Budget for one polling attempt of snapshot creation's wait, covering both the wait for " +
+			"every channel checkpoint to reach the snapshot boundary and, when the request asked for it, " +
+			"the wait for its segments to finish sort compaction. Exceeding it does not abandon the " +
+			"snapshot, which is already committed to the WAL, and does not release the collection's " +
+			"DDL lock -- the ack callback simply retries. Default 180.",
 		Export: true,
 	}
 	p.SnapshotSortWaitTimeout.Init(base.mgr)

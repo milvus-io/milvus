@@ -148,6 +148,10 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 		assert.Equal(t, int64(1001), data.SnapshotInfo.Id)
 		assert.Equal(t, "test_snapshot", data.SnapshotInfo.Name)
 		assert.Equal(t, "test description", data.SnapshotInfo.Description)
+		// Persisted so a consumer can tell a cut meant to be backfill-ready from
+		// an ordinary one. Nothing else reads it, so without this assertion the
+		// assignment could be deleted and the suite would stay green.
+		assert.True(t, data.SnapshotInfo.WaitedForSortedSegments)
 		return nil
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
@@ -201,6 +205,9 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(func(sm *snapshotMeta, ctx context.Context, data *snapshotstorage.SnapshotData) error {
 		// Verify compaction expire time is set
 		assert.True(t, data.SnapshotInfo.CompactionExpireTime > 0)
+		// The other direction of the flag: this call did not ask to wait, and
+		// the record has to say so or a consumer cannot tell the two apart.
+		assert.False(t, data.SnapshotInfo.WaitedForSortedSegments)
 		return nil
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
@@ -218,7 +225,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 		nil, // indexEngineVersionManager
 	)
 
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, testCreateSnapshotBoundary(), true)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, testCreateSnapshotBoundary(), false)
 
 	// Verify snapshot pending intent is cleared after CreateSnapshot completes
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))

@@ -13109,10 +13109,14 @@ type SnapshotInfo struct {
 	// Per-channel snapshot boundaries. Each position records the seek point used
 	// to decide which segments from that channel are included in the snapshot.
 	ChannelSeekPositions []*msgpb.MsgPosition `protobuf:"bytes,13,rep,name=channel_seek_positions,json=channelSeekPositions,proto3" json:"channel_seek_positions,omitempty"`
-	// Whether creation waited for every segment inside the boundary to be
-	// published sorted. Recorded so a consumer can tell a sorted, backfill-ready
-	// cut from an ordinary one; false snapshots may contain unindexed segments
-	// whose manifests predate a concurrent schema-evolution backfill.
+	// Whether creation was ASKED to wait for every segment inside the boundary to
+	// be published sorted -- it records the request, not a proof about the result.
+	// A consumer uses it to tell a cut meant to be backfill-ready from an ordinary
+	// one: when false, the snapshot may contain unindexed segments whose manifests
+	// predate a concurrent schema-evolution backfill, and restoring it re-sorts
+	// and re-indexes them in the target. Note the wait is trivially satisfied for
+	// an external collection, which is never sorted at all, so true does not by
+	// itself prove the capture is sorted.
 	WaitedForSortedSegments bool `protobuf:"varint,14,opt,name=waited_for_sorted_segments,json=waitedForSortedSegments,proto3" json:"waited_for_sorted_segments,omitempty"`
 }
 

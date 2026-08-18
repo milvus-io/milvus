@@ -520,12 +520,22 @@ func (sm *snapshotManager) CreateSnapshot(
 	// persisted state and re-establishes staging from scratch.
 	sm.snapshotMeta.SetSnapshotStaging(collectionID)
 
-	// Every segment the snapshot will reference has to carry its sorted form
-	// first. A flushed segment that still owes a sort is published
-	// Flushed+IsInvisible and is served from the growing path, so its manifest is
-	// not what a reader sees -- and once backfill has added a column, the unsorted
-	// manifest does not even have that column. Capturing it would put a segment in
-	// the snapshot whose contents disagree with the collection.
+	// Wait for the boundary to be complete, and -- only if asked -- for every
+	// segment inside it to be published sorted.
+	//
+	// Capturing an unsorted segment is not a loss of rows: it is served from the
+	// growing path, so the capture gets its binlogs and manifest either way. What
+	// it costs is an index, and correctness against a schema-evolution backfill,
+	// which skips invisible segments -- so their manifests never gain an added
+	// column. That is why a backfill asks for the wait and an ordinary snapshot
+	// does not.
+	//
+	// Without the wait, a sort may commit between here and SetSnapshotPending
+	// below. That is safe only because completeSortCompactionMutation publishes
+	// the output of a stream-flushed input VISIBLE (it inherits invisibility only
+	// from a CreatedByCompaction input), so the replacement is captured normally.
+	// Were that to change, the retired input and the invisible output would both
+	// be filtered out and the rows would vanish from the capture.
 	//
 	// This runs before SetSnapshotPending, and the order is not cosmetic: pending
 	// blocks sort compaction too, so waiting under it would be waiting for tasks
@@ -863,11 +873,18 @@ func checkSnapshotVisibilityReachable(ctx context.Context, m *meta, collectionID
 	return nil
 }
 
-// waitForVisibleBoundary blocks until every segment inside the boundary is one
-// the collection's readers can see.
+// waitForBoundary blocks until the boundary is complete, and -- only when
+// waitForSorted is set -- until every segment inside it is one the collection's
+// readers can see.
 //
-// Usually that means waiting for sort compaction, which is what publishes a
-// stream-flushed segment visible -- but the wait is on visibility itself, not on
+// The two halves are not equally optional. Completeness is mandatory: until
+// every channel checkpoint has passed the boundary, DataCoord has not been told
+// about the segments the fence just sealed, so capturing then would silently
+// miss them. Visibility is the caller's choice, because an unsorted segment is
+// served anyway and so is captured either way; see CreateSnapshot for what
+// skipping it costs.
+//
+// When waitForSorted is set, the wait is on visibility itself, not on
 // sortedness. See segmentsAwaitingVisibility for why the distinction matters:
 // with sort compaction off, segments flush straight to visible and this returns
 // on the first poll rather than waiting for a sort that is not coming.
