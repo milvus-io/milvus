@@ -198,11 +198,20 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
         return remain < batch_size_ ? remain : batch_size_;
     }
 
+    // Outcome of one predicate's R-Tree coarse query. Anything but kPruned
+    // means p.coarse degraded to an all-set bitmap (results stay correct via
+    // Refine; R-Tree pruning is lost for the segment); the two degrade causes
+    // are kept apart so the caller can raise one accurately-worded per-segment
+    // warning for each, instead of one per predicate.
+    enum class CoarseOutcome {
+        kPruned,         // index answered; p.coarse is a real candidate set
+        kIndexUnusable,  // index reported present but the pin yielded none
+        kIndexShort,     // legacy index shorter than active_count_ (see
+                         // PromoteShortGISCoarseBitmap)
+    };
+
     // Run the R-Tree index query for a single predicate, filling p.coarse.
-    // Returns true if the pin came up empty and coarse degraded to an all-set
-    // bitmap (index reported present but unusable); the caller raises a single
-    // per-segment warning for the whole group instead of one per predicate.
-    bool
+    CoarseOutcome
     RunRTreeQuery(GISGroupState::Pred& p);
 
     GISGroupStatePtr st_;
@@ -304,11 +313,14 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
     // Evaluate one predicate against an already-constructed left geometry using
     // a per-thread prepared query geometry (within/contains semantics swapped,
     // mirroring PhyGISFunctionFilterExpr::evaluate_geometry_prepared).
+    // `ctx` must be the calling thread's GEOS context: `left` may be a
+    // cache-owned geometry whose context is shared across concurrent queries.
     bool
     EvalPrepared(proto::plan::GISFunctionFilterExpr_GISOp op,
                  const PreparedGeometry& prepared,
                  const Geometry& query_geom,
-                 const Geometry& left) const;
+                 const Geometry& left,
+                 GEOSContextHandle_t ctx) const;
 
     GISGroupStatePtr st_;
     int64_t current_pos_{0};
