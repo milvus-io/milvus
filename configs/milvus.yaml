@@ -929,7 +929,7 @@ dataCoord:
     clusteringMaxMemory: 8589934592 # upper bound in bytes of the clustering compaction grant
     arrowExpansionFactor: 1.2 # arrow in-memory expansion over binlog MemorySize, for offsets and validity bitmaps
     indexBuildMemoryFactorDefault: 1.5 # build-stage memory multiplier over raw field size for index types not in the built-in factor table
-    indexBuildCPU: 1 # CPU cores charged per scalar index build, stats sub-job and analyze task; a vector index build instead charges the node's cores divided by dataNode.index.maxVecIndexBuildConcurrency, so a full build pool reads as a full node. CPU is a scheduling request, not a limit: only memory can refuse a task
+    indexBuildCPU: 1 # CPU cores charged per index build task; knowhere's build parallelism is fixed by its own pool, so this does not scale with data volume
     indexBuildDecodeWindow: 67108864 # extra in-flight decode window (in bytes) added to storage-v3 index build memory on top of the retained column
     textIndexMemoryFactor: 2 # memory per byte of touched field for text-index stats sub-jobs
     jsonKeyIndexMemoryFactor: 2 # memory per byte of touched field for json-key-index stats sub-jobs
