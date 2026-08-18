@@ -732,16 +732,82 @@ func TestUnlearnedCollapsedMemberStaysSensitive(t *testing.T) {
 	assert.False(t, mgr.IsSensitive("function.textembedding.providers.newprovider.enable"))
 }
 
-// A namespace is matched on segment boundaries, never on the collapsed name of
-// a key that carries its structure: "kafka.consumerlike.x" is not a member of
-// "kafka.consumer." however similar the two look with the dots removed.
-func TestCollapsedPrefixDoesNotSwallowNeighbouringNamespaces(t *testing.T) {
-	mgr := NewManager()
+// Membership and sensitivity must read a key the same way, or a spelling exists
+// that one accepts and the other cannot claim.
+//
+// A caller can spell a key any way they like, and the management endpoints hand
+// whatever they are given straight to the Manager. "kafkaconsumerssl.key.pem"
+// matches the collapsed prefix "kafkaconsumer" while matching no dotted prefix,
+// so admitting it as a group member — while deciding sensitivity on the dotted
+// identity, which no sensitive prefix claims — returned the private key that
+// its own canonical spelling refuses. Every spelling that addresses a stored
+// value must be refused or redacted, not just the ones a well-behaved caller
+// would produce.
+func TestHalfCollapsedSpellingCannotReachASensitiveMember(t *testing.T) {
+	const secret = "-----BEGIN PRIVATE KEY-----"
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile,
+		[]byte("kafka.consumer.ssl.key.pem: "+secret+"\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
 	mgr.RegisterConfigPrefix("kafka.consumer.")
 	mgr.RegisterSensitivePrefix("kafka.consumer.")
 
-	assert.True(t, mgr.IsSensitive("kafka.consumer.x"))
-	assert.False(t, mgr.IsSensitive("kafka.consumerlike.x"))
+	// Well-formed names for the same member — the two spellings a source stores,
+	// and one that names the namespace properly but runs the leaf together.
+	// Admitted as members, and redacted as members of a sensitive namespace.
+	for _, canonical := range []string{
+		"kafka.consumer.ssl.key.pem",
+		"kafkaconsumersslkeypem",
+		"kafka.consumer.sslkeypem",
+	} {
+		_, _, err := mgr.GetRegisteredConfig(canonical)
+		require.ErrorIs(t, err, ErrKeySensitive, canonical)
+	}
+
+	// Everything in between belongs to no namespace: refused outright, and
+	// classified sensitive even so, because either alone would have been enough.
+	for _, malformed := range []string{
+		"kafkaconsumerssl.key.pem",
+		"KAFKACONSUMERSSL.KEY.PEM",
+		"kafka.consumersslkeypem",
+		"kafkaconsumer.sslkey.pem",
+	} {
+		_, kind := mgr.ResolveRegisteredConfigKey(malformed)
+		assert.Equal(t, RegisteredConfigUnknown, kind, malformed)
+		assert.True(t, mgr.IsSensitive(malformed), malformed)
+		_, _, err := mgr.GetRegisteredConfig(malformed)
+		require.ErrorIs(t, err, ErrKeyUnregistered, malformed)
+	}
+
+	// However it was spelled, the secret never came back.
+	for _, spelling := range []string{
+		"kafka.consumer.ssl.key.pem", "kafkaconsumersslkeypem", "kafka.consumer.sslkeypem",
+		"kafkaconsumerssl.key.pem", "KAFKACONSUMERSSL.KEY.PEM", "kafka.consumersslkeypem",
+		"kafkaconsumer.sslkey.pem",
+	} {
+		_, value, _ := mgr.GetRegisteredConfig(spelling)
+		assert.NotContains(t, value, secret, spelling)
+	}
+}
+
+// A collapsed identity that two different keys can produce teaches nothing, so
+// that neither one's classification depends on which source was walked first.
+func TestSpellingRecoveryRefusesToGuessBetweenCollidingKeys(t *testing.T) {
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile,
+		[]byte("kafka.consumer.a.bc: sensitive-member\n"+
+			"kafkaconsumera.bc: not-a-member\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix("kafka.consumer.")
+	mgr.RegisterSensitivePrefix("kafka.consumer.")
+
+	// Both collapse to "kafkaconsumerabc". Whichever the file walk saw last, the
+	// shared identity falls back to the collapsed prefixes, which claim it.
+	assert.True(t, mgr.IsSensitive("kafkaconsumerabc"))
+	_, _, err := mgr.GetRegisteredConfig("kafkaconsumerabc")
+	assert.ErrorIs(t, err, ErrKeySensitive)
 }
 
 // A ParamGroup member set through both overlay spellings must be reported as

@@ -410,9 +410,14 @@ func (m *Manager) GetConfigsRaw() map[string]string {
 	return m.getConfigs(false)
 }
 
+// everyKey is the accept function for the projections that take no filters. It
+// is not filterate with an empty list: filterate reports false when it is handed
+// no filters, which is what makes GetBy() with no arguments return nothing.
+func everyKey(key string) (string, bool) { return key, true }
+
 func (m *Manager) getConfigs(redact bool) map[string]string {
 	config := make(map[string]string)
-	m.walkProjection(!redact, nil, func(key, storedKey, value, _ string) {
+	m.walkProjection(!redact, everyKey, func(key, storedKey, value, _ string) {
 		if projected, include := m.projectValue(storedKey, value, redact); include {
 			config[key] = projected
 		}
@@ -435,15 +440,7 @@ func (m *Manager) getConfigs(redact bool) map[string]string {
 // spelling nothing reads is not part of the configuration in force, but it is
 // part of what the manager holds, and an internal caller asking for originals
 // is asking for the latter.
-func (m *Manager) walkProjection(includeInertOverlays bool, filters []Filter, emit func(key, storedKey, value, source string)) {
-	accept := func(key string) (string, bool) {
-		if len(filters) == 0 {
-			// filterate reports false when it is handed no filters at all.
-			return key, true
-		}
-		return filterate(key, filters...)
-	}
-
+func (m *Manager) walkProjection(includeInertOverlays bool, accept func(string) (string, bool), emit func(key, storedKey, value, source string)) {
 	m.keySourceMap.Range(func(storedKey, _ string) bool {
 		key, ok := accept(storedKey)
 		if !ok {
@@ -481,7 +478,7 @@ func (m *Manager) walkProjection(includeInertOverlays bool, filters []Filter, em
 // the source that supplied them.
 func (m *Manager) GetConfigsView() map[string]string {
 	config := make(map[string]string)
-	m.walkProjection(false, nil, func(key, storedKey, value, source string) {
+	m.walkProjection(false, everyKey, func(key, storedKey, value, source string) {
 		switch m.classify(storedKey) {
 		case projectionOmit:
 		case projectionRedact:
@@ -508,7 +505,10 @@ func (m *Manager) GetByRaw(filters ...Filter) map[string]string {
 
 func (m *Manager) getBy(redact bool, filters ...Filter) map[string]string {
 	matchedConfig := make(map[string]string)
-	m.walkProjection(!redact, filters, func(key, storedKey, value, _ string) {
+	// filterate, not everyKey: GetBy() with no filters has always matched
+	// nothing, and this is an exported API.
+	accept := func(key string) (string, bool) { return filterate(key, filters...) }
+	m.walkProjection(!redact, accept, func(key, storedKey, value, _ string) {
 		if projected, include := m.projectValue(storedKey, value, redact); include {
 			matchedConfig[key] = projected
 		}
@@ -754,7 +754,16 @@ func (m *Manager) rememberSpelling(key, sourceName string) {
 		// knowhere.*, which formatKey exempts from collapsing.
 		return
 	}
-	m.dottedSpellings.Insert(collapsed, dotted)
+	// Two different keys can collapse to one identity ("a.bc" and "ab.c"), and
+	// the order sources are walked in is a Go map iteration order. Letting the
+	// last writer decide would make the classification of both of them depend on
+	// it. Learn nothing instead: with no spelling recovered, the collapsed
+	// identity falls back to the collapsed prefixes, which claim rather than
+	// exempt. TestDeclaredKeysDoNotCollide rules this out among declared keys;
+	// group members are named by whoever wrote them, so it cannot.
+	if previous, loaded := m.dottedSpellings.GetOrInsert(collapsed, dotted); loaded && previous != dotted {
+		m.dottedSpellings.Remove(collapsed)
+	}
 }
 
 func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
@@ -809,13 +818,22 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 			}) {
 				return true
 			}
-		case hasNamespacePrefix(formattedKey, collapsedPrefix):
+		case !strings.Contains(dotted, ".") && hasNamespacePrefix(formattedKey, collapsedPrefix):
 			// Separators already collapsed, so the namespace can only be matched
 			// fuzzily — "tlsclustersprodcapempath" against "tlsclusters". That is
 			// how AlterConfigsInEtcd stores a member, and how FileSource and
 			// EnvSource store their aliases, so the identity has to be accepted
 			// or a key written through the alter endpoint becomes invisible to
 			// the very projections this file exists to make truthful.
+			//
+			// Only for a key that has no dots left, and that restriction is
+			// load-bearing rather than tidiness. Sensitivity is decided on the
+			// dotted identity when there is one, so admitting a half-collapsed
+			// spelling here — "kafkaconsumerssl.key.pem", which matches the
+			// collapsed prefix while matching no dotted one — would admit a
+			// member that no sensitive prefix can then claim, and hand back the
+			// private key that "kafka.consumer.ssl.key.pem" refuses. Membership
+			// and sensitivity have to read the key the same way.
 			//
 			// Fuzzy matching is only safe on sources that hold nothing but
 			// Milvus configuration. The environment holds everything in the pod,
@@ -947,15 +965,12 @@ func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
 		return verdict
 	}
 
-	// The key still carries its namespace and no sensitive prefix claimed it, so
-	// that is the answer. Consulting the collapsed prefixes anyway would invent
-	// matches across segment boundaries — "kafka.consumerlike.x" collapses into
-	// the "kafkaconsumer" namespace it is not a member of.
-	if strings.Contains(dotted, ".") {
-		return verdict
-	}
-
-	// No structure to work with. Fall back to the collapsed prefixes.
+	// Nothing claimed the dotted identity. Try the collapsed one unconditionally
+	// rather than only when the key looks structureless: this is the last thing
+	// standing between a namespace declared sensitive and a spelling nobody
+	// anticipated, so it errs towards claiming too much. Over-claiming here
+	// costs an operator a value they can read under the key's real spelling;
+	// under-claiming costs them a private key.
 	m.sensitiveKeyPrefixesCollapsed.Range(func(prefix string) bool {
 		if strings.HasPrefix(lookup, prefix) {
 			verdict = prefixSensitive
