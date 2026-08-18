@@ -20,7 +20,8 @@ DatasetIterator<T>::DatasetIterator(
     int64_t max_batch_bytes,
     int64_t total_sample_bytes,
     int storage_version,
-    bool random_sample)
+    bool random_sample,
+    const std::map<int64_t, std::string>& manifests)
     : purpose_(purpose),
       segment_ids_(segment_ids),
       segment_files_(segment_files),
@@ -30,7 +31,8 @@ DatasetIterator<T>::DatasetIterator(
       max_batch_bytes_(max_batch_bytes),
       remaining_sample_bytes_(total_sample_bytes),
       storage_version_(storage_version),
-      random_sample_(random_sample) {
+      random_sample_(random_sample),
+      manifests_(manifests) {
     if (purpose_ == DatasetPurpose::TRAIN && random_sample_) {
         std::random_device rd;
         std::mt19937 rng(rd());
@@ -87,7 +89,9 @@ DatasetIterator<T>::Next() {
         part.storage_config[NUM_ROWS_KEY] = rows_to_fetch;
         part.storage_config[OFFSET_KEY] = cur_file_offset_rows_;
         part.storage_config[STORAGE_VERSION_KEY] = storage_version_;
-
+        if (storage_version_ == STORAGE_V3) {
+            part.storage_config[SEGMENT_MANIFEST_KEY] = manifests_[segment_id];
+        }
         cur_file_offset_rows_ += rows_to_fetch;
         if (cur_file_offset_rows_ >= available_rows) {
             cur_file_offset_rows_ = 0;

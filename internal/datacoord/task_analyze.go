@@ -156,9 +156,10 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 		// get binlogIDs
 		binlogIDs := getBinLogIDs(info, at.FieldID)
 		req.SegmentStats[segID] = &indexpb.SegmentStats{
-			ID:      segID,
-			NumRows: info.GetNumOfRows(),
-			LogIDs:  binlogIDs,
+			ID:           segID,
+			NumRows:      info.GetNumOfRows(),
+			LogIDs:       binlogIDs,
+			ManifestPath: info.GetManifestPath(),
 		}
 		req.InsertFiles[segID] = &workerpb.FieldBinLogs{
 			BinLogs: info.GetBinlogs(),
@@ -265,65 +266,6 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	if err != nil {
 		at.dropAndResetTaskOnWorker(cluster, err.Error())
 		return
-	totalSegmentsRows := int64(0)
-	for _, segID := range task.SegmentIDs {
-		info := segmentsMap[segID]
-		if info == nil {
-			log.Warn(context.TODO(), "analyze task is processing, but segment is nil, fail the task",
-				mlog.FieldSegmentID(segID))
-			if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFailed,
-				fmt.Sprintf("segmentInfo with ID: %d is nil", segID)); err != nil {
-				// State is left untouched, so the scheduler re-enqueues the task and retries.
-				log.Warn(context.TODO(), "failed to persist the failed state of the analyze task", mlog.Err(err))
-			}
-			return
-		}
-		totalSegmentsRows += info.GetNumOfRows()
-		stats := &indexpb.SegmentStats{
-			ID:      segID,
-			NumRows: info.GetNumOfRows(),
-		}
-		// StorageV3 segments are read via manifest; V1 via logIDs. Exactly one.
-		if manifest := info.GetManifestPath(); manifest != "" {
-			stats.ManifestPath = manifest
-		} else {
-			stats.LogIDs = getBinLogIDs(info, task.FieldID)
-		}
-		req.SegmentStats[segID] = stats
-	}
-
-	// Extract dim from schema field TypeParams for vector clustering key.
-	if at.schema != nil {
-		for _, f := range at.schema.Fields {
-			if f.FieldID == task.FieldID {
-				dim, err := storage.GetDimFromParams(f.TypeParams)
-				if err != nil {
-					at.SetState(indexpb.JobState_JobStateInit, err.Error())
-					return
-				}
-				req.Dim = int64(dim)
-
-				// Calculate the number of clusters based on total data size.
-				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
-				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
-				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
-					log.Info(context.TODO(), "data size is too small, skip analyze task",
-						mlog.Float64("raw data size", totalSegmentsRawDataSize),
-						mlog.Int64("num clusters", numClusters),
-						mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
-						// State is left untouched, so the scheduler re-enqueues the task and retries.
-						log.Warn(context.TODO(), "failed to persist the finished state of the analyze task", mlog.Err(err))
-					}
-					return
-				}
-				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
-					numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
-				}
-				req.NumClusters = numClusters
-				break
-			}
-		}
 	}
 	defer func() {
 		if err != nil {
