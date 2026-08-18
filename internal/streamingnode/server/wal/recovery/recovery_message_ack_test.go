@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
@@ -20,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -325,21 +327,17 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	msg := newAckTestTimeTickMessage(t, 20, 2)
 	storage.observeDataScannerMessage(context.Background(), msg)
 
-	var attempts []*WALCheckpoint
+	var attempts []*streamingpb.WALCheckpoint
 	persistErr := errors.New("checkpoint persistence failed")
-	mock := mockey.Mock((*recoveryStorageImpl).persistCheckpointSnapshot).To(func(
-		receiver *recoveryStorageImpl,
+	mock := mockey.Mock((*recoveryStorageImpl).saveRecoverySnapshot).To(func(
+		_ *recoveryStorageImpl,
 		_ context.Context,
-		snapshot *dirtyPersistSnapshot,
-		_ bool,
+		snapshot *metastore.WALRecoverySnapshot,
 	) error {
-		attempts = append(attempts, snapshot.Checkpoint.Clone())
+		attempts = append(attempts, proto.Clone(snapshot.ConsumeCheckpoint).(*streamingpb.WALCheckpoint))
 		if len(attempts) == 1 {
 			return persistErr
 		}
-		receiver.mu.Lock()
-		receiver.persistedCheckpoint = snapshot.Checkpoint.Clone()
-		receiver.mu.Unlock()
 		return nil
 	}).Build()
 	defer mock.UnPatch()
@@ -355,7 +353,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 
 	require.NoError(t, storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
 	require.Len(t, attempts, 2)
-	assertCheckpointPointEqual(t, attempts[0], attempts[1])
+	assert.True(t, proto.Equal(attempts[0], attempts[1]))
 	assert.Nil(t, storage.pendingPersistSnapshot)
 
 	followUp := storage.consumeDirtySnapshot()
@@ -366,7 +364,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.True(t, msg.LastConfirmedMessageID().EQ(followUp.Checkpoint.DataCheckpoint.MessageID))
 }
 
-func TestPersistBatchMarksModuleSnapshotsBeforeCheckpoint(t *testing.T) {
+func TestPersistBatchMarksModuleSnapshotsAfterCompoundCommit(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
@@ -379,58 +377,165 @@ func TestPersistBatchMarksModuleSnapshotsBeforeCheckpoint(t *testing.T) {
 	t.Cleanup(storage.metrics.Close)
 	storage.SetLogger(mlog.With())
 
-	events := make([]string, 0, 3)
-	dirtySnapshot := &orderedDirtySnapshot{markPersisted: func() {
-		events = append(events, "mark-module-persisted")
-	}}
+	events := make([]string, 0, 2)
+	dirtySnapshot := &orderedDirtySnapshot{
+		moduleName: moduleapi.ModuleNameSegment,
+		key:        moduleapi.SnapshotKey{SegmentID: 1},
+		op:         moduleapi.SnapshotOpUpsert,
+		payload:    &streamingpb.SegmentAssignmentMeta{SegmentId: 1},
+		markPersisted: func() {
+			events = append(events, "mark-module-persisted")
+		},
+	}
 	storage.pendingPersistSnapshot = &dirtyPersistSnapshot{
 		Checkpoint:       checkpoint.Clone(),
 		CheckpointDirty:  true,
 		ModuleDirtySnaps: []moduleapi.DirtySnapshot{dirtySnapshot},
 	}
 
-	moduleMock := mockey.Mock((*recoveryStorageImpl).persistModuleDirtySnapshot).To(func(
+	compoundMock := mockey.Mock((*recoveryStorageImpl).saveRecoverySnapshot).To(func(
 		*recoveryStorageImpl,
 		context.Context,
-		moduleapi.DirtySnapshot,
+		*metastore.WALRecoverySnapshot,
 	) error {
-		events = append(events, "persist-module")
+		events = append(events, "persist-compound")
 		return nil
 	}).Build()
-	defer moduleMock.UnPatch()
-	checkpointMock := mockey.Mock((*recoveryStorageImpl).persistCheckpointSnapshot).To(func(
-		*recoveryStorageImpl,
-		context.Context,
-		*dirtyPersistSnapshot,
-		bool,
-	) error {
-		events = append(events, "persist-checkpoint")
-		return nil
-	}).Build()
-	defer checkpointMock.UnPatch()
+	defer compoundMock.UnPatch()
 
 	require.NoError(t, storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
-	assert.Equal(t, []string{"persist-module", "mark-module-persisted", "persist-checkpoint"}, events)
+	assert.Equal(t, []string{"persist-compound", "mark-module-persisted"}, events)
+}
+
+func TestBuildRecoverySnapshotBatchesModuleMutations(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  10,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  10,
+		},
+	}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	t.Cleanup(storage.metrics.Close)
+
+	vchannel := func(name string) *streamingpb.VChannelMeta {
+		return &streamingpb.VChannelMeta{Vchannel: name, CollectionInfo: &streamingpb.CollectionInfoOfVChannel{}}
+	}
+	dirty := []moduleapi.DirtySnapshot{
+		newOrderedDirtySnapshot(moduleapi.ModuleNameVChannel, moduleapi.SnapshotKey{VChannel: "v1"}, moduleapi.SnapshotOpUpsert, vchannel("v1")),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameVChannel, moduleapi.SnapshotKey{VChannel: "v2"}, moduleapi.SnapshotOpUpsertBase, vchannel("v2")),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameVChannel, moduleapi.SnapshotKey{VChannel: "v3"}, moduleapi.SnapshotOpDelete, vchannel("v3")),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameSegment, moduleapi.SnapshotKey{SegmentID: 1}, moduleapi.SnapshotOpUpsert, &streamingpb.SegmentAssignmentMeta{SegmentId: 1}),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameSegment, moduleapi.SnapshotKey{SegmentID: 2}, moduleapi.SnapshotOpDelete, &streamingpb.SegmentAssignmentMeta{SegmentId: 2}),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameTransformLog, moduleapi.SnapshotKey{VChannel: "v1"}, moduleapi.SnapshotOpUpsert, &streamingpb.VChannelTransformLogMeta{CheckpointTimeTick: 10}),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameTransformLog, moduleapi.SnapshotKey{VChannel: "v2"}, moduleapi.SnapshotOpDelete, &streamingpb.VChannelTransformLogMeta{}),
+	}
+
+	snapshot, err := storage.buildRecoverySnapshot(&dirtyPersistSnapshot{
+		Checkpoint:       checkpoint,
+		CheckpointDirty:  true,
+		ModuleDirtySnaps: dirty,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, snapshot.VChannels, "v1")
+	assert.Contains(t, snapshot.VChannelBaseMetas, "v2")
+	assert.Contains(t, snapshot.RemovedVChannels, "v3")
+	assert.Contains(t, snapshot.SegmentAssignments, int64(1))
+	assert.Equal(t, []int64{2}, snapshot.RemovedSegmentIDs)
+	assert.Contains(t, snapshot.TransformLogMetas, "v1")
+	assert.Equal(t, []string{"v2"}, snapshot.RemovedTransformLogs)
+	assert.Equal(t, checkpoint.TimeTick, snapshot.ConsumeCheckpoint.GetTimeTick())
+}
+
+func TestPersistDirtySnapshotRejectsInvalidPayloadBeforeSave(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  10,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  10,
+		},
+	}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	t.Cleanup(storage.metrics.Close)
+	storage.SetLogger(mlog.With())
+	storage.pendingPersistSnapshot = &dirtyPersistSnapshot{
+		Checkpoint: checkpoint,
+		ModuleDirtySnaps: []moduleapi.DirtySnapshot{
+			newOrderedDirtySnapshot(
+				moduleapi.ModuleNameSegment,
+				moduleapi.SnapshotKey{SegmentID: 1},
+				moduleapi.SnapshotOpUpsert,
+				&streamingpb.VChannelMeta{},
+			),
+		},
+	}
+
+	saveCalls := 0
+	saveMock := mockey.Mock((*recoveryStorageImpl).saveRecoverySnapshot).To(func(
+		*recoveryStorageImpl,
+		context.Context,
+		*metastore.WALRecoverySnapshot,
+	) error {
+		saveCalls++
+		return nil
+	}).Build()
+	defer saveMock.UnPatch()
+
+	err := storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "payload is not SegmentAssignmentMeta")
+	assert.Zero(t, saveCalls)
+}
+
+func TestRetryOperationWithBackoffStopsOnNonRetryableError(t *testing.T) {
+	attempts := 0
+	expected := merr.WrapErrServiceInternalMsg("invalid recovery snapshot")
+	err := retryOperationWithBackoff(context.Background(), mlog.With(), func(context.Context) error {
+		attempts++
+		return expected
+	})
+	require.ErrorIs(t, err, expected)
+	assert.Equal(t, 1, attempts)
+}
+
+func newOrderedDirtySnapshot(
+	moduleName moduleapi.ModuleName,
+	key moduleapi.SnapshotKey,
+	op moduleapi.SnapshotOp,
+	payload proto.Message,
+) *orderedDirtySnapshot {
+	return &orderedDirtySnapshot{
+		moduleName: moduleName,
+		key:        key,
+		op:         op,
+		payload:    payload,
+	}
 }
 
 type orderedDirtySnapshot struct {
+	moduleName    moduleapi.ModuleName
+	key           moduleapi.SnapshotKey
+	op            moduleapi.SnapshotOp
+	payload       proto.Message
 	markPersisted func()
 }
 
-func (*orderedDirtySnapshot) ModuleName() moduleapi.ModuleName {
-	return moduleapi.ModuleNameSegment
+func (s *orderedDirtySnapshot) ModuleName() moduleapi.ModuleName {
+	return s.moduleName
 }
 
-func (*orderedDirtySnapshot) Key() moduleapi.SnapshotKey {
-	return moduleapi.SnapshotKey{}
+func (s *orderedDirtySnapshot) Key() moduleapi.SnapshotKey {
+	return s.key
 }
 
-func (*orderedDirtySnapshot) Op() moduleapi.SnapshotOp {
-	return moduleapi.SnapshotOpUpsert
+func (s *orderedDirtySnapshot) Op() moduleapi.SnapshotOp {
+	return s.op
 }
 
-func (*orderedDirtySnapshot) Payload() proto.Message {
-	return &streamingpb.SegmentAssignmentMeta{}
+func (s *orderedDirtySnapshot) Payload() proto.Message {
+	return s.payload
 }
 
 func (*orderedDirtySnapshot) MetaTimeTick() uint64 {

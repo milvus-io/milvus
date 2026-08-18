@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -67,119 +68,15 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
-	if err := rs.persistModuleDirtySnapshots(ctx, snapshot); err != nil {
+	recoverySnapshot, err := rs.buildRecoverySnapshot(snapshot)
+	if err != nil {
 		return err
 	}
-	if err := rs.persistCheckpointSnapshot(ctx, snapshot, lvl >= mlog.InfoLevel); err != nil {
+	if err := rs.saveRecoverySnapshot(ctx, recoverySnapshot); err != nil {
 		return err
-	}
-	return
-}
-
-func (rs *recoveryStorageImpl) persistModuleDirtySnapshots(ctx context.Context, snapshot *dirtyPersistSnapshot) error {
-	if snapshot.ModuleSnapshotsAck || len(snapshot.ModuleDirtySnaps) == 0 {
-		return nil
-	}
-	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
-		if err := rs.persistModuleDirtySnapshot(ctx, dirtySnapshot); err != nil {
-			return err
-		}
 	}
 	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
 		dirtySnapshot.MarkPersisted()
-	}
-	snapshot.ModuleSnapshotsAck = true
-	return nil
-}
-
-func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, snapshot moduleapi.DirtySnapshot) error {
-	key := snapshot.Key()
-	if key.PChannel == "" {
-		key.PChannel = rs.channel.Name
-	}
-	catalog := resource.Resource().StreamingNodeCatalog()
-	logger := rs.Logger().With(
-		mlog.String("op", "persistModuleSnapshot"),
-		mlog.String("module", string(snapshot.ModuleName())),
-		mlog.Int("snapshotOp", int(snapshot.Op())),
-		mlog.String("pchannel", key.PChannel),
-		mlog.String("vchannel", key.VChannel),
-		mlog.Int64("segmentID", key.SegmentID),
-		mlog.Uint64("metaTimeTick", snapshot.MetaTimeTick()),
-		mlog.Uint64("dataTimeTick", snapshot.DataTimeTick()),
-	)
-	return rs.retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
-		switch snapshot.ModuleName() {
-		case moduleapi.ModuleNameVChannel:
-			switch snapshot.Op() {
-			case moduleapi.SnapshotOpUpsert:
-				meta, ok := snapshot.Payload().(*streamingpb.VChannelMeta)
-				if !ok || meta == nil {
-					return merr.WrapErrServiceInternalMsg("vchannel dirty snapshot payload is not VChannelMeta")
-				}
-				return catalog.SaveVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
-			case moduleapi.SnapshotOpUpsertBase:
-				meta, ok := snapshot.Payload().(*streamingpb.VChannelMeta)
-				if !ok || meta == nil {
-					return merr.WrapErrServiceInternalMsg("vchannel base dirty snapshot payload is not VChannelMeta")
-				}
-				return catalog.SaveVChannelBaseMetas(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
-			case moduleapi.SnapshotOpDelete:
-				meta, _ := snapshot.Payload().(*streamingpb.VChannelMeta)
-				if meta == nil {
-					meta = &streamingpb.VChannelMeta{Vchannel: key.VChannel}
-				}
-				return catalog.DropVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
-			default:
-				return merr.WrapErrServiceInternalMsg("unknown vchannel snapshot op: %d", snapshot.Op())
-			}
-		case moduleapi.ModuleNameSegment:
-			switch snapshot.Op() {
-			case moduleapi.SnapshotOpUpsert:
-				payload, ok := snapshot.Payload().(*streamingpb.SegmentAssignmentMeta)
-				if !ok || payload == nil {
-					return merr.WrapErrServiceInternalMsg("segment dirty snapshot payload is not SegmentAssignmentMeta")
-				}
-				return catalog.SaveSegmentAssignments(ctx, key.PChannel, map[int64]*streamingpb.SegmentAssignmentMeta{key.SegmentID: payload})
-			case moduleapi.SnapshotOpDelete:
-				return catalog.DropSegmentAssignments(ctx, key.PChannel, []int64{key.SegmentID})
-			default:
-				return merr.WrapErrServiceInternalMsg("unknown segment snapshot op: %d", snapshot.Op())
-			}
-		case moduleapi.ModuleNameTransformLog:
-			switch snapshot.Op() {
-			case moduleapi.SnapshotOpUpsert:
-				meta, ok := snapshot.Payload().(*streamingpb.VChannelTransformLogMeta)
-				if !ok || meta == nil {
-					return merr.WrapErrServiceInternalMsg("transformlog dirty snapshot payload is not VChannelTransformLogMeta")
-				}
-				return catalog.SaveTransformLogMeta(ctx, key.PChannel, map[string]*streamingpb.VChannelTransformLogMeta{key.VChannel: meta})
-			case moduleapi.SnapshotOpDelete:
-				return catalog.DropTransformLogMeta(ctx, key.PChannel, []string{key.VChannel})
-			default:
-				return merr.WrapErrServiceInternalMsg("unknown transformlog snapshot op: %d", snapshot.Op())
-			}
-		default:
-			return merr.WrapErrServiceInternalMsg("unknown module dirty snapshot: %s", snapshot.ModuleName())
-		}
-	})
-}
-
-func (rs *recoveryStorageImpl) persistCheckpointSnapshot(ctx context.Context, snapshot *dirtyPersistSnapshot, _ bool) error {
-	recoverySnapshot := &metastore.WALRecoverySnapshot{}
-	if snapshot.SalvageCheckpoint != nil {
-		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
-	}
-	if snapshot.CheckpointDirty {
-		recoverySnapshot.ConsumeCheckpoint = snapshot.Checkpoint.IntoProto()
-	}
-	if recoverySnapshot.SalvageCheckpoint == nil && recoverySnapshot.ConsumeCheckpoint == nil {
-		return nil
-	}
-	if err := retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "persistCheckpoint")), func(ctx context.Context) error {
-		return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, rs.channel.Name, recoverySnapshot)
-	}); err != nil {
-		return err
 	}
 	if snapshot.CheckpointDirty {
 		rs.mu.Lock()
@@ -188,7 +85,140 @@ func (rs *recoveryStorageImpl) persistCheckpointSnapshot(ctx context.Context, sn
 		rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
 		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
 	}
-	return nil
+	return
+}
+
+func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnapshot) (*metastore.WALRecoverySnapshot, error) {
+	recoverySnapshot := &metastore.WALRecoverySnapshot{}
+	type snapshotIdentity struct {
+		module    moduleapi.ModuleName
+		vchannel  string
+		segmentID int64
+	}
+	seen := make(map[snapshotIdentity]struct{}, len(snapshot.ModuleDirtySnaps))
+	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
+		key := dirtySnapshot.Key()
+		if key.PChannel != "" && key.PChannel != rs.channel.Name {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"dirty snapshot pchannel mismatch: expected %s, got %s",
+				rs.channel.Name,
+				key.PChannel,
+			)
+		}
+		identity := snapshotIdentity{
+			module:    dirtySnapshot.ModuleName(),
+			vchannel:  key.VChannel,
+			segmentID: key.SegmentID,
+		}
+		if identity.module == moduleapi.ModuleNameSegment {
+			identity.vchannel = ""
+		} else {
+			identity.segmentID = 0
+		}
+		if _, ok := seen[identity]; ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"duplicate dirty snapshot for module %s, vchannel %s, segment %d",
+				identity.module,
+				identity.vchannel,
+				identity.segmentID,
+			)
+		}
+		seen[identity] = struct{}{}
+
+		switch dirtySnapshot.ModuleName() {
+		case moduleapi.ModuleNameVChannel:
+			if key.VChannel == "" {
+				return nil, merr.WrapErrServiceInternalMsg("vchannel dirty snapshot is missing vchannel key")
+			}
+			meta, ok := dirtySnapshot.Payload().(*streamingpb.VChannelMeta)
+			if !ok || meta == nil {
+				return nil, merr.WrapErrServiceInternalMsg("vchannel dirty snapshot payload is not VChannelMeta")
+			}
+			if meta.GetVchannel() != key.VChannel {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"vchannel dirty snapshot key mismatch: expected %s, got %s",
+					key.VChannel,
+					meta.GetVchannel(),
+				)
+			}
+			switch dirtySnapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				if recoverySnapshot.VChannels == nil {
+					recoverySnapshot.VChannels = make(map[string]*streamingpb.VChannelMeta)
+				}
+				recoverySnapshot.VChannels[key.VChannel] = meta
+			case moduleapi.SnapshotOpUpsertBase:
+				if recoverySnapshot.VChannelBaseMetas == nil {
+					recoverySnapshot.VChannelBaseMetas = make(map[string]*streamingpb.VChannelMeta)
+				}
+				recoverySnapshot.VChannelBaseMetas[key.VChannel] = meta
+			case moduleapi.SnapshotOpDelete:
+				if recoverySnapshot.RemovedVChannels == nil {
+					recoverySnapshot.RemovedVChannels = make(map[string]*streamingpb.VChannelMeta)
+				}
+				recoverySnapshot.RemovedVChannels[key.VChannel] = meta
+			default:
+				return nil, merr.WrapErrServiceInternalMsg("unknown vchannel snapshot op: %d", dirtySnapshot.Op())
+			}
+		case moduleapi.ModuleNameSegment:
+			switch dirtySnapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := dirtySnapshot.Payload().(*streamingpb.SegmentAssignmentMeta)
+				if !ok || meta == nil {
+					return nil, merr.WrapErrServiceInternalMsg("segment dirty snapshot payload is not SegmentAssignmentMeta")
+				}
+				if meta.GetSegmentId() != key.SegmentID {
+					return nil, merr.WrapErrServiceInternalMsg(
+						"segment dirty snapshot key mismatch: expected %d, got %d",
+						key.SegmentID,
+						meta.GetSegmentId(),
+					)
+				}
+				if recoverySnapshot.SegmentAssignments == nil {
+					recoverySnapshot.SegmentAssignments = make(map[int64]*streamingpb.SegmentAssignmentMeta)
+				}
+				recoverySnapshot.SegmentAssignments[key.SegmentID] = meta
+			case moduleapi.SnapshotOpDelete:
+				recoverySnapshot.RemovedSegmentIDs = append(recoverySnapshot.RemovedSegmentIDs, key.SegmentID)
+			default:
+				return nil, merr.WrapErrServiceInternalMsg("unknown segment snapshot op: %d", dirtySnapshot.Op())
+			}
+		case moduleapi.ModuleNameTransformLog:
+			if key.VChannel == "" {
+				return nil, merr.WrapErrServiceInternalMsg("transformlog dirty snapshot is missing vchannel key")
+			}
+			switch dirtySnapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := dirtySnapshot.Payload().(*streamingpb.VChannelTransformLogMeta)
+				if !ok || meta == nil {
+					return nil, merr.WrapErrServiceInternalMsg("transformlog dirty snapshot payload is not VChannelTransformLogMeta")
+				}
+				if recoverySnapshot.TransformLogMetas == nil {
+					recoverySnapshot.TransformLogMetas = make(map[string]*streamingpb.VChannelTransformLogMeta)
+				}
+				recoverySnapshot.TransformLogMetas[key.VChannel] = meta
+			case moduleapi.SnapshotOpDelete:
+				recoverySnapshot.RemovedTransformLogs = append(recoverySnapshot.RemovedTransformLogs, key.VChannel)
+			default:
+				return nil, merr.WrapErrServiceInternalMsg("unknown transformlog snapshot op: %d", dirtySnapshot.Op())
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unknown module dirty snapshot: %s", dirtySnapshot.ModuleName())
+		}
+	}
+	if snapshot.SalvageCheckpoint != nil {
+		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
+	}
+	if snapshot.CheckpointDirty {
+		recoverySnapshot.ConsumeCheckpoint = snapshot.Checkpoint.IntoProto()
+	}
+	return recoverySnapshot, nil
+}
+
+func (rs *recoveryStorageImpl) saveRecoverySnapshot(ctx context.Context, snapshot *metastore.WALRecoverySnapshot) error {
+	return retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "persistRecoverySnapshot")), func(ctx context.Context) error {
+		return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, rs.channel.Name, snapshot)
+	})
 }
 
 func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, checkpoint *WALCheckpoint) {
@@ -196,11 +226,6 @@ func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, che
 		return
 	}
 	_ = rs.truncator.Truncate(ctx, checkpoint.DataCheckpoint.MessageID)
-}
-
-// retryOperationWithBackoff retries the operation with exponential backoff.
-func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
-	return retryOperationWithBackoff(ctx, logger, op)
 }
 
 func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
@@ -215,6 +240,9 @@ func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if !isRetryableRecoveryPersistError(err) {
+			return err
+		}
 
 		nextInterval := backoff.NextBackOff()
 		logger.Warn(context.TODO(), "failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
@@ -224,6 +252,24 @@ func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func
 			return ctx.Err()
 		}
 	}
+}
+
+func isRetryableRecoveryPersistError(err error) bool {
+	if merr.IsRetryableErr(err) {
+		return true
+	}
+	if merr.IsNonRetryableErr(err) || errors.IsAny(
+		err,
+		merr.ErrServiceInternal,
+		merr.ErrDataIntegrity,
+		merr.ErrSerializationFailed,
+		merr.ErrParameterInvalid,
+	) {
+		return false
+	}
+	// MetaKv implementations can return untyped transport/backend errors.
+	// Preserve the existing retry behavior for those unknown errors.
+	return true
 }
 
 func newBackoff() *backoff.ExponentialBackOff {

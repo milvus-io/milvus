@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -55,14 +56,6 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 	assert.Nil(t, checkpoint)
 	assert.Nil(t, err)
 
-	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
-	assert.NoError(t, err)
-
-	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Unset()
-	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("err"))
-	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
-	assert.Error(t, err)
 }
 
 // TestCatalogSegmentAssignments round-trips segment assignments through the
@@ -130,22 +123,26 @@ func TestCatalogTransformLogMeta(t *testing.T) {
 	require.Len(t, metas, 1)
 	assert.True(t, proto.Equal(meta, metas[vchannel]))
 
-	kv.EXPECT().MultiSave(mock.Anything, mock.MatchedBy(func(kvs map[string]string) bool {
+	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.MatchedBy(func(kvs map[string]string) bool {
 		saved, ok := kvs[key]
 		if !ok {
 			return false
 		}
 		loaded := &streamingpb.VChannelTransformLogMeta{}
 		return proto.Unmarshal([]byte(saved), loaded) == nil && proto.Equal(meta, loaded)
-	})).Return(nil)
-	require.NoError(t, catalog.SaveTransformLogMeta(ctx, "p1", map[string]*streamingpb.VChannelTransformLogMeta{vchannel: meta}))
+	}), mock.Anything).Return(nil)
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		TransformLogMetas: map[string]*streamingpb.VChannelTransformLogMeta{vchannel: meta},
+	}))
 
-	kv.EXPECT().MultiRemove(mock.Anything, []string{key}).
-		Return(nil)
-	require.NoError(t, catalog.DropTransformLogMeta(ctx, "p1", []string{vchannel}))
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, []string{key}).Return(nil)
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		RemovedTransformLogs: []string{vchannel},
+	}))
 }
 
-func TestCatalogSaveVChannelBaseMetasDoesNotRewriteSchemas(t *testing.T) {
+func TestCatalogSaveRecoverySnapshotBaseMetaDoesNotRewriteSchemas(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	meta := &streamingpb.VChannelMeta{
 		Vchannel: "p1_100v2",
@@ -157,7 +154,8 @@ func TestCatalogSaveVChannelBaseMetasDoesNotRewriteSchemas(t *testing.T) {
 		},
 	}
 	key := buildVChannelKey("p1", meta.GetVchannel())
-	kv.EXPECT().MultiSave(mock.Anything, mock.MatchedBy(func(kvs map[string]string) bool {
+	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.MatchedBy(func(kvs map[string]string) bool {
 		require.Len(t, kvs, 1)
 		saved, ok := kvs[key]
 		if !ok {
@@ -167,11 +165,11 @@ func TestCatalogSaveVChannelBaseMetasDoesNotRewriteSchemas(t *testing.T) {
 		return proto.Unmarshal([]byte(saved), loaded) == nil &&
 			len(loaded.GetCollectionInfo().GetSchemas()) == 0 &&
 			loaded.GetVchannel() == meta.GetVchannel()
-	})).Return(nil)
+	}), mock.Anything).Return(nil)
 
-	catalog := NewCataLog(kv).(*catalog)
-	require.NoError(t, catalog.SaveVChannelBaseMetas(context.Background(), "p1", map[string]*streamingpb.VChannelMeta{
-		meta.GetVchannel(): meta,
+	catalog := NewCataLog(kv)
+	require.NoError(t, catalog.SaveRecoverySnapshot(context.Background(), "p1", &metastore.WALRecoverySnapshot{
+		VChannelBaseMetas: map[string]*streamingpb.VChannelMeta{meta.GetVchannel(): meta},
 	}))
 }
 
@@ -262,7 +260,9 @@ func TestCatalogListRecoveryMetaWithRootPath(t *testing.T) {
 			}},
 		},
 	}
-	require.NoError(t, catalog.SaveVChannels(ctx, "p1", map[string]*streamingpb.VChannelMeta{vchannel.GetVchannel(): vchannel}))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		VChannels: map[string]*streamingpb.VChannelMeta{vchannel.GetVchannel(): vchannel},
+	}))
 
 	segments, err := catalog.ListSegmentAssignment(ctx, "p1")
 	require.NoError(t, err)
@@ -300,7 +300,7 @@ func TestCatalogRetainsClosedRecoveryMeta(t *testing.T) {
 			CheckpointTimeTick: 100,
 		},
 	}
-	require.NoError(t, catalog.SaveVChannels(ctx, "p1", vchannels))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{VChannels: vchannels}))
 
 	loadedVChannels, err := catalog.ListVChannel(ctx, "p1")
 	require.NoError(t, err)
@@ -319,7 +319,7 @@ func TestCatalogRetainsClosedRecoveryMeta(t *testing.T) {
 			DataCheckpointTimeTick: 80,
 		},
 	}
-	require.NoError(t, catalog.SaveSegmentAssignments(ctx, "p1", segments))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{SegmentAssignments: segments}))
 
 	loadedSegments, err := catalog.ListSegmentAssignment(ctx, "p1")
 	require.NoError(t, err)
@@ -414,7 +414,7 @@ func TestCatalogRetainsTombstonedRecoveryMeta(t *testing.T) {
 			TombstoneTimeTick:  100,
 		},
 	}
-	require.NoError(t, catalog.SaveVChannels(ctx, "p1", vchannels))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{VChannels: vchannels}))
 
 	loadedVChannels, err := catalog.ListVChannel(ctx, "p1")
 	require.NoError(t, err)
@@ -437,7 +437,7 @@ func TestCatalogRetainsTombstonedRecoveryMeta(t *testing.T) {
 			TombstoneTimeTick:      120,
 		},
 	}
-	require.NoError(t, catalog.SaveSegmentAssignments(ctx, "p1", segments))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{SegmentAssignments: segments}))
 
 	loadedSegments, err := catalog.ListSegmentAssignment(ctx, "p1")
 	require.NoError(t, err)
@@ -490,7 +490,7 @@ func TestCatalogDropsTombstonedRecoveryMeta(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, catalog.SaveVChannels(ctx, "p1", vchannels))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{VChannels: vchannels}))
 
 	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
 		300: {
@@ -507,10 +507,12 @@ func TestCatalogDropsTombstonedRecoveryMeta(t *testing.T) {
 			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
 		},
 	}
-	require.NoError(t, catalog.SaveSegmentAssignments(ctx, "p1", segments))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{SegmentAssignments: segments}))
 
-	require.NoError(t, catalog.DropVChannels(ctx, "p1", vchannelsByName(vchannels, "vchannel-1")))
-	require.NoError(t, catalog.DropSegmentAssignments(ctx, "p1", []int64{300}))
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		RemovedVChannels:  vchannelsByName(vchannels, "vchannel-1"),
+		RemovedSegmentIDs: []int64{300},
+	}))
 
 	loadedVChannels, err := catalog.ListVChannel(ctx, "p1")
 	require.NoError(t, err)
@@ -868,6 +870,23 @@ func (kv *rootedMemoryKV) MultiSave(ctx context.Context, kvs map[string]string) 
 		rooted[kv.GetPath(key)] = value
 	}
 	return kv.MemoryKV.MultiSave(ctx, rooted)
+}
+
+func (kv *rootedMemoryKV) MultiSaveAndRemove(
+	ctx context.Context,
+	saves map[string]string,
+	removals []string,
+	preds ...predicates.Predicate,
+) error {
+	rootedSaves := make(map[string]string, len(saves))
+	for key, value := range saves {
+		rootedSaves[kv.GetPath(key)] = value
+	}
+	rootedRemovals := make([]string, 0, len(removals))
+	for _, key := range removals {
+		rootedRemovals = append(rootedRemovals, kv.GetPath(key))
+	}
+	return kv.MemoryKV.MultiSaveAndRemove(ctx, rootedSaves, rootedRemovals, preds...)
 }
 
 func (kv *rootedMemoryKV) CompareVersionAndSwap(context.Context, string, int64, string) (bool, error) {

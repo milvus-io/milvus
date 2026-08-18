@@ -332,11 +332,10 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 		return nil
 	}
 	return &dirtyPersistSnapshot{
-		Checkpoint:         frozenCheckpoint,
-		CheckpointDirty:    checkpointDirty,
-		SalvageCheckpoint:  salvageCP,
-		ModuleDirtySnaps:   moduleSnapshots,
-		ModuleSnapshotsAck: false,
+		Checkpoint:        frozenCheckpoint,
+		CheckpointDirty:   checkpointDirty,
+		SalvageCheckpoint: salvageCP,
+		ModuleDirtySnaps:  moduleSnapshots,
 	}
 }
 

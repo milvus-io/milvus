@@ -228,9 +228,6 @@ func (m *PChannelRecoveryManager) ConsumeDirtySnapshots() []moduleapi.DirtySnaps
 		if module.HasCleanupCandidates() {
 			m.markCleanupCandidate(module)
 		}
-		if len(dirty) > 0 {
-			m.markModuleDirty(module)
-		}
 	}
 	return snapshots
 }

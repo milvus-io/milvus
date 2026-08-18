@@ -31,11 +31,10 @@ type RecoverySnapshot struct {
 }
 
 type dirtyPersistSnapshot struct {
-	Checkpoint         *WALCheckpoint
-	CheckpointDirty    bool
-	ModuleDirtySnaps   []moduleapi.DirtySnapshot
-	ModuleSnapshotsAck bool
-	SalvageCheckpoint  *utility.ReplicateCheckpoint
+	Checkpoint        *WALCheckpoint
+	CheckpointDirty   bool
+	ModuleDirtySnaps  []moduleapi.DirtySnapshot
+	SalvageCheckpoint *utility.ReplicateCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.

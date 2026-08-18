@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -391,7 +392,9 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	snapshot.Checkpoint.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
 
 	catalog := resource.Resource().StreamingNodeCatalog()
-	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, snapshot.Checkpoint.IntoProto()); err != nil {
+	if err := catalog.SaveRecoverySnapshot(ctx, opt.Channel.Name, &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: snapshot.Checkpoint.IntoProto(),
+	}); err != nil {
 		mlog.Warn(ctx, "failed to persist checkpoint after flushing stage", mlog.String("channel", opt.Channel.Name), mlog.Err(err))
 		return errors.Wrap(err, "failed to persist checkpoint after flushing stage")
 	}
@@ -486,7 +489,9 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	}
 
 	// Persist final checkpoint to catalog
-	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, finalCheckpoint.IntoProto()); err != nil {
+	if err := catalog.SaveRecoverySnapshot(ctx, opt.Channel.Name, &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: finalCheckpoint.IntoProto(),
+	}); err != nil {
 		mlog.Warn(ctx, "failed to persist checkpoint after advance checkpoint stage", mlog.String("channel", opt.Channel.Name), mlog.Err(err))
 		return errors.Wrap(err, "failed to persist checkpoint after advance checkpoint stage")
 	}

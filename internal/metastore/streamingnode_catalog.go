@@ -14,25 +14,15 @@ type StreamingNodeCataLog interface {
 
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
-	SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
-	SaveVChannelBaseMetas(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
-	DropVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
 
 	ListTransformLogMeta(ctx context.Context, pchannelName string) (map[string]*streamingpb.VChannelTransformLogMeta, error)
-	SaveTransformLogMeta(ctx context.Context, pchannelName string, metas map[string]*streamingpb.VChannelTransformLogMeta) error
-	DropTransformLogMeta(ctx context.Context, pchannelName string, vchannels []string) error
 
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
-	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos map[int64]*streamingpb.SegmentAssignmentMeta) error
-	DropSegmentAssignments(ctx context.Context, pChannelName string, segmentIDs []int64) error
 
 	// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 	// Return nil, nil if the checkpoint is not exist.
 	GetConsumeCheckpoint(ctx context.Context, pChannelName string) (*streamingpb.WALCheckpoint, error)
-
-	// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
-	SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error
 
 	// GetSalvageCheckpoint gets all salvage checkpoints for a channel.
 	// Returns an empty slice if none exist. One checkpoint per source cluster.
@@ -41,8 +31,8 @@ type StreamingNodeCataLog interface {
 	// SaveRecoverySnapshot applies a WAL recovery DELTA in one compound
 	// operation. Despite the name it is not a full-state replacement: only the
 	// entries present in the payload are touched, missing keys are left
-	// unchanged, and deletion is expressed by state (a FLUSHED segment or a
-	// DROPPED vchannel/schema), never by omission. It therefore cannot express
+	// unchanged, and deletion is expressed by the explicit Removed* sections,
+	// never by omission. It therefore cannot express
 	// "replace the persisted recovery state with this set" (in particular an
 	// empty payload is a no-op, not a wipe); pruning stale keys is the caller's
 	// responsibility.
@@ -64,12 +54,25 @@ type StreamingNodeCataLog interface {
 // WALRecoverySnapshot is the compound payload of
 // StreamingNodeCataLog.SaveRecoverySnapshot. It is a delta, not a full
 // snapshot: absent sections mean "unchanged", and deletion is carried by
-// entry state (FLUSHED/DROPPED), not by omission. See SaveRecoverySnapshot.
+// explicit Removed* sections, not by omission. See SaveRecoverySnapshot.
 type WALRecoverySnapshot struct {
 	// SegmentAssignments are the segment assignments to save; skipped if empty.
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
-	// VChannels are the vchannel metas to save; skipped if empty.
+	// RemovedSegmentIDs are the segment assignments to remove; skipped if empty.
+	RemovedSegmentIDs []int64
+	// VChannels are the complete vchannel metas, including schemas, to save;
+	// skipped if empty.
 	VChannels map[string]*streamingpb.VChannelMeta
+	// VChannelBaseMetas update only the vchannel base record without rewriting
+	// separately stored schemas; skipped if empty.
+	VChannelBaseMetas map[string]*streamingpb.VChannelMeta
+	// RemovedVChannels are the vchannel base and schema records to remove;
+	// skipped if empty.
+	RemovedVChannels map[string]*streamingpb.VChannelMeta
+	// TransformLogMetas are the transform-log metas to save; skipped if empty.
+	TransformLogMetas map[string]*streamingpb.VChannelTransformLogMeta
+	// RemovedTransformLogs are the transform-log metas to remove; skipped if empty.
+	RemovedTransformLogs []string
 	// SalvageCheckpoint is the salvage checkpoint to save; skipped if nil.
 	// It must be persisted before the consume checkpoint to guarantee ordering.
 	SalvageCheckpoint *commonpb.ReplicateCheckpoint

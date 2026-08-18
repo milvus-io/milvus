@@ -261,7 +261,6 @@ func (m *VChannelRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapsh
 	}
 	for id, view := range m.takeDirtySegments() {
 		if meta := view.ConsumeDirtyAndGetSnapshot(); meta != nil {
-			m.markSegmentDirty(id, view)
 			owner := view
 			snapshot := meta
 			snapshots = append(snapshots, newDirtySnapshot(

@@ -24,6 +24,9 @@ func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
 		tombstoneSnapshots[0].Payload().(*streamingpb.VChannelMeta).GetState())
 	tombstoneSnapshots[0].MarkPersisted()
+	// Consuming a stable snapshot must not re-enqueue an otherwise clean
+	// module for an extra no-op persist round.
+	require.Empty(t, manager.ConsumeDirtySnapshots())
 
 	require.Empty(t, manager.ConsumeCleanupSnapshots(equalCheckpoint))
 
@@ -80,6 +83,33 @@ func TestPChannelRecoveryManagerDoesNotRemarkRemovedModuleDirty(t *testing.T) {
 	manager.markModuleUpdated(module)
 
 	assert.Empty(t, manager.takeDirtyModules())
+}
+
+func TestPChannelRecoveryManagerKeepsChangesAfterSnapshotFrozen(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, nil)
+	module := manager.Module("v1")
+	require.NotNil(t, module)
+
+	require.Empty(t, manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 10,
+		DataPhysicalTimeTick: 10,
+	}))
+	first := manager.ConsumeDirtySnapshots()
+	require.Len(t, first, 1)
+
+	// Simulate a state change arriving while the first snapshot is in flight.
+	module.vchannelView.mu.Lock()
+	module.vchannelView.meta.CheckpointTimeTick = 11
+	module.vchannelView.dirty = true
+	module.vchannelView.mu.Unlock()
+	manager.markModuleUpdated(module)
+	first[0].MarkPersisted()
+
+	followUp := manager.ConsumeDirtySnapshots()
+	require.Len(t, followUp, 1)
+	assert.Equal(t, uint64(11), followUp[0].Payload().(*streamingpb.VChannelMeta).GetCheckpointTimeTick())
+	followUp[0].MarkPersisted()
+	require.Empty(t, manager.ConsumeDirtySnapshots())
 }
 
 func newCleanupTestManager(
