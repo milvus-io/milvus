@@ -769,7 +769,7 @@ TEST(ArrayValue, GrowingSchemaUsesArrayValueAndDenseNullableRows) {
     array_data->add_data();
     *array_data->add_data() = row2;
 
-    record.get_valid_data(field_id)->set_data_raw(3, &data, field_meta);
+    record.get_valid_data(field_id)->set_data_raw(0, 3, &data, field_meta);
     record.get_data_base(field_id)->set_data_raw(0, 3, &data, field_meta);
 
     ASSERT_TRUE(record.get_valid_data(field_id)->is_valid(0));
@@ -789,7 +789,8 @@ TEST(ArrayValue, GrowingSchemaUsesArrayValueAndDenseNullableRows) {
     next_array->set_element_type(proto::schema::DataType::Array);
     *next_array->add_data() = row2;
 
-    record.get_valid_data(field_id)->set_data_raw(1, &next_batch, field_meta);
+    record.get_valid_data(field_id)->set_data_raw(
+        3, 1, &next_batch, field_meta);
     record.get_data_base(field_id)->set_data_raw(3, 1, &next_batch, field_meta);
     ASSERT_EQ(&(*values)[0].type(), &(*values)[3].type());
 }
@@ -854,7 +855,7 @@ TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksFromFieldDataValues) {
     std::vector<FieldDataPtr> field_datas{field_data};
 
     auto valid_data = std::make_shared<segcore::ThreadSafeValidData>(2);
-    valid_data->set_data_raw(field_datas);
+    valid_data->set_data_raw(0, field_datas);
     auto mmap_manager =
         storage::MmapManager::GetInstance().GetMmapChunkManager();
     auto mmap_descriptor = mmap_manager->Register();
