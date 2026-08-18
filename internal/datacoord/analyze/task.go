@@ -159,9 +159,10 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 		// get binlogIDs
 		binlogIDs := getBinLogIDs(info, at.FieldID)
 		req.SegmentStats[segID] = &indexpb.SegmentStats{
-			ID:      segID,
-			NumRows: info.GetNumOfRows(),
-			LogIDs:  binlogIDs,
+			ID:           segID,
+			NumRows:      info.GetNumOfRows(),
+			LogIDs:       binlogIDs,
+			ManifestPath: info.GetManifestPath(),
 		}
 		req.InsertFiles[segID] = &workerpb.FieldBinLogs{
 			BinLogs: info.GetBinlogs(),

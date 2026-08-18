@@ -151,7 +151,7 @@ message GetJobStatsResponse {
 }
 
 message FieldBinLogs {
-  repeated data.FieldBinlog bin_logs=1;
+  repeated data.FieldBinlog bin_logs = 1;
 }
 
 message AnalyzeRequest {
