@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"path"
 	"strings"
@@ -49,6 +50,78 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
+
+func TestCalculatePreAllocIDNum(t *testing.T) {
+	tests := []struct {
+		name          string
+		totalRows     int64
+		binlogNum     int64
+		expansion     int64
+		expectedNum   uint32
+		expectedReq   string
+		expectedError bool
+	}{
+		{
+			name:        "normal",
+			totalRows:   100,
+			binlogNum:   11,
+			expansion:   10,
+			expectedNum: 11110,
+			expectedReq: "11110",
+		},
+		{
+			name:        "reported overflow case",
+			totalRows:   78201209,
+			binlogNum:   11,
+			expansion:   10,
+			expectedNum: math.MaxUint32,
+			expectedReq: "8602133100",
+		},
+		{
+			name:        "int64 rows cannot overflow calculation",
+			totalRows:   math.MaxInt64,
+			binlogNum:   11,
+			expansion:   10,
+			expectedNum: math.MaxUint32,
+			expectedReq: "1014570924054025338880",
+		},
+		{
+			name:          "negative rows",
+			totalRows:     -1,
+			binlogNum:     11,
+			expansion:     10,
+			expectedError: true,
+		},
+		{
+			name:          "non-positive binlog count",
+			totalRows:     100,
+			binlogNum:     0,
+			expansion:     10,
+			expectedError: true,
+		},
+		{
+			name:          "non-positive expansion",
+			totalRows:     100,
+			binlogNum:     11,
+			expansion:     0,
+			expectedError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			num, requested, err := calculatePreAllocIDNum(test.totalRows, test.binlogNum, test.expansion)
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, test.expectedNum, num)
+			assert.Equal(t, test.expectedReq, requested)
+		})
+	}
+}
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
 	fileGroups := [][]*internalpb.ImportFile{
