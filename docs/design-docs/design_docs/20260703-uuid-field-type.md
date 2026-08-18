@@ -107,6 +107,7 @@ Range semantics:
 - `FieldData` parses Arrow `FixedSizeBinaryArray` into Segcore memory buffers.
 
 ## Compatibility & Rolling Upgrade
-- **Wire Compatibility**: Proxy accepts `IDs.uuid_id` from updated clients while accepting `IDs.str_id` from legacy clients as a fallback.
+- **Wire Compatibility**: Proxy accepts `IDs.uuid_id` (field 3) from updated clients while accepting `IDs.str_id` (field 2) from legacy clients as a fallback. FastPB decodes `IDs_UuidId` in-pass.
+- **Memory & Storage Footprint**: In-memory representations use contiguous `[16]byte` structures (`UUIDPrimaryKey`, `UUIDPrimaryKeys`, `UUIDFieldData`), avoiding string heap allocations.
 - **Safe Version Gating**: Creation of UUID collections is validated at RootCoord and Proxy to prevent mixed-cluster deserialization errors before all nodes are upgraded.
 - **CVE Compliance**: Preserves all Go module constraints matching security policies (CVE-2026-39822).
