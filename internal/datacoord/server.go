@@ -102,16 +102,17 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli         *clientv3.Client
-	tikvCli         *txnkv.Client
-	address         string
-	watchClient     kv.WatchKV
-	kv              kv.MetaKv
-	metaRootPath    string
-	meta            *meta
-	dataViewManager DataViewManager
-	segmentManager  Manager
-	allocator       allocator.Allocator
+	etcdCli                             *clientv3.Client
+	tikvCli                             *txnkv.Client
+	address                             string
+	watchClient                         kv.WatchKV
+	kv                                  kv.MetaKv
+	metaRootPath                        string
+	meta                                *meta
+	dataViewManager                     DataViewManager
+	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	segmentManager                      Manager
+	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -400,7 +401,6 @@ func (s *Server) initDataCoord() error {
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
-	RegisterDDLCallbacks(s)
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
 	return nil
@@ -462,6 +462,10 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 
 func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 	s.mixCoord = mixCoord
+}
+
+func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.CollectionRecoveryValidator) {
+	s.dataViewCollectionRecoveryValidator = validator
 }
 
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
@@ -646,20 +650,17 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			return err
 		}
 
-		s.dataViewManager, err = dataview.RecoverManager(s.ctx, catalog)
+		s.dataViewManager, err = dataview.RecoverManager(
+			s.ctx,
+			catalog,
+			s.dataViewCollectionRecoveryValidator,
+		)
 		if err != nil {
 			return err
 		}
 		s.meta.dataViewManager = s.dataViewManager
 
-		// Load collection information asynchronously.
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
-		return nil
+		return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }

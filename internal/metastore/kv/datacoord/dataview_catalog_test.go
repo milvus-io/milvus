@@ -104,17 +104,18 @@ func TestDataViewCatalogLifecycle(t *testing.T) {
 	require.Len(t, views, 1)
 	require.True(t, proto.Equal(dataView, views[0]))
 
-	require.NoError(t, catalog.MarkDataViewCollectionDropped(ctx, 100))
-	dropped, err := catalog.ListDroppedDataViewCollections(ctx)
-	require.NoError(t, err)
-	require.Equal(t, []int64{100}, dropped)
 	allViews, err := catalog.ListAllDataViews(ctx)
 	require.NoError(t, err)
-	require.Len(t, allViews, 1, "drop markers are not DataView payloads")
+	require.Len(t, allViews, 1)
 
 	require.NoError(t, catalog.DropDataView(ctx, 100, dataView.GetDataVersion()))
 	views, err = catalog.ListDataViews(ctx, 100)
 	require.NoError(t, err)
 	require.Empty(t, views)
-	require.NoError(t, catalog.UnmarkDataViewCollectionDropped(ctx, 100))
+
+	require.NoError(t, catalog.SaveDataView(ctx, dataView))
+	require.NoError(t, catalog.DropDataViews(ctx, 100))
+	views, err = catalog.ListDataViews(ctx, 100)
+	require.NoError(t, err)
+	require.Empty(t, views)
 }

@@ -86,6 +86,8 @@ type mixCoordImpl struct {
 
 	// file resource observer
 	fileResourceObserver *FileResourceObserver
+
+	recoveryBarrier *recoveryBarrier
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
@@ -94,6 +96,9 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 	dataCoordServer := datacoord.CreateServer(c, factory)
 
+	recoveryBarrier := newRecoveryBarrier()
+	dataCoordServer.SetDataViewCollectionRecoveryValidator(rootCoordServer.ValidateDataViewCollectionForRecovery)
+
 	return &mixCoordImpl{
 		ctx:              ctx,
 		cancel:           cancel,
@@ -101,6 +106,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 		queryCoordServer: queryCoordServer,
 		datacoordServer:  dataCoordServer,
 		factory:          factory,
+		recoveryBarrier:  recoveryBarrier,
 	}, nil
 }
 
@@ -151,6 +157,7 @@ func (s *mixCoordImpl) activateFunc() error {
 	}
 	mlog.Info(s.ctx, "mixCoord startup success", mlog.String("address", s.session.GetAddress()))
 	s.startAndUpdateHealthy()
+	s.enableExternalAccess()
 	return err
 }
 
@@ -159,9 +166,6 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
-
-	// Register WAL callbacks
-	RegisterWALCallbacks(s)
 
 	if err := s.streamingCoord.Start(s.ctx, s.fileResourceObserver); err != nil {
 		mlog.Error(s.ctx, "streamCoord start failed", mlog.Err(err))
@@ -181,16 +185,12 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	// DataCoord and QueryCoord are independent of each other;
-	// both only depend on RootCoord being ready. Initialize and start them in parallel.
+	// both only depend on RootCoord being ready. Recover them in parallel first.
 	g, _ := errgroup.WithContext(s.ctx)
 	g.Go(func() error {
 		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
 		if err := s.datacoordServer.Init(); err != nil {
 			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
-			return err
-		}
-		if err := s.datacoordServer.Start(); err != nil {
-			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
 			return err
 		}
 		return nil
@@ -201,6 +201,21 @@ func (s *mixCoordImpl) initInternal() error {
 			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
 			return err
 		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	g, _ = errgroup.WithContext(s.ctx)
+	g.Go(func() error {
+		if err := s.datacoordServer.Start(); err != nil {
+			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
 		if err := s.queryCoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
 			return err
@@ -213,6 +228,23 @@ func (s *mixCoordImpl) initInternal() error {
 
 	s.fileResourceObserver.Start()
 	return nil
+}
+
+func (s *mixCoordImpl) enableExternalAccess() {
+	// Register the callback dependencies before RootCoord callbacks, which may
+	// invoke DataCoord or QueryCoord callbacks while handling collection DDLs.
+	datacoord.RegisterDDLCallbacks(s.datacoordServer)
+	querycoordv2.RegisterDDLCallbacks(s.queryCoordServer)
+	rootcoord.RegisterDDLCallbacks(s.rootcoordServer)
+	RegisterWALCallbacks(s)
+
+	// The distributed server starts accepting RPCs only after callbacks are
+	// registered and the combined Coordinator has entered Healthy state.
+	s.recoveryBarrier.Ready()
+}
+
+func (s *mixCoordImpl) WaitForRecovery(ctx context.Context) error {
+	return s.recoveryBarrier.Wait(ctx)
 }
 
 func (s *mixCoordImpl) initKVCreator() {

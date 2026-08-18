@@ -42,7 +42,7 @@ compact_version)`.
 | Flush | `(S,C) -> (S+1,0)` |
 | Import, copy completion, compact, external refresh, drop partition, truncate | `(S,C) -> (S,C+1)` |
 | No membership change | return the current version without persisting |
-| Drop collection | persist terminal marker; no new snapshot |
+| Drop collection | delete all persisted snapshots; no new snapshot |
 
 `streaming_version` is the publication epoch used by StreamingNode to decide
 whether a flushed Segment must still participate in growing-side queries. Only
@@ -103,10 +103,34 @@ Each version is stored as one complete snapshot under:
 coord/dv/{collectionID}/versions/{streaming}/{compact}
 ```
 
-Recovery reads only these snapshots and the collection drop markers. It picks
-the maximum version as latest, initializes runtime ref counts to zero, and
-rejects conflicting snapshots with the same version. It does not repair or
-rebuild membership from any other metadata source.
+Recovery scans every snapshot under `coord/dv`, groups them by Collection, and
+asks the already-recovered CollectionMeta for a decision. A Created Collection
+is recovered; a Creating, Dropping, Dropped, or nonexistent Collection is not
+recoverable and all of its DataView keys are deleted. A CollectionMeta lookup
+failure or unknown state aborts recovery without speculative cleanup. There is
+no separate persisted DataView tombstone; CollectionMeta is the authoritative
+lifecycle record.
+
+For a valid Collection, recovery picks the maximum version as latest,
+initializes runtime ref counts to zero, and rejects conflicting snapshots with
+the same version. It does not repair or rebuild membership from SegmentMeta or
+any other metadata source.
+
+The combined Coordinator uses one in-process recovery barrier. RootCoord first
+recovers CollectionMeta, then DataCoord and QueryCoord recover their metadata;
+DataCoord's Collection details are part of this synchronous initialization and
+are no longer left to a background reload. MixCoord registers the DataCoord,
+QueryCoord, RootCoord, and WAL DDL callbacks only after all three Coordinator
+initialization/start phases have completed and MixCoord has entered Healthy
+state, so the StreamingCoord broadcaster may discover pending callback work but
+cannot replay it during recovery.
+
+The distributed MixCoord constructs the gRPC server and registers its services
+before recovery, but delays `grpcServer.Serve` until the same recovery barrier
+is ready. Consequently external RPCs cannot enter Coordinator handlers during
+recovery, while in-process Coordinator calls and Coordinator-owned background
+loops are unaffected. Normal CollectionMeta and DataViewManager APIs do not
+carry or wait on the barrier.
 
 ## Garbage collection
 
@@ -121,9 +145,11 @@ referenced DataView as protected. Until QueryView references have been
 recovered, that integration must fail closed. The current PR does not add this
 cross-component protection path.
 
-Dropping a collection marks it terminal and rejects new access. Existing Refs
-remain valid until released; later integration code may finalize terminal
-snapshot cleanup.
+Dropping a collection persists the CollectionMeta Dropping state before deleting
+all DataView snapshots. Existing Refs remain valid from their in-memory snapshot
+until released, while new lookups return no DataView after the manager removes
+the Collection state. If the process crashes between the two writes, recovery
+recognizes the CollectionMeta tombstone and removes the remaining DataView keys.
 
 ## Removed responsibilities
 

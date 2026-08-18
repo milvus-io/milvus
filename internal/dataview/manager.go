@@ -32,9 +32,10 @@ type Catalog interface {
 	SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
 	ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error)
 	DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error
-	MarkDataViewCollectionDropped(ctx context.Context, collectionID int64) error
-	ListDroppedDataViewCollections(ctx context.Context) ([]int64, error)
+	DropDataViews(ctx context.Context, collectionID int64) error
 }
+
+type CollectionRecoveryValidator func(ctx context.Context, collectionID int64) (recover bool, err error)
 
 type Manager interface {
 	OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error)
@@ -127,7 +128,6 @@ type versionEntry struct {
 type collectionState struct {
 	mu       sync.Mutex
 	id       int64
-	terminal bool
 	latest   *versionEntry
 	versions map[string]*versionEntry
 }
@@ -151,17 +151,20 @@ func NewManager(catalog Catalog) Manager {
 	}
 }
 
-func RecoverManager(ctx context.Context, catalog Catalog) (Manager, error) {
+func RecoverManager(
+	ctx context.Context,
+	catalog Catalog,
+	validator CollectionRecoveryValidator,
+) (Manager, error) {
+	if validator == nil {
+		return nil, merr.WrapErrServiceInternalMsg("DataView recovery requires a Collection recovery validator")
+	}
 	views, err := catalog.ListAllDataViews(ctx)
 	if err != nil {
 		return nil, err
 	}
-	dropped, err := catalog.ListDroppedDataViewCollections(ctx)
-	if err != nil {
-		return nil, err
-	}
 
-	manager := NewManager(catalog).(*dataViewManager)
+	viewsByCollection := make(map[int64][]*viewpb.DataViewOfCollection)
 	for _, view := range views {
 		if view == nil || view.GetDataVersion() == nil {
 			return nil, merr.WrapErrDataIntegrityMsg("persisted DataView has no DataVersion")
@@ -172,44 +175,67 @@ func RecoverManager(ctx context.Context, catalog Catalog) (Manager, error) {
 				view.GetCollectionId(), dataVersionKey(view.GetDataVersion()),
 			)
 		}
-		state := manager.getOrCreateState(view.GetCollectionId())
-		state.mu.Lock()
-		persisted := canonicalDataViewClone(view)
-		key := dataVersionKey(view.GetDataVersion())
-		if existing := state.versions[key]; existing != nil {
-			if !proto.Equal(existing.view, persisted) {
-				state.mu.Unlock()
-				return nil, merr.WrapErrDataIntegrityMsg(
-					"persisted DataView version %s of collection %d has conflicting snapshots",
-					key, view.GetCollectionId(),
-				)
-			}
-			state.mu.Unlock()
+		viewsByCollection[view.GetCollectionId()] = append(viewsByCollection[view.GetCollectionId()], view)
+	}
+
+	collectionIDs := make([]int64, 0, len(viewsByCollection))
+	for collectionID := range viewsByCollection {
+		collectionIDs = append(collectionIDs, collectionID)
+	}
+	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
+
+	recoverCollection := make(map[int64]bool, len(collectionIDs))
+	for _, collectionID := range collectionIDs {
+		recover, err := validator(ctx, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		recoverCollection[collectionID] = recover
+	}
+
+	manager := NewManager(catalog).(*dataViewManager)
+	for _, collectionID := range collectionIDs {
+		if !recoverCollection[collectionID] {
 			continue
 		}
-		entry := &versionEntry{view: persisted}
-		state.versions[key] = entry
-		if state.latest == nil || compareDataVersion(entry.view.GetDataVersion(), state.latest.view.GetDataVersion()) > 0 {
-			state.latest = entry
+		for _, view := range viewsByCollection[collectionID] {
+			state := manager.getOrCreateState(view.GetCollectionId())
+			state.mu.Lock()
+			persisted := canonicalDataViewClone(view)
+			key := dataVersionKey(view.GetDataVersion())
+			if existing := state.versions[key]; existing != nil {
+				if !proto.Equal(existing.view, persisted) {
+					state.mu.Unlock()
+					return nil, merr.WrapErrDataIntegrityMsg(
+						"persisted DataView version %s of collection %d has conflicting snapshots",
+						key, view.GetCollectionId(),
+					)
+				}
+				state.mu.Unlock()
+				continue
+			}
+			entry := &versionEntry{view: persisted}
+			state.versions[key] = entry
+			if state.latest == nil || compareDataVersion(entry.view.GetDataVersion(), state.latest.view.GetDataVersion()) > 0 {
+				state.latest = entry
+			}
+			state.mu.Unlock()
 		}
-		state.mu.Unlock()
 	}
-	for _, collectionID := range dropped {
-		state := manager.getOrCreateState(collectionID)
-		state.mu.Lock()
-		state.terminal = true
-		state.mu.Unlock()
+	for _, collectionID := range collectionIDs {
+		if recoverCollection[collectionID] {
+			continue
+		}
+		if err := catalog.DropDataViews(ctx, collectionID); err != nil {
+			return nil, err
+		}
 	}
 	return manager, nil
 }
 
 func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
-	state := m.getOrCreateState(event.CollectionID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.terminal {
-		return nil, unavailableDataViewError(event.CollectionID)
-	}
+	state, unlock := m.lockStateForMutation(event.CollectionID)
+	defer unlock()
 	if state.latest != nil {
 		return cloneDataVersion(state.latest.view.GetDataVersion()), nil
 	}
@@ -261,16 +287,17 @@ func (m *dataViewManager) OnTruncate(ctx context.Context, event TruncateDataView
 }
 
 func (m *dataViewManager) OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error) {
-	state := m.getOrCreateState(collectionID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.terminal {
-		return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.states[collectionID]
+	if state != nil {
+		state.mu.Lock()
+		defer state.mu.Unlock()
 	}
-	if err := m.catalog.MarkDataViewCollectionDropped(ctx, collectionID); err != nil {
+	if err := m.catalog.DropDataViews(ctx, collectionID); err != nil {
 		return nil, err
 	}
-	state.terminal = true
+	delete(m.states, collectionID)
 	return nil, nil
 }
 
@@ -281,9 +308,6 @@ func (m *dataViewManager) Latest(_ context.Context, collectionID int64) (DataVie
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.terminal {
-		return nil, unavailableDataViewError(collectionID)
-	}
 	return acquireRefLocked(state, state.latest), nil
 }
 
@@ -297,9 +321,6 @@ func (m *dataViewManager) Get(_ context.Context, collectionID int64, version *vi
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.terminal {
-		return nil, unavailableDataViewError(collectionID)
-	}
 	return acquireRefLocked(state, state.versions[dataVersionKey(version)]), nil
 }
 
@@ -335,9 +356,8 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 }
 
 func (m *dataViewManager) commit(ctx context.Context, collectionID int64, advance dataViewAdvance, mutation membershipMutation) (*viewpb.DataVersion, error) {
-	state := m.getOrCreateState(collectionID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	state, unlock := m.lockStateForMutation(collectionID)
+	defer unlock()
 	return m.commitLocked(ctx, state, advance, mutation)
 }
 
@@ -347,9 +367,6 @@ func (m *dataViewManager) commitLocked(
 	advance dataViewAdvance,
 	mutation membershipMutation,
 ) (*viewpb.DataVersion, error) {
-	if state.terminal {
-		return nil, unavailableDataViewError(state.id)
-	}
 	base := latestView(state)
 	next := canonicalDataViewClone(base)
 	if next == nil {
@@ -398,6 +415,18 @@ func (m *dataViewManager) getState(collectionID int64) *collectionState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.states[collectionID]
+}
+
+func (m *dataViewManager) lockStateForMutation(collectionID int64) (*collectionState, func()) {
+	m.mu.Lock()
+	state := m.states[collectionID]
+	if state == nil {
+		state = &collectionState{id: collectionID, versions: make(map[string]*versionEntry)}
+		m.states[collectionID] = state
+	}
+	state.mu.Lock()
+	m.mu.Unlock()
+	return state, state.mu.Unlock
 }
 
 func (m *dataViewManager) getOrCreateState(collectionID int64) *collectionState {
@@ -673,8 +702,4 @@ func dataVersionKey(version *viewpb.DataVersion) string {
 		return "0/0"
 	}
 	return fmt.Sprintf("%d/%d", version.GetStreamingVersion(), version.GetCompactVersion())
-}
-
-func unavailableDataViewError(collectionID int64) error {
-	return merr.WrapErrServiceNotReadyMsg("DataView collection %d is terminal", collectionID)
 }

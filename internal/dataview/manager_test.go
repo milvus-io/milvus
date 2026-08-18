@@ -29,14 +29,14 @@ import (
 )
 
 type fakeDataViewCatalog struct {
-	mu       sync.Mutex
-	views    []*viewpb.DataViewOfCollection
-	dropped  map[int64]struct{}
-	listErr  error
-	markErr  error
-	saveErr  error
-	dropErr  error
-	saveCall int
+	mu          sync.Mutex
+	views       []*viewpb.DataViewOfCollection
+	listErr     error
+	saveErr     error
+	dropErr     error
+	dropAllErr  error
+	saveCall    int
+	dropAllCall []int64
 }
 
 func (c *fakeDataViewCatalog) SaveDataView(_ context.Context, view *viewpb.DataViewOfCollection) error {
@@ -89,30 +89,22 @@ func (c *fakeDataViewCatalog) DropDataView(_ context.Context, collectionID int64
 	return nil
 }
 
-func (c *fakeDataViewCatalog) MarkDataViewCollectionDropped(_ context.Context, collectionID int64) error {
+func (c *fakeDataViewCatalog) DropDataViews(_ context.Context, collectionID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.markErr != nil {
-		return c.markErr
+	if c.dropAllErr != nil {
+		return c.dropAllErr
 	}
-	if c.dropped == nil {
-		c.dropped = make(map[int64]struct{})
+	c.dropAllCall = append(c.dropAllCall, collectionID)
+	kept := c.views[:0]
+	for _, view := range c.views {
+		if view.GetCollectionId() == collectionID {
+			continue
+		}
+		kept = append(kept, view)
 	}
-	c.dropped[collectionID] = struct{}{}
+	c.views = kept
 	return nil
-}
-
-func (c *fakeDataViewCatalog) ListDroppedDataViewCollections(_ context.Context) ([]int64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.listErr != nil {
-		return nil, c.listErr
-	}
-	ids := make([]int64, 0, len(c.dropped))
-	for id := range c.dropped {
-		ids = append(ids, id)
-	}
-	return ids, nil
 }
 
 func newTestManager() (*dataViewManager, *fakeDataViewCatalog) {
@@ -126,6 +118,10 @@ func segment(id int64, channel string, partition int64) LoadableSegment {
 
 func version(streaming, compact int64) *viewpb.DataVersion {
 	return &viewpb.DataVersion{StreamingVersion: streaming, CompactVersion: compact}
+}
+
+func recoverAllCollections(context.Context, int64) (bool, error) {
+	return true, nil
 }
 
 func requireVersion(t *testing.T, actual *viewpb.DataVersion, streaming, compact int64) {
@@ -240,18 +236,21 @@ func TestManagerRecoveryAndDrop(t *testing.T) {
 	catalog := &fakeDataViewCatalog{}
 	require.NoError(t, catalog.SaveDataView(ctx, &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(1, 0)}))
 	require.NoError(t, catalog.SaveDataView(ctx, &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(2, 0)}))
-	manager, err := RecoverManager(ctx, catalog)
+	manager, err := RecoverManager(ctx, catalog, recoverAllCollections)
 	require.NoError(t, err)
-	ref, err := manager.Latest(ctx, 1)
+	oldRef, err := manager.Latest(ctx, 1)
 	require.NoError(t, err)
-	require.NotNil(t, ref)
-	requireVersion(t, ref.Version(), 2, 0)
-	ref.Deref()
+	require.NotNil(t, oldRef)
+	requireVersion(t, oldRef.Version(), 2, 0)
+
 	_, err = manager.OnDropCollection(ctx, 1)
 	require.NoError(t, err)
-	ref, err = manager.Latest(ctx, 1)
-	require.Error(t, err)
+	require.Empty(t, catalog.views)
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
 	require.Nil(t, ref)
+	requireVersion(t, oldRef.Version(), 2, 0)
+	oldRef.Deref()
 }
 
 func TestManagerAccessAndMutationEdges(t *testing.T) {
@@ -301,18 +300,16 @@ func TestManagerAccessAndMutationEdges(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	catalog.markErr = errors.New("mark failed")
+	catalog.dropAllErr = errors.New("drop failed")
 	_, err = manager.OnDropCollection(ctx, 1)
 	require.Error(t, err)
-	catalog.markErr = nil
+	catalog.dropAllErr = nil
 	_, err = manager.OnDropCollection(ctx, 1)
 	require.NoError(t, err)
 	_, err = manager.OnDropCollection(ctx, 1)
 	require.NoError(t, err)
-	_, err = manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(3, "ch-1", 10)}})
-	require.Error(t, err)
 	ref, err = manager.Get(ctx, 1, version(1, 1))
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Nil(t, ref)
 }
 
@@ -346,7 +343,7 @@ func TestManagerPersistenceFailuresDoNotAdvance(t *testing.T) {
 func TestManagerRecoveryValidation(t *testing.T) {
 	ctx := context.Background()
 
-	_, err := RecoverManager(ctx, &fakeDataViewCatalog{listErr: errors.New("list failed")})
+	_, err := RecoverManager(ctx, &fakeDataViewCatalog{listErr: errors.New("list failed")}, recoverAllCollections)
 	require.Error(t, err)
 	for _, invalid := range []*viewpb.DataViewOfCollection{
 		nil,
@@ -354,7 +351,7 @@ func TestManagerRecoveryValidation(t *testing.T) {
 		{CollectionId: 0, DataVersion: version(1, 0)},
 		{CollectionId: 1, DataVersion: version(0, 1)},
 	} {
-		_, err := RecoverManager(ctx, &fakeDataViewCatalog{views: []*viewpb.DataViewOfCollection{invalid}})
+		_, err := RecoverManager(ctx, &fakeDataViewCatalog{views: []*viewpb.DataViewOfCollection{invalid}}, recoverAllCollections)
 		require.Error(t, err)
 	}
 
@@ -362,7 +359,7 @@ func TestManagerRecoveryValidation(t *testing.T) {
 		{CollectionId: 1, DataVersion: version(2, 1)},
 		{CollectionId: 1, DataVersion: version(2, 1), Shards: []*viewpb.DataViewOfShard{{Vchannel: "ch-1"}}},
 	}}
-	_, err = RecoverManager(ctx, conflicting)
+	_, err = RecoverManager(ctx, conflicting, recoverAllCollections)
 	require.Error(t, err)
 
 	duplicate := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(2, 1)}
@@ -370,12 +367,70 @@ func TestManagerRecoveryValidation(t *testing.T) {
 		duplicate,
 		proto.Clone(duplicate).(*viewpb.DataViewOfCollection),
 		{CollectionId: 1, DataVersion: version(1, 9)},
-	}})
+	}}, recoverAllCollections)
 	require.NoError(t, err)
 	ref, err := manager.Latest(ctx, 1)
 	require.NoError(t, err)
 	requireVersion(t, ref.Version(), 2, 1)
 	ref.Deref()
+}
+
+func TestManagerRecoveryCleansTombstonedCollections(t *testing.T) {
+	ctx := context.Background()
+	catalog := &fakeDataViewCatalog{views: []*viewpb.DataViewOfCollection{
+		{CollectionId: 1, DataVersion: version(2, 0)},
+		{CollectionId: 2, DataVersion: version(3, 1)},
+		{CollectionId: 2, DataVersion: version(4, 0)},
+	}}
+	manager, err := RecoverManager(ctx, catalog, func(_ context.Context, collectionID int64) (bool, error) {
+		return collectionID == 1, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int64{2}, catalog.dropAllCall)
+	require.Len(t, catalog.views, 1)
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	requireVersion(t, ref.Version(), 2, 0)
+	ref.Deref()
+	ref, err = manager.Latest(ctx, 2)
+	require.NoError(t, err)
+	require.Nil(t, ref)
+}
+
+func TestManagerRecoveryValidatorFailureDoesNotDelete(t *testing.T) {
+	ctx := context.Background()
+	catalog := &fakeDataViewCatalog{views: []*viewpb.DataViewOfCollection{
+		{CollectionId: 1, DataVersion: version(1, 0)},
+		{CollectionId: 2, DataVersion: version(1, 0)},
+	}}
+	_, err := RecoverManager(ctx, catalog, func(_ context.Context, collectionID int64) (bool, error) {
+		if collectionID == 2 {
+			return false, errors.New("validation failed")
+		}
+		return false, nil
+	})
+	require.Error(t, err)
+	require.Empty(t, catalog.dropAllCall)
+	require.Len(t, catalog.views, 2)
+
+	_, err = RecoverManager(ctx, catalog, nil)
+	require.Error(t, err)
+}
+
+func TestManagerRecoveryCleanupFailure(t *testing.T) {
+	ctx := context.Background()
+	catalog := &fakeDataViewCatalog{
+		views: []*viewpb.DataViewOfCollection{
+			{CollectionId: 1, DataVersion: version(1, 0)},
+		},
+		dropAllErr: errors.New("cleanup failed"),
+	}
+	_, err := RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) {
+		return false, nil
+	})
+	require.ErrorIs(t, err, catalog.dropAllErr)
+	require.Len(t, catalog.views, 1)
 }
 
 func TestDataViewRefNilAndVersionHelpers(t *testing.T) {

@@ -129,17 +129,18 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 					mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 
-			// 3. mark the DataView terminal before the collection becomes unavailable.
-			// The ack callback retries this step after failures.
+			// 3. persist the CollectionMeta tombstone before deleting its DataViews.
+			// Recovery uses this state to distinguish stale DataViews from live ones.
+			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
+				return merr.Wrap(err, "failed to drop collection")
+			}
+
+			// 4. delete all persisted DataView versions. The ack callback retries this
+			// step, and recovery also removes any versions left behind after a crash.
 			if dropper, ok := c.mixCoord.(collectionDataViewDropper); ok {
 				if err := dropper.DropCollectionDataView(ctx, collectionID); err != nil {
 					return merr.Wrap(err, "failed to drop collection data view")
 				}
-			}
-
-			// 4. drop the collection meta itself.
-			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
-				return merr.Wrap(err, "failed to drop collection")
 			}
 			continue
 		}

@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -526,10 +524,7 @@ func (kc *Catalog) ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCo
 
 func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) ([]*viewpb.DataViewOfCollection, error) {
 	dataViews := make([]*viewpb.DataViewOfCollection, 0)
-	applyFn := func(key []byte, value []byte) error {
-		if isDataViewDropMarkerKey(string(key)) {
-			return nil
-		}
+	applyFn := func(_ []byte, value []byte) error {
 		dataView := &viewpb.DataViewOfCollection{}
 		if err := proto.Unmarshal(value, dataView); err != nil {
 			return err
@@ -550,38 +545,6 @@ func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVer
 
 func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {
 	return kc.MetaKv.RemoveWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
-}
-
-func (kc *Catalog) MarkDataViewCollectionDropped(ctx context.Context, collectionID int64) error {
-	return kc.MetaKv.Save(ctx, buildDataViewDropMarkerKey(collectionID), "1")
-}
-
-func (kc *Catalog) ListDroppedDataViewCollections(ctx context.Context) ([]int64, error) {
-	prefix := DataViewDropMarkerPrefix + "/"
-	keys, _, err := kc.MetaKv.LoadWithPrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-
-	collectionIDs := make([]int64, 0, len(keys))
-	for _, key := range keys {
-		collectionID, err := strconv.ParseInt(path.Base(key), 10, 64)
-		if err != nil {
-			return nil, merr.WrapErrDataIntegrityMsg("invalid data view drop marker key %s", key)
-		}
-		collectionIDs = append(collectionIDs, collectionID)
-	}
-	slices.Sort(collectionIDs)
-	return collectionIDs, nil
-}
-
-func isDataViewDropMarkerKey(key string) bool {
-	markerPrefix := DataViewDropMarkerPrefix + "/"
-	return strings.HasPrefix(key, markerPrefix) || strings.Contains(key, "/"+markerPrefix)
-}
-
-func (kc *Catalog) UnmarkDataViewCollectionDropped(ctx context.Context, collectionID int64) error {
-	return kc.MetaKv.Remove(ctx, buildDataViewDropMarkerKey(collectionID))
 }
 
 func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
