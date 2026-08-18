@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -1789,29 +1788,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 		assert.Equal(t, "123456789", rsp.GetJobID())
-	})
-
-	t.Run("ImportV2 rejects an oversized idempotency key", func(t *testing.T) {
-		// The node is deliberately left without a scheduler. ImportV2 must reject
-		// the key before it touches node.sched.dmQueue, so a regression that drops
-		// the early return panics on the nil scheduler here instead of passing
-		// silently. The mixCoord mock carries no expectations for the same reason:
-		// any call downstream fails the test.
-		node := &Proxy{}
-		node.UpdateStateCode(commonpb.StateCode_Healthy)
-		node.mixCoord = mocks.NewMockMixCoordClient(t)
-
-		mc := NewMockCache(t)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
-		}, nil)
-		globalMetaCache = mc
-
-		oversized := strings.Repeat("a", Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()+1)
-		mdCtx := metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderIdempotencyKey, oversized))
-		rsp, err := node.ImportV2(mdCtx, &internalpb.ImportRequest{CollectionName: "aaa"})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(rsp.GetStatus()), merr.ErrParameterInvalid)
 	})
 
 	// The key travels to DataCoord in the gRPC metadata, so what the proxy owes the

@@ -1549,22 +1549,6 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
-// validateIdempotencyKeyLength rejects an oversized key at the proxy. The key
-// travels in the message properties of the write it guards and is retained in the
-// broadcaster's in-memory dedup index for the whole idempotency window, so its
-// size is bounded here rather than at the component that ends up storing it.
-//
-// The bound fails closed, matching the other length checks in this file: a limit
-// of 0 rejects every non-empty key, i.e. the cluster accepts no idempotency keys
-// at all. A request that carries no key is unaffected at any limit.
-func validateIdempotencyKeyLength(key string) error {
-	limit := Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	if len(key) > limit {
-		return merr.WrapErrParameterInvalidMsg(
-			"idempotency key length %d exceeds limit %d", len(key), limit)
-	}
-	return nil
-}
 
 // GetCurDBNameFromRequestOrContext returns the database a request actually
 // operates on. It prefers the DbName carried in the request body (which is
