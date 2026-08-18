@@ -352,7 +352,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 	tr := timerecord.NewTimeRecorder(method)
 
 	dct := &dropDatabaseTask{
-		baseTask:            baseTask{metaCache: node.metaCache},
+		baseTask:            baseTask{metaCache: node.getMetaCache()},
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		DropDatabaseRequest: request,
@@ -598,7 +598,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	tr := timerecord.NewTimeRecorder(method)
 
 	dct := &dropCollectionTask{
-		baseTask:              baseTask{metaCache: node.metaCache},
+		baseTask:              baseTask{metaCache: node.getMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
@@ -657,7 +657,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 	tr := timerecord.NewTimeRecorder(method)
 
 	dct := &truncateCollectionTask{
-		baseTask:                  baseTask{metaCache: node.metaCache},
+		baseTask:                  baseTask{metaCache: node.getMetaCache()},
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		TruncateCollectionRequest: request,
@@ -724,7 +724,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	mlog.Debug(context.TODO(), "HasCollection received")
 
 	hct := &hasCollectionTask{
-		baseTask:             baseTask{metaCache: node.metaCache},
+		baseTask:             baseTask{metaCache: node.getMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
@@ -781,7 +781,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 	tr := timerecord.NewTimeRecorder(method)
 
 	lct := &loadCollectionTask{
-		baseTask:              baseTask{metaCache: node.metaCache},
+		baseTask:              baseTask{metaCache: node.getMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
@@ -834,7 +834,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 	method := "ReleaseCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	rct := &releaseCollectionTask{
-		baseTask:                 baseTask{metaCache: node.metaCache},
+		baseTask:                 baseTask{metaCache: node.getMetaCache()},
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
@@ -1129,7 +1129,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 	method := "GetStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	g := &getStatisticsTask{
-		baseTask:  baseTask{metaCache: node.metaCache},
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		request:   request,
 		Condition: NewTaskCondition(ctx),
 		ctx:       ctx,
@@ -1194,7 +1194,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	g := &getCollectionStatisticsTask{
-		baseTask:                       baseTask{metaCache: node.metaCache},
+		baseTask:                       baseTask{metaCache: node.getMetaCache()},
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		GetCollectionStatisticsRequest: request,
@@ -1252,7 +1252,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 	tr := timerecord.NewTimeRecorder(method)
 
 	sct := &showCollectionsTask{
-		baseTask:               baseTask{metaCache: node.metaCache},
+		baseTask:               baseTask{metaCache: node.getMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
@@ -1307,7 +1307,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	tr := timerecord.NewTimeRecorder(method)
 
 	act := &alterCollectionTask{
-		baseTask:               baseTask{metaCache: node.metaCache},
+		baseTask:               baseTask{metaCache: node.getMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
@@ -1373,7 +1373,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	method := "AlterCollectionFunction"
 	tr := timerecord.NewTimeRecorder(method)
 	task := &alterCollectionFunctionTask{
-		baseTask:                       baseTask{metaCache: node.metaCache},
+		baseTask:                       baseTask{metaCache: node.getMetaCache()},
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		AlterCollectionFunctionRequest: request,
@@ -1441,7 +1441,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	}
 
 	act := &alterCollectionFieldTask{
-		baseTask:                    baseTask{metaCache: node.metaCache},
+		baseTask:                    baseTask{metaCache: node.getMetaCache()},
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),
 		AlterCollectionFieldRequest: request,
@@ -1500,7 +1500,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	tr := timerecord.NewTimeRecorder(method)
 
 	cpt := &createPartitionTask{
-		baseTask:               baseTask{metaCache: node.metaCache},
+		baseTask:               baseTask{metaCache: node.getMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
@@ -1559,7 +1559,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	tr := timerecord.NewTimeRecorder(method)
 
 	dpt := &dropPartitionTask{
-		baseTask:             baseTask{metaCache: node.metaCache},
+		baseTask:             baseTask{metaCache: node.getMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
@@ -1673,7 +1673,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 	method := "LoadPartitions"
 	tr := timerecord.NewTimeRecorder(method)
 	lpt := &loadPartitionsTask{
-		baseTask:              baseTask{metaCache: node.metaCache},
+		baseTask:              baseTask{metaCache: node.getMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
@@ -1724,7 +1724,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	defer sp.End()
 
 	rpt := &releasePartitionsTask{
-		baseTask:                 baseTask{metaCache: node.metaCache},
+		baseTask:                 baseTask{metaCache: node.getMetaCache()},
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
@@ -1782,7 +1782,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	tr := timerecord.NewTimeRecorder(method)
 
 	g := &getPartitionStatisticsTask{
-		baseTask:                      baseTask{metaCache: node.metaCache},
+		baseTask:                      baseTask{metaCache: node.getMetaCache()},
 		ctx:                           ctx,
 		Condition:                     NewTaskCondition(ctx),
 		GetPartitionStatisticsRequest: request,
@@ -1839,7 +1839,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	defer sp.End()
 
 	spt := &showPartitionsTask{
-		baseTask:              baseTask{metaCache: node.metaCache},
+		baseTask:              baseTask{metaCache: node.getMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		ShowPartitionsRequest: request,
@@ -2078,7 +2078,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	defer sp.End()
 
 	cit := &createIndexTask{
-		baseTask:  baseTask{metaCache: node.metaCache},
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       request,
@@ -2131,7 +2131,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 	defer sp.End()
 
 	task := &alterIndexTask{
-		baseTask:  baseTask{metaCache: node.metaCache},
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       request,
@@ -2187,7 +2187,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	defer sp.End()
 
 	dit := &describeIndexTask{
-		baseTask:             baseTask{metaCache: node.metaCache},
+		baseTask:             baseTask{metaCache: node.getMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
@@ -2248,7 +2248,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 	defer sp.End()
 
 	dit := &getIndexStatisticsTask{
-		baseTask:                  baseTask{metaCache: node.metaCache},
+		baseTask:                  baseTask{metaCache: node.getMetaCache()},
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		GetIndexStatisticsRequest: request,
@@ -2303,7 +2303,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	defer sp.End()
 
 	dit := &dropIndexTask{
-		baseTask:         baseTask{metaCache: node.metaCache},
+		baseTask:         baseTask{metaCache: node.getMetaCache()},
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
@@ -2361,7 +2361,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 	defer sp.End()
 
 	gibpt := &getIndexBuildProgressTask{
-		baseTask:                     baseTask{metaCache: node.metaCache},
+		baseTask:                     baseTask{metaCache: node.getMetaCache()},
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		GetIndexBuildProgressRequest: request,
@@ -2422,7 +2422,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 	defer sp.End()
 
 	dipt := &getIndexStateTask{
-		baseTask:             baseTask{metaCache: node.metaCache},
+		baseTask:             baseTask{metaCache: node.getMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		GetIndexStateRequest: request,
@@ -2498,7 +2498,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	it := &insertTask{
 		baseTask: baseTask{
-			metaCache: node.metaCache,
+			metaCache: node.getMetaCache(),
 		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -2637,7 +2637,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := &deleteRunner{
 		req:             request,
-		metaCache:       node.metaCache,
+		metaCache:       node.getMetaCache(),
 		idAllocator:     node.rowIDAllocator,
 		tsoAllocatorIns: node.tsoAllocator,
 		chMgr:           node.chMgr,
@@ -2741,7 +2741,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	it := &upsertTask{
 		baseTask: baseTask{
-			metaCache: node.metaCache,
+			metaCache: node.getMetaCache(),
 		},
 		baseMsg: msgstream.BaseMsg{
 			HashValues: request.HashKeys,
@@ -2998,7 +2998,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	qt := &searchTask{
 		baseTask: baseTask{
-			metaCache: node.metaCache,
+			metaCache: node.getMetaCache(),
 		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3233,7 +3233,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	newSearchReq := convertHybridSearchToSearch(request)
 	qt := &searchTask{
 		baseTask: baseTask{
-			metaCache: node.metaCache,
+			metaCache: node.getMetaCache(),
 		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3535,7 +3535,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Create queryTask to execute the retrieval
 	qt := &queryTask{
 		baseTask: baseTask{
-			metaCache: node.metaCache,
+			metaCache: node.getMetaCache(),
 		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3664,7 +3664,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	defer sp.End()
 
 	ft := &flushTask{
-		baseTask:     baseTask{metaCache: node.metaCache},
+		baseTask:     baseTask{metaCache: node.getMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		FlushRequest: request,
@@ -3820,7 +3820,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	qt := &queryTask{
 		baseTask: baseTask{
-			metaCache: node.metaCache,
+			metaCache: node.getMetaCache(),
 		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3924,7 +3924,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 	defer sp.End()
 
 	cat := &CreateAliasTask{
-		baseTask:           baseTask{metaCache: node.metaCache},
+		baseTask:           baseTask{metaCache: node.getMetaCache()},
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		CreateAliasRequest: request,
@@ -4035,7 +4035,7 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 	defer sp.End()
 
 	lat := &ListAliasesTask{
-		baseTask:           baseTask{metaCache: node.metaCache},
+		baseTask:           baseTask{metaCache: node.getMetaCache()},
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		nodeID:             node.session.ServerID,
@@ -4142,7 +4142,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	defer sp.End()
 
 	aat := &AlterAliasTask{
-		baseTask:          baseTask{metaCache: node.metaCache},
+		baseTask:          baseTask{metaCache: node.getMetaCache()},
 		ctx:               ctx,
 		Condition:         NewTaskCondition(ctx),
 		AlterAliasRequest: request,
@@ -6157,7 +6157,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
 	t := &TransferReplicaTask{
-		baseTask:               baseTask{metaCache: node.metaCache},
+		baseTask:               baseTask{metaCache: node.getMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		TransferReplicaRequest: request,
@@ -6262,7 +6262,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
 	t := &DescribeResourceGroupTask{
-		baseTask:                     baseTask{metaCache: node.metaCache},
+		baseTask:                     baseTask{metaCache: node.getMetaCache()},
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		DescribeResourceGroupRequest: request,
@@ -6439,7 +6439,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	nodeID := paramtable.GetStringNodeID()
 
 	it := &importTask{
-		baseTask:  baseTask{metaCache: node.metaCache},
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       req,
@@ -6759,7 +6759,7 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 
 	method := "RunAnalyzer"
 	task := &RunAnalyzerTask{
-		baseTask:           baseTask{metaCache: node.metaCache},
+		baseTask:           baseTask{metaCache: node.getMetaCache()},
 		ctx:                ctx,
 		lb:                 node.lbPolicy,
 		Condition:          NewTaskCondition(ctx),
@@ -7369,7 +7369,7 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 
 	bt := &batchUpdateManifestTask{
-		baseTask:  baseTask{metaCache: node.metaCache},
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       req,

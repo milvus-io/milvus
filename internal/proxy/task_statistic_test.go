@@ -98,7 +98,6 @@ func (s *StatisticTaskSuite) SetupTest() {
 	cache, err := initMetaCache(context.Background(), s.mixc)
 	s.NoError(err)
 	s.metaCache = cache
-	s.T().Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	s.collectionName = "test_statistics_task"
 	s.loadCollection()
@@ -176,6 +175,7 @@ func (s *StatisticTaskSuite) TestStatisticTask_Timeout() {
 
 func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisticsTask {
 	return &getStatisticsTask{
+		baseTask:       baseTask{metaCache: s.metaCache},
 		Condition:      NewTaskCondition(ctx),
 		ctx:            ctx,
 		collectionName: s.collectionName,

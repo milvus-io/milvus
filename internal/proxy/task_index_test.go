@@ -68,7 +68,11 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	ctx := context.Background()
 	queryCoord := NewMixCoordMock()
 
+	cache, err := initMetaCache(ctx, queryCoord)
+	assert.NoError(t, err)
+
 	gist := &getIndexStateTask{
+		baseTask: baseTask{metaCache: cache},
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
 			Base:           &commonpb.MsgBase{},
 			DbName:         dbName,
@@ -86,9 +90,6 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	}
 
 	// failed to get collection id.
-	cache, err := initMetaCache(ctx, queryCoord)
-	assert.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 	assert.Error(t, gist.Execute(ctx))
 }
 

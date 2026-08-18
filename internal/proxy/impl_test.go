@@ -579,7 +579,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	// mgr := newShardClientMgr()
 	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
-	node.metaCache = cache
+	node.setMetaCache(cache)
 
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 
@@ -663,7 +663,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	// mgr := newShardClientMgr()
 	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
-	node.metaCache = cache
+	node.setMetaCache(cache)
 
 	t.Run("create resource group", func(t *testing.T) {
 		resp, err := node.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
@@ -743,7 +743,7 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 
 		// Act: Execute test
 		node := createTestProxy()
-		node.metaCache = metaCache
+		node.setMetaCache(metaCache)
 		defer node.sched.Close()
 
 		messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
@@ -788,7 +788,7 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 
 		// Act: Execute test
 		node := createTestProxy()
-		node.metaCache = metaCache
+		node.setMetaCache(metaCache)
 		defer node.sched.Close()
 
 		mixcoord := &grpcmixcoordclient.Client{}
@@ -894,7 +894,7 @@ func TestProxy_GetFlushState(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(0), nil).Maybe()
-		node.metaCache = cache
+		node.setMetaCache(cache)
 
 		resp, err = node.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
 			CollectionName: "collection1",
@@ -1234,7 +1234,7 @@ func TestProxyDropDatabase(t *testing.T) {
 
 		cache := NewMockCache(t)
 		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return()
-		node.metaCache = cache
+		node.setMetaCache(cache)
 
 		ctx := context.Background()
 
@@ -1437,8 +1437,9 @@ func TestProxyDescribeCollection(t *testing.T) {
 	}, nil).Maybe()
 	mixCoord.On("DescribeCollection", mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 	var err error
-	node.metaCache, err = NewMetaCache(mixCoord)
+	mc, err := NewMetaCache(mixCoord)
 	assert.NoError(t, err)
+	node.setMetaCache(mc)
 
 	t.Run("not healthy", func(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -1672,7 +1673,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc := NewMockCache(t)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr).Once()
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1684,7 +1685,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr).Once()
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr).Once()
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1698,7 +1699,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
 		}, nil).Once()
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1711,7 +1712,7 @@ func TestProxy_ImportV2(t *testing.T) {
 				{IsPartitionKey: true},
 			}},
 		}, nil)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, mockErr).Once()
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
@@ -1734,7 +1735,7 @@ func TestProxy_ImportV2(t *testing.T) {
 			}},
 		}, nil)
 		mc.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1746,7 +1747,7 @@ func TestProxy_ImportV2(t *testing.T) {
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1758,7 +1759,7 @@ func TestProxy_ImportV2(t *testing.T) {
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1785,7 +1786,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
 			DBID: 1,
 		}, nil)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 
 		mixCoord := mocks.NewMockMixCoordClient(t)
 		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
@@ -1836,7 +1837,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		// normal case
 		mc := NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		node.metaCache = mc
+		node.setMetaCache(mc)
 		mixCoord := mocks.NewMockMixCoordClient(t)
 		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
 		node.mixCoord = mixCoord
@@ -3074,7 +3075,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
 
 			node := createTestProxy()
-			node.metaCache = metaCache
+			node.setMetaCache(metaCache)
 			defer node.sched.Close()
 
 			node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -3102,7 +3103,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
 
 			node := createTestProxy()
-			node.metaCache = metaCache
+			node.setMetaCache(metaCache)
 			defer node.sched.Close()
 
 			mixcoord := &grpcmixcoordclient.Client{}
@@ -3408,7 +3409,7 @@ func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t 
 		{"persisted spec empty rejected", mkInfo("s3://bucket/p", ""), true},
 	}
 	cache := &MetaCache{}
-	node.metaCache = cache
+	node.setMetaCache(cache)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3436,7 +3437,7 @@ func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cache := &MetaCache{}
-	node.metaCache = cache
+	node.setMetaCache(cache)
 
 	cacheCalled := false
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).To(
@@ -3492,7 +3493,7 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cache := &MetaCache{}
-	node.metaCache = cache
+	node.setMetaCache(cache)
 
 	schema := &schemapb.CollectionSchema{
 		Name: "external_collection",

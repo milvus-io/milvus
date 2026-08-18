@@ -546,9 +546,9 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		root := buildRoot(true)
 		cache, err := initMetaCache(ctx, root)
 		assert.NoError(t, err)
-		t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
@@ -566,9 +566,9 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		root := buildRoot(false)
 		cache, err := initMetaCache(ctx, root)
 		assert.NoError(t, err)
-		t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,

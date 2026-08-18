@@ -44,13 +44,13 @@ import (
 
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
 
-func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
+func (h *HandlersV1) checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
 	username, ok := c.Get(ContextUsername)
 	if !ok || username.(string) == "" {
 		HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		return RestRequestInterceptorErr
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	_, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
 	if authErr != nil {
 		HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		return RestRequestInterceptorErr
@@ -79,7 +79,7 @@ func NewHandlersV1(proxyComponent types.ProxyComponent) *HandlersV1 {
 		h.interceptors = append(h.interceptors,
 			// authorization
 			func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-				err := checkAuthorization(ctx, ginCtx, req)
+				err := h.checkAuthorization(ctx, ginCtx, req)
 				if err != nil {
 					return nil, err
 				}

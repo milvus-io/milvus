@@ -84,7 +84,6 @@ func TestQueryTask_all(t *testing.T) {
 
 	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	fieldName2Types := map[string]schemapb.DataType{
 		testBoolField:     schemapb.DataType_Bool,
@@ -132,6 +131,7 @@ func TestQueryTask_all(t *testing.T) {
 
 	t.Run("test query task parameters", func(t *testing.T) {
 		task := &queryTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
@@ -279,6 +279,7 @@ func TestQueryTask_all(t *testing.T) {
 
 	t.Run("test query for iterator", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
@@ -331,6 +332,7 @@ func TestQueryTask_all(t *testing.T) {
 
 		// next page query task
 		qt = &queryTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
@@ -399,6 +401,7 @@ func TestQueryTask_all(t *testing.T) {
 				})
 			}
 			task := &queryTask{
+				baseTask:  baseTask{metaCache: cache},
 				Condition: NewTaskCondition(ctx),
 				RetrieveRequest: &internalpb.RetrieveRequest{
 					QueryLabel: "query",
@@ -498,6 +501,7 @@ func TestQueryTask_all(t *testing.T) {
 	t.Run("test order by without limit", func(t *testing.T) {
 		// ORDER BY without explicit limit should fail with an error
 		task := &queryTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{
@@ -540,6 +544,7 @@ func TestQueryTask_all(t *testing.T) {
 	t.Run("test order by with limit succeeds", func(t *testing.T) {
 		// ORDER BY with explicit limit should pass the validation
 		task := &queryTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{

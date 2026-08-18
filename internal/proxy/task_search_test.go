@@ -96,9 +96,9 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	task := &searchTask{
+		baseTask:      baseTask{metaCache: cache},
 		ctx:           context.Background(),
 		SearchRequest: &internalpb.SearchRequest{},
 		request: &milvuspb.SearchRequest{
@@ -191,7 +191,6 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
@@ -268,7 +267,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			}
 
 			qt := &searchTask{
-				ctx: ctx,
+				baseTask: baseTask{metaCache: cache},
+				ctx:      ctx,
 				SearchRequest: &internalpb.SearchRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Search,
@@ -361,6 +361,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			},
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -472,6 +473,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			},
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -897,7 +899,6 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	require.NoError(t, err)
 	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
@@ -1478,8 +1479,16 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	cache, err := initMetaCache(ctx, qc)
+	_, err = initMetaCache(ctx, qc)
 	require.NoError(t, err)
+
+	collectionID := UniqueID(1000)
+	mockCache := NewMockCache(t)
+	info := mustNewSchemaInfo(schema)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
+	mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 
 	getSearchTask := func(t *testing.T, collName string, data []string, withRerank bool) *searchTask {
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -1507,7 +1516,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		}
 
 		task := &searchTask{
-			baseTask:       baseTask{metaCache: cache},
+			baseTask:       baseTask{metaCache: mockCache},
 			ctx:            ctx,
 			collectionName: collectionName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -1538,15 +1547,6 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		return task
 	}
-
-	collectionID := UniqueID(1000)
-	mockCache := NewMockCache(t)
-	info := mustNewSchemaInfo(schema)
-	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
-	mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	t.Cleanup(mockBaseTaskMetaCacheForTest(mockCache))
 
 	{
 		task := getSearchTask(t, collectionName, []string{"sentence"}, false)
@@ -1601,6 +1601,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 			subReqs = append(subReqs, subReq)
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: mockCache},
 			ctx:            ctx,
 			collectionName: collectionName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -1705,9 +1706,8 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	cache, err := initMetaCache(ctx, qc)
+	_, err = initMetaCache(ctx, qc)
 	require.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	defer qc.Close()
 
@@ -3387,7 +3387,6 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	cache, err := initMetaCache(ctx, rc)
 	assert.NoError(t, err)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	fieldName2Types := map[string]schemapb.DataType{
 		testBoolField:     schemapb.DataType_Bool,
@@ -3460,6 +3459,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	// test begins
 	task := &searchTask{
+		baseTask:  baseTask{metaCache: cache},
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
@@ -4601,7 +4601,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
-	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
+	node.setMetaCache(cache)
 
 	mgr := shardclient.NewMockShardClientManager(t)
 	// mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
@@ -4675,7 +4675,8 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		outputFields := []string{pkField, vecField}
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4719,7 +4720,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		node := mocks.NewMockProxy(t)
 
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4751,7 +4753,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		node.lbPolicy = lb
 
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4796,7 +4799,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		}
 
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4964,10 +4968,10 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	t.Cleanup(mockBaseTaskMetaCacheForTest(mockMetaCache))
 
 	t.Run("default consistency level", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5010,6 +5014,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 			}, nil).Times(3)
 
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5033,6 +5038,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("legacy_guarantee_ts", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5061,6 +5067,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 			nil, errors.New("mock error")).Once()
 
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5085,6 +5092,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 
 		st2 := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5135,11 +5143,11 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 			CollID:                s.colID,
 			PartitionKeyIsolation: true,
 		}, nil)
-	s.T().Cleanup(mockBaseTaskMetaCacheForTest(s.mockMetaCache))
 }
 
 func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
 	task := &searchTask{
+		baseTask:       baseTask{metaCache: s.mockMetaCache},
 		ctx:            s.ctx,
 		collectionName: s.colName,
 		SearchRequest:  &internalpb.SearchRequest{},
@@ -5170,6 +5178,7 @@ func (s *MaterializedViewTestSuite) getHybridSearchTask(dsl string) *searchTask 
 	}
 
 	task := &searchTask{
+		baseTask:       baseTask{metaCache: s.mockMetaCache},
 		ctx:            s.ctx,
 		collectionName: s.colName,
 		SearchRequest:  &internalpb.SearchRequest{},

@@ -73,7 +73,9 @@ func TestCreateSnapshotTask_OnEnqueue_BaseAlreadyExists(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
+	cache := &MetaCache{}
 	task := &createSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -82,8 +84,6 @@ func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 	}
 
 	// Mock meta cache calls
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -94,7 +94,9 @@ func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
+	cache := &MetaCache{}
 	task := &createSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -103,8 +105,6 @@ func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 	}
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	expectedError := errors.New("collection not found")
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedError).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -146,7 +146,9 @@ func TestCreateSnapshotTask_PreExecute_ProtectionExceedsMax(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
+	cache := &MetaCache{}
 	task := &createSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:                        "test_snapshot",
 			DbName:                      "default",
@@ -155,8 +157,6 @@ func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -165,7 +165,9 @@ func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PreExecute_ProtectionValid(t *testing.T) {
+	cache := &MetaCache{}
 	task := &createSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:                        "test_snapshot",
 			DbName:                      "default",
@@ -174,8 +176,6 @@ func TestCreateSnapshotTask_PreExecute_ProtectionValid(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -283,7 +283,9 @@ func TestDropSnapshotTask_OnEnqueue_Success(t *testing.T) {
 }
 
 func TestDropSnapshotTask_PreExecute(t *testing.T) {
+	cache := &MetaCache{}
 	task := &dropSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.DropSnapshotRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -291,8 +293,6 @@ func TestDropSnapshotTask_PreExecute(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -316,7 +316,9 @@ func TestDropSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
 }
 
 func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
+	cache := &MetaCache{}
 	task := &dropSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.DropSnapshotRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -324,8 +326,6 @@ func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	expectedError := errors.New("collection not found")
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedError).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -393,7 +393,9 @@ func TestDescribeSnapshotTask_OnEnqueue_Success(t *testing.T) {
 
 func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
+	cache := &MetaCache{}
 	task := &describeSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -415,8 +417,6 @@ func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 	defer mockDescribeSnapshot.UnPatch()
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock meta cache calls
 	mockGetCollectionName := mockey.Mock((*MetaCache).GetCollectionName).Return("test_collection", nil).Build()
 	defer mockGetCollectionName.UnPatch()
@@ -466,7 +466,9 @@ func TestDescribeSnapshotTask_Execute_MixCoordError(t *testing.T) {
 
 func TestDescribeSnapshotTask_Execute_CollectionNameResolutionError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
+	cache := &MetaCache{}
 	task := &describeSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -486,8 +488,6 @@ func TestDescribeSnapshotTask_Execute_CollectionNameResolutionError(t *testing.T
 	defer mockDescribeSnapshot.UnPatch()
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock collection name resolution failure
 	expectedError := errors.New("collection name resolution failed")
 	mockGetCollectionName := mockey.Mock((*MetaCache).GetCollectionName).Return("", expectedError).Build()
@@ -501,7 +501,9 @@ func TestDescribeSnapshotTask_Execute_CollectionNameResolutionError(t *testing.T
 
 func TestDescribeSnapshotTask_Execute_PartitionNameResolutionError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
+	cache := &MetaCache{}
 	task := &describeSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -521,8 +523,6 @@ func TestDescribeSnapshotTask_Execute_PartitionNameResolutionError(t *testing.T)
 	defer mockDescribeSnapshot.UnPatch()
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock successful collection name resolution
 	mockGetCollectionName := mockey.Mock((*MetaCache).GetCollectionName).Return("test_collection", nil).Build()
 	defer mockGetCollectionName.UnPatch()
@@ -559,7 +559,9 @@ func TestListSnapshotsTask_OnEnqueue_Success(t *testing.T) {
 }
 
 func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listSnapshotsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
 			CollectionName: "test_collection",
@@ -567,8 +569,6 @@ func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 	}
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
@@ -700,7 +700,9 @@ func TestRestoreSnapshotTask_Execute_StatusError(t *testing.T) {
 
 func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
+	cache := &MetaCache{}
 	task := &createSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			DbName:         "default",
 			CollectionName: "test_collection",
@@ -717,8 +719,6 @@ func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 	assert.NotNil(t, task.req.Base)
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock PreExecute dependencies
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -746,7 +746,9 @@ func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 // =========================== Edge Cases and Error Scenarios ===========================
 
 func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
+	cache := &MetaCache{}
 	task := &createSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -755,8 +757,6 @@ func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
 	}
 
 	// Initialize meta cache
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -918,7 +918,9 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 	t.Run("CreateSnapshotTask", func(t *testing.T) {
 		for _, tc := range validSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
+				cache := &MetaCache{}
 				task := &createSnapshotTask{
+					baseTask: baseTask{metaCache: cache},
 					req: &milvuspb.CreateSnapshotRequest{
 						Name:           tc.snapshotName,
 						DbName:         "default",
@@ -927,8 +929,6 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 				}
 
 				// Mock globalMetaCache
-				cache := &MetaCache{}
-				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -943,7 +943,9 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 	t.Run("DropSnapshotTask", func(t *testing.T) {
 		for _, tc := range validSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
+				cache := &MetaCache{}
 				task := &dropSnapshotTask{
+					baseTask: baseTask{metaCache: cache},
 					req: &milvuspb.DropSnapshotRequest{
 						Name:           tc.snapshotName,
 						DbName:         "default",
@@ -951,8 +953,6 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 					},
 				}
 
-				cache := &MetaCache{}
-				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -967,7 +967,9 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 	t.Run("DescribeSnapshotTask", func(t *testing.T) {
 		for _, tc := range validSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
+				cache := &MetaCache{}
 				task := &describeSnapshotTask{
+					baseTask: baseTask{metaCache: cache},
 					req: &milvuspb.DescribeSnapshotRequest{
 						Name:           tc.snapshotName,
 						DbName:         "default",
@@ -975,8 +977,6 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 					},
 				}
 
-				cache := &MetaCache{}
-				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -1002,7 +1002,9 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
+				cache := &MetaCache{}
 				task := &restoreSnapshotTask{
+					baseTask: baseTask{metaCache: cache},
 					req: &milvuspb.RestoreSnapshotRequest{
 						Name:                 tc.snapshotName,
 						CollectionName:       tc.collectionName,
@@ -1010,8 +1012,6 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 					},
 				}
 
-				cache := &MetaCache{}
-				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -1026,15 +1026,15 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 // =========================== Test for Issue #47066 ===========================
 
 func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listSnapshotsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
 			CollectionName: "", // Empty collection name should be rejected
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 
@@ -1114,7 +1114,9 @@ func TestRestoreSnapshotTask_PreExecute_MissingTargetCollectionName(t *testing.T
 }
 
 func TestRestoreSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
+	cache := &MetaCache{}
 	task := &restoreSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:                 "valid_snapshot",
 			CollectionName:       "source_collection",
@@ -1123,8 +1125,6 @@ func TestRestoreSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(0), errors.New("source collection not found")).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -1152,7 +1152,9 @@ func TestDescribeSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
 }
 
 func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
+	cache := &MetaCache{}
 	task := &describeSnapshotTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name:           "valid_snapshot",
 			DbName:         "default",
@@ -1160,8 +1162,6 @@ func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(0), errors.New("collection not found")).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -1175,14 +1175,14 @@ func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 // =========================== listSnapshotsTask.PreExecute Additional Tests ===========================
 
 func TestListSnapshotsTask_PreExecute_GetDatabaseInfoError(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listSnapshotsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName: "nonexistent_db",
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(nil, errors.New("database not found")).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1194,15 +1194,15 @@ func TestListSnapshotsTask_PreExecute_GetDatabaseInfoError(t *testing.T) {
 }
 
 func TestListSnapshotsTask_PreExecute_GetCollectionIDError(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listSnapshotsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
 			CollectionName: "nonexistent_collection",
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1247,7 +1247,9 @@ func TestGetRestoreSnapshotStateTask_PreExecute(t *testing.T) {
 
 func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
+	cache := &MetaCache{}
 	task := &getRestoreSnapshotStateTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			JobId: 1,
 		},
@@ -1272,8 +1274,6 @@ func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 	defer mockGetState.UnPatch()
 
 	// Mock resolveCollectionNames via meta cache GetCollectionInfo
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		Return(&collectionInfo{
 			DBName: "test_db",
@@ -1392,14 +1392,14 @@ func TestListRestoreSnapshotJobsTask_OnEnqueue(t *testing.T) {
 }
 
 func TestListRestoreSnapshotJobsTask_PreExecute_DbNameError(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listRestoreSnapshotJobsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName: "nonexistent_db",
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(nil, errors.New("database not found")).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1411,15 +1411,15 @@ func TestListRestoreSnapshotJobsTask_PreExecute_DbNameError(t *testing.T) {
 }
 
 func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listRestoreSnapshotJobsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName:         "default",
 			CollectionName: "nonexistent_collection",
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1434,15 +1434,15 @@ func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T
 }
 
 func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listRestoreSnapshotJobsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName:         "default",
 			CollectionName: "test_collection",
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 5}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1458,14 +1458,14 @@ func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *te
 }
 
 func TestListRestoreSnapshotJobsTask_PreExecute_OnlyDbName(t *testing.T) {
+	cache := &MetaCache{}
 	task := &listRestoreSnapshotJobsTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName: "default",
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 5}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1491,7 +1491,9 @@ func TestListRestoreSnapshotJobsTask_PreExecute_Empty(t *testing.T) {
 
 func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
+	cache := &MetaCache{}
 	task := &listRestoreSnapshotJobsTask{
+		baseTask:     baseTask{metaCache: cache},
 		req:          &milvuspb.ListRestoreSnapshotJobsRequest{},
 		mixCoord:     mockMixCoord,
 		collectionID: 0,
@@ -1523,8 +1525,6 @@ func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 	defer mockListJobs.UnPatch()
 
 	// Mock resolveCollectionNames for both collections
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	callCount := 0
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		To(func(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
@@ -1678,7 +1678,9 @@ func TestListRestoreSnapshotJobsTask_TaskInterface(t *testing.T) {
 // =========================== PinSnapshotDataTask Tests ===========================
 
 func TestPinSnapshotDataTask_PreExecute_Success(t *testing.T) {
+	cache := &MetaCache{}
 	task := &pinSnapshotDataTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -1686,8 +1688,6 @@ func TestPinSnapshotDataTask_PreExecute_Success(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -1755,7 +1755,9 @@ func TestPinSnapshotDataTask_PreExecute_TTLExceedsMax(t *testing.T) {
 }
 
 func TestPinSnapshotDataTask_PreExecute_TTLAtMaxBoundary(t *testing.T) {
+	cache := &MetaCache{}
 	task := &pinSnapshotDataTask{
+		baseTask: baseTask{metaCache: cache},
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			DbName:         "default",
@@ -1764,8 +1766,6 @@ func TestPinSnapshotDataTask_PreExecute_TTLAtMaxBoundary(t *testing.T) {
 		},
 	}
 
-	cache := &MetaCache{}
-	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 

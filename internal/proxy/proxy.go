@@ -85,8 +85,9 @@ type Proxy struct {
 
 	simpleLimiter *SimpleLimiter
 
-	metaCache Cache
-	chMgr     channelsMgr
+	metaCacheMu sync.RWMutex
+	metaCache   Cache
+	chMgr       channelsMgr
 
 	sched *taskScheduler
 
@@ -154,7 +155,18 @@ func (node *Proxy) GetStateCode() commonpb.StateCode {
 }
 
 func (node *Proxy) getMetaCache() Cache {
+	node.metaCacheMu.RLock()
+	defer node.metaCacheMu.RUnlock()
 	return node.metaCache
+}
+
+// setMetaCache publishes the meta cache. It is called once during Proxy.Init()
+// after the cache is fully initialized, so request-serving goroutines observe it
+// atomically instead of racing with the assignment.
+func (node *Proxy) setMetaCache(cache Cache) {
+	node.metaCacheMu.Lock()
+	defer node.metaCacheMu.Unlock()
+	node.metaCache = cache
 }
 
 func (node *Proxy) GetMetaCache() Cache {
@@ -268,7 +280,7 @@ func (node *Proxy) Init() error {
 		mlog.Warn(node.ctx, "failed to init meta cache", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
 		return err
 	}
-	node.metaCache = metaCache
+	node.setMetaCache(metaCache)
 	mlog.Debug(node.ctx, "init meta cache done", mlog.String("role", typeutil.ProxyRole))
 
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
@@ -357,8 +369,8 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
-	if node.metaCache != nil {
-		node.metaCache.Close()
+	if metaCache := node.getMetaCache(); metaCache != nil {
+		metaCache.Close()
 	}
 
 	node.cancel()

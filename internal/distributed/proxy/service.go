@@ -311,7 +311,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			proxy.DatabaseInterceptor(),
 			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
+			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache)),
 			proxy.UnaryServerHookInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),

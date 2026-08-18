@@ -24,7 +24,6 @@ package proxy
 import (
 	"context"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -88,11 +87,4 @@ func mustNewMetaCacheWithDBInfoForTest(mixCoord types.MixCoordClient, dbInfo map
 		cache.SeedDBInfoForTest(db, info)
 	}
 	return cache
-}
-
-func mockBaseTaskMetaCacheForTest(cache Cache) func() {
-	patch := mockey.Mock((*baseTask).getMetaCache).Return(cache).Build()
-	return func() {
-		patch.UnPatch()
-	}
 }

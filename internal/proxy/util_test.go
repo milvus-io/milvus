@@ -1138,7 +1138,8 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 		util.HeaderAuthorize,
 		encodedToken,
 	))
-	_, err = AuthenticationInterceptor(ctx)
+	authInterceptor := AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() })
+	_, err = authInterceptor(ctx)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 	assert.NotContains(t, err.Error(), encodedToken)
