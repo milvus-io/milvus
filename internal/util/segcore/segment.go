@@ -71,7 +71,10 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var status C.CStatus
 	if req.LoadInfo != nil {
-		segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to convert segment load info")
+		}
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
@@ -356,7 +359,10 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 
-	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	if err != nil {
+		return merr.Wrap(err, "failed to convert reopen load info")
+	}
 	loadInfoBlob, err := proto.Marshal(segLoadInfo)
 	if err != nil {
 		return err
@@ -409,15 +415,18 @@ func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
 // ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
 // This function is needed because segcorepb.SegmentLoadInfo is a simplified version that doesn't
 // depend on data_coord.proto and excludes fields like start_position, delta_position, and level.
-func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.SegmentLoadInfo {
+func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error) {
 	if src == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Resolve text/json stats with basePaths.
 	// V2: stats come from src proto fields, basePaths computed from metadata + rootPath.
 	// V3: stats resolved from manifest (src proto fields are empty), basePaths from manifest paths.
-	textStats, jsonStats, textBasePaths, jsonBasePaths := resolveStatsWithBasePaths(src)
+	textStats, jsonStats, textBasePaths, jsonBasePaths, err := resolveStatsWithBasePaths(src)
+	if err != nil {
+		return nil, err
+	}
 
 	return &segcorepb.SegmentLoadInfo{
 		SegmentID:            src.GetSegmentID(),
@@ -444,17 +453,20 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		UseTakeForOutput:     src.GetUseTakeForOutput(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
 		CommitTimestamp:      src.GetCommitTimestamp(),
-	}
+	}, nil
 }
 
 // resolveStatsWithBasePaths resolves text/json stats and computes basePaths.
 // V2: stats from src proto fields, basePaths computed from rootPath + metadata.
 // V3: stats resolved from manifest via StatsResolver, basePaths extracted from manifest paths.
+// A V3 manifest error does not fall back to V2 path construction because the
+// legacy prefixes are incompatible with manifest-backed stat files.
 func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 	map[int64]*datapb.TextIndexStats,
 	map[int64]*datapb.JsonKeyStats,
 	map[int64]string, // textBasePaths
 	map[int64]string, // jsonBasePaths
+	error,
 ) {
 	textStats := src.GetTextStatsLogs()
 	jsonStats := src.GetJsonKeyStatsLogs()
@@ -467,8 +479,9 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 				mlog.Int64("segmentID", src.GetSegmentID()),
 				mlog.String("manifestPath", src.GetManifestPath()),
 				mlog.Err(result.Err()))
+			return nil, nil, nil, nil, merr.Wrap(result.Err(), "failed to resolve V3 stats from manifest")
 		} else {
-			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths
+			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths, nil
 		}
 	}
 
@@ -489,7 +502,7 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
 	}
 
-	return textStats, jsonStats, textBasePaths, jsonBasePaths
+	return textStats, jsonStats, textBasePaths, jsonBasePaths, nil
 }
 
 // convertFieldBinlogs converts datapb.FieldBinlog to segcorepb.FieldBinlog.
