@@ -1093,7 +1093,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			collection := s.meta.GetCollection(ctx, collectionID)
 			if collection == nil {
 				err := merr.WrapErrCollectionNotLoaded(collectionID)
-				mlog.Warn(context.TODO(), "failed to update load config", mlog.Err(err))
+				mlog.Warn(ctx, "failed to update load config", mlog.Err(err))
 				return
 			}
 
@@ -1118,7 +1118,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			}
 
 			if !replicaChanged && !rgChanged {
-				mlog.Info(context.TODO(), "no need to update load config", mlog.Int64("collectionID", collectionID))
+				mlog.Info(ctx, "no need to update load config", mlog.Int64("collectionID", collectionID))
 				return
 			}
 

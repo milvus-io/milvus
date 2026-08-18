@@ -16,10 +16,10 @@ package schemaevolution
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/blang/semver/v4"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
