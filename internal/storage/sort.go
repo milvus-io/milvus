@@ -165,11 +165,13 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 
 	phaseStart = time.Now()
 	rb := NewRecordBuilder(schema)
+	if err := rb.prepareAppendDefaults(); err != nil {
+		return 0, nil, err
+	}
 
 	// Resolve each output column's source array once per input record (instead
 	// of once per row, as RecordBuilder.Append would).
 	srcByField := make([][]arrow.Array, len(rb.builders))
-	defaults := make([]*schemapb.ValueField, len(rb.builders))
 	for fi := range rb.builders {
 		fid := rb.fields[fi].FieldID
 		cols := make([]arrow.Array, len(records))
@@ -177,7 +179,6 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			cols[ri] = records[ri].Column(fid)
 		}
 		srcByField[fi] = cols
-		defaults[fi] = rb.fields[fi].GetDefaultValue()
 	}
 
 	writeRecord := func() error {
@@ -191,7 +192,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 
 	for _, idx := range indices {
 		for fi, builder := range rb.builders {
-			size, err := appendValueAt(builder, srcByField[fi][idx.ri], int(idx.i), defaults[fi])
+			size, err := appendValueAt(builder, srcByField[fi][idx.ri], int(idx.i), rb.fields[fi], rb.defaults[fi])
 			if err != nil {
 				return 0, nil, merr.Wrapf(err, "failed to append value at row %d for field %s", idx.i, rb.fields[fi].GetName())
 			}
