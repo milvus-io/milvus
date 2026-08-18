@@ -1341,6 +1341,31 @@ type ConfigPayload struct {
 	TTLSeconds        int64    `json:"ttl_seconds,omitempty"`
 }
 
+// ConfigApplyResult is what a push_config reply carries back, so the sender can tell a
+// config that took effect from one that was quietly dropped.
+//
+// encoding/json ignores fields it does not know, which made every payload look accepted:
+// a misspelled key, a key belonging to a newer client, or ttl_seconds -- which lives in
+// ConfigPayload and is sent by the web UI but has never been read by anything -- all
+// produced the same bare Success. Naming both halves is the only way the caller can see
+// the difference.
+type ConfigApplyResult struct {
+	// Applied lists the payload keys that changed this client's configuration.
+	Applied []string `json:"applied"`
+	// Ignored lists the payload keys this client does not act on. It is not an error:
+	// failing the whole command would stop a newer server from configuring an older
+	// client at all, so the keys are reported and the rest is still applied.
+	Ignored []string `json:"ignored,omitempty"`
+}
+
+// configPayloadKeys are the payload keys handlePushConfig acts on. Anything else in a
+// payload is reported as ignored.
+var configPayloadKeys = map[string]struct{}{
+	"enabled":               {},
+	"heartbeat_interval_ms": {},
+	"sampling_rate":         {},
+}
+
 // CollectionMetricsPayload represents the payload for collection_metrics command
 type CollectionMetricsPayload struct {
 	Enabled      bool     `json:"enabled"`
@@ -1351,6 +1376,10 @@ type CollectionMetricsPayload struct {
 // handlePushConfig handles dynamic configuration updates
 func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandReply {
 	var payload ConfigPayload
+	// raw is decoded alongside the typed payload purely to see which keys were sent:
+	// unmarshalling into ConfigPayload cannot distinguish "key absent" from "key unknown",
+	// and both halves are needed to answer honestly.
+	raw := map[string]json.RawMessage{}
 	if len(cmd.Payload) > 0 {
 		if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
 			return &CommandReply{
@@ -1359,12 +1388,30 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 				ErrorMessage: "failed to parse config payload: " + err.Error(),
 			}
 		}
+		if err := json.Unmarshal(cmd.Payload, &raw); err != nil {
+			return &CommandReply{
+				CommandId:    cmd.CommandId,
+				Success:      false,
+				ErrorMessage: "failed to parse config payload: " + err.Error(),
+			}
+		}
 	}
+
+	ignored := make([]string, 0, len(raw))
+	for key := range raw {
+		if _, known := configPayloadKeys[key]; !known {
+			ignored = append(ignored, key)
+		}
+	}
+	sort.Strings(ignored)
+
+	applied := make([]string, 0, len(configPayloadKeys))
 
 	// Apply configuration changes with write lock
 	m.configMu.Lock()
 	if payload.Enabled != nil {
 		m.config.Enabled = *payload.Enabled
+		applied = append(applied, "enabled")
 	}
 	if payload.HeartbeatInterval != nil {
 		if *payload.HeartbeatInterval <= 0 {
@@ -1376,6 +1423,7 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 			}
 		}
 		m.config.HeartbeatInterval = time.Duration(*payload.HeartbeatInterval) * time.Millisecond
+		applied = append(applied, "heartbeat_interval_ms")
 	}
 	if payload.SamplingRate != nil {
 		samplingRate := *payload.SamplingRate
@@ -1385,13 +1433,20 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 			samplingRate = 1.0
 		}
 		m.config.SamplingRate = samplingRate
+		applied = append(applied, "sampling_rate")
 	}
 	m.configMu.Unlock()
 
-	return &CommandReply{
+	reply := &CommandReply{
 		CommandId: cmd.CommandId,
 		Success:   true,
 	}
+	// A reply that cannot be encoded would be worse than one without the detail, so the
+	// command still succeeds -- the configuration was applied either way.
+	if encoded, err := json.Marshal(ConfigApplyResult{Applied: applied, Ignored: ignored}); err == nil {
+		reply.Payload = encoded
+	}
+	return reply
 }
 
 // GetConfigResponse represents the response for get_config command

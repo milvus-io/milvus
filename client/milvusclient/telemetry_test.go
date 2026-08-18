@@ -1150,6 +1150,97 @@ func TestPublicHandleMethods(t *testing.T) {
 	})
 }
 
+// A push_config reply used to say Success for any payload at all, because unknown JSON
+// fields are dropped silently by encoding/json and nothing else was reported. Pushing a
+// misspelled key, or one this client is too old to know, looked exactly like a config that
+// took effect. The reply now says which keys were applied and which were ignored, so the
+// sender can tell the difference.
+func TestPushConfigReplyReportsAppliedAndIgnoredKeys(t *testing.T) {
+	decode := func(t *testing.T, reply *CommandReply) ConfigApplyResult {
+		t.Helper()
+		var result ConfigApplyResult
+		require.NoError(t, json.Unmarshal(reply.Payload, &result))
+		return result
+	}
+
+	t.Run("applied keys are named", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"sampling_rate": 0.25, "heartbeat_interval_ms": 3000}`),
+		})
+		assert.True(t, reply.Success)
+
+		result := decode(t, reply)
+		assert.ElementsMatch(t, []string{"sampling_rate", "heartbeat_interval_ms"}, result.Applied)
+		assert.Empty(t, result.Ignored)
+	})
+
+	t.Run("unknown keys are reported rather than silently dropped", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"unsupported_probe": true, "sampling_rate": 0.5}`),
+		})
+		// Still a success: the known key was applied, and an unknown key must not fail the
+		// whole command, or a newer server could not push to an older client at all.
+		assert.True(t, reply.Success)
+
+		result := decode(t, reply)
+		assert.Equal(t, []string{"sampling_rate"}, result.Applied)
+		assert.Equal(t, []string{"unsupported_probe"}, result.Ignored)
+	})
+
+	t.Run("a payload of only unknown keys applies nothing", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		manager.configMu.RLock()
+		beforeRate, beforeInterval, beforeEnabled := manager.config.SamplingRate, manager.config.HeartbeatInterval, manager.config.Enabled
+		manager.configMu.RUnlock()
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"unsupported_probe": true}`),
+		})
+		assert.True(t, reply.Success)
+
+		result := decode(t, reply)
+		assert.Empty(t, result.Applied)
+		assert.Equal(t, []string{"unsupported_probe"}, result.Ignored)
+
+		manager.configMu.RLock()
+		defer manager.configMu.RUnlock()
+		assert.Equal(t, beforeRate, manager.config.SamplingRate)
+		assert.Equal(t, beforeInterval, manager.config.HeartbeatInterval)
+		assert.Equal(t, beforeEnabled, manager.config.Enabled)
+	})
+
+	// ttl_seconds sits in ConfigPayload and the web UI sends it, but nothing has ever read
+	// it. Naming it in the reply is how that stops being invisible.
+	t.Run("ttl_seconds is reported as ignored", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"ttl_seconds": 300}`),
+		})
+		assert.True(t, reply.Success)
+		assert.Equal(t, []string{"ttl_seconds"}, decode(t, reply).Ignored)
+	})
+
+	t.Run("a rejected value reports no applied keys", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"heartbeat_interval_ms": 0}`),
+		})
+		assert.False(t, reply.Success)
+		assert.Contains(t, reply.ErrorMessage, "must be positive")
+	})
+}
+
 func TestHandlePushConfigEdgeCases(t *testing.T) {
 	t.Run("invalid payload", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())

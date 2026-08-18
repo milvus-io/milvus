@@ -1,0 +1,11 @@
+localStorage:
+  path: /Users/xiaofan.luan/milvus-local-run/data/
+etcd:
+  use:
+    embed: true
+  data:
+    dir: /Users/xiaofan.luan/milvus-local-run/etcd
+  config:
+    path: /private/tmp/claude-501/-Users-xiaofan-luan/5d4c6e02-b7d6-4edb-b9a8-12bdf89176cd/scratchpad/wt-tel/configs/advanced/etcd.yaml
+common:
+  storageType: local
