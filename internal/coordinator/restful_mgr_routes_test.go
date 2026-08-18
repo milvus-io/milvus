@@ -440,6 +440,21 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		assert.NotContains(t, w.Body.String(), "sensitive configuration")
 	})
 
+	t.Run("sensitive ParamGroup member may still be deleted", func(t *testing.T) {
+		// The other side of the delete fence. credential.* is Sensitive because
+		// its members are open-ended, not because anyone reviewed this one, and
+		// there is no compiled default for a delete to revert to — so fencing it
+		// would only strand whatever is already in etcd.
+		const key = "credential.aksk1.secret_access_key"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.NotEqual(t, http.StatusBadRequest, w.Code)
+		assert.NotContains(t, w.Body.String(), "sensitive configuration")
+	})
+
 	t.Run("sensitive ParamGroup member cannot be set", func(t *testing.T) {
 		// credential.* is a declared, sensitive ParamGroup: a member of it needs
 		// no prior registration to resolve, and must still be refused.

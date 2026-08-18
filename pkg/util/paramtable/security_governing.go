@@ -63,9 +63,9 @@ func IsSecurityGoverningConfig(key string) bool {
 	// "PROXYENABLEPUBLICPRIVILEGE" all reach the same etcd entry, and comparing
 	// dotted strings would fence exactly one of them.
 	//
-	// The prefix test therefore runs against the separator-free form too, which
-	// also matches a hypothetical "common.securityFoo". That over-match is the
-	// safe direction for a fence, and no such key exists.
+	// The prefix test therefore runs against the separator-free form, which also
+	// matches a hypothetical "common.securityFoo". That over-match is the safe
+	// direction for a fence, and no such key exists.
 	identity := config.EtcdConfigKey(key)
 	if strings.HasPrefix(identity, securityGoverningConfigPrefixIdentity) {
 		return true
