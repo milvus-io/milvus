@@ -1352,7 +1352,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithUUI
 	s.Require().NoError(err)
 
 	for i := 0; i < 3; i++ {
-		pk := fmt.Sprintf("uuid-pk-%d-%d", segID, i)
+		pk := fmt.Sprintf("550e8400-0000-0000-%04x-%012x", segID, i)
 		value := map[int64]interface{}{
 			common.RowIDField:     segID + int64(i),
 			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
@@ -1362,8 +1362,10 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithUUI
 		if includeDroppedField {
 			value[103] = int64(i)
 		}
+		uuidPK, errPK := storage.NewUUIDPrimaryKeyFromString(pk)
+		s.Require().NoError(errPK)
 		v := storage.Value{
-			PK:        storage.NewVarCharPrimaryKey(pk),
+			PK:        uuidPK,
 			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     value,
 		}

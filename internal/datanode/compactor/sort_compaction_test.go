@@ -527,9 +527,11 @@ func (s *SortCompactionTaskSuite) initUUIDSegBuffer(size int, seed int64) {
 	s.segWriter, _ = NewSegmentWriter(s.meta.GetSchema(), int64(size), compactionBatchSize, 1, PartitionID, CollectionID, []int64{})
 
 	for i := 0; i < size; i++ {
-		pk := fmt.Sprintf("%04d-%04d-%04d-%04d-%04d", seed, i, i, i, i)
+		pk := fmt.Sprintf("550e8400-0000-0000-%04x-%012x", seed, i)
+		uuidPK, errPK := storage.NewUUIDPrimaryKeyFromString(pk)
+		s.Require().NoError(errPK)
 		v := storage.Value{
-			PK:        storage.NewVarCharPrimaryKey(pk),
+			PK:        uuidPK,
 			Timestamp: int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i))),
 			Value:     getUUIDRow(pk, int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i)))),
 		}

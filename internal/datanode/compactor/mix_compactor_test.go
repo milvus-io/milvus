@@ -1200,9 +1200,11 @@ func (s *MixCompactionTaskStorageV1Suite) initUUIDSegBuffer(size int, seed int64
 	s.Require().NoError(err)
 
 	for i := 0; i < size; i++ {
-		pk := fmt.Sprintf("%04d-%04d-%04d-%04d-%04d", seed, i, i, i, i)
+		pk := fmt.Sprintf("550e8400-0000-0000-%04x-%012x", seed, i)
+		uuidPK, errPK := storage.NewUUIDPrimaryKeyFromString(pk)
+		s.Require().NoError(errPK)
 		v := storage.Value{
-			PK:        storage.NewVarCharPrimaryKey(pk),
+			PK:        uuidPK,
 			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     getUUIDRow(pk, int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))),
 		}

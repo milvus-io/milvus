@@ -17,6 +17,8 @@
 package importv2
 
 import (
+	"hash/crc32"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -282,10 +284,27 @@ func hashByVChannel(channelNum int64, pkField *schemapb.FieldSchema) func(pk any
 			hash, _ := typeutil.Hash32Int64(pk.(int64))
 			return int64(hash) % channelNum
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar:
 		return func(pk any) int64 {
 			hash := typeutil.HashString2Uint32(pk.(string))
 			return int64(hash) % channelNum
+		}
+	case schemapb.DataType_UUID:
+		return func(pk any) int64 {
+			switch v := pk.(type) {
+			case [16]byte:
+				return int64(crc32.ChecksumIEEE(v[:])) % channelNum
+			case []byte:
+				return int64(crc32.ChecksumIEEE(v)) % channelNum
+			case string:
+				if u, err := typeutil.ParseUUID(v); err == nil {
+					return int64(crc32.ChecksumIEEE(u[:])) % channelNum
+				}
+				hash := typeutil.HashString2Uint32(v)
+				return int64(hash) % channelNum
+			default:
+				return 0
+			}
 		}
 	default:
 		return nil
@@ -304,10 +323,27 @@ func hashByPartition(partitionNum int64, partField *schemapb.FieldSchema) func(k
 			hash, _ := typeutil.Hash32Int64(key.(int64))
 			return int64(hash) % partitionNum
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar:
 		return func(key any) int64 {
 			hash := typeutil.HashString2Uint32(key.(string))
 			return int64(hash) % partitionNum
+		}
+	case schemapb.DataType_UUID:
+		return func(key any) int64 {
+			switch v := key.(type) {
+			case [16]byte:
+				return int64(crc32.ChecksumIEEE(v[:])) % partitionNum
+			case []byte:
+				return int64(crc32.ChecksumIEEE(v)) % partitionNum
+			case string:
+				if u, err := typeutil.ParseUUID(v); err == nil {
+					return int64(crc32.ChecksumIEEE(u[:])) % partitionNum
+				}
+				hash := typeutil.HashString2Uint32(v)
+				return int64(hash) % partitionNum
+			default:
+				return 0
+			}
 		}
 	default:
 		return nil

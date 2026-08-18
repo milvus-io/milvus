@@ -1168,26 +1168,36 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 }
 
 func TestInsertDataUUIDPKDedup(t *testing.T) {
-	// Growing-segment in-memory dedup must track UUID PKs in the string map;
+	// Growing-segment in-memory dedup must track UUID PKs in uuidPKTs map;
 	// previously NewInsertData/Append no-opped for DataType_UUID.
 	id := NewInsertData(1, 2, 2, schemapb.DataType_UUID)
-	assert.NotNil(t, id.strPKTs, "UUID PKs must be tracked in strPKTs")
+	assert.NotNil(t, id.uuidPKTs, "UUID PKs must be tracked in uuidPKTs")
+
+	uuid1 := "550e8400-e29b-41d4-a716-446655440001"
+	uuid2 := "550e8400-e29b-41d4-a716-446655440002"
+	uuid3 := "550e8400-e29b-41d4-a716-446655440003"
+	u1, _ := typeutil.ParseUUID(uuid1)
+	u2, _ := typeutil.ParseUUID(uuid2)
 
 	insert := &storage.InsertData{
 		Data: map[storage.FieldID]storage.FieldData{
-			100: &storage.StringFieldData{DataType: schemapb.DataType_UUID, Data: []string{"uuid-1", "uuid-2"}},
+			100: &storage.UUIDFieldData{DataType: schemapb.DataType_UUID, Data: [][16]byte{u1, u2}},
 		},
 	}
-	pkFieldData := &storage.StringFieldData{DataType: schemapb.DataType_UUID, Data: []string{"uuid-1", "uuid-2"}}
+	pkFieldData := &storage.UUIDFieldData{DataType: schemapb.DataType_UUID, Data: [][16]byte{u1, u2}}
 	tsFieldData := &storage.Int64FieldData{Data: []int64{100, 200}}
 
 	id.Append(insert, pkFieldData, tsFieldData)
 	assert.Equal(t, int64(2), id.rowNum)
 
-	assert.True(t, id.pkExists(storage.NewVarCharPrimaryKey("uuid-1"), 101))
-	assert.False(t, id.pkExists(storage.NewVarCharPrimaryKey("uuid-1"), 100))
-	assert.True(t, id.pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 201))
-	assert.False(t, id.pkExists(storage.NewVarCharPrimaryKey("uuid-3"), 300))
+	pk1, _ := storage.NewUUIDPrimaryKeyFromString(uuid1)
+	pk2, _ := storage.NewUUIDPrimaryKeyFromString(uuid2)
+	pk3, _ := storage.NewUUIDPrimaryKeyFromString(uuid3)
+
+	assert.True(t, id.pkExists(pk1, 101))
+	assert.False(t, id.pkExists(pk1, 100))
+	assert.True(t, id.pkExists(pk2, 201))
+	assert.False(t, id.pkExists(pk3, 300))
 }
 
 func TestPrepareInsertWithUUIDPK(t *testing.T) {
@@ -1200,6 +1210,10 @@ func TestPrepareInsertWithUUIDPK(t *testing.T) {
 		},
 	}
 	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_UUID, IsPrimaryKey: true}
+
+	uuid1 := "550e8400-e29b-41d4-a716-446655440001"
+	uuid2 := "550e8400-e29b-41d4-a716-446655440002"
+	uuid3 := "550e8400-e29b-41d4-a716-446655440003"
 
 	insertMsg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -1242,7 +1256,7 @@ func TestPrepareInsertWithUUIDPK(t *testing.T) {
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_StringData{
-								StringData: &schemapb.StringArray{Data: []string{"uuid-1", "uuid-2", "uuid-3"}},
+								StringData: &schemapb.StringArray{Data: []string{uuid1, uuid2, uuid3}},
 							},
 						},
 					},
@@ -1258,9 +1272,10 @@ func TestPrepareInsertWithUUIDPK(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(3), result[0].rowNum)
-	assert.NotNil(t, result[0].strPKTs, "UUID PKs must be tracked in strPKTs")
-	// The insert message carries per-row timestamps {1,1,1}, so uuid-2 was
+	assert.NotNil(t, result[0].uuidPKTs, "UUID PKs must be tracked in uuidPKTs")
+	// The insert message carries per-row timestamps {1,1,1}, so uuid2 was
 	// last seen at ts=1. A later timestamp is a duplicate, an earlier one is not.
-	assert.True(t, result[0].pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 2))
-	assert.False(t, result[0].pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 0))
+	pk2, _ := storage.NewUUIDPrimaryKeyFromString(uuid2)
+	assert.True(t, result[0].pkExists(pk2, 2))
+	assert.False(t, result[0].pkExists(pk2, 0))
 }

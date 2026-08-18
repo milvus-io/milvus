@@ -91,8 +91,10 @@ func TestFieldStatsUpdate(t *testing.T) {
 	assert.NoError(t, err)
 	fieldStat9.Update(NewScalarFieldValue(schemapb.DataType_UUID, "550e8400-e29b-41d4-a716-446655440000"))
 	fieldStat9.Update(NewScalarFieldValue(schemapb.DataType_UUID, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"))
-	assert.Equal(t, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", fieldStat9.Max.GetValue())
-	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", fieldStat9.Min.GetValue())
+	uMin, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	uMax, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	assert.Equal(t, uMax, fieldStat9.Max.GetValue())
+	assert.Equal(t, uMin, fieldStat9.Min.GetValue())
 }
 
 func TestFieldStatsWriter_Int8FieldValue(t *testing.T) {

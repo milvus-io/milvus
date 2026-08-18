@@ -2,6 +2,7 @@ package importv2
 
 import (
 	"fmt"
+	"hash/crc32"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -149,13 +150,15 @@ func TestHashData(t *testing.T) {
 		}
 		assert.Equal(t, 1000, totalRows)
 
-		// UUID values hash as strings, so every row must land in the
-		// channel/partition derived from the string hash of its key.
 		expectedChannelCount := make([]int64, 2)
 		expectedPartitionCount := make([]int64, 2)
 		for i := 0; i < 1000; i++ {
-			expectedChannelCount[int64(typeutil.HashString2Uint32(pks[i]))%2]++
-			expectedPartitionCount[int64(typeutil.HashString2Uint32(partKeys[i]))%2]++
+			uPK, errPK := typeutil.ParseUUID(pks[i])
+			assert.NoError(t, errPK)
+			uPart, errPart := typeutil.ParseUUID(partKeys[i])
+			assert.NoError(t, errPart)
+			expectedChannelCount[int64(crc32.ChecksumIEEE(uPK[:]))%2]++
+			expectedPartitionCount[int64(crc32.ChecksumIEEE(uPart[:]))%2]++
 		}
 		channelCounts := make([]int64, 2)
 		partitionCounts := make([]int64, 2)
