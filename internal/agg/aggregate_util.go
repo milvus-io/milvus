@@ -391,7 +391,7 @@ func (uuidField *UUIDFieldAccessor) Hash(idx int) uint64 {
 
 func (uuidField *UUIDFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	uuidField.vals = fieldData.GetScalars().GetBytesData().GetData()
-	uuidField.validData = fieldData.GetValidData()
+	uuidField.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (uuidField *UUIDFieldAccessor) RowCount() int {

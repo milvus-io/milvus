@@ -478,15 +478,13 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 					}
 				}
 			case *schemapb.ValueField_BytesData:
-				if dtype != schemapb.DataType_JSON && dtype != schemapb.DataType_UUID {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_JSON or DataType_UUID")
-				}
-				if dtype == schemapb.DataType_UUID {
+				switch dtype {
+				case schemapb.DataType_UUID:
 					defVal := fieldSchema.GetDefaultValue().GetBytesData()
 					if len(defVal) != 16 {
 						return merr.WrapErrParameterInvalidMsg("invalid default_value length %d for UUID field %s, expect 16 bytes", len(defVal), fieldSchema.GetName())
 					}
-				} else if dtype == schemapb.DataType_JSON {
+				case schemapb.DataType_JSON:
 					defVal := fieldSchema.GetDefaultValue().GetBytesData()
 					jsonData := make(map[string]interface{})
 					if err := json.Unmarshal(defVal, &jsonData); err != nil {
@@ -496,6 +494,8 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 						)
 						return merr.WrapErrParameterInvalidErr(err, "invalid default json value, milvus only supports json map")
 					}
+				default:
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_JSON or DataType_UUID")
 				}
 			default:
 				panic("default value unsupport data type")

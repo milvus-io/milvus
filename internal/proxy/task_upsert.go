@@ -962,12 +962,11 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		}), nil
 
 	case schemapb.DataType_UUID:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_BytesData{
@@ -977,7 +976,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_JSON:
 		return withValidData(&schemapb.FieldData{

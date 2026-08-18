@@ -880,6 +880,31 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
+		case schemapb.DataType_UUID:
+			var data [][16]byte
+			if srcField.GetScalars().GetBytesData() != nil {
+				for _, b := range srcField.GetScalars().GetBytesData().GetData() {
+					u, err := typeutil.BytesToUUID(b)
+					if err != nil {
+						return nil, err
+					}
+					data = append(data, u)
+				}
+			} else if srcField.GetScalars().GetStringData() != nil {
+				for _, s := range srcField.GetScalars().GetStringData().GetData() {
+					u, err := typeutil.ParseUUID(s)
+					if err != nil {
+						return nil, err
+					}
+					data = append(data, u)
+				}
+			}
+			fieldData = &UUIDFieldData{
+				Data:      data,
+				DataType:  schemapb.DataType_UUID,
+				ValidData: typeutil.GetFieldDataValidData(srcField),
+				Nullable:  field.GetNullable(),
+			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := typeutil.GetFieldDataValidData(srcField)
