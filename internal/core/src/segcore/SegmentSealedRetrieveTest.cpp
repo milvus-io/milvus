@@ -347,7 +347,7 @@ TEST_P(RetrieveTest, Limit) {
                 " bytes). Reduce output fields or row limit, paginate, fetch "
                 "large fields separately, or raise "
                 "quotaAndLimits.limits.maxOutputSize only after checking "
-                "memory impact.");
+                "memory impact");
     }
 
     auto retrieve_results = segment->Retrieve(

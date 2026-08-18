@@ -240,7 +240,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
             "maximum: {} bytes). Reduce output fields or row limit, paginate, "
             "fetch large fields separately, or raise "
             "quotaAndLimits.limits.maxOutputSize only after checking memory "
-            "impact.",
+            "impact",
             output_data_size,
             limit_size);
     }

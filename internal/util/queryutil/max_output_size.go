@@ -25,7 +25,7 @@ func NewQueryResultSizeLimitExceededError(estimatedOutputSize, maxOutputSize int
 	return merr.WrapErrParameterInvalidMsg(
 		"Query result exceeds the byte-size limit (estimated: %d bytes, maximum: %d bytes). "+
 			"Reduce output fields or row limit, paginate, fetch large fields separately, or raise "+
-			"quotaAndLimits.limits.maxOutputSize only after checking memory impact.",
+			"quotaAndLimits.limits.maxOutputSize only after checking memory impact",
 		estimatedOutputSize,
 		maxOutputSize,
 	)
