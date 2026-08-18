@@ -137,3 +137,216 @@ var ViewSyncService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "view.proto",
 }
+
+const (
+	QueryPlanService_GetQueryPlan_FullMethodName = "/milvus.proto.view.QueryPlanService/GetQueryPlan"
+)
+
+// QueryPlanServiceClient is the client API for QueryPlanService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type QueryPlanServiceClient interface {
+	GetQueryPlan(ctx context.Context, in *GetQueryPlanRequest, opts ...grpc.CallOption) (*GetQueryPlanResponse, error)
+}
+
+type queryPlanServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewQueryPlanServiceClient(cc grpc.ClientConnInterface) QueryPlanServiceClient {
+	return &queryPlanServiceClient{cc}
+}
+
+func (c *queryPlanServiceClient) GetQueryPlan(ctx context.Context, in *GetQueryPlanRequest, opts ...grpc.CallOption) (*GetQueryPlanResponse, error) {
+	out := new(GetQueryPlanResponse)
+	err := c.cc.Invoke(ctx, QueryPlanService_GetQueryPlan_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// QueryPlanServiceServer is the server API for QueryPlanService service.
+// All implementations should embed UnimplementedQueryPlanServiceServer
+// for forward compatibility
+type QueryPlanServiceServer interface {
+	GetQueryPlan(context.Context, *GetQueryPlanRequest) (*GetQueryPlanResponse, error)
+}
+
+// UnimplementedQueryPlanServiceServer should be embedded to have forward compatible implementations.
+type UnimplementedQueryPlanServiceServer struct {
+}
+
+func (UnimplementedQueryPlanServiceServer) GetQueryPlan(context.Context, *GetQueryPlanRequest) (*GetQueryPlanResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetQueryPlan not implemented")
+}
+
+// UnsafeQueryPlanServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to QueryPlanServiceServer will
+// result in compilation errors.
+type UnsafeQueryPlanServiceServer interface {
+	mustEmbedUnimplementedQueryPlanServiceServer()
+}
+
+func RegisterQueryPlanServiceServer(s grpc.ServiceRegistrar, srv QueryPlanServiceServer) {
+	s.RegisterService(&QueryPlanService_ServiceDesc, srv)
+}
+
+func _QueryPlanService_GetQueryPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetQueryPlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryPlanServiceServer).GetQueryPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryPlanService_GetQueryPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryPlanServiceServer).GetQueryPlan(ctx, req.(*GetQueryPlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// QueryPlanService_ServiceDesc is the grpc.ServiceDesc for QueryPlanService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "milvus.proto.view.QueryPlanService",
+	HandlerType: (*QueryPlanServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetQueryPlan",
+			Handler:    _QueryPlanService_GetQueryPlan_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "view.proto",
+}
+
+const (
+	ViewQueryService_SearchOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/SearchOnView"
+	ViewQueryService_QueryOnView_FullMethodName  = "/milvus.proto.view.ViewQueryService/QueryOnView"
+)
+
+// ViewQueryServiceClient is the client API for ViewQueryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type ViewQueryServiceClient interface {
+	SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error)
+	QueryOnView(ctx context.Context, in *QueryOnViewRequest, opts ...grpc.CallOption) (*QueryOnViewResponse, error)
+}
+
+type viewQueryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewViewQueryServiceClient(cc grpc.ClientConnInterface) ViewQueryServiceClient {
+	return &viewQueryServiceClient{cc}
+}
+
+func (c *viewQueryServiceClient) SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error) {
+	out := new(SearchOnViewResponse)
+	err := c.cc.Invoke(ctx, ViewQueryService_SearchOnView_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *viewQueryServiceClient) QueryOnView(ctx context.Context, in *QueryOnViewRequest, opts ...grpc.CallOption) (*QueryOnViewResponse, error) {
+	out := new(QueryOnViewResponse)
+	err := c.cc.Invoke(ctx, ViewQueryService_QueryOnView_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ViewQueryServiceServer is the server API for ViewQueryService service.
+// All implementations should embed UnimplementedViewQueryServiceServer
+// for forward compatibility
+type ViewQueryServiceServer interface {
+	SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error)
+	QueryOnView(context.Context, *QueryOnViewRequest) (*QueryOnViewResponse, error)
+}
+
+// UnimplementedViewQueryServiceServer should be embedded to have forward compatible implementations.
+type UnimplementedViewQueryServiceServer struct {
+}
+
+func (UnimplementedViewQueryServiceServer) SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SearchOnView not implemented")
+}
+func (UnimplementedViewQueryServiceServer) QueryOnView(context.Context, *QueryOnViewRequest) (*QueryOnViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method QueryOnView not implemented")
+}
+
+// UnsafeViewQueryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ViewQueryServiceServer will
+// result in compilation errors.
+type UnsafeViewQueryServiceServer interface {
+	mustEmbedUnimplementedViewQueryServiceServer()
+}
+
+func RegisterViewQueryServiceServer(s grpc.ServiceRegistrar, srv ViewQueryServiceServer) {
+	s.RegisterService(&ViewQueryService_ServiceDesc, srv)
+}
+
+func _ViewQueryService_SearchOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchOnViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewQueryServiceServer).SearchOnView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewQueryService_SearchOnView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewQueryServiceServer).SearchOnView(ctx, req.(*SearchOnViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ViewQueryService_QueryOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryOnViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewQueryServiceServer).QueryOnView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewQueryService_QueryOnView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewQueryServiceServer).QueryOnView(ctx, req.(*QueryOnViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ViewQueryService_ServiceDesc is the grpc.ServiceDesc for ViewQueryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ViewQueryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "milvus.proto.view.ViewQueryService",
+	HandlerType: (*ViewQueryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SearchOnView",
+			Handler:    _ViewQueryService_SearchOnView_Handler,
+		},
+		{
+			MethodName: "QueryOnView",
+			Handler:    _ViewQueryService_QueryOnView_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "view.proto",
+}
