@@ -6,10 +6,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -358,4 +361,24 @@ func TestEngineStartWaitsForActivation(t *testing.T) {
 
 	coord.fire()
 	assert.Equal(t, 1, engine.startCount, "activation is what starts the engine")
+}
+
+// The adapter's narrowness is structural, not conventional: the coordinator
+// sits in an unexported field, so no type assertion can climb from the
+// extension.MixCoord handle back to the full coordinator surface. With an
+// embedded types.MixCoordComponent this assertion would succeed.
+func TestEngineClientDoesNotLeakTheFullCoordinator(t *testing.T) {
+	client, err := newMixCoordEngineClient(&engineTestCoord{})
+	require.NoError(t, err)
+
+	_, leaks := client.(types.MixCoordComponent)
+	assert.False(t, leaks,
+		"extension.MixCoord must be the whole of what an engine can reach; see the removed GetShardLeaders")
+
+	type shardLeadersProvider interface {
+		GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error)
+	}
+	_, leaks = client.(shardLeadersProvider)
+	assert.False(t, leaks,
+		"the collection-wide GetShardLeaders was removed from the interface; it must not be reachable structurally either")
 }

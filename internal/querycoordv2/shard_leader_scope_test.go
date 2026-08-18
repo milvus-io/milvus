@@ -130,3 +130,23 @@ func TestGetShardLeadersScopedToAnUnknownResourceGroup(t *testing.T) {
 	assert.Empty(t, leaderNodeIDs(t, resp, "100-dmc0"),
 		"a resource group the collection was never loaded into must be served no leaders at all")
 }
+
+// The strict form (unserviceable shards not accepted) refuses an unknown
+// resource group by name, not with ChannelNotAvailable: the channel is fine -
+// a sibling group may be serving it right now - and a retry will not change
+// the answer until someone loads the collection into this group.
+func TestGetShardLeadersStrictScopeRefusesAnUnheldResourceGroupByName(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putLeader(100, 10, "100-dmc0", true)
+
+	resp, err := scopedServer(f).GetShardLeaders(context.Background(), &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-nowhere",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+	assert.Contains(t, resp.GetStatus().GetReason(), "rg-nowhere",
+		"the refusal must name the resource group, not blame the channel")
+}

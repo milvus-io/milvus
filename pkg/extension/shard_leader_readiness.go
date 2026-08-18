@@ -18,6 +18,11 @@ package extension
 // enough to say WHY the answer is no: which shards are missing a leader, out
 // of how many, and a reason for the outcomes that are not about a specific
 // shard at all.
+// The reason strings below mirror internal/querycoordv2/utils, which computes
+// them; the two sets must stay identically valued, or callers comparing
+// against these constants go blind. The DTO is duplicated rather than shared
+// because the dependency points outward: querycoord's computation layer does
+// not import this package.
 type ShardLeaderReadiness struct {
 	// Ready is true only when every shard of the collection has a serviceable
 	// leader inside a replica that lives in the requested resource group. It is

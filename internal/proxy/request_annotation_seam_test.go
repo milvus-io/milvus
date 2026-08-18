@@ -413,6 +413,11 @@ func TestOnConnectSurfacesARefusal(t *testing.T) {
 // site depends on: OnConnect runs BEFORE the connection is registered, so a
 // refused client leaves nothing behind in the connection manager for the
 // disconnect sweep to trip over.
+// NOTE: Connect registers the connection in the process-global
+// connection.GetManager(), which exposes no per-entry removal - registrations
+// made here outlive the test and are collected only by the manager's own
+// inactivity sweep. Keep identifiers unique per test so leftovers cannot
+// collide.
 func TestConnectRefusalLeavesNoRegisteredConnection(t *testing.T) {
 	ext := installFormExtension(t)
 	ext.refuse = errors.New("refused")

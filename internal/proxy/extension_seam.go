@@ -370,11 +370,10 @@ func checkCreateCollectionAdmission(ctx context.Context, coord types.MixCoordCli
 }
 
 // The database-creation path has no equivalent checkCreateDatabaseAdmission
-// wrapper. createDatabaseTask.PreExecute (task_database.go) must interleave
-// its existence check between "admission is installed" and "call the
-// checker" -- CheckDatabase only needs to run in the former case, and the
-// wrapper shape above has no room for a caller-supplied step in the middle
-// without taking a callback nobody else would need. So task_database.go
-// resolves admissionChecker() itself and calls CheckCreateDatabase directly;
-// see the comment there for why that is not a second consultation of
+// wrapper: createDatabaseTask.PreExecute follows the same admission-first,
+// existence-only-on-rejection order as the collection path, but its rejection
+// fallback (GetDatabaseInfo) lives on the task's own dependencies, so the
+// task resolves admissionChecker() itself and calls CheckCreateDatabase
+// directly. The two spellings are the same consultation - one capability
+// read, one call - differing only in where the code lives;
 // extension.Caps() but the only one for that path.

@@ -3,6 +3,7 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 )
 
@@ -28,13 +29,20 @@ import (
 // report: the load path itself rejects it, with a message about the resource
 // group rather than about analyzer files.
 func (s *Server) checkFileResourceReadyForResourceGroups(ctx context.Context, rgNames []string) error {
-	if s.fileResourceObserver == nil || len(rgNames) == 0 {
+	if s.fileResourceObserver == nil {
 		return nil
+	}
+	// A load that names no resource group loads into the default one, so an
+	// empty list is the default group by another spelling - it must be
+	// checked exactly as the explicit __default_resource_group is, or the
+	// same load passes or fails on how the client happened to phrase it.
+	if len(rgNames) == 0 {
+		rgNames = []string{meta.DefaultResourceGroupName}
 	}
 	nodes := make([]int64, 0, len(rgNames))
 	for _, rgName := range rgNames {
 		if rgName == "" {
-			continue
+			rgName = meta.DefaultResourceGroupName
 		}
 		rgNodes, err := s.meta.GetNodes(ctx, rgName)
 		if err != nil {

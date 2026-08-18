@@ -187,8 +187,10 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	log := mlog.With(
 		mlog.String("db", database),
 		mlog.FieldCollectionName(collectionName),
-		mlog.FieldCollectionID(collectionID),
-		mlog.String("resourceGroup", key.resourceGroup))
+		mlog.FieldCollectionID(collectionID))
+	if key.resourceGroup != "" {
+		log = log.With(mlog.String("resourceGroup", key.resourceGroup))
+	}
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)

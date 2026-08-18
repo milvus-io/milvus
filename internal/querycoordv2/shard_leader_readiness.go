@@ -20,5 +20,14 @@ import (
 // reach querycoord through Server, keep a stable entry point - the same split
 // GetLoadPercentageByResourceGroup uses.
 func (s *Server) GetShardLeaderReadinessByResourceGroup(ctx context.Context, collectionID int64, rgName string) (extension.ShardLeaderReadiness, error) {
-	return utils.ShardLeaderReadinessByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID, rgName)
+	// The conversion is this boundary's job: utils computes with its own DTO
+	// so the computation layer does not depend on pkg/extension, and the two
+	// types are field-for-field identical by construction.
+	r, err := utils.ShardLeaderReadinessByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID, rgName)
+	return extension.ShardLeaderReadiness{
+		Ready:         r.Ready,
+		Reason:        r.Reason,
+		TotalShards:   r.TotalShards,
+		UnreadyShards: r.UnreadyShards,
+	}, err
 }

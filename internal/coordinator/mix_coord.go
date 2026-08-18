@@ -1103,8 +1103,10 @@ func (s *mixCoordImpl) GetShardLeaderReadinessByResourceGroup(ctx context.Contex
 // type-assert the concrete coordinator rather than growing types.MixCoord and
 // every generated mock of it.
 //
-// The coordinator holds the only proxy client manager in the process, which is
-// why the fan-out has to live here rather than in the caller.
+// The proxy client manager is built by rootcoord during Init and shared with
+// this coordinator (initInternal wires it), and nothing outside the
+// coordinator process holds one - which is why the fan-out has to live here
+// rather than in the caller.
 func (s *mixCoordImpl) InvalidateShardLeaderCache(ctx context.Context, collectionID int64) error {
 	if s.proxyClientManager == nil {
 		// Not wired yet - initInternal has not run. Failing loudly matters

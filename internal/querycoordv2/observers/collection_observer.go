@@ -252,7 +252,10 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 		}
 		percentage, err := utils.LoadPercentageByResourceGroup(ctx, ob.meta, ob.targetMgr, ob.dist, task.CollectionID, task.ResourceGroup)
 		if err != nil {
-			mlog.Warn(ctx, "failed to read resource group load percentage",
+			// Rate-limited: this runs per task per observation tick, and a
+			// persistent read failure (a recorded load failure, say) would
+			// otherwise print once a second until the task times out.
+			mlog.RatedWarn(ctx, 0.1, "failed to read resource group load percentage",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup),
 				mlog.Err(err))

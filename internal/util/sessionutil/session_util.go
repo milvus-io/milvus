@@ -163,7 +163,13 @@ func (s *SessionRaw) GetResourceGroupName() string {
 // embedded query node does not serve shard queries.
 //
 // The absence of the label is the answer milvus gave before it existed, so an
-// unlabelled session reads as query serving.
+// unlabelled session reads as query serving. The comparison is against the
+// literal "1" and nothing else - not "true", not "yes" - deliberately: a
+// half-set label must fail toward the native reading (the node serves
+// queries), and one accepted spelling keeps deployment templates from
+// drifting. Note the constant is STREAMING_NOQUERY with an underscore; a
+// hyphenated spelling in an environment variable cannot be exported from a
+// shell and is silently a different label.
 func (s *SessionRaw) HasNoQueryService() bool {
 	if s.ServerLabels == nil {
 		return false

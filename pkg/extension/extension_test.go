@@ -1,9 +1,13 @@
 package extension
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 type fakeProvider struct {
@@ -63,3 +67,28 @@ func TestSetProviderRejectsDoubleInstall(t *testing.T) {
 	err := SetProvider(fakeProvider{name: "second"})
 	assert.ErrorContains(t, err, "first", "the error should name the provider already installed")
 }
+
+// A typed-nil capability passes the non-nil interface check and then panics at
+// its first seam call. SetProvider refuses it at install time, with the
+// capability named, instead of letting a wiring mistake surface as a panic in
+// whichever request happens to consult the capability first.
+func TestSetProviderRefusesATypedNilCapability(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+
+	var nilDrainer *typedNilDrainer
+	err := SetProvider(fakeProvider{name: "typed-nil-form", caps: Capabilities{IndexDrain: nilDrainer}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), string(CapIndexDrain))
+}
+
+type typedNilDrainer struct{}
+
+func (*typedNilDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64, string) bool {
+	return false
+}
+func (*typedNilDrainer) BeginDropIndex(context.Context, *indexpb.DropIndexRequest) bool { return false }
+func (*typedNilDrainer) AfterDropIndex(context.Context, *indexpb.DropIndexRequest)      {}
+func (*typedNilDrainer) AbortDropIndex(context.Context, *indexpb.DropIndexRequest)      {}
+func (*typedNilDrainer) AfterCreateIndex(context.Context, *indexpb.CreateIndexRequest)  {}
+func (*typedNilDrainer) CollectionDraining(context.Context, int64) bool                 { return false }

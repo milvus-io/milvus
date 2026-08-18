@@ -25,6 +25,12 @@ type ProxyConnections interface {
 	// returned to that client and passed to OnConnect - and false when the
 	// request carries none. A request with no identifier is ordinary: it is
 	// what a client that never called Connect sends.
+	//
+	// TRUST: the identifier is read off a client-controlled header and is not
+	// authenticated - any client can send any value. It is a ROUTING key (a
+	// wrong value routes the request to the wrong binding, which is the
+	// sender's own problem), never an authorization boundary: nothing that
+	// grants access may be keyed on it alone.
 	IdentifierFromContext(ctx context.Context) (int64, bool)
 
 	// Connected reports whether a connection identifier is still registered.
@@ -82,9 +88,17 @@ type ProxyConnections interface {
 // the one condition under which it must not, is on the method.
 type ProxyExtension interface {
 	// InterceptDML may short-circuit: a non-nil status rejects the write before
-	// it reaches the write path. op is the operation name, e.g. "Insert". ctx
-	// carries the caller's deadline and any request-scoped values. req is the
-	// DML request being considered.
+	// it reaches the write path. op is the operation name - one of "Insert",
+	// "Delete", "Upsert", "Flush", "FlushAll" and "Import" (which ImportV2
+	// funnels through; those are the six write paths wired today). ctx carries
+	// the caller's deadline and any request-scoped values. req is the DML
+	// request being considered.
+	//
+	// A short-circuited request returns before the handler's own metrics,
+	// rate-limit accounting and trace span - the same place milvus's own
+	// checkExternalCollectionBlockedForWrite rejects from - so refused writes
+	// appear in the gRPC-layer access log and stats, not in ProxyFunctionCall
+	// or the NQ counters.
 	InterceptDML(ctx context.Context, op string, req proto.Message) *commonpb.Status
 
 	// InterceptAdminRPC may short-circuit the administrative RPCs a deployment
@@ -197,6 +211,14 @@ type ProxyExtension interface {
 	// nothing is not unusual - it is what every control-plane-only client
 	// looks like - so returning an error for a missing declaration would
 	// refuse connections milvus itself has no problem with.
+	//
+	// ORDERING: this runs BEFORE the connection is registered (a rejected
+	// handshake must not leave a registered connection nothing will ever
+	// collect), so there is a window in which the binding exists while
+	// Connected(identifier) still answers false. A sweeper that collects
+	// bindings on Connected()==false must therefore grant a fresh binding a
+	// grace period longer than a Connect round trip, or it will collect the
+	// binding this very handshake just created.
 	OnConnect(identifier int64, info *commonpb.ClientInfo) error
 
 	// RewriteRequestParams runs at the entry of every search, hybrid search and
@@ -267,7 +289,10 @@ type ProxyExtension interface {
 
 	// Start runs the extension's proxy-side background work. It is called once
 	// while the proxy starts, must return promptly rather than blocking, and
-	// whatever it started must stop when ctx is canceled.
+	// whatever it started must stop when ctx is canceled. Proxy shutdown
+	// cancels ctx but does NOT wait for that work to finish - there is no
+	// join - so the work must be safe to abandon mid-step: nothing that
+	// corrupts state when the process exits while it runs.
 	//
 	// OBSERVE ONLY: it cannot fail the proxy's start-up and cannot change what
 	// any request does.

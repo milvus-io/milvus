@@ -6,7 +6,30 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
+)
+
+// ShardLeaderReadiness is this package's own answer type. It is structurally
+// identical to ShardLeaderReadiness - the Server boundary converts
+// one into the other - because the dependency has to point outward: utils is
+// querycoord's computation layer, and importing pkg/extension from here for
+// one DTO would let extension concerns creep under the computation instead of
+// staying at the boundary that serves them.
+type ShardLeaderReadiness struct {
+	Ready         bool
+	Reason        string
+	TotalShards   int
+	UnreadyShards []string
+}
+
+// The reason strings are the source of truth for the identically-valued
+// ShardLeadersReason* constants; a change here must be mirrored
+// there, or boundary callers comparing against those constants go blind.
+const (
+	ShardLeadersReasonCoordinatorNotReady      = "coordinator query meta is not ready"
+	ShardLeadersReasonNoReplicaInResourceGroup = "no replica of the collection lives in this resource group"
+	ShardLeadersReasonCollectionNotLoaded      = "the collection is not registered as loaded"
+	ShardLeadersReasonNoChannelTarget          = "the collection has no shard in the current target, it may be recovering"
+	ShardLeadersReasonShardsWithoutLeader      = "some shards have no serviceable leader in this resource group"
 )
 
 // ShardLeaderReadinessByResourceGroup answers a narrower question than
@@ -57,9 +80,9 @@ func ShardLeaderReadinessByResourceGroup(
 	nodeMgr *session.NodeManager,
 	collectionID int64,
 	rgName string,
-) (extension.ShardLeaderReadiness, error) {
+) (ShardLeaderReadiness, error) {
 	if m == nil || targetMgr == nil || dist == nil || nodeMgr == nil {
-		return extension.ShardLeaderReadiness{Reason: extension.ShardLeadersReasonCoordinatorNotReady}, nil
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady}, nil
 	}
 
 	var replicas []*meta.Replica
@@ -69,7 +92,7 @@ func ShardLeaderReadinessByResourceGroup(
 		}
 	}
 	if len(replicas) == 0 {
-		return extension.ShardLeaderReadiness{Reason: extension.ShardLeadersReasonNoReplicaInResourceGroup}, nil
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoReplicaInResourceGroup}, nil
 	}
 
 	// A replica record can outlive the load registration, for instance when the
@@ -77,7 +100,7 @@ func ShardLeaderReadinessByResourceGroup(
 	// wait out its timeout on a load that is never coming back, matching what
 	// LoadPercentageByResourceGroup does with the same cache.
 	if !m.Exist(ctx, collectionID) {
-		return extension.ShardLeaderReadiness{Reason: extension.ShardLeadersReasonCollectionNotLoaded},
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonCollectionNotLoaded},
 			meta.GlobalFailedLoadCache.Get(collectionID)
 	}
 
@@ -86,10 +109,10 @@ func ShardLeaderReadinessByResourceGroup(
 	// the same target the native shard-leader path reads.
 	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 	if len(channels) == 0 {
-		return extension.ShardLeaderReadiness{Reason: extension.ShardLeadersReasonNoChannelTarget}, nil
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoChannelTarget}, nil
 	}
 
-	readiness := extension.ShardLeaderReadiness{TotalShards: len(channels)}
+	readiness := ShardLeaderReadiness{TotalShards: len(channels)}
 	for _, channel := range channels {
 		if !hasServiceableLeaderInReplicas(dist, nodeMgr, channel.GetChannelName(), replicas) {
 			readiness.UnreadyShards = append(readiness.UnreadyShards, channel.GetChannelName())
@@ -99,7 +122,7 @@ func ShardLeaderReadinessByResourceGroup(
 		// channels arrives as a map, so its iteration order is random; sort so
 		// that one state always prints one line.
 		sort.Strings(readiness.UnreadyShards)
-		readiness.Reason = extension.ShardLeadersReasonShardsWithoutLeader
+		readiness.Reason = ShardLeadersReasonShardsWithoutLeader
 		return readiness, nil
 	}
 

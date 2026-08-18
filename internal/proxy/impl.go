@@ -3167,6 +3167,10 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 	// A hybrid search carries the reserved parameter on its rank params; see
 	// the note in Search on why this runs outside the retry.
+	// RankParams only, not the sub-requests' SearchParams: a form's routing
+	// parameter names the cluster for the whole hybrid search, and the
+	// top-level params are where clients put it (the fork this generalizes
+	// read exactly this field). Sub-request params are left untouched.
 	ctx, request.RankParams = rewriteRequestParams(ctx, request.GetRankParams())
 
 	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())

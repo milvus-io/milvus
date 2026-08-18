@@ -106,7 +106,11 @@ type MixCoord interface {
 // The three methods are called in this order, and only in this order:
 //
 //  1. RegisterOnCoordinator, while the coordinator's gRPC server is being
-//     built and before it serves.
+//     built and before it serves. The services registered here share the
+//     coordinator server's interceptors - cluster and server-id validation,
+//     no authentication - so they are reachable by anything that can reach
+//     the coordinator port: the deployment's network boundary is their access
+//     control, exactly as it is for the coordinator's own services.
 //  2. Start, after the coordinator itself is running and able to answer the
 //     MixCoord calls the engine makes.
 //  3. Stop, once, when the coordinator shuts down.
@@ -135,9 +139,16 @@ type CoordinatorEngine interface {
 	// start-up: an engine that failed to come up would leave the deployment
 	// running without the control plane it depends on, which is worse than
 	// not coming up at all.
+	// ctx is the coordinator server's lifetime context. It is NOT the stop
+	// signal: it is cancelled only after Stop has already returned, so an
+	// implementation shuts down on Stop and may use ctx merely as the parent
+	// for the background work it starts.
 	Start(ctx context.Context, coord MixCoord) error
 
-	// Stop shuts the engine down. It is called during coordinator shutdown
-	// even if Start failed or never ran, so it must tolerate that.
+	// Stop shuts the engine down. It is called on a graceful coordinator
+	// shutdown even when Start failed or never ran, so it must tolerate both;
+	// it is NOT called when the process exits because start-up itself failed
+	// (the process just dies), so anything needing cleanup across a failed
+	// boot must be crash-safe rather than Stop-dependent.
 	Stop() error
 }
