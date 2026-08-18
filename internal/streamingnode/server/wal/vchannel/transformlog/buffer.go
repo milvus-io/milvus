@@ -85,6 +85,10 @@ func (b *buffer) DataTimeTick() uint64 {
 	return b.toTimeTick
 }
 
+func (b *buffer) FromTimeTick() uint64 {
+	return b.fromTimeTick
+}
+
 func (b *buffer) FlushTargetTimeTick() uint64 {
 	return b.flushTargetTimeTick
 }

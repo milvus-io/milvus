@@ -269,6 +269,19 @@ func (m *PChannelRecoveryManager) Module(vchannel string) *VChannelRecoveryModul
 	return module
 }
 
+// RequestPersistThrough schedules persistence for buffered data of one
+// VChannel through targetTimeTick.
+func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetTimeTick uint64) {
+	if m == nil || vchannel == "" {
+		return
+	}
+	module := m.Module(vchannel)
+	if module == nil {
+		return
+	}
+	module.RequestPersistThrough(targetTimeTick)
+}
+
 func (m *PChannelRecoveryManager) Close() {}
 
 func (m *PChannelRecoveryManager) shouldBroadcast(msg message.ImmutableMessage) bool {

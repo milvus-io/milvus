@@ -27,7 +27,7 @@ func TestBroadcastAckHoldsOwnerUntilExclusiveAndAckSucceeds(t *testing.T) {
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{10}}).
 		WithBody(&msgpb.CreateCollectionRequest{}))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 	other := owner.Clone()
 
@@ -54,7 +54,7 @@ func TestBroadcastAckSubmitsExclusiveOwnerImmediately(t *testing.T) {
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
 		WithBody(&msgpb.CreateCollectionRequest{}))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 
 	module.Accept(owner)
@@ -71,7 +71,7 @@ func TestBroadcastAckReleasesNonBroadcastOwnerImmediately(t *testing.T) {
 	t.Cleanup(module.Close)
 	raw := message.CreateTestTimeTickSyncMessage(t, 1, 20, walimplstest.NewTestMessageID(10)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(11))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	owner := tracker.Track(raw)
 
 	module.Accept(owner)
@@ -97,7 +97,7 @@ func TestBroadcastAckRetriesSameTaskAfterFailure(t *testing.T) {
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{10}}).
 		WithBody(&msgpb.CreateCollectionRequest{}))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 	module.Accept(owner)
 
@@ -127,7 +127,7 @@ func TestBroadcastAckAllowsReadyNonConflictingTaskToPass(t *testing.T) {
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 2, PartitionIds: []int64{20}}).
 		WithBody(&msgpb.CreateCollectionRequest{}), 2, 20,
 		message.NewExclusiveCollectionNameResourceKey("db", "c2"))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	firstOwner := tracker.Track(firstMsg)
 	firstConsumer := firstOwner.Clone()
 	secondOwner := tracker.Track(secondMsg)
@@ -168,7 +168,7 @@ func TestBroadcastAckKeepsConflictingTasksOrderedAcrossRetry(t *testing.T) {
 		WithBroadcast([]string{"v2"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 2, PartitionIds: []int64{20}}).
 		WithBody(&msgpb.CreateCollectionRequest{}), 2, 20, key)
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	firstOwner := tracker.Track(firstMsg)
 	secondOwner := tracker.Track(secondMsg)
 
@@ -206,7 +206,7 @@ func TestBroadcastAckSharedTasksDoNotConflict(t *testing.T) {
 		WithBroadcast([]string{"v2"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 2}).
 		WithBody(&msgpb.CreateCollectionRequest{}), 2, 20, key)
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	firstOwner := tracker.Track(firstMsg)
 	firstConsumer := firstOwner.Clone()
 	secondOwner := tracker.Track(secondMsg)
@@ -241,7 +241,7 @@ func TestBroadcastAckExclusiveClusterPreservesBarrierOrder(t *testing.T) {
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 3}).
 		WithBody(&msgpb.CreateCollectionRequest{}), 3, 30,
 		message.NewSharedClusterResourceKey())
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	firstOwner := tracker.Track(firstMsg)
 	firstConsumer := firstOwner.Clone()
 	barrierOwner := tracker.Track(barrierMsg)
@@ -293,7 +293,7 @@ func TestBroadcastAckCloseCancelsPendingConsumerWait(t *testing.T) {
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
 		WithBody(&msgpb.CreateCollectionRequest{}))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 	consumer := owner.Clone()
 
@@ -318,7 +318,7 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
 		WithBody(&msgpb.CreateCollectionRequest{}))
-	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil)
+	tracker := messageack.NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 	module.Accept(owner)
 

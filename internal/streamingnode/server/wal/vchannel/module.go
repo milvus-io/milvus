@@ -303,6 +303,25 @@ func (m *VChannelRecoveryModule) IsActive() bool {
 	return m.vchannelView != nil && m.vchannelView.IsActive()
 }
 
+// RequestPersistThrough schedules persistence for buffered data observed by
+// this VChannel through targetTimeTick.
+func (m *VChannelRecoveryModule) RequestPersistThrough(targetTimeTick uint64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed {
+		return
+	}
+	for _, view := range m.segments {
+		view.RequestPersistThrough(targetTimeTick)
+	}
+	if m.transformLog != nil {
+		m.transformLog.RequestPersistThrough(targetTimeTick)
+	}
+}
+
 func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) {
 	if m.vchannelView == nil {
 		m.vchannelView = NewVChannelViewFromCreateCollectionMessage(msg)

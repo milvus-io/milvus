@@ -90,6 +90,12 @@ func (t *TransformLog) submitFlushTask(timetick uint64) {
 		return
 	}
 	t.mu.Lock()
+	task := t.newFlushTaskLocked(timetick)
+	t.mu.Unlock()
+	scheduler.Submit(task)
+}
+
+func (t *TransformLog) newFlushTaskLocked(timetick uint64) *transformFlushTask {
 	task := &transformFlushTask{
 		transformTaskBase: transformTaskBase{
 			log:          t,
@@ -98,8 +104,7 @@ func (t *TransformLog) submitFlushTask(timetick uint64) {
 		},
 	}
 	t.flushTasks = append(t.flushTasks, task)
-	t.mu.Unlock()
-	scheduler.Submit(task)
+	return task
 }
 
 func (t *TransformLog) submitMaterializeTask(timetick uint64) {
@@ -136,8 +141,23 @@ func (t *TransformLog) taskPredecessorsLocked() []transformTask {
 func (t *TransformLog) HasPendingFlushTask() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.hasPendingFlushTaskLocked()
+}
+
+func (t *TransformLog) hasPendingFlushTaskLocked() bool {
 	t.flushTasks = compactTransformFlushTasks(t.flushTasks)
 	return len(t.flushTasks) > 0
+}
+
+func (t *TransformLog) pendingFlushTargetLocked() uint64 {
+	t.flushTasks = compactTransformFlushTasks(t.flushTasks)
+	var target uint64
+	for _, task := range t.flushTasks {
+		if task.timetick > target {
+			target = task.timetick
+		}
+	}
+	return target
 }
 
 func (t *TransformLog) HasPendingMaterializeTask() bool {

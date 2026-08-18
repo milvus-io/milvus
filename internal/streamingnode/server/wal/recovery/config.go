@@ -11,10 +11,12 @@ import (
 func newConfig() *config {
 	params := paramtable.Get()
 	persistInterval := params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse()
+	ackStallTimeout := params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
 	maxDirtyMessages := params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt()
 	taskConcurrency := params.StreamingCfg.WALRecoveryTaskConcurrency.GetAsInt()
 	cfg := &config{
 		persistInterval:  persistInterval,
+		ackStallTimeout:  ackStallTimeout,
 		maxDirtyMessages: maxDirtyMessages,
 		taskConcurrency:  taskConcurrency,
 	}
@@ -27,6 +29,7 @@ func newConfig() *config {
 // config is the configuration for the recovery module.
 type config struct {
 	persistInterval  time.Duration // persistInterval is the interval to persist the dirty recovery snapshot.
+	ackStallTimeout  time.Duration // ackStallTimeout is the maximum wait before requesting VChannel data persistence.
 	maxDirtyMessages int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
 	taskConcurrency  int           // taskConcurrency is the max number of async recovery tasks running concurrently.
 }

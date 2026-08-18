@@ -423,6 +423,29 @@ func (t *TransformLog) HasPendingWork() bool {
 		t.buffer.FlushTargetTimeTick() > t.persistedDataTimeTick
 }
 
+// RequestPersistThrough schedules persistence when the current buffer contains
+// transform entries whose TimeTick is not greater than targetTimeTick. Once
+// triggered, the whole current buffer is batched into the scheduled frontier.
+func (t *TransformLog) RequestPersistThrough(targetTimeTick uint64) bool {
+	if t == nil || t.runtime.Scheduler == nil {
+		return false
+	}
+	t.mu.Lock()
+	if t.buffer.IsEmpty() || t.buffer.FromTimeTick() > targetTimeTick {
+		t.mu.Unlock()
+		return false
+	}
+	flushTargetTimeTick := t.buffer.DataTimeTick()
+	if t.pendingFlushTargetLocked() >= flushTargetTimeTick {
+		t.mu.Unlock()
+		return false
+	}
+	task := t.newFlushTaskLocked(flushTargetTimeTick)
+	t.mu.Unlock()
+	t.runtime.Scheduler.Submit(task)
+	return true
+}
+
 func (t *TransformLog) hasFlushWork() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()

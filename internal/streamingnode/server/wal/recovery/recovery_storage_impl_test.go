@@ -52,6 +52,7 @@ func newTestRecoveryStorage(t *testing.T, checkpoint *utility.WALCheckpoint) *re
 	})
 	require.NoError(t, err)
 	storage.vchannelManager = manager
+	storage.installCheckpoint(storage.checkpoint)
 	t.Cleanup(manager.Close)
 	return storage
 }
@@ -107,6 +108,7 @@ func TestRecoveryStorageCloseDoesNotPersist(t *testing.T) {
 	defer persistMock.UnPatch()
 
 	go storage.backgroundTask()
+	storage.startAckTracker()
 	storage.Close()
 
 	assert.Zero(t, persisted)

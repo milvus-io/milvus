@@ -64,6 +64,38 @@ func TestTransformLogDoesNotCloneUnrelatedMessage(t *testing.T) {
 	assert.Panics(t, func() { _ = owner.Message() })
 }
 
+func TestTransformLogRequestPersistThrough(t *testing.T) {
+	scheduler := &recordingScheduler{}
+	transformLog := New(Config{
+		VChannel: "v1",
+		MaxRows:  100,
+		Store:    newMemoryStore(),
+		Runtime:  moduleapi.Runtime{Scheduler: scheduler},
+	})
+	transformLog.SwitchIntoMetaAndData()
+	first := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 10))
+	second := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 11))
+	observeRetainedTransformMessage(transformLog, first)
+	observeRetainedTransformMessage(transformLog, second)
+	first.Release()
+	second.Release()
+	require.Empty(t, scheduler.tasks)
+
+	assert.False(t, transformLog.RequestPersistThrough(9))
+	require.Empty(t, scheduler.tasks)
+	require.True(t, transformLog.RequestPersistThrough(10))
+	require.Len(t, scheduler.tasks, 1)
+	task, ok := scheduler.tasks[0].(*transformFlushTask)
+	require.True(t, ok)
+	assert.Equal(t, uint64(11), task.timetick)
+
+	assert.False(t, transformLog.RequestPersistThrough(11))
+	require.Len(t, scheduler.tasks, 1)
+	require.NoError(t, task.Execute(context.Background()))
+	assert.Panics(t, func() { _ = first.Message() })
+	assert.Panics(t, func() { _ = second.Message() })
+}
+
 func TestTransformLogBarrierRefCompletesWithoutMaterialization(t *testing.T) {
 	scheduler := &recordingScheduler{}
 	materializer := &recordingMaterializer{}

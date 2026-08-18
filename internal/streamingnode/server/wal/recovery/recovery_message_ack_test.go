@@ -39,6 +39,7 @@ func installManager(t *testing.T, storage *recoveryStorageImpl) *vchannel.PChann
 	})
 	require.NoError(t, err)
 	storage.vchannelManager = manager
+	storage.installCheckpoint(storage.checkpoint)
 	t.Cleanup(manager.Close)
 	return manager
 }

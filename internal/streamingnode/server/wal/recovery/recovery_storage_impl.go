@@ -64,6 +64,7 @@ func RecoverRecoveryStorage(
 		mlog.String("state", recoveryStorageStateWorking)))
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
+	rs.startAckTracker()
 	rs.startDataLiveScanner(recoveryStreamBuilder)
 	return rs, snapshot, nil
 }
@@ -143,6 +144,7 @@ type recoveryStorageImpl struct {
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *dirtyPersistSnapshot
 	dataScannerWG          sync.WaitGroup
+	ackTrackerWG           sync.WaitGroup
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -167,7 +169,7 @@ func (r *recoveryStorageImpl) installCheckpoint(checkpoint *WALCheckpoint) {
 	}
 	r.ackTracker = messageack.NewTracker(dataPoint, func(utility.WALConsumeCheckpoint) {
 		r.notifyPersist()
-	})
+	}, r.vchannelManager)
 }
 
 func (r *recoveryStorageImpl) initRecoveryModules(
@@ -217,6 +219,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		return err
 	}
 	r.vchannelManager = manager
+	r.installCheckpoint(r.checkpoint)
 	return nil
 }
 
@@ -246,6 +249,7 @@ func (r *recoveryStorageImpl) Close() {
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
 	r.dataScannerWG.Wait()
+	r.ackTrackerWG.Wait()
 	if r.broadcastAck != nil {
 		r.broadcastAck.Close()
 	}
@@ -253,6 +257,17 @@ func (r *recoveryStorageImpl) Close() {
 		r.taskScheduler.Close()
 	}
 	r.metrics.Close()
+}
+
+func (r *recoveryStorageImpl) startAckTracker() {
+	if r.ackTracker == nil {
+		return
+	}
+	r.ackTrackerWG.Add(1)
+	go func() {
+		defer r.ackTrackerWG.Done()
+		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout)
+	}()
 }
 
 // notifyPersist notifies a persist operation.

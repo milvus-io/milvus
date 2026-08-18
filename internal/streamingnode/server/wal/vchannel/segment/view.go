@@ -356,6 +356,24 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 	return nil
 }
 
+// RequestPersistThrough schedules persistence for buffered inserts whose
+// TimeTick is not greater than targetTimeTick. The whole current buffer may be
+// persisted, so the scheduled task can cover a later TimeTick as well.
+func (s *SegmentView) RequestPersistThrough(targetTimeTick uint64) bool {
+	if s == nil || s.runtime.Scheduler == nil {
+		return false
+	}
+	s.mu.Lock()
+	if len(s.pending.entries) == 0 || s.pending.fromTimeTick > targetTimeTick {
+		s.mu.Unlock()
+		return false
+	}
+	task := s.newFlushL1BufferTaskLocked()
+	s.mu.Unlock()
+	s.runtime.Scheduler.Submit(task)
+	return true
+}
+
 func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
 	info.mu.Lock()
 	defer info.mu.Unlock()
