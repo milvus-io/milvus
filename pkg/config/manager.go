@@ -699,7 +699,10 @@ func (m *Manager) RegisterConfigPrefix(prefix string) {
 	m.registeredKeyPrefixes.Insert(canonicalPrefix, formatKeyUncached(canonicalPrefix))
 }
 
-// RegisteredConfigPrefixes returns the dynamic namespaces declared so far.
+// RegisteredConfigPrefixes returns the dynamic namespaces declared so far, in
+// no particular order. A manager whose ParamGroup declares no KeyPrefix — the
+// hook table — reports the empty prefix, so a caller appending a leaf to each
+// entry must expect a bare key back.
 //
 // Exported for the paramtable audits: they used to enumerate namespaces by
 // reflecting over ParamGroup fields, which made a prefix registered any other
@@ -839,6 +842,12 @@ func (m *Manager) rememberSpelling(key, sourceName string) {
 	// spelling only ever endorses a segmentation, and endorsing one for an
 	// identity that no longer holds a value costs nothing, while dropping it
 	// would mean tracking which of the key's two entries went away.
+	//
+	// A collision leaves that identity classified by its collapsed spelling
+	// while the dotted one it was taught first may still be exempted — the very
+	// state TestOneIdentityHasOneVerdict forbids, which that test cannot reach
+	// because it never writes two keys that collide. It errs closed, and
+	// producing one takes writing both spellings of a member yourself.
 	if m.collidedSpellings.Contain(collapsed) {
 		return
 	}

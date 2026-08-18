@@ -204,10 +204,17 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.models.zilliz.",
 		Version:   "2.6.5",
 		Sensitive: true,
-		// No exemptions: unlike the two groups above, no member of this one
-		// ships in milvus.yaml, so no segmentation of it is ever endorsed and an
-		// exemption could never be claimed. Listing suffixes here would only
-		// look like it did something.
+		// Every leaf this group actually defines — see loadConfig in
+		// internal/util/function/models/zilliz/zilliz_client.go. An endpoint, a
+		// TLS switch, a CA *path* and an SNI override are infrastructure detail
+		// of exactly the kind minio.address and tls.clusters.* stay readable
+		// for; the file certFile points at is the secret, not the path.
+		//
+		// The group stays Sensitive so that a member nobody has thought of yet
+		// fails closed. Do not copy this list from the two groups above: theirs
+		// name different leaves, and a suffix that matches no real member
+		// silently exempts nothing.
+		NonSensitiveSuffixes: []string{"endpoint", "enableTLS", "certFile", "serverNameOverride"},
 	}
 	p.ZillizProviders.Init(base.mgr)
 

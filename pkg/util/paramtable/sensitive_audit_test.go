@@ -172,12 +172,16 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 func TestNoEmptyPrefixParamGroup(t *testing.T) {
 	params := newSensitiveAuditParams(t)
 
-	walkParamGroups(reflect.ValueOf(params).Elem(), func(group *ParamGroup) {
-		if group.KeyPrefix == "" {
-			t.Errorf("ParamGroup with an empty KeyPrefix declares every source key, "+
-				"including every process environment variable, as registered configuration: %+v", group)
+	// Asked of the manager, not of the ParamGroup fields. A prefix can be
+	// registered without a field — grpc_param.go registers the two CDC
+	// namespaces directly, because nothing reads them as a group — and a guard
+	// that only reflects over fields would not see it.
+	for _, prefix := range params.baseTable.mgr.RegisteredConfigPrefixes() {
+		if prefix == "" {
+			t.Error("a prefix registered on the main table is empty, which declares every source key, " +
+				"including every process environment variable, to be registered configuration")
 		}
-	})
+	}
 }
 
 func TestSensitiveCipherParamItemsMarked(t *testing.T) {
