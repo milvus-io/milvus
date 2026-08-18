@@ -24,9 +24,10 @@ import (
 // IDsChecker provides efficient lookup functionality for schema.IDs
 // It supports checking if an ID at a specific position in one IDs exists in another IDs
 type IDsChecker struct {
-	intIDSet map[int64]struct{}
-	strIDSet map[string]struct{}
-	idType   schemapb.DataType
+	intIDSet  map[int64]struct{}
+	strIDSet  map[string]struct{}
+	uuidIDSet map[[16]byte]struct{}
+	idType    schemapb.DataType
 }
 
 // NewIDsChecker creates a new IDsChecker from the given IDs
@@ -52,6 +53,17 @@ func NewIDsChecker(ids *schemapb.IDs) (*IDsChecker, error) {
 		data := ids.GetStrId().GetData()
 		for _, id := range data {
 			checker.strIDSet[id] = struct{}{}
+		}
+	case *schemapb.IDs_UuidId:
+		checker.idType = schemapb.DataType_UUID
+		checker.uuidIDSet = make(map[[16]byte]struct{})
+		data := ids.GetUuidId().GetData()
+		for _, id := range data {
+			if len(id) == 16 {
+				var u [16]byte
+				copy(u[:], id)
+				checker.uuidIDSet[u] = struct{}{}
+			}
 		}
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported ID type in IDs")
@@ -102,6 +114,22 @@ func (c *IDsChecker) Contains(idsA *schemapb.IDs, cursor int) (bool, error) {
 		_, exists := c.strIDSet[id]
 		return exists, nil
 
+	case *schemapb.IDs_UuidId:
+		if c.idType != schemapb.DataType_UUID {
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: checker expects %v, got UUID", c.idType)
+		}
+		if c.uuidIDSet == nil {
+			return false, nil
+		}
+		raw := idsA.GetUuidId().GetData()[cursor]
+		if len(raw) != 16 {
+			return false, nil
+		}
+		var u [16]byte
+		copy(u[:], raw)
+		_, exists := c.uuidIDSet[u]
+		return exists, nil
+
 	default:
 		return false, merr.WrapErrParameterInvalidMsg("unsupported ID type in idsA")
 	}
@@ -150,6 +178,24 @@ func (c *IDsChecker) ContainsAny(idsA *schemapb.IDs) ([]int, error) {
 			}
 		}
 
+	case *schemapb.IDs_UuidId:
+		if c.idType != schemapb.DataType_UUID {
+			return nil, merr.WrapErrParameterInvalidMsg("type mismatch: checker expects %v, got UUID", c.idType)
+		}
+		if c.uuidIDSet == nil {
+			return result, nil
+		}
+		data := idsA.GetUuidId().GetData()
+		for i, raw := range data {
+			if len(raw) == 16 {
+				var u [16]byte
+				copy(u[:], raw)
+				if _, exists := c.uuidIDSet[u]; exists {
+					result = append(result, i)
+				}
+			}
+		}
+
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported ID type in idsA")
 	}
@@ -170,6 +216,11 @@ func (c *IDsChecker) Size() int {
 			return 0
 		}
 		return len(c.strIDSet)
+	case schemapb.DataType_UUID:
+		if c.uuidIDSet == nil {
+			return 0
+		}
+		return len(c.uuidIDSet)
 	default:
 		return 0
 	}

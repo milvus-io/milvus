@@ -13,13 +13,18 @@ import (
 
 // GetMaxLength get max length of field. Maybe also helpful outside.
 func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
-	if !typeutil.IsStringType(field.GetDataType()) && !typeutil.IsStringType(field.GetElementType()) {
+	if !typeutil.IsStringType(field.GetDataType()) && !typeutil.IsStringType(field.GetElementType()) && !typeutil.IsUUIDType(field.GetDataType()) && !typeutil.IsUUIDType(field.GetElementType()) {
 		msg := fmt.Sprintf("%s is not of string type", field.GetDataType())
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_VarChar, field.GetDataType(), msg)
 	}
 	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
 	maxLengthStr, err := h.Get(common.MaxLengthKey)
 	if err != nil {
+		// UUID is fixed-length: canonical form is exactly 36 bytes,
+		// so no max_length type param is required.
+		if typeutil.IsUUIDType(field.GetDataType()) || typeutil.IsUUIDType(field.GetElementType()) {
+			return 36, nil
+		}
 		msg := "max length not found"
 		return 0, merr.WrapErrParameterInvalid("max length key in type parameters", "not found", msg)
 	}

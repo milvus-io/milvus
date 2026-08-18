@@ -125,6 +125,12 @@ func locateRoutingIndexes[K comparable](keys []K, targetCount int, hasher common
 	return hashValues, nil
 }
 
+type bytesRoutingHasher struct{}
+
+func (bytesRoutingHasher) Hash(key [16]byte) (uint64, error) {
+	return uint64(crc32.ChecksumIEEE(key[:])), nil
+}
+
 // HashPK2Channels hash primary keys to channels
 func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) ([]uint32, error) {
 	var hashValues []uint32
@@ -135,7 +141,36 @@ func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) ([]uint32, 
 		hashValues, err = locateRoutingIndexes(pks, len(shardNames), int64RoutingHasher{})
 	case *schemapb.IDs_StrId:
 		pks := primaryKeys.GetStrId().Data
+		// Check if first element is a UUID to use canonical 16-byte hashing
+		if len(pks) > 0 {
+			if u, errParse := ParseUUID(pks[0]); errParse == nil {
+				uuidKeys := make([][16]byte, 0, len(pks))
+				uuidKeys = append(uuidKeys, u)
+				allUUID := true
+				for i := 1; i < len(pks); i++ {
+					if uNext, errNext := ParseUUID(pks[i]); errNext == nil {
+						uuidKeys = append(uuidKeys, uNext)
+					} else {
+						allUUID = false
+						break
+					}
+				}
+				if allUUID {
+					return locateRoutingIndexes(uuidKeys, len(shardNames), bytesRoutingHasher{})
+				}
+			}
+		}
 		hashValues, err = locateRoutingIndexes(pks, len(shardNames), stringRoutingHasher{})
+	case *schemapb.IDs_UuidId:
+		uuidKeys := make([][16]byte, 0, len(primaryKeys.GetUuidId().Data))
+		for _, b := range primaryKeys.GetUuidId().Data {
+			u, errBytes := BytesToUUID(b)
+			if errBytes != nil {
+				return nil, errBytes
+			}
+			uuidKeys = append(uuidKeys, u)
+		}
+		hashValues, err = locateRoutingIndexes(uuidKeys, len(shardNames), bytesRoutingHasher{})
 	default:
 		// TODO::
 	}
@@ -154,9 +189,37 @@ func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]ui
 			return locateRoutingIndexes(longKeys, len(partitionNames), int64RoutingHasher{})
 		case *schemapb.ScalarField_StringData:
 			stringKeys := scalarField.GetStringData().Data
+			if len(stringKeys) > 0 {
+				if u, errParse := ParseUUID(stringKeys[0]); errParse == nil {
+					uuidKeys := make([][16]byte, 0, len(stringKeys))
+					uuidKeys = append(uuidKeys, u)
+					allUUID := true
+					for i := 1; i < len(stringKeys); i++ {
+						if uNext, errNext := ParseUUID(stringKeys[i]); errNext == nil {
+							uuidKeys = append(uuidKeys, uNext)
+						} else {
+							allUUID = false
+							break
+						}
+					}
+					if allUUID {
+						return locateRoutingIndexes(uuidKeys, len(partitionNames), bytesRoutingHasher{})
+					}
+				}
+			}
 			return locateRoutingIndexes(stringKeys, len(partitionNames), stringRoutingHasher{})
+		case *schemapb.ScalarField_BytesData:
+			uuidKeys := make([][16]byte, 0, len(scalarField.GetBytesData().Data))
+			for _, b := range scalarField.GetBytesData().Data {
+				u, errBytes := BytesToUUID(b)
+				if errBytes != nil {
+					return nil, errBytes
+				}
+				uuidKeys = append(uuidKeys, u)
+			}
+			return locateRoutingIndexes(uuidKeys, len(partitionNames), bytesRoutingHasher{})
 		default:
-			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition key Field")
+			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64, VarChar or UUID as partition key Field")
 		}
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as partition keys")
