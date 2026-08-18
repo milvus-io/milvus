@@ -714,22 +714,63 @@ func TestExemptedGroupMemberIsVisibleUnderEverySpelling(t *testing.T) {
 	}
 }
 
-// The spelling recovery only knows what a source has shown it. A member that
-// exists nowhere but etcd — which is where /management/config/alter writes,
-// under the collapsed identity and nothing else — still has no structure to be
-// classified by, and a group whose members are open-ended by definition has to
-// keep failing closed there.
-func TestUnlearnedCollapsedMemberStaysSensitive(t *testing.T) {
+// A suffix exemption is granted to a leaf name, so whoever gets to say where the
+// leaf begins gets to say whether the exemption applies. That may not be the
+// caller.
+//
+// A member that exists nowhere but etcd — which is where /management/config/alter
+// writes, under the collapsed identity and nothing else — has no segmentation
+// anyone in the process vouched for. "…newprovidersecret.enable" and
+// "…newprovider.secret_enable" are one identity spelled two ways, and only the
+// first ends in the leaf the group declared safe. Neither may claim it.
+func TestUnendorsedSegmentationCannotClaimAnExemption(t *testing.T) {
+	const prefix = "function.textembedding.providers."
 	mgr := NewManager()
-	mgr.RegisterConfigPrefix("function.textembedding.providers.")
-	mgr.RegisterSensitivePrefix("function.textembedding.providers.")
-	mgr.RegisterNonSensitiveSuffix("function.textembedding.providers.", "enable")
+	mgr.RegisterConfigPrefix(prefix)
+	mgr.RegisterSensitivePrefix(prefix)
+	mgr.RegisterNonSensitiveSuffix(prefix, "enable")
 
-	// No source ever supplied the dotted spelling of this one.
-	assert.True(t, mgr.IsSensitive("functiontextembeddingprovidersnewproviderenable"),
-		"a name with no namespace left in it cannot prove an exemption")
-	// While the dotted spelling, which can, is exempted.
-	assert.False(t, mgr.IsSensitive("function.textembedding.providers.newprovider.enable"))
+	const identity = "functiontextembeddingprovidersnewprovidersecretenable"
+	for _, spelling := range []string{
+		"functiontextembeddingprovidersnewprovidersecretenable",
+		"function.textembedding.providers.newprovider.secret_enable",
+		// The same identity, re-cut so the leaf reads as the exempted "enable".
+		"function.textembedding.providers.newprovidersecret.enable",
+	} {
+		require.Equal(t, identity, EtcdConfigKey(spelling), spelling)
+		assert.True(t, mgr.IsSensitive(spelling),
+			"%s: nothing vouched for this segmentation, so the group default stands", spelling)
+	}
+}
+
+// The exemption does work, for a segmentation a source vouched for.
+func TestEndorsedSegmentationKeepsItsExemption(t *testing.T) {
+	const prefix = "function.textembedding.providers."
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile,
+		[]byte("function.textEmbedding.providers.tei.enable: true\n"+
+			"function.textEmbedding.providers.tei.credential: provider-secret\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigPrefix(prefix)
+	mgr.RegisterSensitivePrefix(prefix)
+	mgr.RegisterNonSensitiveSuffix(prefix, "enable")
+
+	// Both spellings of the entry the file supplied, and both agree.
+	for _, spelling := range []string{
+		"function.textEmbedding.providers.tei.enable",
+		"functiontextembeddingprovidersteienable",
+	} {
+		assert.False(t, mgr.IsSensitive(spelling), spelling)
+		_, value, err := mgr.GetRegisteredConfig(spelling)
+		require.NoError(t, err, spelling)
+		assert.Equal(t, "true", value, spelling)
+	}
+	// A runtime overlay vouches for a segmentation too.
+	mgr.SetMapConfig("function.textEmbedding.providers.other.enable", "false")
+	assert.False(t, mgr.IsSensitive("function.textembedding.providers.other.enable"))
+
+	assert.True(t, mgr.IsSensitive("function.textEmbedding.providers.tei.credential"))
 }
 
 // Membership and sensitivity must read a key the same way, or a spelling exists
@@ -824,9 +865,10 @@ func TestCallerCannotResegmentAKeyOntoAnExemptedLeaf(t *testing.T) {
 		assert.NotContains(t, value, secret, spelling)
 	}
 
-	// The exemption still works for a leaf the group really declared safe.
+	// The exemption still works for a leaf something vouched for — see
+	// TestEndorsedSegmentationKeepsItsExemption for that in full.
+	mgr.SetMapConfig("function.textEmbedding.providers.myprov.url", "https://example.invalid")
 	assert.False(t, mgr.IsSensitive("function.textEmbedding.providers.myprov.url"))
-	assert.False(t, mgr.IsSensitive("function.textEmbedding.providers.myprov.enable"))
 }
 
 // A collapsed identity that two different keys can produce teaches nothing, so

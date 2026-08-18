@@ -158,6 +158,10 @@ type Manager struct {
 	// the initial load. Without it a later updateEvent re-learns whichever
 	// spelling it happens to carry.
 	collidedSpellings *typeutil.ConcurrentSet[string]
+	// spellingMutex serialises the check-then-act in rememberSpelling. Without
+	// it two source refreshers can each pass the collision check and then
+	// re-teach the identity one of them was supposed to have retired.
+	spellingMutex sync.Mutex
 	// registeredKeyPrefixes maps a declared ParamGroup's prefix to the same
 	// prefix with its separators removed. Both are needed on every lookup and
 	// the collapsed one is derived, so it is derived once at registration
@@ -281,7 +285,7 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 	if resolved.kind == RegisteredConfigUnknown {
 		return "", "", errors.Wrap(ErrKeyUnregistered, key)
 	}
-	if m.isSensitiveResolved(resolved.lookup, resolved.dotted) {
+	if m.isSensitiveResolved(resolved.lookup, resolved.dotted, resolved.segmented) {
 		return "", "", errors.Wrap(ErrKeySensitive, key)
 	}
 	return m.readResolved(resolved, key)
@@ -362,6 +366,20 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 // PATH, HOSTNAME, http_proxy. Treating "the dotted spelling exists" as proof of
 // configuration would hand every such variable to a group whose prefix they
 // happen to match, which for the empty prefix is all of them.
+// isStoredKey reports whether some source or runtime overlay holds a value under
+// exactly this spelling.
+func (m *Manager) isStoredKey(dotted string) bool {
+	for _, candidate := range [2]string{dotted, strings.ReplaceAll(dotted, ".", "/")} {
+		if value, ok := m.overlays.Get(candidate); ok && value != TombValue {
+			return true
+		}
+		if _, ok := m.keySourceMap.Get(candidate); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) groupMemberIsEnvironmentOnly(dotted, lookup string) bool {
 	// Every spelling the same key can be stored under. EtcdSource keeps whatever
 	// separator the stored key used, hence the slash form.
@@ -676,12 +694,14 @@ func (m *Manager) RegisterNonSensitiveKey(key string) {
 
 // RegisterSensitivePrefix marks every configuration below a dynamic prefix as
 // sensitive.
+// RegisterSensitivePrefix marks every configuration below a dynamic prefix as
+// sensitive. The empty prefix is accepted and means every key of this manager,
+// which is what Sensitive on a group with no KeyPrefix declares; dropping it as
+// a no-op would be the one registration path in this file that fails open.
 func (m *Manager) RegisterSensitivePrefix(prefix string) {
 	canonicalPrefix := strings.ToLower(prefix)
-	if canonicalPrefix != "" {
-		m.sensitiveKeyPrefixes.Insert(canonicalPrefix)
-		m.sensitiveKeyPrefixesCollapsed.Insert(formatKeyUncached(canonicalPrefix))
-	}
+	m.sensitiveKeyPrefixes.Insert(canonicalPrefix)
+	m.sensitiveKeyPrefixesCollapsed.Insert(formatKeyUncached(canonicalPrefix))
 }
 
 // RegisterNonSensitiveSuffix exempts one leaf name below a sensitive prefix.
@@ -729,6 +749,12 @@ type resolvedKey struct {
 	lookup string
 	dotted string
 	kind   RegisteredConfigKind
+	// segmented records that dotted came from a declaration or from a source,
+	// rather than from whoever asked. Only one rule in this file widens a
+	// verdict — a NonSensitiveSuffixes exemption, which is granted to a leaf
+	// name — and a leaf name is a property of the segmentation. So that rule
+	// may only be applied to a segmentation nothing outside the process chose.
+	segmented bool
 }
 
 // rememberSpelling records that one configuration key can be addressed under
@@ -768,6 +794,8 @@ func (m *Manager) rememberSpelling(key, sourceName string) {
 	// which claim rather than exempt. TestDeclaredKeysDoNotCollide rules this
 	// out among declared keys; group members are named by whoever wrote them,
 	// so it cannot.
+	m.spellingMutex.Lock()
+	defer m.spellingMutex.Unlock()
 	if m.collidedSpellings.Contain(collapsed) {
 		return
 	}
@@ -789,7 +817,7 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	// same way whether the caller used the declared key, its environment alias,
 	// or the separator-free identity the value is stored under.
 	if declared, ok := m.declaredKeys.Get(formattedKey); ok {
-		return resolvedKey{lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar}
+		return resolvedKey{lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar, segmented: true}
 	}
 
 	// Nobody declared this key, so use the spelling the sources showed us for
@@ -808,14 +836,25 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	// Recovery cannot widen anything, because it only fires when the two
 	// spellings collapse to the same identity — which is to say, when they are
 	// the same entry. It can only put the segments back where the source had
-	// them. When nothing was learned (a member that exists only in etcd, or an
-	// identity two keys collide on) there is no segmentation to trust, and the
-	// collapsed prefixes below claim it.
+	// them.
+	//
+	// When nothing was learned — a member that exists only in etcd, which is
+	// what an alter-endpoint write leaves behind, or an identity two keys
+	// collide on — the caller's segmentation is all there is, and it is then
+	// marked unendorsed rather than trusted. See resolvedKey.segmented: an
+	// unendorsed segmentation may still name a namespace, because naming one
+	// only ever narrows, but it may not claim a suffix exemption.
+	segmented := false
 	if learned, ok := m.dottedSpellings.Get(formattedKey); ok {
 		dotted = learned
+		segmented = true
+	} else if m.isStoredKey(dotted) {
+		// No pairing learned, but a source stored the key under exactly this
+		// spelling, so the segmentation is still not the caller's invention.
+		segmented = true
 	}
 
-	resolved := resolvedKey{lookup: formattedKey, dotted: dotted}
+	resolved := resolvedKey{lookup: formattedKey, dotted: dotted, segmented: segmented}
 	var environmentOnly, environmentBacked *bool
 	lazily := func(cached **bool, compute func() bool) bool {
 		if *cached == nil {
@@ -884,7 +923,7 @@ func hasNamespacePrefix(key, prefix string) bool {
 // the caller passed.
 func (m *Manager) IsSensitive(key string) bool {
 	resolved := m.resolveRegisteredKey(key)
-	return m.isSensitiveResolved(resolved.lookup, resolved.dotted)
+	return m.isSensitiveResolved(resolved.lookup, resolved.dotted, resolved.segmented)
 }
 
 // isSensitiveResolved decides sensitivity from both identities of one key.
@@ -893,7 +932,7 @@ func (m *Manager) IsSensitive(key string) bool {
 // declared NonSensitive ParamItem that happens to sit below a sensitive
 // ParamGroup prefix (kafka.producer.message.max.bytes) must stay readable, and
 // a declared Sensitive key must stay hidden whatever its name looks like.
-func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
+func (m *Manager) isSensitiveResolved(lookup, dotted string, segmented bool) bool {
 	if m.sensitiveKeys.Contain(lookup) {
 		return true
 	}
@@ -910,7 +949,7 @@ func (m *Manager) isSensitiveResolved(lookup, dotted string) bool {
 	// uses mixed case.
 	dotted = strings.ToLower(dotted)
 
-	switch m.matchSensitivePrefix(dotted, lookup) {
+	switch m.matchSensitivePrefix(dotted, lookup, segmented) {
 	case prefixSensitive:
 		return true
 	case prefixExempted:
@@ -958,18 +997,21 @@ const (
 //
 // What is left is a key whose structure nothing in the process knows: a member
 // created through /management/config/alter, under a namespace whose members are
-// open-ended by definition. There the collapsed prefixes are all there is, and
-// the group's Sensitive default has to stand — a declared NonSensitiveSuffixes
-// exemption cannot be proven against a name with no separators left in it, and
-// guessing where they used to be is not a thing to do on this side of the
-// decision.
-func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
+// open-ended by definition. There the group's Sensitive default has to stand,
+// and it stands two ways. A name with no separators left in it is matched
+// against the collapsed prefixes. A name the caller supplied separators for is
+// matched against the dotted prefixes as usual, but arrives unendorsed, so the
+// exemption below is withheld: "…zilliz.secret_enable" and
+// "…zilliz.secret.enable" are one identity, and letting the caller pick which
+// of them to send would let them pick the leaf name the exemption is granted
+// to, and with it the verdict.
+func (m *Manager) matchSensitivePrefix(dotted, lookup string, segmented bool) prefixVerdict {
 	verdict := prefixNoMatch
 	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
 		if !strings.HasPrefix(dotted, prefix) {
 			return true
 		}
-		if m.suffixExempted(prefix, dotted[len(prefix):]) {
+		if segmented && m.suffixExempted(prefix, dotted[len(prefix):]) {
 			// Exempted for this prefix, but a longer sensitive prefix may still
 			// cover the key without exempting it, so keep scanning.
 			verdict = prefixExempted
@@ -999,7 +1041,9 @@ func (m *Manager) matchSensitivePrefix(dotted, lookup string) prefixVerdict {
 }
 
 // suffixExempted reports whether the part of a key below a sensitive prefix is
-// one of the leaves the group declared safe.
+// one of the leaves the group declared safe. Callers must have established that
+// the segmentation is endorsed — see resolvedKey.segmented — because this is the
+// one rule in this file that turns a sensitive verdict into a readable one.
 //
 // The exemption is deliberately shallow: it covers "<provider>.enable" and the
 // group's own "enable", but not "<provider>.secret.enable". A group is marked
@@ -1056,7 +1100,7 @@ func (m *Manager) classify(key string) projectionKind {
 	switch {
 	case resolved.kind == RegisteredConfigUnknown:
 		return projectionOmit
-	case m.isSensitiveResolved(resolved.lookup, resolved.dotted):
+	case m.isSensitiveResolved(resolved.lookup, resolved.dotted, resolved.segmented):
 		return projectionRedact
 	default:
 		return projectionKeep
