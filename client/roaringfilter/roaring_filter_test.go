@@ -196,7 +196,6 @@ func TestBuildPortableContainerEncodings(t *testing.T) {
 	for _, value := range []int64{0, 999, 1 << 16, (1 << 16) + 8192, (4 << 16) + 1, (1 << 32) + 7} {
 		require.True(t, contains(bitmap, value), "member %d must be present", value)
 	}
-
 }
 
 func mustBuild(t *testing.T, members []int64) []byte {

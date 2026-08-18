@@ -429,10 +429,10 @@ func PlanContainsMembershipFilter(plan *planpb.PlanNode) bool {
 // embed a membership blob too, so both plan-size accounting and delete safety
 // must see them. Keeping the plan traversal here means a new PlanNode variant
 // is picked up by every membership predicate at once.
+//
+// A nil plan needs no special case: the generated getters are nil-safe, so it
+// yields no scorers and a nil predicate, and walkExpr reports false for nil.
 func planContainsFilter(plan *planpb.PlanNode, has func(*planpb.Expr) bool) bool {
-	if plan == nil {
-		return false
-	}
 	for _, scorer := range plan.GetScorers() {
 		if has(scorer.GetFilter()) {
 			return true
