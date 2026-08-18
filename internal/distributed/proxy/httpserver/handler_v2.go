@@ -613,8 +613,28 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 	}
 }
 
+// injectIdempotencyKey copies the REST Idempotency-Key header into the gRPC
+// incoming metadata, so the proxy reads the key from exactly one place regardless
+// of whether the request arrived over REST or gRPC. Existing metadata is preserved.
+//
+// Applied to every v2 endpoint rather than to the ones that happen to support
+// idempotency today: which operations are idempotent is decided downstream, and an
+// endpoint that ignores the key costs nothing but must not silently drop it and
+// force the next adopter to remember this hop.
+func injectIdempotencyKey(ctx context.Context, c *gin.Context) context.Context {
+	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
+	if key == "" {
+		return ctx
+	}
+	md, _ := metadata.FromIncomingContext(ctx)
+	md = md.Copy()
+	md.Set(util.HeaderIdempotencyKey, key)
+	return metadata.NewIncomingContext(ctx, md)
+}
+
 func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	return func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+		ctx = injectIdempotencyKey(ctx, c)
 		switch proxy.Params.CommonCfg.TraceLogMode.GetAsInt() {
 		case 1: // simple info
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
@@ -3948,19 +3968,6 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 	return resp, err
 }
 
-// injectIdempotencyKey copies the REST Idempotency-Key header into the gRPC
-// incoming metadata, so the proxy reads the key from exactly one place regardless
-// of whether the request arrived over REST or gRPC. Existing metadata is preserved.
-func injectIdempotencyKey(ctx context.Context, c *gin.Context) context.Context {
-	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
-	if key == "" {
-		return ctx
-	}
-	md, _ := metadata.FromIncomingContext(ctx)
-	md = md.Copy()
-	md.Set(util.HeaderIdempotencyKey, key)
-	return metadata.NewIncomingContext(ctx, md)
-}
 
 func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	var (
@@ -3991,12 +3998,6 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}
 		ctx = c.Request.Context()
 	}
-	// Keep this after the auth block. Today either order works, because
-	// checkAuthorizationV2 re-attaches a context derived from the one it was given,
-	// so the reassignment above round-trips the injected value rather than dropping
-	// it. That is an implementation detail of the auth path, not a contract — and no
-	// test can catch it being broken, since both orders currently pass.
-	ctx = injectIdempotencyKey(ctx, c)
 	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
