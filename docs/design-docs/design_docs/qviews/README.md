@@ -89,6 +89,11 @@ data ([B1] and [A1]). A version number DataVersion is introduced:
 
 Version numbers are ordered lexicographically by `(streaming_version, compact_version)`.
 
+Completeness and logical non-duplication are publication contracts, not facts
+derived by DataViewManager. The manager validates unique Segment-ID placement,
+but callers decide when a Segment is loadable and must not publish overlapping
+logical data under different Segment IDs.
+
 ### 5.2 Data Structures
 
 `DataViewOfCollection`, `DataViewOfShard`, `DataViewOfPartition`, and
@@ -96,37 +101,33 @@ Version numbers are ordered lexicographically by `(streaming_version, compact_ve
 
 ### 5.3 Storage View Version Evolution Example
 
-The following timeline shows the version evolution process of the storage view (DataView), with each Segment labeled as `SegmentID @DataVersion`:
+The following timeline shows the current Collection-level snapshot behavior:
 
 | Step | Event | DataView Version | Segments in the View |
 |---|---|---|---|
-| 1 | Initial state | `1,0` | `Segment 1 @1,0`, `Segment 2 @1,0` |
-| 2 | Flush Segment 3 | `2,0` | `Segment 1 @1,0`, `Segment 2 @1,0`, `Segment 3 @2,0` |
-| 3 | Compact Segment 1 and 2 into Segment 4 and 5 | `2,1` | `Segment 4 @2,1`, `Segment 5 @2,1`, `Segment 3 @2,0` |
-| 4 | Cluster compaction or reshard | `2,2` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2` |
-| 5 | Import Segment 10 | `2,3` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2`, `Segment 10 @2,3` |
+| 1 | Create Collection | `(1,0)` | none; declared VChannels only |
+| 2 | Flush Segments 1 and 2 | `(2,0)` | `1, 2` |
+| 3 | Flush Segment 3 | `(3,0)` | `1, 2, 3` |
+| 4 | Compact Segments 1 and 2 into Segments 4 and 5 | `(3,1)` | `3, 4, 5` |
+| 5 | Cluster compaction or reshard | `(3,2)` | `6, 7, 8, 9` |
+| 6 | Import Segment 10 | `(3,3)` | `6, 7, 8, 9, 10` |
 
-1. **Version 1,0**: Initial state, containing Segment 1 @1,0 and Segment 2 @1,0.
-2. **Version 2,0** (Flush Segment 3): Segment 3 @2,0 is added, streaming_version is incremented. Segments 1 and 2 retain their original version number @1,0.
-3. **Version 2,1** (Compact Segments 1 and 2 into Segments 4 and 5): Segments 1 and 2 are removed from the view, Segments 4 @2,1 and 5 @2,1 are added. compact_version is incremented. Segment 3 @2,0 remains unchanged.
-4. **Version 2,2** (Cluster Compaction or Reshard): All old Segments are replaced by Segments 6–9 @2,2.
-5. **Version 2,3** (Import Segment 10): Segment 10 @2,3 is added,
-   compact_version is incremented. Segments 6–9 retain @2,2.
+Each row is a complete immutable snapshot. DataView does not store a per-Segment
+join version; only the Collection snapshot carries `DataVersion`.
 
 Key observations:
 - Only Flush operations cause streaming_version to increment (for example,
-  1,0 → 2,0).
+  `(1,0) → (2,0) → (3,0)`).
 - All other membership changes cause compact_version to increment (for
-  example, 2,0 → 2,1 → 2,2 → 2,3).
-- In this example, `SegmentID @DataVersion` labels the DataVersion when the
-  segment joined the view. DataView itself stores loadable membership and the
-  collection-level DataVersion, not a per-segment view-version field.
-- After Compaction, old Segments are permanently removed from the view.
+  example, `(3,0) → (3,1) → (3,2) → (3,3)`).
+- Compaction replaces its input membership with output membership in one
+  snapshot.
 
 ### 5.4 Constraints
 
 - Each DataVersion can correspond to one or more segment membership changes.
-- Once a Segment is compacted, it is removed from the storage view and will never return.
+- DataViewManager does not understand compaction lineage. Event producers must
+  not publish a superseded input Segment again after compaction removes it.
 - The view is not affected by offline tasks such as indexing.
 - The storage view version number is at the Collection level (laying the groundwork for future capabilities such as Shard splitting).
 - DataView tracks loadable segment membership only. Segment content changes,
@@ -137,8 +138,11 @@ Key observations:
 
 ### 6.1 Version Number
 
-Each query view version number is `(D, Q)`, ordered lexicographically:
-- **D increases**: Data undergoes storage-level changes.
+Each query view version number is `(D, Q)`, where
+`D = (streaming_version, compact_version)`. The full ordering is therefore
+lexicographic by `(streaming_version, compact_version, query_version)`:
+
+- **D increases**: DataView membership changes.
 - **Q increases**: Data undergoes load-level redistribution.
 
 The query view version number is at the **ShardOnReplica level**, and its lifecycle is the same as the Load operation lifecycle of the corresponding replica.
@@ -149,20 +153,14 @@ The following timeline shows the version evolution process of the query view (Qu
 
 | Step | Event | QueryView Version | Segment Placement |
 |---|---|---|---|
-| 1 | Initial placement | `(1,1)` | `Segment 1 @Node1`, `Segment 2 @Node1` |
-| 2 | Balance: move Segment 2 from Node1 to Node2 | `(1,2)` | `Segment 1 @Node1`, `Segment 2 @Node2` |
-| 3 | DataVersion 2 arrives and adds Segment 3 | `(2,1)` | `Segment 1 @Node1`, `Segment 2 @Node2`, `Segment 3 @Node2` |
-| 4 | Recovery balance after Node2 crashes | `(2,2)` | `Segment 1 @Node1`, `Segment 2 @Node1`, `Segment 3 @Node1` |
-| 5 | DataVersion 3 arrives with more QueryNodes | `(3,1)` | `Segment 6 @Node1`, `Segment 7 @Node2`, `Segment 8 @Node3`, `Segment 9 @Node1`, `Segment 10 @Node2` |
-
-1. **Version (1,1)**: Initial state, Segment 1 @Node1, Segment 2 @Node1 (all Segments on Node 1).
-2. **Version (1,2)** (Balance Operation: Move Segment 2 From Node 1 To Node 2): Segment 2 is migrated to Node 2. DataVersion remains unchanged (D=1), QueryVersion is incremented (Q: 1→2).
-3. **Version (2,1)** (Data Version 2 Coming): DataView produces a new version (Flush adds Segment 3), Segment 3 @Node2 joins. DataVersion is incremented (D: 1→2), QueryVersion is reset (Q=1).
-4. **Version (2,2)** (Balance Operation For Recovery, such as Node 2 crashes): Node 2 crashes, all Segments are moved back to Node 1. QueryVersion is incremented (Q: 1→2).
-5. **Version (3,1)** (Data Version 3 Coming And More QueryNode): A new DataVersion arrives with more QueryNodes available, Segments 6–10 are distributed across Node 1, Node 2, and Node 3. DataVersion is incremented (D: 2→3), QueryVersion is reset (Q=1).
+| 1 | Place DataView `(2,0)` | `((2,0),1)` | `Segment 1 @Node1`, `Segment 2 @Node1` |
+| 2 | Balance: move Segment 2 from Node1 to Node2 | `((2,0),2)` | `Segment 1 @Node1`, `Segment 2 @Node2` |
+| 3 | DataView `(3,0)` adds Segment 3 | `((3,0),1)` | `Segment 1 @Node1`, `Segment 2 @Node2`, `Segment 3 @Node2` |
+| 4 | Recovery balance after Node2 crashes | `((3,0),2)` | `Segment 1 @Node1`, `Segment 2 @Node1`, `Segment 3 @Node1` |
+| 5 | DataView advances to `(3,3)` | `((3,3),1)` | `Segment 6 @Node1`, `Segment 7 @Node2`, `Segment 8 @Node3`, `Segment 9 @Node1`, `Segment 10 @Node2` |
 
 Key observations:
-- When D increases, Q is reset to 1 (new data at the storage level needs to be redistributed).
+- When composite D increases, Q is reset to 1 (new data at the storage level needs to be redistributed).
 - An increase in Q represents pure load-level redistribution (Balance, Recovery); the data itself does not change.
 - Node crashes are handled by generating a new QueryView, migrating crashed node's Segments to surviving nodes.
 
@@ -178,7 +176,8 @@ See the definitions of `QueryViewOfShard`, `QueryViewMeta`, `QueryViewVersion`,
 
 ### 6.5 Constraints
 
-- The version number `(D,Q)` of a QueryView in Up state may only increase non-strictly; rollback is not allowed.
+- The version number `((S,C),Q)` of a QueryView in Up state may only increase
+  non-strictly; rollback is not allowed.
 - A Shard maintains a fixed upper limit of query views (typically 2–3, similar to a Double Buffer / Triple Buffer pipeline design).
 
 ## 7. Query View Lifecycle State Machine
@@ -203,23 +202,28 @@ Key constraints:
 
 ## 8. Incremental Query Segment Lifecycle
 
-On StreamingNode, incremental Segments generated from WAL have their lifecycle entirely controlled by Coord instructions:
+In the target QueryView integration, incremental Segments generated from WAL on
+StreamingNode follow Coord-driven lifecycle instructions:
 
 ```
-Growing → Sealed [DataVersion D1] → Release
+Growing → Sealed [flush streaming_version S1] → Release
 ```
 
 | State | State Transition Condition | Description | Query Behavior |
 |---|---|---|---|
 | **Growing** | Discovered from WAL | Segment is in Growing state; Coord has not yet managed it | Always queried |
-| **Sealed [D1]** | Consumed Flush event from WAL | Segment becomes Sealed at version D1 (meaning Coord has seen this Segment in views ≥ D1) | View Version < (D1,0): Always queried; View Version ≥ (D1,0): Not queried (data is already on QN) |
-| **Release** | SN required DataVersion watermark ≥ D1 and no retained view needs this Segment | Segment does not participate in any queries | Noop |
+| **Sealed [S1]** | Consumed Flush publication metadata | Segment was added by a DataView whose `streaming_version` is S1 | QueryView DataVersion with `streaming_version < S1`: still query it on SN; `streaming_version >= S1`: the sealed handoff may exclude it from growing-side queries |
+| **Release** | SN required streaming-version watermark ≥ S1 and no retained view needs this Segment | Segment does not participate in any queries | Noop |
 
-The Sealed state is retained on StreamingNode until the local required DataVersion
-watermark reaches D1. This delayed GC is required for crash recovery when
-a persisted Up view is older than the latest local SegmentModule state: the old Up
-view still needs flushed-at-D1 segments as growing-side resources if its DataVersion is
-lower than D1.
+The Sealed state is retained on StreamingNode until the local required
+streaming-version watermark reaches S1. This delayed GC is required for crash
+recovery when a persisted Up view is older than the latest local SegmentModule
+state: the old Up view still needs a flushed-at-S1 Segment as a growing-side
+resource if its DataVersion has `streaming_version < S1`.
+
+The current DataView PR returns the Flush DataVersion but does not durably bind
+S1 to the Segment or deliver that binding to StreamingNode. That integration is
+required before this release rule is enabled.
 
 ## 9. Historical Query Segment Lifecycle
 
@@ -247,7 +251,8 @@ StreamingNode resources are prepared by QueryView state machines. The QueryView'
 When QueryView state enters the local Preparing/UpRecovering path, the state
 machine calls the PChannel-local
 `VChannelRecoveryModule` through `Acquire`; the module builds the query input
-view from its owned DataView, Segment state, and TransformLog, then keeps
+view from its StreamingNode-local WAL recovery data view, Segment state, and
+TransformLog, then keeps
 consuming DML so the recovered DataView only grows while the QueryView is live.
 Long-term resource retention is driven by local QueryView references.
 QueryNode sealed segment resources continue to follow QueryNode's segment/view resource
@@ -279,7 +284,7 @@ design when that resource module is picked.
 | Coord | Node Manager | Service discovery, maintaining the global available QueryNode list |
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
-| Coord | DataView Manager | Maintaining the storage view list |
+| DataCoord (inside MixCoord) | DataView Manager | Maintaining immutable Collection snapshots and DataViewRefs |
 | Coord | Sealed Segment Balancer | Gathering information from all Managers, generating and distributing QueryViews |
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
 | Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |

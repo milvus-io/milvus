@@ -25,11 +25,46 @@ type LoadableSegment struct {
 
 The manager does not query SegmentMeta or infer state, level, visibility,
 importing, indexes, manifests, delete frontiers, or compaction lineage.
+Within one snapshot it keeps a Segment ID in only one VChannel/Partition:
+re-adding it at the same location is a no-op, while adding it at a different
+location is a data-integrity error. It cannot detect duplicate logical data
+stored under different Segment IDs; loadability, completeness, and lineage are
+event-producer responsibilities.
 
 `transform_start_after_timetick` remains a wire-compatible derived field in
 the protobuf, but this manager clears it and never persists or computes it.
 Delete-frontier projection may be implemented later by an adapter that has
 SegmentMeta access.
+
+## Lifecycle
+
+The normal Collection lifecycle is:
+
+```text
+absent
+  -> OnCreateCollection: persist the empty (1,0) snapshot
+  -> active: append immutable snapshots for membership changes
+  -> CollectionMeta Dropping: delete every persisted snapshot and manager state
+  -> absent from DataViewManager
+```
+
+`OnCreateCollection` records all declared VChannels but no Segments. It is
+idempotent: if the Collection already has a latest snapshot, it returns that
+snapshot's version. The normal DDL path creates this snapshot before any
+Segment publication event.
+
+An active Collection owns a `latest` entry and a map of retained versions.
+Every membership-changing `On*` call is serialized by the Collection lock,
+clones the latest immutable snapshot, applies the mutation, canonicalizes the
+result, persists the complete new snapshot, and only then publishes it as the
+new in-memory latest version. A failed catalog write therefore leaves the
+previous latest version unchanged.
+
+Collection drop is coordinated by CollectionMeta rather than by a DataView
+state or tombstone. RootCoord first persists CollectionMeta as Dropping, then
+DataViewManager deletes the Collection's snapshot prefix and removes its
+manager state. New access no longer finds the Collection, while an already
+issued `DataViewRef` continues to own its in-memory snapshot until `Deref`.
 
 ## Versioning
 
@@ -83,6 +118,10 @@ Get(ctx, collectionID, version) (DataViewRef, error)
 reference and must call `Deref()` exactly when it finishes using the snapshot;
 `Deref()` is idempotent.
 
+`Latest` returns a Ref to the current latest entry and `Get` returns a Ref to
+the exact requested version. An unknown Collection, a nil version, or a version
+that has already been collected returns `(nil, nil)`.
+
 When QueryView integration is introduced, a QueryView must retain its exact
 `DataViewRef` through Preparing, Ready, Up, Down, Unrecoverable, and Dropping,
 and release it only after reaching Dropped. Recovered QueryViews must reacquire
@@ -116,6 +155,10 @@ initializes runtime ref counts to zero, and rejects conflicting snapshots with
 the same version. It does not repair or rebuild membership from SegmentMeta or
 any other metadata source.
 
+Recovery validates every discovered Collection against CollectionMeta before
+deleting any stale prefix. This prevents a transient validation failure from
+causing partial, speculative cleanup.
+
 The combined Coordinator uses one in-process recovery barrier. RootCoord first
 recovers CollectionMeta, then DataCoord and QueryCoord recover their metadata;
 DataCoord's Collection details are part of this synchronous initialization and
@@ -138,6 +181,9 @@ carry or wait on the barrier.
 A snapshot is retained if it is latest, among the newest `retainLatest`
 versions, or protected by a live `DataViewRef`. Physical Segment deletion is a
 separate concern.
+
+`retainLatest` is normalized to at least one. The current DataCoord metadata GC
+invokes this operation for live Collections with `retainLatest = 1`.
 
 Holding a `DataViewRef` currently protects only the DataView snapshot. Future
 physical Segment GC integration must also treat every Segment in a live

@@ -15,6 +15,14 @@ Coord is the leader of the global state machine. It generates QueryViews, drives
 
 Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahead), **Dropped** (deletion).
 
+Each state-machine instance is derived from one exact Collection-scoped
+DataVersion. The QueryView manager must own the corresponding `DataViewRef`
+from Preparing through Ready, Up, Down, Unrecoverable, and Dropping, and release
+it only after Dropped destroys the instance. On recovery, persisted QueryViews
+must reacquire their exact DataVersions before DataView snapshot GC is enabled.
+This ownership wiring is a required QueryView integration step and is not
+implemented by the current DataView-only PR.
+
 ### 1.1 Preparing
 
 **Entry Conditions:**
@@ -231,14 +239,15 @@ multiple Up recovery records may coexist.
 **Automatic Behavior:**
 1. Check replica information.
 2. Transition growing segments to queryable state.
-3. Check whether the local Flusher's data_version > the view's data_version.
+3. Check whether retained growing data can satisfy the QueryView's composite
+   DataVersion, using the per-Segment Flush `streaming_version` handoff metadata.
 
 **Transitions:**
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | **TODO:** data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord after the failure callback is wired |
+| Unrecoverable | **TODO:** required growing data expired because a flushed Segment was released before the view's streaming-version watermark allowed it | Report Unrecoverable to Coord after the failure callback is wired |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -343,8 +352,9 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ### 2.6 Unrecoverable (TODO: Production Failure Wiring)
 
 **Entry Conditions:**
-- **TODO:** data_version check failed during Preparing (growing segments already
-  flushed to sealed and released).
+- **TODO:** required growing data check failed during Preparing because a
+  flushed Segment was released before the view's streaming-version watermark
+  allowed it.
 - **TODO:** local resource failure during UpRecovering (e.g., OOM while
   replaying WAL to recover growing segments).
 
