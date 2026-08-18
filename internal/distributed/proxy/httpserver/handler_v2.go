@@ -33,7 +33,6 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -51,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
@@ -613,28 +611,8 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 	}
 }
 
-// injectIdempotencyKey copies the REST Idempotency-Key header into the gRPC
-// incoming metadata, so the proxy reads the key from exactly one place regardless
-// of whether the request arrived over REST or gRPC. Existing metadata is preserved.
-//
-// Applied to every v2 endpoint rather than to the ones that happen to support
-// idempotency today: which operations are idempotent is decided downstream, and an
-// endpoint that ignores the key costs nothing but must not silently drop it and
-// force the next adopter to remember this hop.
-func injectIdempotencyKey(ctx context.Context, c *gin.Context) context.Context {
-	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
-	if key == "" {
-		return ctx
-	}
-	md, _ := metadata.FromIncomingContext(ctx)
-	md = md.Copy()
-	md.Set(util.HeaderIdempotencyKey, key)
-	return metadata.NewIncomingContext(ctx, md)
-}
-
 func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	return func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		ctx = injectIdempotencyKey(ctx, c)
 		switch proxy.Params.CommonCfg.TraceLogMode.GetAsInt() {
 		case 1: // simple info
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
