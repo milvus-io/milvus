@@ -816,12 +816,17 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 	// node is gone its entry went with it, and if it is alive but unreachable
 	// the resubmission below either lands on another node or is rejected as a
 	// duplicate, and retryOnError brings the task back here for another go.
-	// Only a task requeued after a worker failure carries a stale plan: the
-	// requeue branch bumps RetryTimes and deliberately keeps the old NodeID,
-	// while a fresh task has RetryTimes 0 and the CreateCompaction-failed path
-	// resets NodeID to NullNodeID -- neither has anything to drop.
-	if prev := t.GetTaskProto().GetNodeID(); prev > 0 &&
-		t.GetTaskProto().GetRetryTimes() > 0 {
+	// Any task with a real previous node may have left a plan entry there
+	// (the DataNode only removes a failed entry on DropCompactionPlan), so the
+	// gate is NodeID alone. It must NOT also require RetryTimes > 0: the
+	// CreateCompaction failure below returns with the NodeID kept, and
+	// Process's state-change refresh resets RetryTimes to 0 when it interleaves
+	// with the scheduler-side requeue -- either would skip the drop and every
+	// same-node resubmission would then be rejected as a duplicate until the
+	// budget ran out. A fresh task has NodeID 0 (proto zero value) or
+	// NullNodeID(-1) and issues no drop; for anything else the drop is
+	// idempotent, so dropping when there was nothing to drop is a no-op.
+	if prev := t.GetTaskProto().GetNodeID(); prev > 0 {
 		if dropErr := cluster.DropCompaction(prev, t.GetTaskProto().GetPlanID()); dropErr != nil {
 			mlog.Warn(context.TODO(),
 				"failed to drop the previous plan before resubmitting clustering compaction",
@@ -837,10 +842,17 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 			mlog.Int64("nodeID", originNodeID),
 			mlog.Err(err))
-		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
-		if err != nil {
-			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
-			return err
+		// Keep the NodeID: if the drop above failed and this create was to the
+		// same node (rejected as a duplicate), resetting to NullNodeID would
+		// erase the only record of where the stale plan lives -- the next
+		// attempt would skip the drop and be rejected again until the retry
+		// budget ran out, and the terminal cleanup would target NullNodeID and
+		// leave the entry on the worker until restart. Keeping it costs
+		// nothing: the scheduler picks the next node from the slot heap and
+		// never reads it.
+		if metaErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining)); metaErr != nil {
+			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(metaErr))
+			return metaErr
 		}
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()

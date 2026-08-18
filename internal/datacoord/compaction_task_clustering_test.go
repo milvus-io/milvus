@@ -119,6 +119,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	task := s.generateBasicTask(false)
 
 	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCompaction(mock.Anything, mock.Anything).Return(nil).Maybe()
 	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	task.CreateTaskOnWorker(1, cluster)
 
@@ -492,6 +493,7 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		})
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropCompaction(mock.Anything, mock.Anything).Return(nil).Maybe()
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
@@ -1209,11 +1211,77 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})
 
+	s.Run("create failure keeps the previous node so the next attempt still drops", func() {
+		task := s.generateBasicTask(false)
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(7), setRetryTimes(1))
+
+		// Attempt 1: the drop fails AND the same-node resubmission is rejected
+		// as a duplicate. The previous node must survive in the meta.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(errors.New("rpc blip")).Once()
+		cluster.EXPECT().CreateCompaction(int64(7), mock.Anything, mock.Anything).
+			Return(merr.WrapErrCompactionPlanConflict("duplicated plan")).Once()
+		s.Error(task.doCompact(7, cluster))
+		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+		s.Equal(int64(7), task.GetTaskProto().GetNodeID())
+
+		// Attempt 2: because the node was kept, the drop runs again; this time
+		// it succeeds and so does the resubmission.
+		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(nil).Once()
+		cluster.EXPECT().CreateCompaction(int64(7), mock.Anything, mock.Anything).Return(nil).Once()
+		s.NoError(task.doCompact(7, cluster))
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+	})
+
+	s.Run("drop still runs when RetryTimes was reset to zero", func() {
+		// Process's state-change refresh applies setRetryTimes(0) and can
+		// interleave with the scheduler-side requeue; the drop gate must not
+		// depend on RetryTimes.
+		task := s.generateBasicTask(false)
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(7), setRetryTimes(0))
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(nil).Once()
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil).Once()
+		s.NoError(task.doCompact(9, cluster))
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+	})
+
 	s.Run("fresh task never issues a drop", func() {
 		task := s.generateBasicTask(false)
-		// Fresh: RetryTimes 0. generateBasicTask sets a NodeID, which is fine --
-		// only the (NodeID>0 && RetryTimes>0) requeue signature triggers a drop.
-		s.Equal(int32(0), task.GetTaskProto().GetRetryTimes())
+		// Fresh: no previous node. generateBasicTask sets NodeID 1, so reset it
+		// to the proto zero value a task straight from the trigger carries.
+		task.updateAndSaveTaskMeta(setNodeID(0))
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
