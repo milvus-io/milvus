@@ -410,9 +410,28 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 		}
 	}
 
-	if remaining := ob.meta.GetByCollection(ctx, task.CollectionID); len(remaining) == 0 {
+	remaining := ob.meta.GetByCollection(ctx, task.CollectionID)
+	if len(remaining) == 0 {
 		ob.meta.CollectionManager.RemoveCollection(ctx, task.CollectionID)
 		ob.targetObserver.ReleaseCollection(task.CollectionID)
+		ob.loadTasks.Remove(key)
+		return
+	}
+	// The incremental-expansion path raised the collection's ReplicaNumber
+	// when this resource group was added; taking its replicas away must write
+	// the number back down, or everything that reads it - updateLoadConfig's
+	// replica-changed check, ShowLoadCollections, the collection-wide
+	// observer's loadPercentage denominator - keeps counting replicas that no
+	// longer exist, and the load percentage can never reach 100 again.
+	if coll := ob.meta.GetCollection(ctx, task.CollectionID); coll != nil &&
+		int(coll.GetReplicaNumber()) != len(remaining) {
+		if err := ob.meta.UpdateReplicaNumber(ctx, task.CollectionID,
+			int32(len(remaining)), coll.GetUserSpecifiedReplicaMode()); err != nil {
+			mlog.Warn(ctx, "failed to write ReplicaNumber back down after releasing a timed-out resource group",
+				mlog.FieldCollectionID(task.CollectionID),
+				mlog.String("resourceGroup", task.ResourceGroup),
+				mlog.Err(err))
+		}
 	}
 	ob.loadTasks.Remove(key)
 }

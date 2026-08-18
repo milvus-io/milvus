@@ -437,6 +437,9 @@ func (s *CollectionObserverRGSuite) TestStalledResourceGroupTimesOutWithoutTouch
 	s.Empty(s.replicaIDsInRG(400, rgB), "a stalled resource group must be released")
 	s.Len(s.replicaIDsInRG(400, rgA), 1, "a sibling resource group must survive its neighbour's timeout")
 	s.NotNil(s.meta.GetCollection(s.ctx, 400), "the collection must survive while any resource group holds it")
+	s.EqualValues(1, s.meta.GetCollection(s.ctx, 400).GetReplicaNumber(),
+		"releasing the timed-out resource group's replicas must write ReplicaNumber back down, "+
+			"or the collection-wide load percentage keeps a denominator counting replicas that no longer exist")
 	s.False(s.ob.loadTasks.Contain(key))
 }
 

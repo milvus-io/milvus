@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -467,6 +468,13 @@ func (suite *IncrementalExpansionSuite) SetupSuite() {
 func (suite *IncrementalExpansionSuite) SetupTest() {
 	suite.ctx = context.Background()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+
+	// The keep-loaded fast path is extension-gated: only a form that manages
+	// placement itself gets it, so these tests install a placement-capable
+	// provider. TestNativeBinaryNeverTakesTheFastPath is the other half.
+	extension.ResetForTest()
+	suite.T().Cleanup(extension.ResetForTest)
+	suite.Require().NoError(extension.SetProvider(placementOnlyProvider{}))
 
 	suite.catalog = mocks.NewQueryCoordCatalog(suite.T())
 	// The collection under test always carries exactly one partition, so a
@@ -914,4 +922,44 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 
 func TestIncrementalExpansion(t *testing.T) {
 	suite.Run(t, new(IncrementalExpansionSuite))
+}
+
+// placementOnlyProvider declares exactly the LoadPlacement capability the
+// fast-path gate looks for.
+type placementOnlyProvider struct{}
+
+func (placementOnlyProvider) Name() string                       { return "test" }
+func (placementOnlyProvider) Requires() []extension.CapabilityID { return nil }
+func (placementOnlyProvider) Capabilities() extension.Capabilities {
+	return extension.Capabilities{LoadPlacement: inertPlacement{}}
+}
+
+type inertPlacement struct{}
+
+func (inertPlacement) ScopedToNamedResourceGroups(context.Context, int64, []string) bool {
+	return true
+}
+
+// A stock binary never takes the fast path, whatever the request looks like:
+// the same add-resource-group request that the extension-gated path keeps
+// loaded falls through to the native overwrite - reset to Loading, one
+// unscoped observer task - so native failure visibility (the SDK blocks until
+// the new resource group loads, or the whole collection is released on
+// timeout) is exactly what it always was.
+func (suite *IncrementalExpansionSuite) TestNativeBinaryNeverTakesTheFastPath() {
+	extension.ResetForTest()
+	suite.seedLoadedCollection(1, rgA, 1)
+
+	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
+		replicaConfig(1, rgA), replicaConfig(2, rgB)))
+	suite.NoError(err)
+	suite.Equal(1, putCalls, "with no provider installed the meta overwrite must happen exactly as upstream")
+
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
+	suite.Require().NotNil(collection)
+	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus(),
+		"native semantics: adding a resource group resets the collection to Loading")
+
+	suite.Require().Len(tasks, 1)
+	suite.Equal("", tasks[0].resourceGroup, "native path registers the unscoped collection-wide task")
 }
