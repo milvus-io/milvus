@@ -417,7 +417,6 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
-	warnOnImportIdempotencyWindowMisconfig(s.ctx)
 	s.startTaskScheduler()
 	s.startServerLoop()
 	s.afterStart()

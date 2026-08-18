@@ -439,9 +439,6 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
-	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
-		ImportJob: &datapb.ImportJob{JobID: 4242},
-	})
 
 	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
@@ -461,9 +458,6 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
-	importMeta.EXPECT().GetJob(mock.Anything, int64(0)).Return(&importJob{
-		ImportJob: &datapb.ImportJob{JobID: 0},
-	})
 
 	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 0, importV2RequestFilePath)
 
@@ -476,39 +470,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 	s.Equal("0", resp.GetJobID())
 }
 
-// The key outlived its job, so returning the original jobID would hand the client an
-// id GetImportProgress cannot resolve; ImportV2 must fail instead of returning a jobID.
-func (s *ImportServicesSuite) TestImportV2_DuplicateWithExpiredJobReturnsError() {
-	ctx := newImportV2IdempotentContext("run-1")
-
-	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
-	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil)
-
-	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
-
-	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
-
-	s.NoError(err)
-	s.NotNil(resp)
-	// Server-side state (GC timing, or a misconfigured retention) forces this branch,
-	// not the request content, so it stays in the System family.
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportSysFailed))
-	s.Contains(resp.GetStatus().GetReason(), "past its retention")
-	s.Empty(resp.GetJobID())
-}
-
-// The client key must reach the broadcaster byte for byte. Proxy.ImportV2 admits a raw
-// key of up to streaming.idempotency.maxKeyLength bytes and the broadcaster enforces the
-// same bound on whatever it receives, so anything DataCoord prepends here turns a key the
-// proxy just accepted into one the broadcaster rejects. This test sits on that exact
-// boundary; a short key would pass either way.
 func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtTheLimit() {
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
-	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
-		ImportJob: &datapb.ImportJob{JobID: 4242},
-	})
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
