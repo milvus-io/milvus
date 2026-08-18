@@ -37,21 +37,21 @@ class RoaringMembership {
         uint64_t estimated_decoded_bytes;
     };
 
-    // The MRB1 envelope and admission limits below are one contract with the
-    // Go SDK builder (client/v3/roaringfilter) and the Go proxy validator
+    // The MRB1 envelope and admission limits below are one contract with the Go
+    // SDK builder (client/v3/roaringfilter) and the Go proxy validator
     // (pkg/v3/util/roaringfilter). Nothing in the build links the three, so
     // TestRoaringSegcoreConstantsMatch (internal/parser/planparserv2) pins each
-    // declaration to its Go counterpart by exact text. That check builds the
-    // expected text from the Go constant rather than evaluating this one, which
-    // is why these are plain literals: the readable form goes in the trailing
-    // comment. Keep the shape `static constexpr <type> <name> = <literal>;`.
+    // to its Go counterpart. It reads these declarations as text, so a constant
+    // added here must keep the `constexpr <type> <name> = <initializer>;` shape
+    // and the k-prefixed name, or it is invisible to that check.
     static constexpr std::string_view kMagic = "MRB1";
     static constexpr uint16_t kVersion = 1;
     static constexpr uint16_t kFormatPortableRoaring64 = 1;
     static constexpr size_t kHeaderSize = 32;
-    static constexpr size_t kMaxBodySize = 134217728;                // 128 MiB
-    static constexpr uint64_t kMaxHighContainerCount = 262144;       // 1 << 18
-    static constexpr uint64_t kMaxEstimatedDecodedBytes = 67108864;  // 64 MiB
+    static constexpr size_t kMaxBodySize = 128 * 1024 * 1024;
+    static constexpr uint64_t kMaxHighContainerCount = uint64_t{1} << 18;
+    static constexpr uint64_t kMaxEstimatedDecodedBytes =
+        uint64_t{64} * 1024 * 1024;
     static constexpr uint64_t kEstimatedHighContainerOverheadBytes = 128;
     static constexpr uint64_t kEstimatedLowContainerOverheadBytes = 64;
 

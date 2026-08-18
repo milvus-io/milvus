@@ -82,12 +82,25 @@ var segcoreRoaringPins = []cppConstantPin{
 //     minimum and asserts the failure is the cookie rather than the bound, so
 //     raising it fails.
 //
-// That is the stronger check, not a weaker one: comparing declarations cannot
-// see a use site, so flipping a `>` to a `>=` would pass a value pin while
-// those fixtures fail. What it gives up is symmetry -- those tests hold each
-// implementation to the format, not to each other -- so a divergence would have
-// to slip past both suites rather than past one comparison. They stay listed so
-// a constant added to the .cpp still has to be classified.
+// Those checks catch a divergence a value pin cannot: a value pin reads
+// declarations, so flipping a `>` to a `>=` passes it while the fixtures fail.
+// They are not strictly stronger, and the limit is worth stating because it was
+// measured rather than assumed. Fault injection on
+// kPortableRoaring64MinEntryBytes, the weakest of the seven:
+//
+//   - tightening it (12 -> 16) fails on both sides --
+//     TestValidateAcceptsRunCookieWithSingleValueArrayContainer pins a 23-byte
+//     body in Go, RejectsUnsupportedRoaring32CookieAfterPrefixBound pads to
+//     exactly the bound in C++;
+//   - loosening it (12 -> 8) fails on neither.
+//
+// Loosening is benign here -- the bound is a cheap pre-filter, a structurally
+// valid body always carries at least 12 bytes per high entry, and a body that
+// slips past a loosened bound is rejected by the full scan behind it -- but the
+// two sides really can drift in that direction without a test noticing. What
+// this list gives up is symmetry: these tests hold each implementation to the
+// format, not to each other. They stay listed so a constant added to the .cpp
+// still has to be classified.
 var segcoreRoaringUnpinned = []string{
 	"kPortableCookieNoRun",
 	"kPortableCookieRun",

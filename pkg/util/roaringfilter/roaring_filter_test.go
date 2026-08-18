@@ -318,7 +318,7 @@ func TestPortableContainerEncodingsReachEveryBranch(t *testing.T) {
 	// than the bitmap this set exists to reach. The mix assertions below are
 	// what catch that; this is the cheaper signal that the set was edited at
 	// all. 1000 + 4097 + 3 + 1, all distinct.
-	require.Len(t, members, 5101)
+	require.Equal(t, 5101, len(members))
 
 	blob, err := buildFixture(members)
 	require.NoError(t, err)

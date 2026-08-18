@@ -188,7 +188,7 @@ func TestBuildPortableContainerEncodings(t *testing.T) {
 	// bitmap this set exists to reach, and pkg/util/roaringfilter, which owns
 	// the classifier that can see the difference, keeps its own copy of the set.
 	// This catches an edit to this copy before the two drift.
-	require.Len(t, members, 5101)
+	require.Equal(t, 5101, len(members))
 
 	blob := mustBuild(t, members)
 	bitmap := decodeBody(t, blob)
