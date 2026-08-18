@@ -213,7 +213,16 @@ func (p *functionConfig) init(base *BaseTable) {
 		// The group stays Sensitive so that a member nobody has thought of yet
 		// fails closed. Do not copy this list from the two groups above: theirs
 		// name different leaves, and a suffix that matches no real member
-		// silently exempts nothing.
+		// silently exempts nothing — which is what this list used to do.
+		//
+		// Two things to know about what the exemption buys. It applies once the
+		// key is configured, because an exemption is only honoured for a
+		// segmentation something vouched for (resolvedKey.segmented) — an
+		// unconfigured member reads as sensitive, though there is nothing behind
+		// it to read. And ParamGroup.GetValue hands the consumer lower-cased
+		// leaves, so loadConfig's camelCase lookups for enableTLS, certFile and
+		// serverNameOverride do not match today; that is a pre-existing bug in
+		// the consumer, unrelated to this classification.
 		NonSensitiveSuffixes: []string{"endpoint", "enableTLS", "certFile", "serverNameOverride"},
 	}
 	p.ZillizProviders.Init(base.mgr)

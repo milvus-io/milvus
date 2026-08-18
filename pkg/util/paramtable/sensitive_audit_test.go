@@ -480,3 +480,92 @@ func TestNoCredentialIsImmutable(t *testing.T) {
 			len(violations), strings.Join(violations, "\n  "))
 	}
 }
+
+// consumerLeaves records, for each Sensitive ParamGroup, the member names its
+// consumer actually reads, and where that was read off.
+//
+// A ParamGroup's members are named by whoever writes them, so nothing in the
+// declaration can be checked against the code that uses them — which is how
+// function.models.zilliz. came to exempt {"enable", "url"}, copied from the two
+// groups above it, while its consumer reads endpoint/enableTLS/certFile/
+// serverNameOverride. The exemption matched nothing, and all four of that
+// group's real settings were redacted and refused by /management/config/alter.
+// Nothing caught it: the group ships no entry in configs/milvus.yaml, so it
+// appears in none of the projection measurements, and every other audit here
+// reflects over declarations rather than over consumers.
+//
+// This table is the anchor. Keeping it correct means opening the consumer named
+// beside each entry.
+var consumerLeaves = map[string]struct {
+	source string
+	leaves []string
+}{
+	"credential.": {
+		source: "internal/util/credentials/credentials.go",
+		leaves: []string{"apikey", "access_key_id", "secret_access_key", "credential_json"},
+	},
+	"function.textembedding.providers.": {
+		source: "internal/util/function/models/common.go ParseAKAndURL/IsEnable, openai_embedding_provider.go",
+		leaves: []string{"credential", "url", "enable", "resource_name"},
+	},
+	"function.rerank.model.providers.": {
+		source: "internal/util/function/models/common.go ParseAKAndURL/IsEnable",
+		leaves: []string{"credential", "url", "enable"},
+	},
+	"function.models.zilliz.": {
+		source: "internal/util/function/models/zilliz/zilliz_client.go loadConfig",
+		leaves: []string{"endpoint", "enableTLS", "certFile", "serverNameOverride"},
+	},
+	// librdkafka passthrough: the member names are the broker's, not Milvus's,
+	// so there is no consumer to read them off and no exemption to check.
+	"kafka.consumer.": {source: "librdkafka (open-ended)"},
+	"kafka.producer.": {source: "librdkafka (open-ended)"},
+}
+
+// TestNonSensitiveSuffixesNameRealMembers fails when a declared exemption names
+// a leaf its consumer does not read, or when a Sensitive group is added without
+// recording where its member names come from.
+func TestNonSensitiveSuffixesNameRealMembers(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+
+	violations := make([]string, 0)
+	seen := make(map[string]struct{})
+	walkParamGroups(reflect.ValueOf(params).Elem(), func(group *ParamGroup) {
+		if !group.Sensitive {
+			return
+		}
+		prefix := strings.ToLower(group.KeyPrefix)
+		seen[prefix] = struct{}{}
+
+		consumer, recorded := consumerLeaves[prefix]
+		if !recorded {
+			violations = append(violations, prefix+
+				" is Sensitive but consumerLeaves does not record which members its consumer reads;"+
+				" open that consumer and add an entry, or an exemption for it cannot be checked")
+			return
+		}
+		for _, suffix := range group.NonSensitiveSuffixes {
+			found := false
+			for _, leaf := range consumer.leaves {
+				if strings.EqualFold(leaf, suffix) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				violations = append(violations, prefix+" exempts "+suffix+
+					" which is not a member "+consumer.source+" reads; the exemption applies to nothing")
+			}
+		}
+	})
+
+	for prefix := range consumerLeaves {
+		if _, ok := seen[prefix]; !ok {
+			t.Errorf("consumerLeaves records %q, which is no longer a Sensitive ParamGroup; "+
+				"delete the entry deliberately rather than letting this audit cover less", prefix)
+		}
+	}
+	if len(violations) > 0 {
+		t.Errorf("exemption/consumer mismatch:\n  %s", strings.Join(violations, "\n  "))
+	}
+}
