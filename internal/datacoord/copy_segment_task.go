@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -905,24 +904,10 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
 			operators := []UpdateOperator{op1, op2, op3}
-			segment := meta.GetSegment(ctx, result.GetSegmentId())
-			v3ManifestCommit := segment != nil && segment.GetStorageVersion() == storage.StorageV3 && result.GetManifestPath() != ""
-			if !v3ManifestCommit && result.GetManifestPath() != "" {
-				operators = append(operators, UpdateManifest(result.GetSegmentId(), result.GetManifestPath()))
+			if manifestPath := result.GetManifestPath(); manifestPath != "" {
+				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
-			if v3ManifestCommit {
-				err = meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-					SegmentID:        result.GetSegmentId(),
-					ExpectedManifest: segment.GetManifestPath(),
-					Mutation: ManifestMutation{
-						Type:         ManifestMutationNoop,
-						ManifestPath: result.GetManifestPath(),
-					},
-					CatalogMutation: SegmentCatalogMutation{Operators: operators},
-				})
-			} else {
-				err = meta.UpdateSegmentsInfo(ctx, operators...)
-			}
+			err = meta.UpdateSegmentsInfo(ctx, operators...)
 			if err != nil {
 				// On error, mark task and job as failed
 				updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
