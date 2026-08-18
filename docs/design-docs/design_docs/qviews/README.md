@@ -25,12 +25,20 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 
 ## 3. Two-Phase Query Process
 
-TODO(query/query_client.md): add the detailed query-path flow, service boundary,
-client orchestration, and shard discovery design when the query path is picked.
+[Query Client](query/query_client.md) defines the transport-neutral two-phase
+orchestration and its current Primary-only boundary.
+[Legacy Query Client](query/query_client_legacy.md) defines the initial raw-result
+domain that can be integrated with the existing Proxy pipeline in a later change.
 TODO(query/query_plan.md): add the node-side Phase 1 planning design when that
 module is picked.
 TODO(query/query_execution.md): add the node-side Phase 2 execution design when
 that module is picked.
+
+Current implementation status: the wire contract, RPC error projection, and
+independent Legacy Query Client are implemented. Production shard discovery,
+StreamingNode/QueryNode transport adapters, node-side services, and Proxy
+integration are intentionally deferred. Consequently, no production query
+traffic uses this path yet.
 
 1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
    - Includes MVCC
