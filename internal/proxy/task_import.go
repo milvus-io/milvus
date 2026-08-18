@@ -220,8 +220,6 @@ func (it *importTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// The idempotency key is not part of this request: the client interceptor copies
-	// it from the incoming metadata of ctx onto the outgoing call to DataCoord.
 	importReq := &internalpb.ImportRequestInternal{
 		DbID:           dbInfo.DBID,
 		CollectionID:   it.collectionID,

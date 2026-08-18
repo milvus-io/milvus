@@ -73,7 +73,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -6437,14 +6436,6 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	tr := timerecord.NewTimeRecorder(method)
 	mlog.Info(ctx, rpcReceived(method))
 	nodeID := paramtable.GetStringNodeID()
-
-	// The key itself travels to DataCoord in the gRPC metadata, but its length is
-	// rejected here, close to the user, so an oversized key never reaches the hop.
-	if err := validateIdempotencyKeyLength(interceptor.IdempotencyKeyFromContext(ctx)); err != nil {
-		mlog.Warn(ctx, "reject import with oversized idempotency key", mlog.Err(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
 
 	it := &importTask{
 		baseTask:  baseTask{metaCache: node.getMetaCache()},
