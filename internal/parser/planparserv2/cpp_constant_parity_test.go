@@ -48,11 +48,19 @@ package planparserv2
 //     someone updates both the C++ type and this table.
 //
 // The evaluator handles only what these declarations use: literals with the
-// usual suffixes and digit separators, `*`, `<<`, parentheses, and the
-// `uint64_t{1}` brace-init form. Anything else is an error, not a guess. Note
-// which way its own bugs point: a mis-evaluated expression yields a value the
-// Go constant does not have, so it fails loudly. It cannot pass wrongly unless
-// it agrees with the compiler, which is the whole job.
+// usual suffixes and digit separators, `*`, `+`, `<<`, parentheses, and the
+// `uint64_t{1}` brace-init form. It does not resolve identifiers. Anything else
+// is an error, not a guess. Note which way its own bugs point: a mis-evaluated
+// expression yields a value the Go constant does not have, so it fails loudly.
+// It cannot pass wrongly unless it agrees with the compiler, which is the whole
+// job.
+//
+// The scanner in front of it carries the weight of that claim, so it is the
+// part to be suspicious of: it has to find the declaration the compiler
+// actually uses. That is why it accepts the same `const`/`constexpr` spellings
+// the completeness check does, why a name declared twice is a failure rather
+// than a last-match-wins, and why the name has to be the declarator rather than
+// merely mentioned.
 //
 // Evaluating rather than demanding a literal is deliberate. The alternative --
 // pinning the initializer as text -- forces segcore to spell its limits as
@@ -60,11 +68,11 @@ package planparserv2
 // production C++ to save complexity in a test. `128 * 1024 * 1024` says what it
 // means.
 //
-// Spelling that the compiler ignores is normalised away before comparing:
+// Spelling that does not change the value is normalised away before comparing:
 // whitespace and the line breaks .clang-format's ColumnLimit forces, `static`
-// and `inline`, a `std::` qualifier, and digit separators. A Go test failing
-// over `std::size_t` or `134'217'728` would send the reader hunting in the
-// wrong language.
+// and `inline`, `const` versus `constexpr`, a `std::` qualifier, and digit
+// separators. A Go test failing over `std::size_t` or `134'217'728` would send
+// the reader hunting in the wrong language.
 //
 // # What it does not cover
 //
@@ -130,6 +138,12 @@ var (
 	// `static const uint64_t kFoo = 7;` behaves identically and would otherwise
 	// be invisible to the completeness check. `[^;=]` keeps it from reaching
 	// past an initializer into a use site.
+	//
+	// cppDeclarationsOf must accept exactly the same spellings. If it accepted
+	// only `constexpr`, a live `static const` declaration would be invisible to
+	// the pin while still being classified here, and a decoy `constexpr` of the
+	// same name elsewhere would be graded in its place -- a green test over a
+	// diverged constant.
 	cppConstantName = regexp.MustCompile(`const(?:expr)?\s[^;=]*?\b(k[A-Z]\w*)\s*[={]`)
 
 	// One alternation, left to right, so neither comment kind can eat the
@@ -146,6 +160,12 @@ var (
 	// `static` and `inline` are storage and linkage, not part of the contract,
 	// and `constexpr static` is as valid as `static constexpr`.
 	cppSpecifier = regexp.MustCompile(`\b(?:static|inline)\s+`)
+	// A leading `const` denotes the same value as `constexpr`. The difference is
+	// real to the compiler -- usability in constant expressions, and pre-C++17
+	// linkage -- but that is the compiler's to enforce, not this check's, whose
+	// subject is the value. `\s` after `const` is what keeps this off
+	// `constexpr` itself.
+	cppLeadingConst = regexp.MustCompile(`^const\s+`)
 
 	cppBraceInit    = regexp.MustCompile(`\b\w+\s*\{\s*([^{}]*?)\s*\}`)
 	cppInnerParens  = regexp.MustCompile(`\(([^()]*)\)`)
@@ -192,11 +212,25 @@ func assertCppConstantParity(t *testing.T, sources []string, pinned []cppConstan
 		}
 	}
 
+	declared := declaredCppConstants(bodies)
+
+	// The unpinned list carries a written argument for why each name needs no Go
+	// counterpart. Deleting the constant -- most plausibly by inlining its
+	// literal at the use site, which is this check's widest blind spot -- would
+	// otherwise leave that argument standing over something that no longer
+	// exists.
+	for _, name := range unpinned {
+		assert.Containsf(t, declared, name,
+			"%v no longer declare %s, but it is still listed as deliberately unpinned. "+
+				"Drop it from that list, and check whether the reasoning it carries still "+
+				"describes the code", sources, name)
+	}
+
 	known := slices.Clone(unpinned)
 	for _, pin := range pinned {
 		known = append(known, pin.name)
 	}
-	for _, name := range declaredCppConstants(bodies) {
+	for _, name := range declared {
 		assert.Containsf(t, known, name,
 			"%s is declared in %v and nothing classifies it; pin it against its Go "+
 				"counterpart, or list it as unpinned with the reason it needs none",
@@ -229,6 +263,17 @@ func soleCppDeclaration(t *testing.T, bodies map[string]string, sources []string
 			"%s is declared %d times across %v, so this check cannot tell which one the "+
 				"compiler takes:\n%s",
 			name, len(declarations), sources, strings.Join(declarations, "\n"))
+		return "", false
+	}
+	// One statement, two declarators: `constexpr uint64_t kA = 1, kB = 2;`.
+	// Splitting that at its first `=` would grade kB against kA's initializer
+	// and report kA's declarator while naming kB, which is a misdiagnosis of
+	// exactly the kind this check exists to avoid making.
+	if strings.Contains(declarations[0], ",") {
+		assert.Failf(t, "more than one declarator in one statement",
+			"%s is declared in a statement that declares more than one name, which this "+
+				"check reads one declarator at a time:\n%s\nSplit it into one statement "+
+				"per constant.", name, declarations[0])
 		return "", false
 	}
 	return declarations[0], true
@@ -303,11 +348,12 @@ func assertCppDeclarationMatches(t *testing.T, pin cppConstantPin, declaration s
 // two it references would report a duplicate that does not exist, on what is
 // the most natural edit to make next to these constants.
 func cppDeclarationsOf(bodies map[string]string, name string) []string {
-	// `[^;]` cannot cross a statement boundary, so a match is one declaration,
-	// and a use site -- which carries no constexpr of its own -- cannot produce
-	// one.
+	// `[^;]` cannot cross a statement boundary, so a match is one statement, and
+	// a use site -- which carries no const of its own -- cannot produce one.
+	// `const(?:expr)?` must stay in step with cppConstantName; see the note
+	// there for what an asymmetry buys an attacker.
 	declaration := regexp.MustCompile(
-		`(?:static\s+|inline\s+)*constexpr\s[^;]*?\b` + regexp.QuoteMeta(name) + `\s*=[^;]*;`)
+		`(?:static\s+|inline\s+)*const(?:expr)?\s[^;]*?\b` + regexp.QuoteMeta(name) + `\s*=[^;]*;`)
 	var out []string
 	for _, source := range slices.Sorted(maps.Keys(bodies)) {
 		out = append(out, declaration.FindAllString(bodies[source], -1)...)
@@ -352,14 +398,22 @@ func stripCppStd(s string) string {
 // compiler ignores.
 func canonicalCppDeclaration(decl string) string {
 	decl = cppSpecifier.ReplaceAllString(normalizeCppWhitespace(strings.TrimSpace(decl)), "")
+	decl = cppLeadingConst.ReplaceAllString(decl, "constexpr ")
 	decl = cppAssign.ReplaceAllString(stripCppStd(decl), " = ")
 	return strings.ReplaceAll(decl, " ;", ";")
 }
 
 // evalCppIntExpr evaluates the small arithmetic these declarations use: decimal
 // and hex literals with optional suffixes and C++14 digit separators, `a * b`,
-// `a << b`, parentheses, and the `uint64_t{1}` brace-init form. Anything else
-// is an error rather than a guess, which surfaces as "cannot evaluate".
+// `a + b`, `a << b`, parentheses, and the `uint64_t{1}` brace-init form.
+// Anything else is an error rather than a guess, which surfaces as "cannot
+// evaluate".
+//
+// It does not resolve identifiers, so a constant derived from another --
+// `kMaxBlobSize = kHeaderSize + kMaxBodySize` -- cannot be pinned today. It
+// fails loudly rather than silently, and the repair is to teach this function,
+// not to move the constant to the unpinned list: unpinned means "held by
+// something else", which a derived limit is not.
 func evalCppIntExpr(expr string) (uint64, error) {
 	// The brace-init type tag carries a narrowing the compiler would apply, but
 	// the declared type is pinned separately and the result range-checked
@@ -384,7 +438,7 @@ func evalCppIntExpr(expr string) (uint64, error) {
 		}
 	}
 
-	// `<<` binds looser than `*` in C++, so split on it first.
+	// Loosest binding first: `<<` below `+` below `*`.
 	if lhs, rhs, found := strings.Cut(expr, "<<"); found {
 		if strings.Contains(rhs, "<<") {
 			return 0, fmt.Errorf("unsupported chained shift in %q", expr)
@@ -401,6 +455,18 @@ func evalCppIntExpr(expr string) (uint64, error) {
 			return 0, fmt.Errorf("shift count %d is out of range in %q", right, expr)
 		}
 		return left << right, nil
+	}
+
+	if strings.Contains(expr, "+") {
+		sum := uint64(0)
+		for _, term := range strings.Split(expr, "+") {
+			value, err := evalCppIntExpr(term)
+			if err != nil {
+				return 0, err
+			}
+			sum += value
+		}
+		return sum, nil
 	}
 
 	product := uint64(1)

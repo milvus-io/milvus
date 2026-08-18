@@ -31,6 +31,15 @@
 namespace milvus {
 namespace {
 
+// These are RoaringFormatSpec values, not a Milvus contract, so unlike the
+// limits in RoaringMembership.h they are not pinned to a Go counterpart by
+// value; each side is held to the format behaviourally by its own fixtures.
+// TestRoaringSegcoreConstantsMatch (internal/parser/planparserv2) still reads
+// this file, and every k-prefixed constant here has to be classified there as
+// pinned or deliberately unpinned -- so adding one, renaming one, or deleting
+// one fails a Go test until that list is updated. Keep the shape
+// `constexpr <type> <name> = <initializer>;`; a #define or an enum is invisible
+// to that check instead.
 constexpr uint32_t kPortableCookieNoRun = 12346;
 constexpr uint16_t kPortableCookieRun = 12347;
 constexpr uint32_t kPortableArrayMaxCardinality = 4096;
