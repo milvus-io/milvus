@@ -45,7 +45,8 @@ class DatasetIterator {
         int64_t max_batch_bytes,
         int64_t total_sample_bytes,
         int storage_version,
-        bool random_sample);
+        bool random_sample,
+        const std::map<int64_t, std::string>& manifests);
 
     bool
     HasNext() const;
@@ -54,8 +55,8 @@ class DatasetIterator {
     void
     notifyEOF();
     void
-    increaseRemaining(size_t increase) {
-        remaining_sample_bytes_ += increase;
+    updateRemaining(int64_t delta) {
+        remaining_sample_bytes_ += delta;
     }
 
  private:
@@ -64,6 +65,7 @@ class DatasetIterator {
     std::map<int64_t, std::vector<std::string>> segment_files_;
     std::map<int64_t, int64_t> num_rows_;
     std::map<std::string, int64_t> file_sizes_map_;
+    std::map<int64_t, std::string> manifests_;
 
     int64_t dim_;
     int64_t max_batch_bytes_;
