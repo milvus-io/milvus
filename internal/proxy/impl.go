@@ -6559,6 +6559,14 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 
+	// Extension seam, see extension_seam.go. Import is in the DML table
+	// because it is bulk INSERT: a form that refuses streaming writes and
+	// left this open would simply have taught its tenants a slower syntax
+	// for the same forbidden write. Import (v1) funnels through here.
+	if st := interceptDML(ctx, "Import", req); st != nil {
+		return &internalpb.ImportResponse{Status: st}, nil
+	}
+
 	// Check for external collection - import is not supported
 	if err := checkExternalCollectionBlockedForWrite(ctx, req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil

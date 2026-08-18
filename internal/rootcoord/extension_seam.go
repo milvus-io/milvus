@@ -24,6 +24,7 @@ import (
 // privilege metadata a bootstrapper is allowed to touch.
 type catalogCredentialStore struct {
 	catalog metastore.RootCoordCatalog
+	meta    IMetaTable
 }
 
 // HasCredential reports whether a credential already exists for username. The
@@ -41,7 +42,12 @@ func (s catalogCredentialStore) HasCredential(ctx context.Context, username stri
 	return true, nil
 }
 
-// CreateCredential stores an already-encrypted password for username.
+// CreateCredential stores an already-encrypted password for username. It
+// writes through the catalog on purpose: MetaTable has no credential-write
+// short of the RPC task pipeline, and rootcoord's own InitCredential seeds
+// the root account through this same catalog call at this same point in
+// initialisation - the bootstrap's credentials take exactly the path the
+// native root credential takes.
 func (s catalogCredentialStore) CreateCredential(ctx context.Context, username, encryptedPassword string) error {
 	return s.catalog.AlterCredential(ctx, &model.Credential{
 		Username:          username,
@@ -49,24 +55,26 @@ func (s catalogCredentialStore) CreateCredential(ctx context.Context, username, 
 	})
 }
 
-// CreateRole forwards directly to the catalog.
+// The RBAC writes below go through the MetaTable, not the raw catalog: its
+// methods carry the validation and normalisation the RPC path has (empty-value
+// checks, DbName defaulting in OperatePrivilege) and take the permission lock,
+// so a bootstrapped grant is byte-for-byte what the same grant issued over RPC
+// would have written.
+
 func (s catalogCredentialStore) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-	return s.catalog.CreateRole(ctx, tenant, entity)
+	return s.meta.CreateRole(ctx, tenant, entity)
 }
 
-// AlterUserRole forwards directly to the catalog.
 func (s catalogCredentialStore) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, op milvuspb.OperateUserRoleType) error {
-	return s.catalog.AlterUserRole(ctx, tenant, userEntity, roleEntity, op)
+	return s.meta.OperateUserRole(ctx, tenant, userEntity, roleEntity, op)
 }
 
-// ListUser forwards directly to the catalog.
 func (s catalogCredentialStore) ListUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-	return s.catalog.ListUser(ctx, tenant, entity, includeRoleInfo)
+	return s.meta.SelectUser(ctx, tenant, entity, includeRoleInfo)
 }
 
-// AlterGrant forwards directly to the catalog.
 func (s catalogCredentialStore) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, op milvuspb.OperatePrivilegeType) error {
-	return s.catalog.AlterGrant(ctx, tenant, entity, op)
+	return s.meta.OperatePrivilege(ctx, tenant, entity, op)
 }
 
 // bootstrapExtensionRBAC seeds provider-managed accounts and roles once during
@@ -75,10 +83,10 @@ func (s catalogCredentialStore) AlterGrant(ctx context.Context, tenant string, e
 // the adapter or touching the catalog. A non-nil error must fail rootcoord
 // startup: a form whose accounts are missing would otherwise serve requests
 // with no identity.
-func bootstrapExtensionRBAC(ctx context.Context, catalog metastore.RootCoordCatalog) error {
+func bootstrapExtensionRBAC(ctx context.Context, meta IMetaTable, catalog metastore.RootCoordCatalog) error {
 	bootstrapper := extension.Caps().RBACBootstrap
 	if bootstrapper == nil {
 		return nil
 	}
-	return bootstrapper.Bootstrap(ctx, catalogCredentialStore{catalog: catalog})
+	return bootstrapper.Bootstrap(ctx, catalogCredentialStore{catalog: catalog, meta: meta})
 }

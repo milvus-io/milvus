@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -54,7 +55,7 @@ func TestBootstrapExtensionRBACNoProviderDoesNotTouchCatalog(t *testing.T) {
 
 	catalog := mocks.NewRootCoordCatalog(t)
 
-	err := bootstrapExtensionRBAC(context.Background(), catalog)
+	err := bootstrapExtensionRBAC(context.Background(), mockrootcoord.NewIMetaTable(t), catalog)
 	assert.NoError(t, err)
 	assert.Empty(t, catalog.Calls, "with no provider installed the seam must not construct the adapter or call the catalog")
 }
@@ -67,7 +68,7 @@ func TestBootstrapExtensionRBACCallsBootstrapperWithAdaptedStore(t *testing.T) {
 	b := &recordingBootstrapper{}
 	installRBACBootstrapper(t, b)
 
-	err := bootstrapExtensionRBAC(context.Background(), catalog)
+	err := bootstrapExtensionRBAC(context.Background(), mockrootcoord.NewIMetaTable(t), catalog)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, b.callCount, "Bootstrap must run exactly once")
 
@@ -84,7 +85,7 @@ func TestBootstrapExtensionRBACPropagatesBootstrapError(t *testing.T) {
 	want := errors.New("seeding failed")
 	installRBACBootstrapper(t, &recordingBootstrapper{err: want})
 
-	err := bootstrapExtensionRBAC(context.Background(), catalog)
+	err := bootstrapExtensionRBAC(context.Background(), mockrootcoord.NewIMetaTable(t), catalog)
 	assert.ErrorIs(t, err, want, "a Bootstrap error must propagate out of the seam so rootcoord startup fails")
 }
 
@@ -134,18 +135,22 @@ func TestCatalogCredentialStoreCreateCredentialForwardsToAlterCredential(t *test
 	assert.NoError(t, err)
 }
 
+// The RBAC methods go through the MetaTable, not the raw catalog: its methods
+// carry the validation and normalisation the RPC path has (DbName defaulting
+// in OperatePrivilege, empty-value checks) and take the permission lock, so a
+// bootstrapped grant is exactly what the same grant over RPC would write.
 func TestCatalogCredentialStoreForwardsRemainingMethods(t *testing.T) {
-	catalog := mocks.NewRootCoordCatalog(t)
+	meta := mockrootcoord.NewIMetaTable(t)
 	roleEntity := &milvuspb.RoleEntity{Name: "role1"}
 	userEntity := &milvuspb.UserEntity{Name: "user1"}
 	grantEntity := &milvuspb.GrantEntity{Role: roleEntity}
 
-	catalog.On("CreateRole", mock.Anything, "tenant1", roleEntity).Return(nil)
-	catalog.On("AlterUserRole", mock.Anything, "tenant1", userEntity, roleEntity, milvuspb.OperateUserRoleType_AddUserToRole).Return(nil)
-	catalog.On("ListUser", mock.Anything, "tenant1", userEntity, true).Return([]*milvuspb.UserResult{{User: userEntity}}, nil)
-	catalog.On("AlterGrant", mock.Anything, "tenant1", grantEntity, milvuspb.OperatePrivilegeType_Grant).Return(nil)
+	meta.On("CreateRole", mock.Anything, "tenant1", roleEntity).Return(nil)
+	meta.On("OperateUserRole", mock.Anything, "tenant1", userEntity, roleEntity, milvuspb.OperateUserRoleType_AddUserToRole).Return(nil)
+	meta.On("SelectUser", mock.Anything, "tenant1", userEntity, true).Return([]*milvuspb.UserResult{{User: userEntity}}, nil)
+	meta.On("OperatePrivilege", mock.Anything, "tenant1", grantEntity, milvuspb.OperatePrivilegeType_Grant).Return(nil)
 
-	store := catalogCredentialStore{catalog: catalog}
+	store := catalogCredentialStore{meta: meta}
 	ctx := context.Background()
 
 	assert.NoError(t, store.CreateRole(ctx, "tenant1", roleEntity))

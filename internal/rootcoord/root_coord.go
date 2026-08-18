@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -623,10 +624,18 @@ func (c *Core) initRbac(initCtx context.Context) error {
 		}
 	}
 
+	// The credential half of the bootstrap needs the catalog (the same path
+	// InitCredential seeds root through); the RBAC half goes through the
+	// MetaTable. A meta implementation that is not the real MetaTable cannot
+	// supply the former - and with the capability installed that is a broken
+	// deployment, not a case to skip silently: a form whose accounts are
+	// missing would serve requests with no identity behind its API keys.
 	if mt, ok := c.meta.(*MetaTable); ok {
-		if err := bootstrapExtensionRBAC(initCtx, mt.catalog); err != nil {
+		if err := bootstrapExtensionRBAC(initCtx, c.meta, mt.catalog); err != nil {
 			return errors.Wrap(err, "failed to bootstrap extension rbac")
 		}
+	} else if extension.Caps().RBACBootstrap != nil {
+		return errors.New("rbac bootstrap capability installed, but the meta table cannot store credentials")
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {

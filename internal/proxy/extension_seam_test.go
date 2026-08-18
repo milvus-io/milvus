@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -113,6 +114,11 @@ func TestEveryWritePathIsGuardedByTheDMLSeam(t *testing.T) {
 		}},
 		{"FlushAll", func(node *Proxy, ctx context.Context) *commonpb.Status {
 			resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+			assert.NoError(t, err)
+			return status(resp.GetStatus())
+		}},
+		{"Import", func(node *Proxy, ctx context.Context) *commonpb.Status {
+			resp, err := node.ImportV2(ctx, &internalpb.ImportRequest{DbName: "db", CollectionName: "coll"})
 			assert.NoError(t, err)
 			return status(resp.GetStatus())
 		}},
@@ -526,7 +532,6 @@ func TestCheckCreateDatabaseAdmissionPassesCoordThroughAtPreExecute(t *testing.T
 	}
 }
 
-
 // adminBlockingExtension records the operation names it sees and refuses every
 // administrative RPC.
 type adminBlockingExtension struct {
@@ -564,9 +569,9 @@ type fakeReplicateStream struct {
 	ctx context.Context
 }
 
-func (f fakeReplicateStream) Context() context.Context                     { return f.ctx }
-func (f fakeReplicateStream) Send(*milvuspb.ReplicateResponse) error       { return nil }
-func (f fakeReplicateStream) Recv() (*milvuspb.ReplicateRequest, error)    { return nil, nil }
+func (f fakeReplicateStream) Context() context.Context                  { return f.ctx }
+func (f fakeReplicateStream) Send(*milvuspb.ReplicateResponse) error    { return nil }
+func (f fakeReplicateStream) Recv() (*milvuspb.ReplicateRequest, error) { return nil, nil }
 
 // Every withheld administrative RPC consults the seam at its entry - before
 // health checks, argument validation, anything - so the refusal is uniform

@@ -294,6 +294,16 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 				rwNodes = replica.GetRWNodes()
 			}
 		}
+		if len(rwNodes) == 0 {
+			// No candidate at any tier. Without this line the failure mode is
+			// pure silence: no task, no log, the collection just never
+			// becomes queryable while the checker retries every tick.
+			mlog.RatedWarn(ctx, 0.1, "no node can take this channel's delegator: no serving streaming node and no regular query node in the replica",
+				mlog.FieldCollectionID(replica.GetCollectionID()),
+				mlog.String("channel", ch.GetChannelName()),
+				mlog.String("resourceGroup", replica.GetResourceGroup()))
+			continue
+		}
 		plan := c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
 		plans = append(plans, plan...)
 	}

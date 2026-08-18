@@ -400,3 +400,24 @@ func TestLoadPercentageByResourceGroup_EmptyRGStillReportsNoReplica(t *testing.T
 	assert.NoError(t, err)
 	assert.EqualValues(t, -1, percentage, "no replica anywhere must stay distinguishable from a replica at zero progress")
 }
+
+// TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion asserts the
+// figure is read NextTargetFirst: promoting the next target to current clears
+// the next target until the observer re-pulls it ~10s later, and a plain
+// NextTarget read in that window reports 0 - a fully loaded, serving resource
+// group flapping 100/0 on every promotion. Changing NextTargetFirst back to
+// NextTarget in replicaLoadPercentage fails this at 0.
+func TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 900, 9000, "900-dmc0")
+	f.putReplica(t, 900, 90, "rg-promoted")
+	f.putDelegator(900, 90, "900-dmc0")
+
+	require.True(t, f.targetMgr.UpdateCollectionCurrentTarget(context.Background(), 900),
+		"promotion moves next to current and clears next")
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 900, "rg-promoted")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 100, percentage,
+		"a promoted target must keep reporting the loaded figure, not flap to 0")
+}

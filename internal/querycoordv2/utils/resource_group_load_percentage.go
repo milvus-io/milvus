@@ -116,8 +116,13 @@ func replicaLoadPercentage(
 	replica *meta.Replica,
 ) int32 {
 	collectionID := replica.GetCollectionID()
-	channelTargets := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
-	segmentTargets := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+	// NextTargetFirst, not NextTarget: promotion clears the next target until
+	// the observer re-pulls it ~10s later, and a plain NextTarget read in that
+	// window sees an empty target and reports 0 - so a fully loaded, serving
+	// resource group would flap 100/0 on every promotion to any caller of
+	// GetLoadPercentageByResourceGroup.
+	channelTargets := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTargetFirst)
+	segmentTargets := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTargetFirst)
 
 	targetNum := len(channelTargets) + len(segmentTargets)
 	if targetNum == 0 {
