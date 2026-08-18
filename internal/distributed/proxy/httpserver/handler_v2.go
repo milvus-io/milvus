@@ -4014,7 +4014,6 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 	return resp, err
 }
 
-
 func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	var (
 		collectionGetter = anyReq.(requestutil.CollectionNameGetter)
