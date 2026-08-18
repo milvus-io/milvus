@@ -37,7 +37,19 @@ import (
 //   - CPU is compressible. Two tasks on one core both finish, just later. So
 //     CPU is a REQUEST, in the Kubernetes sense: nothing enforces it, no task is
 //     ever refused for want of it (see MemoryFitsIn), and it exists to place and
-//     to spread rather than to admit. See cpu.go for what consumes it.
+//     to spread rather than to admit.
+//
+// The CPU figure is currently a flat per-family charge and is known to be a poor
+// model of the DataNode's actual behavior: a vector index build and an analyze
+// task each saturate knowhere's global build thread pool
+// (GetCPUNum() x DefaultKnowhereThreadPoolNumRatioInBuild, shared by both), so
+// running two does not consume twice the cores -- it halves each one's speed. A
+// resource of that shape is not additive and cannot be priced by a per-task
+// number at all; it needs a per-node concurrency count. Scalar index and stats
+// builds are the opposite: tantivy's writer runs on a single thread
+// (DEFAULT_NUM_THREADS = 1), so their CPU really is additive and really is about
+// one core. Fixing this is deferred; nothing in the admission path depends on
+// the CPU figure, so the flat charge is inaccurate rather than unsafe.
 type Requirement struct {
 	CPU    float64
 	Memory int64
@@ -93,10 +105,10 @@ func (r Requirement) FitsIn(c Capacity) bool {
 // contend for the same thread pool -- an L0 compaction blocked behind four
 // vector index builds it shares nothing with.
 //
-// This is also what makes the CPU request safe to set honestly. Once a vector
-// index build charges the several cores it really occupies (see
-// VectorIndexBuildCPU), a charge that large would refuse half the node's work
-// if admission still treated it as a reservation.
+// This is also what makes the CPU request safe to set honestly at all. A vector
+// index build saturates the whole knowhere build pool; a charge that reflected
+// that would refuse half the node's work if admission still treated it as a
+// reservation.
 func (r Requirement) MemoryFitsIn(c Capacity) bool {
 	return r.Memory <= c.Memory
 }
