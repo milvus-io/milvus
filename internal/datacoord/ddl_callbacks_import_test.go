@@ -85,34 +85,6 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 	s.Contains(err.Error(), "timeout")
 }
 
-func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsError() {
-	ctx := context.Background()
-
-	mock := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds default MaxImportJobNum (1024)
-	}).Build()
-	defer mock.UnPatch()
-
-	server := &Server{
-		importMeta: &importMeta{},
-	}
-
-	files := []*msgpb.ImportFile{
-		{Id: 1, Paths: []string{"/test/file1.json"}},
-	}
-	options := []*commonpb.KeyValuePair{
-		{Key: "timeout", Value: "300s"},
-	}
-
-	err := server.validateImportRequest(ctx, files, options)
-
-	s.Error(err)
-	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
-	// (must not be bucketed as a user-caused failure).
-	s.True(errors.Is(err, merr.ErrImportSysFailed))
-	s.Contains(err.Error(), "The number of jobs has reached the limit")
-}
-
 func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturnsError() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -283,14 +255,13 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 // broadcastImport Tests
 // --------------------------------
 
+// A request that fails validateImportRequest is rejected before any broadcast wiring is
+// touched -- server.broker is nil here, so reaching it would panic or block. The trigger
+// is an unparsable timeout, i.e. a pure function of the request. The job-count limit is
+// no longer one of these: it is admission over mutable cluster state and now runs inside
+// the broadcast, covered by TestImportV2_JobLimitStillRejectsANewJob.
 func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
 	ctx := context.Background()
-
-	// Mock validateImportRequest to fail
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds limit
-	}).Build()
-	defer mockCount.UnPatch()
 
 	server := &Server{
 		importMeta: &importMeta{},
@@ -302,7 +273,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "not-a-duration"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
@@ -655,6 +626,18 @@ func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
 	}
 	mock.closeCalled.Store(false)
 	return mock
+}
+
+// BroadcastWithAdmission mirrors the real broadcaster: admit runs only when the
+// broadcast is not deduplicated, so a test whose configured result carries Duplicated
+// must never see it called.
+func (m *mockBroadcastAPIImpl) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
+	if admit != nil && (m.broadcastResult == nil || m.broadcastResult.Duplicated == nil) {
+		if err := admit(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return m.Broadcast(ctx, msg)
 }
 
 func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -1188,6 +1171,15 @@ type captureBroadcastAPI struct {
 func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 	c.captured = msg
 	return &types.BroadcastAppendResult{BroadcastID: 1}, nil
+}
+
+func (c *captureBroadcastAPI) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
+	if admit != nil {
+		if err := admit(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return c.Broadcast(ctx, msg)
 }
 
 func (c *captureBroadcastAPI) Close() {}

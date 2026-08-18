@@ -1358,6 +1358,9 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 			Return(paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt() + 1)
 		err := ValidateMaxImportJobExceed(ctx, mockImportMeta)
 		assert.Error(t, err)
+		// Job-count backpressure is a server-side condition -> ErrImportSysFailed
+		// (must not be bucketed as a user-caused failure).
+		assert.ErrorIs(t, err, merr.ErrImportSysFailed)
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
 }

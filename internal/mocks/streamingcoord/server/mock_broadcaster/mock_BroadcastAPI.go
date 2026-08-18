@@ -83,6 +83,66 @@ func (_c *MockBroadcastAPI_Broadcast_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// BroadcastWithAdmission provides a mock function with given fields: ctx, msg, admit
+func (_m *MockBroadcastAPI) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
+	ret := _m.Called(ctx, msg, admit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BroadcastWithAdmission")
+	}
+
+	var r0 *types.BroadcastAppendResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastMutableMessage, func(context.Context) error) (*types.BroadcastAppendResult, error)); ok {
+		return rf(ctx, msg, admit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastMutableMessage, func(context.Context) error) *types.BroadcastAppendResult); ok {
+		r0 = rf(ctx, msg, admit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.BroadcastAppendResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, message.BroadcastMutableMessage, func(context.Context) error) error); ok {
+		r1 = rf(ctx, msg, admit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcastAPI_BroadcastWithAdmission_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BroadcastWithAdmission'
+type MockBroadcastAPI_BroadcastWithAdmission_Call struct {
+	*mock.Call
+}
+
+// BroadcastWithAdmission is a helper method to define mock.On call
+//   - ctx context.Context
+//   - msg message.BroadcastMutableMessage
+//   - admit func(context.Context) error
+func (_e *MockBroadcastAPI_Expecter) BroadcastWithAdmission(ctx interface{}, msg interface{}, admit interface{}) *MockBroadcastAPI_BroadcastWithAdmission_Call {
+	return &MockBroadcastAPI_BroadcastWithAdmission_Call{Call: _e.mock.On("BroadcastWithAdmission", ctx, msg, admit)}
+}
+
+func (_c *MockBroadcastAPI_BroadcastWithAdmission_Call) Run(run func(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error)) *MockBroadcastAPI_BroadcastWithAdmission_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(message.BroadcastMutableMessage), args[2].(func(context.Context) error))
+	})
+	return _c
+}
+
+func (_c *MockBroadcastAPI_BroadcastWithAdmission_Call) Return(_a0 *types.BroadcastAppendResult, _a1 error) *MockBroadcastAPI_BroadcastWithAdmission_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcastAPI_BroadcastWithAdmission_Call) RunAndReturn(run func(context.Context, message.BroadcastMutableMessage, func(context.Context) error) (*types.BroadcastAppendResult, error)) *MockBroadcastAPI_BroadcastWithAdmission_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockBroadcastAPI) Close() {
 	_m.Called()

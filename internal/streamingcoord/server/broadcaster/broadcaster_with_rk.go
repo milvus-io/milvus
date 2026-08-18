@@ -16,16 +16,21 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	return b.BroadcastWithAdmission(ctx, msg, nil)
+}
+
+func (b *broadcasterWithRK) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
 	// The idempotency lookup lives here rather than in an exported check method so
 	// it cannot be called before the resource keys are held: this object only
-	// exists once StartBroadcastWithResourceKeys acquired them. Without that
-	// ordering two concurrent same-key requests would both miss and create two
-	// tasks. The guards are deliberately NOT consumed on a hit, so the caller's
-	// deferred Close() releases the locks.
+	// exists once StartBroadcastWithResourceKeys acquired them. Two concurrent
+	// same-key requests are then serialized by the resource lock rather than both
+	// missing -- but only if the keys they hold are exclusive. Under a shared key
+	// both requests hold a read lock, both can miss, and each creates a task; the
+	// index keeps the first broadcastID while the second has already reached the
+	// WAL. The only keyed caller today (import) holds an exclusive collection key.
+	// The guards are deliberately NOT consumed on a hit, so the caller's deferred
+	// Close() releases the locks.
 	if clientKey := message.IdempotencyKeyOf(msg); clientKey != "" {
-		if err := validateIdempotencyKeyLength(clientKey); err != nil {
-			return nil, err
-		}
 		// The scope is derived from the resource keys the guards hold, not from the
 		// message header: the header is only stamped with them a few lines below, so
 		// reading it here would scope every broadcast against an empty key set. The
@@ -38,6 +43,20 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 				AppendResults: results,
 				Duplicated:    dup,
 			}, nil
+		}
+		// Checked after the lookup, not before: the bound is an admission limit on new
+		// index entries, and the parameter behind it is refreshable. Enforcing it on a
+		// lookup would let a lowered limit cut the idempotency window short for keys
+		// that were accepted under the old one -- the retry would be rejected before it
+		// could recover the original broadcastID.
+		if err := validateIdempotencyKeyLength(clientKey); err != nil {
+			return nil, err
+		}
+	}
+
+	if admit != nil {
+		if err := admit(ctx); err != nil {
+			return nil, err
 		}
 	}
 

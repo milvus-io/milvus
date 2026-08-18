@@ -479,9 +479,9 @@ func TestDuplicatedBroadcastAgainstUnackedOriginalDoesNotPanic(t *testing.T) {
 	require.Nil(t, result.AppendResults)
 }
 
-// TestBroadcastRejectsOversizedIdempotencyKey covers the defensive bound at the
-// broadcaster. Proxy.ImportV2 checks the same limit earlier; this one is what every
-// other entry point passes through.
+// TestBroadcastRejectsOversizedIdempotencyKey covers the length bound at the
+// broadcaster, the only place it is enforced and the one point every entry path
+// passes through.
 func TestBroadcastRejectsOversizedIdempotencyKey(t *testing.T) {
 	bm := newBroadcastTaskManagerForTest(t)
 	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
@@ -510,7 +510,7 @@ func TestBroadcastRejectsOversizedIdempotencyKey(t *testing.T) {
 }
 
 // TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit guards the length budget at
-// its real boundary, with the real default limit. Proxy.ImportV2 admits a raw client
+// its real boundary, with the real default limit. A client is told it may send a raw
 // key of up to streaming.idempotency.maxKeyLength bytes, so anything that inflates the
 // key on its way here — a scoping prefix, an encoding — makes the broadcaster reject a
 // key the user was told is legal. A short-key test cannot catch that; only a key
@@ -520,7 +520,7 @@ func TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit(t *testing.T) {
 	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
 
 	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	require.Equal(t, 256, limit, "this test asserts the boundary of the DEFAULT limit, the one the proxy advertises")
+	require.Equal(t, 256, limit, "this test asserts the boundary of the DEFAULT limit, the one advertised to clients")
 
 	atLimit := strings.Repeat("k", limit)
 	first := broadcastForTest(t, bm, 1, newImportMsgWithKey(atLimit), collKey)
@@ -588,4 +588,83 @@ func TestNonImportBroadcastIsDeduplicated(t *testing.T) {
 	appendResult := result.AppendResults["v1"]
 	require.NotNil(t, appendResult)
 	require.Equal(t, uint64(1), appendResult.TimeTick)
+}
+
+// TestAdmissionRunsOnlyWhenANewTaskIsCreated pins the ordering the import job-count
+// limit depends on: admission is what a caller uses to guard mutable cluster state, and
+// a deduplicated broadcast must reach the original task without passing it. Were admit
+// to run on a hit, a limit the original request is itself still counted against would
+// reject its own retry.
+func TestAdmissionRunsOnlyWhenANewTaskIsCreated(t *testing.T) {
+	bm := newBroadcastTaskManagerForTest(t)
+	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
+
+	admitted := 0
+	broadcast := func(broadcastID uint64, msg message.BroadcastMutableMessage) *types.BroadcastAppendResult {
+		api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, guards: bm.resourceKeyLocker.Lock(collKey)}
+		defer api.Close()
+		result, err := api.BroadcastWithAdmission(context.Background(), msg, func(context.Context) error {
+			admitted++
+			return nil
+		})
+		require.NoError(t, err)
+		return result
+	}
+
+	first := broadcast(1, newImportMsgWithKey("run-1"))
+	require.Nil(t, first.Duplicated)
+	require.Equal(t, 1, admitted)
+
+	second := broadcast(2, newImportMsgWithKey("run-1"))
+	require.NotNil(t, second.Duplicated, "the retry must resolve to the original broadcast")
+	require.Equal(t, uint64(1), second.BroadcastID)
+	require.Equal(t, 1, admitted, "admission must not run for a deduplicated broadcast")
+}
+
+// TestAdmissionFailureLeavesNoTask asserts a rejected admission is a clean rejection:
+// no task, no index entry, so the same key is still free once the condition clears.
+func TestAdmissionFailureLeavesNoTask(t *testing.T) {
+	bm := newBroadcastTaskManagerForTest(t)
+	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
+
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 1, guards: bm.resourceKeyLocker.Lock(collKey)}
+	_, err := api.BroadcastWithAdmission(context.Background(), newImportMsgWithKey("run-1"), func(context.Context) error {
+		return merr.WrapErrServiceInternal("at the limit")
+	})
+	require.Error(t, err)
+	api.Close()
+
+	retry := broadcastForTest(t, bm, 2, newImportMsgWithKey("run-1"), collKey)
+	require.Nil(t, retry.Duplicated, "the rejected attempt must not have claimed the key")
+	require.Equal(t, uint64(2), retry.BroadcastID)
+}
+
+// TestLoweringTheKeyLengthLimitDoesNotEndTheWindow guards the order of the length check
+// against the index lookup. streaming.idempotency.maxKeyLength is refreshable, so an
+// operator can lower it while keys accepted under the old value are still inside their
+// idempotency window. The limit is admission control over NEW keys; enforcing it on a
+// lookup would reject those retries before they could recover the original broadcastID,
+// and a client that then re-sends under a fresh key imports its data twice.
+func TestLoweringTheKeyLengthLimitDoesNotEndTheWindow(t *testing.T) {
+	bm := newBroadcastTaskManagerForTest(t)
+	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
+
+	old := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("8")
+	defer paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue(old)
+
+	first := broadcastForTest(t, bm, 1, newImportMsgWithKey("12345678"), collKey)
+	require.Nil(t, first.Duplicated)
+
+	// The operator lowers the bound below a key that is already indexed.
+	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("4")
+
+	retry := broadcastForTest(t, bm, 2, newImportMsgWithKey("12345678"), collKey)
+	require.NotNil(t, retry.Duplicated, "an already-indexed key must still resolve")
+	require.Equal(t, uint64(1), retry.BroadcastID)
+
+	// A key that is not in the index is still held to the current bound.
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 3, guards: bm.resourceKeyLocker.Lock(collKey)}
+	defer api.Close()
+	_, err := api.Broadcast(context.Background(), newImportMsgWithKey("87654321"))
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }

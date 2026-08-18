@@ -78,13 +78,13 @@ func writeLengthPrefixed(b *strings.Builder, s string) {
 }
 
 // validateIdempotencyKeyLength rejects an oversized client key at the broadcaster.
-// Proxy.ImportV2 checks the same bound earlier and reports a better error location;
-// this is the defense in depth that also covers every other entry point, since the
-// broadcaster is where the key is retained for the whole idempotency window.
+// This is the only place the bound is enforced: no entry path validates the key
+// earlier, and the broadcaster is the single point every one of them passes through,
+// as well as where the key is retained for the whole idempotency window.
 //
-// The bound is inclusive and fails closed exactly like the proxy check: a limit of 0
-// or less rejects every non-empty key, i.e. the cluster accepts no idempotency keys at
-// all. A broadcast that carries no key is not idempotent and is never rejected here.
+// The bound is inclusive and fails closed: a limit of 0 or less rejects every
+// non-empty key, i.e. the cluster accepts no idempotency keys at all. A broadcast that
+// carries no key is not idempotent and is never rejected here.
 func validateIdempotencyKeyLength(key string) error {
 	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
 	if len(key) > limit {
