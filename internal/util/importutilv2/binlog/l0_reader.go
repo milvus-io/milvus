@@ -135,10 +135,14 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				case schemapb.DataType_UUID:
 					col := rec.Column(0)
 					if fsb, ok := col.(*array.FixedSizeBinary); ok {
-						pk = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+						var err error
+						pk, err = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+						if err != nil {
+							return nil, err
+						}
 					} else if strArr, ok := col.(*array.String); ok {
 						var err error
-						pk, err = storage.NewUUIDPrimaryKey(strArr.Value(i))
+						pk, err = storage.NewUUIDPrimaryKeyFromString(strArr.Value(i))
 						if err != nil {
 							return nil, err
 						}

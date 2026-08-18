@@ -1345,9 +1345,12 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				case schemapb.DataType_UUID:
 					col := dl.Column(0)
 					if fsb, ok := col.(*array.FixedSizeBinary); ok {
-						pk = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+						pk, err = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+						if err != nil {
+							return err
+						}
 					} else if strArr, ok := col.(*array.String); ok {
-						pk, err = storage.NewUUIDPrimaryKey(strArr.Value(i))
+						pk, err = storage.NewUUIDPrimaryKeyFromString(strArr.Value(i))
 						if err != nil {
 							return err
 						}
