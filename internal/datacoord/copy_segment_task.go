@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
@@ -76,8 +75,6 @@ import (
 // - Task failure immediately marks job as failed (fail-fast)
 // - Failed segments are dropped by inspector
 // - Metrics recorded for pending and executing duration
-
-var externalSnapshotMinimumDataNodeVersion = semver.MustParse("3.0.1")
 
 // ===========================================================================================
 // Task Filters and Update Actions
@@ -316,20 +313,6 @@ func (t *copySegmentTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 // GetTaskVersion returns the task version for optimistic concurrency control.
 func (t *copySegmentTask) GetTaskVersion() int64 {
 	return t.task.Load().GetTaskVersion()
-}
-
-// MinimumWorkerVersion prevents external restore tasks from being dispatched
-// to DataNodes that do not understand foreign snapshot storage settings. Local
-// snapshot restore continues to work with older DataNodes.
-func (t *copySegmentTask) MinimumWorkerVersion() semver.Version {
-	if t.copyMeta == nil {
-		return semver.Version{}
-	}
-	job := t.copyMeta.GetJob(t.ctx, t.GetJobId())
-	if job != nil && job.GetExternal() {
-		return externalSnapshotMinimumDataNodeVersion
-	}
-	return semver.Version{}
 }
 
 // ===========================================================================================
