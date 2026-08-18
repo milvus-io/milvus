@@ -1522,6 +1522,9 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) {
 		fieldDataType = columnInfo.GetElementType()
 	}
+	if typeutil.IsUUIDType(fieldDataType) {
+		return merr.WrapErrParameterInvalidMsg("range operations are not supported on uuid field")
+	}
 
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
@@ -1602,6 +1605,9 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	fieldDataType := columnInfo.GetDataType()
 	if typeutil.IsArrayType(columnInfo.GetDataType()) {
 		fieldDataType = columnInfo.GetElementType()
+	}
+	if typeutil.IsUUIDType(fieldDataType) {
+		return merr.WrapErrParameterInvalidMsg("range operations are not supported on uuid field")
 	}
 
 	lowerValue := lowerValueExpr.GetValue()

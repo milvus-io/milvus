@@ -239,6 +239,39 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 		if hasNull {
 			typeutil.SetFieldDataValidData(&ret, validData)
 		}
+	case schemapb.DataType_UUID:
+		values := []*string{}
+		err := json.Unmarshal(raw, &values)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		data := make([]string, 0, len(values))
+		validData := make([]bool, len(values))
+		hasNull := false
+		for i, value := range values {
+			if value == nil {
+				hasNull = true
+				continue
+			}
+			normalized, err := typeutil.NormalizeUUID(*value)
+			if err != nil {
+				return nil, newFieldDataError(f.FieldName, err)
+			}
+			data = append(data, normalized)
+			validData[i] = true
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: data,
+					},
+				},
+			},
+		}
+		if hasNull {
+			typeutil.SetFieldDataValidData(&ret, validData)
+		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		data := []int32{}
 		err := json.Unmarshal(raw, &data)

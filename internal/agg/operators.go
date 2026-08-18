@@ -1,6 +1,8 @@
 package agg
 
 import (
+	"bytes"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -266,6 +268,16 @@ func shouldReplaceOrderedValue(target, new any, op string) (bool, error) {
 			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is string, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
+	case []byte:
+		newVal, ok := new.([]byte)
+		if !ok {
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is []byte, new is %T", new)
+		}
+		cmp := bytes.Compare(newVal, targetVal)
+		if op == kMin {
+			return cmp < 0, nil
+		}
+		return cmp > 0, nil
 	default:
 		return false, merr.WrapErrParameterInvalidMsg("unsupported type for %s aggregation: %T", op, target)
 	}

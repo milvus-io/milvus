@@ -452,6 +452,9 @@ func validateDimension(field *schemapb.FieldSchema) error {
 }
 
 func validateMaxLengthPerRow(collectionName string, fieldName string, dataType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {
+	if typeutil.IsUUIDType(dataType) {
+		return nil
+	}
 	exist := false
 	for _, param := range typeParams {
 		if param.Key != common.MaxLengthKey {
@@ -584,6 +587,10 @@ func validateNestedArrayTypeParams(collectionName string, fieldName string, type
 			if err := validateMaxLengthPerRow(collectionName, fieldName, kind.LeafType, typeSchema.GetTypeParams()); err != nil {
 				return 0, err
 			}
+		}
+		// UUID is fixed-length (16B), no max_length required
+		if kind.LeafType == schemapb.DataType_UUID {
+			return 0, nil
 		}
 		return 0, nil
 	default:

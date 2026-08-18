@@ -1,6 +1,7 @@
 package typeutil
 
 import (
+	"hash/crc32"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -21,6 +22,16 @@ type stringPartitionKeyHasher struct{}
 
 func (stringPartitionKeyHasher) Hash(key string) (uint64, error) {
 	return uint64(typeutil.HashString2Uint32(key)), nil
+}
+
+type uuidPartitionKeyHasher struct{}
+
+func (uuidPartitionKeyHasher) Hash(key string) (uint64, error) {
+	u, err := typeutil.ParseUUID(key)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(crc32.ChecksumIEEE(u[:])), nil
 }
 
 func locatePartitionNamesByRoutingTable[K comparable](keys []K, partitionNames []string, hasher common.Hasher[K]) ([]string, error) {
@@ -69,8 +80,18 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 			}
 		}
 		return locatePartitionNamesByRoutingTable(stringKeys, partitionNames, stringPartitionKeyHasher{})
+	case schemapb.DataType_UUID:
+		stringKeys := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if stringVal, ok := key.GetVal().(*planpb.GenericValue_StringVal); ok {
+				stringKeys = append(stringKeys, stringVal.StringVal)
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
+			}
+		}
+		return locatePartitionNamesByRoutingTable(stringKeys, partitionNames, uuidPartitionKeyHasher{})
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition keys")
+		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64, VarChar, or UUID as partition keys")
 	}
 }
 

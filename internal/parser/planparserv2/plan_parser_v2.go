@@ -540,9 +540,26 @@ func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb
 		})
 	case *schemapb.IDs_StrId:
 		values = lo.Map(ids.GetStrId().GetData(), func(id string, _ int) *planpb.GenericValue {
+			if pkField.GetDataType() == schemapb.DataType_UUID {
+				if normalized, err := typeutil.NormalizeUUID(id); err == nil {
+					id = normalized
+				}
+			}
 			return &planpb.GenericValue{
 				Val: &planpb.GenericValue_StringVal{
 					StringVal: id,
+				},
+			}
+		})
+	case *schemapb.IDs_UuidId:
+		values = lo.Map(ids.GetUuidId().GetData(), func(id []byte, _ int) *planpb.GenericValue {
+			var str string
+			if u, err := typeutil.BytesToUUID(id); err == nil {
+				str = typeutil.UUIDToString(u)
+			}
+			return &planpb.GenericValue{
+				Val: &planpb.GenericValue_StringVal{
+					StringVal: str,
 				},
 			}
 		})

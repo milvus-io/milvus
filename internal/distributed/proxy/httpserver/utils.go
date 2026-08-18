@@ -266,6 +266,30 @@ func primaryKeyTemplateValue(field *schemapb.FieldSchema, result gjson.Result) (
 			},
 		}, nil
 
+	case schemapb.DataType_UUID:
+		values := make([]string, 0, len(elements))
+		for _, element := range elements {
+			if element.Type != gjson.String {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"%s must be a string for a UUID primary key, got: %s",
+					DefaultPrimaryFieldName, element.Raw)
+			}
+			normalized, err := typeutil.NormalizeUUID(element.Str)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, normalized)
+		}
+		return &schemapb.TemplateValue{
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_StringData{
+						StringData: &schemapb.StringArray{Data: values},
+					},
+				},
+			},
+		}, nil
+
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"unsupported primary key type: %s", field.DataType.String())
@@ -343,7 +367,7 @@ func convertIDsToSchemapbIDs(ids []json.RawMessage, pkField *schemapb.FieldSchem
 			},
 		}, nil
 
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		stringIDs := make([]string, 0, len(ids))
 		for i, raw := range ids {
 			value := gjson.ParseBytes(raw)
@@ -360,6 +384,13 @@ func convertIDsToSchemapbIDs(ids []json.RawMessage, pkField *schemapb.FieldSchem
 			}
 			if stringID == "" {
 				return nil, merr.WrapErrParameterInvalidMsg("empty string id at index %d", i)
+			}
+			if pkField.DataType == schemapb.DataType_UUID {
+				normalized, err := typeutil.NormalizeUUID(stringID)
+				if err != nil {
+					return nil, merr.WrapErrParameterInvalidMsg("invalid UUID id at index %d: %s", i, stringID)
+				}
+				stringID = normalized
 			}
 			stringIDs = append(stringIDs, stringID)
 		}
@@ -426,7 +457,7 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 			dim, _ := getDim(field)
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
 		}
-	} else if field.DataType == schemapb.DataType_VarChar {
+	} else if field.DataType == schemapb.DataType_VarChar || field.DataType == schemapb.DataType_UUID {
 		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
 		if oldVersion {
 			maxLength, _ := parameterutil.GetMaxLength(field)
@@ -1330,6 +1361,12 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, err
 					}
 					reallyData[fieldName] = value
+				case schemapb.DataType_UUID:
+					normalized, err := typeutil.NormalizeUUID(dataString)
+					if err != nil {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+					}
+					reallyData[fieldName] = normalized
 				default:
 					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName)
 				}
@@ -1959,7 +1996,7 @@ func parseScalarArrayElements(elementType schemapb.DataType, vals []gjson.Result
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: arr}},
 		}, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		arr := make([]string, 0, len(vals))
 		for idx, v := range vals {
 			if v.Type != gjson.String {
@@ -2880,7 +2917,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]float64, 0, rowsLen)
 		case schemapb.DataType_Timestamptz:
 			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 			data = make([]string, 0, rowsLen)
 		case schemapb.DataType_Array:
 			data = make([]*schemapb.ScalarField, 0, rowsLen)
@@ -2981,7 +3018,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Double:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float64), candi.v.Interface().(float64))
-			case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+			case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Array:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]*schemapb.ScalarField), candi.v.Interface().(*schemapb.ScalarField))
@@ -3166,7 +3203,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
-		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 			colData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
@@ -3515,7 +3552,7 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_Int8Vector:
 		valueType = commonpb.PlaceholderType_Int8Vector
 		values, err = serializeInt8Vectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, typeutil.Int8ArrayToBytes)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		valueType = commonpb.PlaceholderType_VarChar
 		res := gjson.Get(body, HTTPRequestData).Array()
 		values = make([][]byte, 0, len(res))
@@ -3614,6 +3651,11 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		}
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
+	case schemapb.DataType_UUID:
+		if fieldData.GetScalars().GetBytesData() != nil {
+			return int64(len(fieldData.GetScalars().GetBytesData().GetData())), nil
+		}
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_Array:
 		return int64(len(fieldData.GetScalars().GetArrayData().GetData())), nil
@@ -4048,6 +4090,17 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					}
 				case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+				case schemapb.DataType_UUID:
+					if fieldDataList[j].GetScalars().GetBytesData() != nil {
+						raw := fieldDataList[j].GetScalars().GetBytesData().GetData()[dataIdx]
+						var str string
+						if u, err := typeutil.BytesToUUID(raw); err == nil {
+							str = typeutil.UUIDToString(u)
+						}
+						row[fieldDataList[j].GetFieldName()] = str
+					} else {
+						row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+					}
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
@@ -4596,7 +4649,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		v, ok := value.(string)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as string default value`, value, value)
