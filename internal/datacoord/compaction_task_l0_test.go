@@ -20,23 +20,64 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestL0CompactionTaskSuite(t *testing.T) {
 	suite.Run(t, new(L0CompactionTaskSuite))
+}
+
+func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             200,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	deltaPath := basePath + "/_delta/9001"
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
+	}}
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, basePath, base)
+			require.EqualValues(t, 7, version)
+			require.Equal(t, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 3}}, updates.DeltaLogs)
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	task := &l0CompactionTask{meta: meta, committedV3Manifests: make(map[int64]string)}
+	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 200, deltalogs))
+
+	updated := meta.GetSegment(context.Background(), 200)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.EqualValues(t, 3, updated.GetStats().GetDeleteNumRows())
+	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
 type L0CompactionTaskSuite struct {

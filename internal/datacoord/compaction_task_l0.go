@@ -510,12 +510,12 @@ func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID in
 		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires a published manifest, segmentID=%d", segmentID)
 	}
 
-	// L0 compaction does not yet return a structured manifest delta.  Until
-	// that producer contract lands, serialize its metadata visibility through
-	// the framework without manufacturing a manifest revision here.
-	manifestPath := t.committedV3Manifests[segmentID]
-	if manifestPath == "" {
-		manifestPath = current.GetManifestPath()
+	entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
 	}
 
 	manifestMeta, ok := t.meta.(interface {
@@ -527,20 +527,20 @@ func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID in
 	if err := manifestMeta.CommitSegmentManifest(ctx, SegmentManifestCommit{
 		SegmentID:        segmentID,
 		ExpectedManifest: current.GetManifestPath(),
+		StorageConfig:    compaction.CreateStorageConfig(),
 		Mutation: ManifestMutation{
-			Type:         ManifestMutationNoop,
-			ManifestPath: manifestPath,
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{DeltaLogs: entries},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			// Keep the catalog half of L0 exactly on the established L0
-			// mutation path. The Noop only adapts pointer publication until
-			// the compaction producer returns a structured manifest delta.
+			// Keep the catalog half of L0 exactly on the established mutation
+			// path so merging, stats accumulation, and retry deduplication are
+			// shared with the legacy implementation.
 			Operators: []UpdateOperator{AddL0DeltalogsOperator(segmentID, deltalogs)},
 		},
 	}); err != nil {
 		return err
 	}
-	t.committedV3Manifests[segmentID] = t.meta.GetSegment(ctx, segmentID).GetManifestPath()
 	return nil
 }
 
