@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -345,60 +345,10 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
 
-	// Each upsert performs the old operator's validation and metadata patch in
-	// the CatalogMutation, then publishes the prepared manifest in the same
-	// segment-scoped catalog write. NewSegment retains the old creation and
-	// metric behavior inside CommitSegmentManifest. External collections are
-	// StorageV3-only, so the worker's prepared manifest is a Noop mutation
-	// until it emits packed manifest deltas directly.
-	for _, incoming := range normalizedUpdatedSegments {
-		_, isPatch := baselineSegmentMap[incoming.GetID()]
-		existing := mt.GetSegment(ctx, incoming.GetID())
-		if !isPatch && existing != nil {
-			if externalRefreshNewSegmentAlreadyApplied(existing, incoming) {
-				mlog.Info(ctx, "new external refresh segment already applied, skipping replay",
-					mlog.FieldSegmentID(incoming.GetID()))
-				continue
-			}
-			return merr.WrapErrServiceInternalMsg("new external refresh segment %d collides with existing metadata", incoming.GetID())
-		}
-		if isPatch && existing == nil {
-			return merr.WrapErrServiceInternalMsg("baseline segment %d not found", incoming.GetID())
-		}
+	// Build update operators
+	var operators []UpdateOperator
+	alreadyAppliedNewSegments := make(map[int64]struct{})
 
-		catalogMutation := SegmentCatalogMutation{}
-		if isPatch {
-			catalogMutation.Operators = []UpdateOperator{externalRefreshPatchOperator(ctx, incoming, collectionID)}
-		} else {
-			initial := proto.Clone(incoming).(*datapb.SegmentInfo)
-			initial.ManifestPath = ""
-			catalogMutation.NewSegment = initial
-		}
-		mlog.Info(ctx, "committing external refresh segment",
-			mlog.FieldSegmentID(incoming.GetID()),
-			mlog.Int64("numRows", incoming.GetNumOfRows()),
-			mlog.String("manifestPath", incoming.GetManifestPath()),
-			mlog.Bool("newSegment", catalogMutation.NewSegment != nil))
-		if err := mt.CommitSegmentManifest(ctx, SegmentManifestCommit{
-			SegmentID: incoming.GetID(),
-			Mutation: ManifestMutation{
-				Type:         ManifestMutationNoop,
-				ManifestPath: incoming.GetManifestPath(),
-			},
-			CatalogMutation: catalogMutation,
-		}); err != nil {
-			mlog.Warn(ctx, "failed to commit external refresh segment",
-				mlog.FieldSegmentID(incoming.GetID()), mlog.Err(err))
-			return err
-		}
-	}
-
-	// Apply destructive drops only after all replacement segments are durable.
-	// For an ownership plan this list is limited to its immutable baseline.
-	// Re-run the ownership validation while UpdateSegmentsInfo holds segMu.  The
-	// manifest commits above serialize each individual replacement, but cannot
-	// make the whole refresh atomic; this preserves the baseline/replay checks
-	// that the former all-in-one update performed immediately before dropping.
 	validationOperator := func(modPack *updateSegmentPack) bool {
 		for segmentID := range baselineSegmentMap {
 			existing := modPack.meta.segments.GetSegment(segmentID)
@@ -431,11 +381,38 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				continue
 			}
 			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
+				mlog.Warn(ctx, "invalid external refresh segment patch",
+					mlog.FieldSegmentID(incoming.GetID()),
+					mlog.Err(err))
 				return modPack.fail(err)
 			}
 		}
+
+		for segmentID := range upsertSegmentMap {
+			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
+				continue
+			}
+			existing := modPack.meta.segments.GetSegment(segmentID)
+			if existing == nil {
+				continue
+			}
+			if externalRefreshNewSegmentAlreadyApplied(existing, upsertSegmentMap[segmentID]) {
+				alreadyAppliedNewSegments[segmentID] = struct{}{}
+				mlog.Info(ctx, "new external refresh segment already applied, skipping replay",
+					mlog.FieldSegmentID(segmentID))
+				continue
+			}
+			return modPack.fail(merr.WrapErrServiceInternalMsg(
+				"new external refresh segment %d collides with existing metadata",
+				segmentID,
+			))
+		}
 		return true
 	}
+	operators = append(operators, validationOperator)
+
+	// Operator 1: Drop only the segment IDs selected during validation. For an
+	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *updateSegmentPack) bool {
 		for _, segmentID := range segmentsToDrop {
 			current := modPack.meta.segments.GetSegment(segmentID)
@@ -452,8 +429,56 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		}
 		return true
 	}
-	if err := mt.UpdateSegmentsInfo(ctx, validationOperator, dropOperator); err != nil {
-		mlog.Warn(ctx, "failed to finalize external refresh segments", mlog.Err(err))
+	operators = append(operators, dropOperator)
+
+	// Operator 2: Add new segments or patch existing active segments.
+	for _, seg := range normalizedUpdatedSegments {
+		incoming := seg
+		upsertOperator := func(modPack *updateSegmentPack) bool {
+			if _, ok := alreadyAppliedNewSegments[incoming.GetID()]; ok {
+				return true
+			}
+			existing := modPack.Get(incoming.GetID())
+			if existing != nil {
+				patched := applyExternalRefreshPatch(existing, incoming)
+				modPack.segments[incoming.GetID()] = patched
+				modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
+					Segment: patched.SegmentInfo,
+				}
+				mlog.Info(ctx, "patching existing segment",
+					mlog.FieldSegmentID(incoming.GetID()),
+					mlog.Int64("numRows", incoming.GetNumOfRows()),
+					mlog.String("manifestPath", incoming.GetManifestPath()))
+				return true
+			}
+
+			segInfo := NewSegmentInfo(incoming)
+			modPack.segments[incoming.GetID()] = segInfo
+
+			modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
+				Segment: incoming,
+			}
+
+			modPack.metricMutation.addNewSeg(
+				commonpb.SegmentState_Flushed,
+				incoming.GetLevel(),
+				incoming.GetIsSorted(),
+				incoming.GetStorageVersion(),
+				segmentMetricFormatLabel(segInfo),
+				incoming.GetNumOfRows(),
+			)
+
+			mlog.Info(ctx, "adding new segment",
+				mlog.FieldSegmentID(incoming.GetID()),
+				mlog.Int64("numRows", incoming.GetNumOfRows()))
+			return true
+		}
+		operators = append(operators, upsertOperator)
+	}
+
+	// Execute all operators atomically
+	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
 	}
 
@@ -471,9 +496,6 @@ func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collect
 	}
 	if incoming.GetManifestPath() == "" {
 		return merr.WrapErrServiceInternalMsg("updated segment %d has empty manifest path", incoming.GetID())
-	}
-	if incoming.GetStorageVersion() != storage.StorageV3 {
-		return merr.WrapErrServiceInternalMsg("external collection segment %d must use StorageV3, got %d", incoming.GetID(), incoming.GetStorageVersion())
 	}
 	if len(incoming.GetBinlogs()) == 0 {
 		return merr.WrapErrServiceInternalMsg("updated segment %d has empty fake binlogs", incoming.GetID())
@@ -582,6 +604,7 @@ func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expected
 
 func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo) *SegmentInfo {
 	cloned := oldSeg.Clone()
+	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
 	cloned.TextStatsLogs = nil
@@ -590,23 +613,6 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
 	return cloned
-}
-
-func externalRefreshPatchOperator(ctx context.Context, incoming *datapb.SegmentInfo, collectionID int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
-		existing := modPack.Get(incoming.GetID())
-		if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-			mlog.Warn(ctx, "invalid external refresh segment patch",
-				mlog.FieldSegmentID(incoming.GetID()), mlog.Err(err))
-			return modPack.fail(err)
-		}
-		modPack.segments[incoming.GetID()] = applyExternalRefreshPatch(existing, incoming)
-		mlog.Info(ctx, "patched external refresh segment",
-			mlog.FieldSegmentID(incoming.GetID()),
-			mlog.Int64("numRows", incoming.GetNumOfRows()),
-			mlog.String("manifestPath", incoming.GetManifestPath()))
-		return true
-	}
 }
 
 // getExternalRefreshSegmentSnapshots returns clones in the same order as

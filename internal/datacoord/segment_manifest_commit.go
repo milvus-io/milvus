@@ -39,6 +39,11 @@ import (
 // meta while the segment commit lock is held.
 type ManifestMutationType int
 
+// errSegmentManifestStale is an in-process control-flow marker for an exact
+// ExpectedManifest conflict. The returned error remains a typed, retriable
+// service-unavailable error for callers that do not consume this marker.
+var errSegmentManifestStale = errors.New("stale segment manifest")
+
 const (
 	// ManifestMutationCommitUpdates creates a new revision from structured
 	// packed updates.  It is the normal StorageV3 publication path.
@@ -92,12 +97,11 @@ type SegmentManifestCommit struct {
 }
 
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
-// StorageV3 manifest revision and advances SegmentInfo.manifest_path.  Lock
+// StorageV3 manifest revision and advances SegmentInfo.manifest_path. Lock
 // order is segmentManifestLocks[segmentID] -> segMu -> indexMeta.keyLock. No
-// caller may enter this protocol while holding segMu; multi-segment paths must
-// acquire segmentManifestLocks in ascending SegmentID order before segMu. This
-// function does not acquire an index lock; a caller that needs one must acquire
-// it only after entering this protocol.
+// caller may enter this protocol while holding segMu. Manifest I/O runs outside
+// segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
+// catalog + memory publication stays in one segMu critical section.
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
@@ -105,9 +109,8 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 	// KeyLock.Lock is synchronous: a caller blocks here only when another
 	// transaction for this segment is in flight. There is no asynchronous
-	// queue or goroutine. Different segment IDs have independent locks, so
-	// their manifest I/O continues concurrently; lockWait records same-segment
-	// contention while lockHold below records the serialized transaction time.
+	// queue or goroutine. Different segment IDs can perform manifest I/O
+	// concurrently; their final full-record publication is serialized by segMu.
 	locks := m.getSegmentManifestLocks()
 	lockStart := time.Now()
 	locks.Lock(commit.SegmentID)
@@ -121,8 +124,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			mlog.Duration("lockHold", time.Since(holdStart)))
 	}()
 
-	// Snapshot the currently published pointer under segMu, then release it
-	// before opening the (potentially slow) object-storage transaction.
+	// Snapshot the manifest input, then release segMu before object-storage I/O.
 	m.segMu.RLock()
 	segment := m.segments.GetSegment(commit.SegmentID)
 	if segment != nil {
@@ -163,9 +165,36 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		return err
 	}
 
-	// segmentManifestLocks owns this segment's publication sequence, including
-	// the catalog write below. Use the snapshot taken after acquiring that lock;
-	// do not re-enter segMu or re-load the segment after manifest I/O.
+	// Re-enter segMu only for the final full-record publication. Ordinary
+	// segment writers may have changed unrelated fields during manifest I/O, so
+	// apply the catalog mutation to the latest clone rather than the I/O input.
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+	latest := m.segments.GetSegment(commit.SegmentID)
+	if isNewSegment {
+		if latest != nil {
+			return staleSegmentManifestError(commit.SegmentID, "", latest.GetManifestPath())
+		}
+	} else {
+		if latest == nil {
+			return merr.WrapErrSegmentNotFound(commit.SegmentID)
+		}
+		latest = latest.Clone()
+		if latest.GetStorageVersion() != storage.StorageV3 {
+			return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
+		}
+		if !isSegmentHealthy(latest) {
+			return merr.WrapErrServiceInternalMsg("segment manifest commit requires a healthy segment, segmentID=%d", commit.SegmentID)
+		}
+		if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
+			return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
+		}
+		if err := validatePreparedManifest(latest.GetManifestPath(), manifestPath); err != nil {
+			return merr.Wrap(err, "validate manifest before publication")
+		}
+		segment = latest
+	}
+
 	updated, metricMutation, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
 	if err != nil {
 		// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
@@ -197,12 +226,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		return merr.Wrap(err, "publish segment manifest")
 	}
 	metricMutation.commit()
-	// Memory is installed only after the catalog write has succeeded. This
-	// short critical section protects SegmentsInfo's map; it does not include
-	// any etcd or object-storage operation.
-	m.segMu.Lock()
+	// Memory is installed only after the catalog write has succeeded while the
+	// same segMu critical section still excludes competing full-record writers.
 	m.segments.SetSegment(commit.SegmentID, updated)
-	m.segMu.Unlock()
 	return nil
 }
 
@@ -267,7 +293,10 @@ func validatePreparedManifest(baseManifest, preparedManifest string) error {
 		return merr.WrapErrServiceInternalMsg("prepared manifest base %q does not match expected base %q", preparedBase, basePath)
 	}
 	if preparedVersion < baseVersion {
-		return merr.WrapErrServiceUnavailableMsg("prepared manifest version %d regresses expected version %d", preparedVersion, baseVersion)
+		// A prepared manifest that regresses the current version was built from a
+		// stale base; tag it so stats callers discard the obsolete result rather
+		// than retry, matching the exact-ExpectedManifest conflict path.
+		return merr.WrapErrServiceUnavailableErr(errSegmentManifestStale, "prepared manifest version %d regresses expected version %d", preparedVersion, baseVersion)
 	}
 	return nil
 }
@@ -333,7 +362,7 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 }
 
 func staleSegmentManifestError(segmentID int64, expected, current string) error {
-	return merr.WrapErrServiceUnavailableMsg(
+	return merr.WrapErrServiceUnavailableErr(errSegmentManifestStale,
 		"stale segment manifest, segmentID=%d expected=%q current=%q", segmentID, expected, current)
 }
 

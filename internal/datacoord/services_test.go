@@ -4949,7 +4949,18 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			}).
 			WithBody(&message.BatchUpdateManifestMessageBody{
 				Items: []*messagespb.BatchUpdateManifestItem{
-					{SegmentId: 1, ManifestVersion: 15},
+					// A V2 column-groups item dispatches an UpdateSegmentColumnGroups
+					// operator through UpdateSegmentsInfo, whose error the callback
+					// must propagate. V3 items now publish via CommitSegmentManifest
+					// and never reach UpdateSegmentsInfo.
+					{
+						SegmentId: 1,
+						V2ColumnGroups: &messagespb.BatchUpdateManifestV2ColumnGroups{
+							ColumnGroups: map[int64]*datapb.FieldBinlog{
+								200: {FieldID: 200, Binlogs: []*datapb.Binlog{{LogID: 7}}},
+							},
+						},
+					},
 				},
 			}).
 			WithBroadcast([]string{"control_channel"}).
@@ -4978,12 +4989,29 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			}).Build()
 		defer mockUpdate.UnPatch()
 
+		var commitCount int
+		mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
+			func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+				commitCount++
+				return nil
+			}).Build()
+		defer mockCommit.UnPatch()
+
 		server := &Server{
 			ctx:  ctx,
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
+
+		// Segment 1 is an already-published StorageV3 segment (manifest version
+		// 3 < 15), so its V3 item advances the manifest through
+		// CommitSegmentManifest rather than an UpdateSegmentsInfo operator.
+		server.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1,
+			StorageVersion: 3,
+			ManifestPath:   `{"ver":3,"base_path":"files/x/1"}`,
+		}))
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
@@ -5013,10 +5041,11 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		// Two operators dispatched: one V3 UpdateManifestVersion, one V2
-		// UpdateSegmentColumnGroupsOperator. Both flow through the single
-		// UpdateSegmentsInfo batch call.
-		assert.Equal(t, 2, capturedOps)
+		// The V2 column-groups item dispatches one UpdateSegmentColumnGroups
+		// operator through UpdateSegmentsInfo; the V3 item publishes separately
+		// through CommitSegmentManifest.
+		assert.Equal(t, 1, capturedOps)
+		assert.Equal(t, 1, commitCount)
 	})
 
 	t.Run("item_with_both_v2_and_v3_is_skipped", func(t *testing.T) {
@@ -5032,12 +5061,29 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			}).Build()
 		defer mockUpdate.UnPatch()
 
+		var commitCount int
+		mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
+			func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+				commitCount++
+				return nil
+			}).Build()
+		defer mockCommit.UnPatch()
+
 		server := &Server{
 			ctx:  ctx,
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
+
+		// Segment 2 is an already-published StorageV3 segment (manifest version
+		// 3 < 25), so the valid V3 item advances its manifest through
+		// CommitSegmentManifest.
+		server.meta.segments.SetSegment(2, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             2,
+			StorageVersion: 3,
+			ManifestPath:   `{"ver":3,"base_path":"files/x/2"}`,
+		}))
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
@@ -5068,8 +5114,11 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		// ambiguous item is skipped, only the valid V3 item becomes an operator
-		assert.Equal(t, 1, capturedOps)
+		// The ambiguous V2+V3 item is skipped; the valid V3 item publishes
+		// through CommitSegmentManifest and produces no UpdateSegmentsInfo
+		// operator, so UpdateSegmentsInfo is never called.
+		assert.Equal(t, 0, capturedOps)
+		assert.Equal(t, 1, commitCount)
 	})
 }
 

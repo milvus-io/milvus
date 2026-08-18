@@ -80,6 +80,51 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
+func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/201"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             201,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	deltaPath := basePath + "/_delta/9001"
+	// Each attempt receives a fresh result, as a re-query of the worker would.
+	freshDeltalogs := func() []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
+		}}
+	}
+
+	var commitCount int
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(_ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			commitCount++
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	task := &l0CompactionTask{meta: meta}
+	// First attempt publishes the manifest and records the deltalog on the segment.
+	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 201, freshDeltalogs()))
+	// A retry (saveSegmentMeta re-run after a failed meta_saved/etcd write) with
+	// the same output must not append the deltalog to the manifest a second time.
+	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 201, freshDeltalogs()))
+
+	require.Equal(t, 1, commitCount, "manifest must be committed exactly once across retries")
+	updated := meta.GetSegment(context.Background(), 201)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.EqualValues(t, 3, updated.GetStats().GetDeleteNumRows(), "delete count must not double on retry")
+	require.Len(t, updated.GetDeltalogs(), 1)
+	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 1)
+}
+
 type L0CompactionTaskSuite struct {
 	suite.Suite
 

@@ -510,6 +510,21 @@ func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID in
 		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires a published manifest, segmentID=%d", segmentID)
 	}
 
+	// Drop deltalogs already registered on the segment before building the
+	// manifest transaction. The same L0 output reaches saveSegmentMeta twice
+	// whenever it re-runs (a failed catalog write, or a failed meta_saved
+	// task-state write after the catalog write succeeded). Unlike the catalog
+	// half, packed manifest commits append delta-log entries without any
+	// deduplication, so a blind re-commit would leave duplicate entries in the
+	// manifest and bump a fresh revision on every retry. Filtering by
+	// (fieldID, logID) makes the manifest re-commit idempotent, mirroring the
+	// catalog dedup in addDeltalogsToSegment; a full duplicate short-circuits
+	// before any object-storage I/O.
+	deltalogs = filterDuplicateFieldBinlogs(current.GetDeltalogs(), deltalogs)
+	if len(deltalogs) == 0 {
+		return nil
+	}
+
 	entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
 	if err != nil {
 		return err

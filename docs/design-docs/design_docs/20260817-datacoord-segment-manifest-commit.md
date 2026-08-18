@@ -66,8 +66,16 @@ network I/O block all metadata updates.
    manifest in one catalog transaction.
 5. Failure is retryable and never publishes a manifest pointer before its
    manifest exists.
-6. All StorageV3 manifest-writer paths eventually use this framework; direct
-   `UpdateManifest` is not an allowed publication mechanism for a V3 segment.
+6. The framework serializes manifest writes only where *concurrent* writers can
+   target the same segment: the post-flush async jobs — stats sort, index build,
+   GC, compaction, batch DDL — that operate on an already-flushed segment.
+   Single-writer manifest writes are published inline via `UpdateManifest`
+   without the keyed lock: the flush of a growing or L0 segment
+   (`SaveBinlogPaths`, serialized by the segment's single WAL owner) and the
+   finalization of a fresh copy or import target. `UpdateManifest` therefore
+   carries no StorageV3 guard; the concurrent paths route through
+   `CommitSegmentManifest` by construction because they build a new revision
+   rather than record a pre-built pointer.
 
 ## Non-goals
 
@@ -103,17 +111,39 @@ DataCoord meta.CommitSegmentManifest(segmentID, request)
 Visible SegmentInfo.manifest_path
 ```
 
-The worker must not return a pre-published manifest revision for an existing
-segment.  For example, an index task returns its index files and index metadata,
-not the result of `AddIndexInfoToManifest`.  DataCoord converts it to a
+Where DataCoord builds the revision, the worker must not return a pre-published
+manifest revision.  For example, an index task returns its index files and index
+metadata, not the result of `AddIndexInfoToManifest`; DataCoord converts it to a
 `ManifestIndexInfo` while holding the segment commit lock and invokes the packed
-transaction itself.
+transaction itself.  This holds for every concurrent post-flush path — stats
+sort, index build, GC index removal, compaction, batch DDL — because each
+targets an already-flushed segment that the others may be advancing at the same
+time and so must serialize.  These paths reach the manifest only through
+`CommitSegmentManifest`; they never call `UpdateManifest`.
 
-For a newly written segment (flush, import, copy target, or compaction target),
-the same rule applies: the data producer returns the structured column-group,
-delta, stats, and index entries required to create the manifest.  DataCoord
-creates and publishes the initial revision through the framework.  A producer
-may write data files, but does not select a visible manifest revision.
+Single-writer manifest writes do not serialize and are published inline via
+`UpdateManifest`:
+
+- The flush of a growing or L0 segment (`SaveBinlogPaths`).  A growing segment is
+  created *already holding* a `ManifestEarliest` revision (`segment_manager.go`)
+  and its manifest is advanced by every sync, but those syncs come from the one
+  WAL owner of the segment's VChannel and are applied sequentially — there is no
+  concurrent writer.  Stale retries and cross-node handoff are fenced by the
+  channel-owner check in `SaveBinlogPaths`, and a re-sent identical pointer is a
+  no-op, so no base-match CAS is required.  The flusher returns a complete
+  manifest pointer, which DataCoord records directly.
+- The finalization of a fresh copy or import target.  It is pre-registered with
+  an **empty** manifest path (`snapshot_manager.go`, `import_util.go`) and stays
+  `Importing` — invisible to stats/index/compaction, which gate on
+  `Flushed`/`Flushing` — until a single `Importing -> Flushed` finalization.  Its
+  worker returns a complete manifest pointer, DataCoord does no manifest I/O, and
+  no other writer touches it before publication.
+
+Because these paths have no concurrent writer, `UpdateManifest` carries no
+StorageV3 guard.  A producer may write data files, but a job that publishes into
+the concurrent post-flush window does not select a visible manifest revision
+itself; it hands DataCoord the structured entries and DataCoord commits the
+revision under the lock.
 
 ## API Shape
 
@@ -169,16 +199,18 @@ For one segment, the protocol is:
    packed resolver is `OVERWRITE`: under the segment lock there is no competing
    local writer, while the resolver gives a deterministic latest-manifest
    rebase for retry/leader-handoff races.
-4. Apply the new pointer and catalog mutation to the clone captured in step 2.
-   The segment lock is the sole in-process serialization point for this
-   segment's manifest publication; callers that mutate a StorageV3 manifest
-   must enter this protocol.
-5. Execute one `catalog.Update` / catalog transaction containing the changed
-   `SegmentInfo` and all associated `SegmentIndex` records.  This runs under
-   the segment lock but outside `segMu`, so catalog writes for different
-   segments remain concurrent.  If it fails, do not change memory.
-6. Briefly acquire `segMu` only to install the cloned metadata in memory, then
-   release it and release the segment lock.
+4. Reacquire `segMu`, reload the latest `SegmentInfo`, and revalidate segment
+   health and `ExpectedManifest`. Apply the new pointer and catalog mutation to
+   that latest clone, preserving unrelated ordinary metadata updates that ran
+   during manifest I/O.
+5. While still holding `segMu`, execute one `catalog.Update` / catalog
+   transaction containing the changed `SegmentInfo` and all associated
+   `SegmentIndex` records. This matches the existing full-record
+   `UpdateSegmentsInfo` consistency model: final catalog publications are
+   serialized, while the slower manifest I/O for different segments remains
+   concurrent. If the catalog write fails, do not change memory.
+6. Install the cloned metadata in memory, then release `segMu` and the segment
+   lock.
 
 The lock ordering is always:
 
@@ -209,7 +241,10 @@ artifact files -> manifest revision -> etcd/catalog pointer -> memory
   must not create duplicate logical index entries; dropping a deleted logical
   index may remove every matching historical entry.
 - A stale expected base or changed segment state is a retry/discard result, not
-  an attempt to overwrite the current pointer.
+  an attempt to overwrite the current pointer. Exact `ExpectedManifest`
+  conflicts retain a typed retriable error plus an in-process stale marker, so
+  task-specific consumers such as Stats can discard obsolete worker output
+  without classifying unrelated service-unavailable failures as stale.
 
 Drop requires a durable cleanup state in addition to serialization:
 
@@ -229,16 +264,28 @@ The pending state makes the remaining cleanup discoverable and idempotent.
 |---|---|
 | `task_index.go` / DataNode index task | Return index artifact metadata.  `meta.CommitSegmentManifest(AddIndexes)` creates the revision and atomically completes `SegmentIndex`. |
 | `garbage_collector.go` | Use `DropIndexes`; publish pointer and cleanup intent in one catalog transaction, then perform retryable object cleanup. |
-| `copy_segment_task.go` / restore | Build the target manifest through `CreateManifest` or `AddIndexes`; create target `SegmentIndex` records in the same publication transaction. |
+| `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. |
 | `task_stats.go` | Text, JSON, and sort stats all use `AddStats`; remove the bare sort `UpdateManifest` path. |
-| flush, import, `SaveBinlogPaths`, server update paths | Return structured data-manifest deltas and call `CreateManifest`/`AppendData`, not `UpdateManifest`. |
+| flush / `SaveBinlogPaths` | No migration. Publishes inline via `UpdateManifest`. A growing or L0 segment is flushed by its single WAL owner and advanced sequentially, so its manifest write has no concurrent writer and needs no `CommitSegmentManifest` serialization even though the manifest advances from `ManifestEarliest`. |
 | compaction | Generate output files in DataNode, return output manifest entries, then publish each output segment through the framework. |
-| snapshot/restore and recovery | Read the published pointer normally; all destination-manifest writes use the framework. |
+| external collection refresh | Deferred from the segment-scoped migration. Keep its existing job-level `UpdateSegmentsInfo` publication until a collection-level generation boundary can atomically switch the complete refresh result and `external_source` / `external_spec`. |
+| snapshot/restore and recovery | Read the published pointer normally; concurrent post-flush destination-manifest writes use the framework. |
 
-`UpdateManifest` should be retained only for StorageV1/V2 compatibility while
-the migration is in progress, then made unavailable for StorageV3 callers.  A
-review-time grep of every `UpdateManifest(` and every packed manifest mutation
-is a required migration gate.
+`UpdateManifest` is the inline publication mechanism for the single-writer
+manifest paths: all StorageV1/V2 writes, and the StorageV3 flush
+(`SaveBinlogPaths`) and copy/import finalizations, none of which has a concurrent
+writer. It carries no StorageV3 guard. The concurrent post-flush paths (stats,
+index, GC, compaction, batch DDL) never call `UpdateManifest` — they build a
+revision and advance the pointer through `CommitSegmentManifest`. A review-time
+grep of every `UpdateManifest(` and every packed manifest mutation is a required
+migration gate: any new `UpdateManifest` caller must be a single-writer path.
+
+The current staged implementation intentionally does not migrate external
+collection refresh by publishing each returned segment independently. Doing so
+would turn one job-level refresh into a partially visible sequence and could
+leave a failed job with only some new manifests published. External collection
+refresh remains an explicit follow-up and the end-state acceptance criteria
+below are not satisfied until that collection-level protocol is implemented.
 
 ## Implementation Plan in the Clean Worktree
 
@@ -251,9 +298,10 @@ is a required migration gate.
    worker-side index manifest publication, and atomically publish
    `SegmentInfo` plus `SegmentIndex` from `meta`.
 4. Migrate GC with the durable cleanup state and crash/retry tests.
-5. Migrate stats, including the sort path, then copy/restore.
-6. Migrate flush/import/compaction and eliminate StorageV3 direct
-   `UpdateManifest` calls.
+5. Migrate stats, including the sort path.
+6. Migrate compaction output publication to the framework. Leave flush
+   (`SaveBinlogPaths`) and copy/import on inline `UpdateManifest` — they are
+   single-writer — and keep `UpdateManifest` free of any StorageV3 guard.
 7. Add observability: lock wait/hold duration, commit outcomes, stale-base
    rejections, orphan-manifest count, and cleanup retries.
 8. Run the full affected DataCoord/DataNode test matrix in the Milvus builder

@@ -710,6 +710,14 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 				}).Build()
 			defer mockAlterSegments.UnPatch()
 			s.mt.catalog = &mockeyDataCoordCatalog{}
+			// The StorageV3 publish path commits via catalog.Update, not
+			// AlterSegments; count it as the catalog write for expectCatalog.
+			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
+					alterSegmentsCount++
+					return nil
+				}).Build()
+			defer mockUpdate.UnPatch()
 
 			err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
 				TaskID:           s.taskID,
@@ -817,6 +825,14 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 				}).Build()
 			defer mockAlterSegments.UnPatch()
 			s.mt.catalog = &mockeyDataCoordCatalog{}
+			// The StorageV3 publish path commits via catalog.Update, not
+			// AlterSegments; count it as the catalog write for expectCatalog.
+			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
+					alterSegmentsCount++
+					return nil
+				}).Build()
+			defer mockUpdate.UnPatch()
 
 			err := s.newTextStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
 				TaskID:        s.taskID,
@@ -850,6 +866,21 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			}
 		})
 	}
+}
+
+func (s *statsTaskSuite) TestClassifyStatsManifestCommitError() {
+	s.Nil(classifyStatsManifestCommitError(nil))
+
+	transient := merr.WrapErrServiceUnavailableMsg("object storage temporarily unavailable")
+	classified := classifyStatsManifestCommitError(transient)
+	s.ErrorIs(classified, merr.ErrServiceUnavailable)
+	s.NotErrorIs(classified, errStatsResultStale)
+
+	conflict := staleSegmentManifestError(s.segID, "manifest-1", "manifest-2")
+	classified = classifyStatsManifestCommitError(conflict)
+	s.ErrorIs(classified, merr.ErrServiceUnavailable)
+	s.ErrorIs(classified, errSegmentManifestStale)
+	s.ErrorIs(classified, errStatsResultStale)
 }
 
 func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {

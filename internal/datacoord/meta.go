@@ -98,8 +98,8 @@ type meta struct {
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
 	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
-	// segment. It must be acquired before segMu; segMu must never be held while
-	// a manifest transaction performs object-storage I/O.
+	// segment. It must be acquired before segMu. Manifest I/O runs outside
+	// segMu; final full-record catalog and memory publication runs under segMu.
 	segmentManifestLocks *lock.KeyLock[int64]
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
@@ -1730,9 +1730,13 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 		if manifestPath == "" || segment.ManifestPath == manifestPath {
 			return false
 		}
-		if segment.GetStorageVersion() == storage.StorageV3 {
-			return modPack.fail(merr.WrapErrServiceInternalMsg("StorageV3 manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID))
-		}
+		// Inline publication is used by single-writer manifest paths: the flush of
+		// a growing/L0 segment (SaveBinlogPaths, serialized by its single WAL
+		// owner) and the finalization of a fresh copy/import target. These segments
+		// have no concurrent manifest writer, so no CommitSegmentManifest
+		// serialization is needed even for StorageV3. Concurrent post-flush writers
+		// (stats, index, GC, compaction, batch DDL) never reach this operator; they
+		// build revisions and advance the pointer through CommitSegmentManifest.
 		segment.ManifestPath = manifestPath
 		return true
 	}

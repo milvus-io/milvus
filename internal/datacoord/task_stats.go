@@ -509,7 +509,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
 		if st.shouldPublishPreparedManifest(ctx, st.GetSegmentID(), result) {
-			err = st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+			err = classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
 				SegmentID:        st.GetSegmentID(),
 				ExpectedManifest: result.GetBaseManifest(),
 				Mutation: ManifestMutation{
@@ -517,7 +517,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 					ManifestPath: result.GetManifest(),
 				},
 				CatalogMutation: SegmentCatalogMutation{TextStats: result.GetTextStatsLogs()},
-			})
+			}))
 		} else {
 			err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
 		}
@@ -528,7 +528,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		if st.shouldPublishPreparedManifest(ctx, st.GetSegmentID(), result) {
-			err = st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+			err = classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
 				SegmentID:        st.GetSegmentID(),
 				ExpectedManifest: result.GetBaseManifest(),
 				Mutation: ManifestMutation{
@@ -536,7 +536,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 					ManifestPath: result.GetManifest(),
 				},
 				CatalogMutation: SegmentCatalogMutation{JSONKeyStats: result.GetJsonKeyStatsLogs()},
-			})
+			}))
 		} else {
 			err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
 		}
@@ -588,14 +588,14 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		}
 		var updateErr error
 		if st.shouldPublishPreparedManifest(ctx, segID, result) {
-			updateErr = st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+			updateErr = classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
 				SegmentID:        segID,
 				ExpectedManifest: result.GetBaseManifest(),
 				Mutation: ManifestMutation{
 					Type:         ManifestMutationNoop,
 					ManifestPath: manifest,
 				},
-			})
+			}))
 		} else {
 			updateErr = st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest))
 		}
@@ -616,6 +616,29 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	return nil
 }
 
+// classifyStatsManifestCommitError preserves the typed manifest conflict while
+// marking it with the stats scheduler's stale-result identity. QueryTaskOnWorker
+// consumes that identity and discards the obsolete worker result instead of
+// retrying it as a generic service-unavailable failure.
+func classifyStatsManifestCommitError(err error) error {
+	if errors.Is(err, errSegmentManifestStale) {
+		return staleStatsResultError{cause: err}
+	}
+	return err
+}
+
+// staleStatsResultError tags a segment-manifest conflict as a stale stats
+// result while preserving the wrapped chain (ServiceUnavailable +
+// errSegmentManifestStale via Unwrap). It implements Is so both stdlib
+// errors.Is (used by testify's ErrorIs) and cockroachdb errors.Is detect
+// errStatsResultStale; cockroachdb v1.9.1's errors.Mark yields a marker with no
+// Is method, invisible to stdlib errors.Is.
+type staleStatsResultError struct{ cause error }
+
+func (e staleStatsResultError) Error() string        { return e.cause.Error() }
+func (e staleStatsResultError) Unwrap() error        { return e.cause }
+func (e staleStatsResultError) Is(target error) bool { return target == errStatsResultStale }
+
 // shouldPublishPreparedManifest identifies the temporary compatibility path
 // for workers which still return a prepared stats manifest, including the
 // first manifest. The Noop adapter keeps pointer publication serialized while
@@ -624,7 +647,11 @@ func (st *statsTask) shouldPublishPreparedManifest(ctx context.Context, segmentI
 	segment := st.meta.GetSegment(ctx, segmentID)
 	return segment != nil &&
 		segment.GetStorageVersion() == storage.StorageV3 &&
-		result.GetManifest() != ""
+		result.GetManifest() != "" &&
+		// Nothing to publish when the worker's manifest already matches the
+		// current pointer; fall through to the ordinary no-op path instead of
+		// re-publishing an identical revision.
+		result.GetManifest() != segment.GetManifestPath()
 }
 
 func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {
