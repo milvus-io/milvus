@@ -137,6 +137,9 @@ func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 		case schemapb.DataType_VarChar:
 			stringValue := pk.(*storage.VarCharPrimaryKey).Value
 			s.currentStat.PkFilter.AddString(stringValue)
+		case schemapb.DataType_UUID:
+			uuidValue := pk.(*storage.UUIDPrimaryKey).Value
+			s.currentStat.PkFilter.Add(uuidValue[:])
 		default:
 			mlog.Error(context.TODO(), "failed to update bloomfilter", mlog.Any("PK type", pk.Type()))
 			panic("failed to update bloomfilter")

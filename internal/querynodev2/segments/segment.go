@@ -1522,7 +1522,7 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 		for _, value := range values {
 			pks = append(pks, storage.NewInt64PrimaryKey(int64(value)))
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		if cResult.varchar_primary_key_offsets == nil {
 			return nil, merr.WrapErrDataIntegrityMsg("growing source varchar primary key offsets are nil")
 		}

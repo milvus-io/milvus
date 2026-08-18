@@ -222,7 +222,7 @@ func pkFromGenericValue(dataType schemapb.DataType, value *planpb.GenericValue) 
 	switch dataType {
 	case schemapb.DataType_Int64:
 		return storage.NewInt64PrimaryKey(value.GetInt64Val()), true
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return storage.NewVarCharPrimaryKey(value.GetStringVal()), true
 	default:
 		mlog.Warn(context.TODO(), "unknown pk type", mlog.Int("type", int(dataType)))

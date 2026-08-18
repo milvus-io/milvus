@@ -164,9 +164,81 @@ func TestParseFieldData2PrimaryKeys(t *testing.T) {
 
 		assert.ElementsMatch(t, pks, testPks)
 	})
+
+	t.Run("uuid pk", func(t *testing.T) {
+		u1, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+		u2, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		pkValues := [][]byte{u1[:], u2[:]}
+		var fieldData *schemapb.FieldData
+
+		// test nil fieldData
+		_, err := ParseFieldData2PrimaryKeys(fieldData)
+		assert.Error(t, err)
+
+		// test nil scalar data
+		fieldData = &schemapb.FieldData{
+			FieldName: "UUIDField",
+		}
+		_, err = ParseFieldData2PrimaryKeys(fieldData)
+		assert.Error(t, err)
+
+		// test parse success
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: pkValues,
+					},
+				},
+			},
+		}
+		fieldData.Type = schemapb.DataType_UUID
+		testPks := []PrimaryKey{
+			NewUUIDPrimaryKey(u1),
+			NewUUIDPrimaryKey(u2),
+		}
+
+		pks, err := ParseFieldData2PrimaryKeys(fieldData)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, pks, testPks)
+	})
+}
+
+func TestUUIDPrimaryKey(t *testing.T) {
+	u1, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	u2, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	pk1 := NewUUIDPrimaryKey(u1)
+	pk2 := NewUUIDPrimaryKey(u2)
+
+	assert.EqualValues(t, 24, pk1.Size())
+
+	// test EQ, GE, LE with same value
+	testPk1 := NewUUIDPrimaryKey(u1)
+	assert.True(t, pk1.EQ(testPk1))
+	assert.True(t, pk1.GE(testPk1))
+	assert.True(t, pk1.LE(testPk1))
+
+	// test LT / GT across u1 and u2 (u1 < u2 in byte order)
+	assert.True(t, pk1.LT(pk2))
+	assert.True(t, pk2.GT(pk1))
+	assert.False(t, pk1.GT(pk2))
+	assert.False(t, pk2.LT(pk1))
+
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk1)
+		assert.NoError(t, err)
+
+		unmarshalledPk := &UUIDPrimaryKey{}
+		err = json.Unmarshal(blob, unmarshalledPk)
+		assert.NoError(t, err)
+		assert.Equal(t, pk1.Value, unmarshalledPk.Value)
+	})
 }
 
 func TestParsePrimaryKeysAndIDs(t *testing.T) {
+	u1, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	u2, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+
 	type testCase struct {
 		pks []PrimaryKey
 	}
@@ -176,6 +248,9 @@ func TestParsePrimaryKeysAndIDs(t *testing.T) {
 		},
 		{
 			pks: []PrimaryKey{NewVarCharPrimaryKey("test1"), NewVarCharPrimaryKey("test2")},
+		},
+		{
+			pks: []PrimaryKey{NewUUIDPrimaryKey(u1), NewUUIDPrimaryKey(u2)},
 		},
 	}
 
@@ -209,6 +284,19 @@ func TestParsePrimaryKeysBatch2IDs(t *testing.T) {
 		ids, err = ParsePrimaryKeysBatch2IDs(strPks)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []string{"1", "2", "3"}, ids.GetStrId().GetData())
+
+		u1, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+		u2, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		uuidPks := NewUUIDPrimaryKeys(2)
+		uuidPks.AppendRaw(u1, u2)
+
+		ids, err = ParsePrimaryKeysBatch2IDs(uuidPks)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, [][]byte{u1[:], u2[:]}, ids.GetUuidId().GetData())
+
+		parsedPks, err := ParseIDs2PrimaryKeysBatch(ids)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, parsedPks.Len())
 	})
 
 	t.Run("unsupport_type", func(t *testing.T) {

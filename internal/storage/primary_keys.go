@@ -166,3 +166,83 @@ func (pks *VarcharPrimaryKeys) Reset() {
 	pks.values = pks.values[:0]
 	pks.size = 0
 }
+
+type UUIDPrimaryKeys struct {
+	values [][16]byte
+}
+
+func NewUUIDPrimaryKeys(cap int64) *UUIDPrimaryKeys {
+	return &UUIDPrimaryKeys{
+		values: make([][16]byte, 0, cap),
+	}
+}
+
+func (pks *UUIDPrimaryKeys) AppendRaw(values ...[16]byte) {
+	pks.values = append(pks.values, values...)
+}
+
+func (pks *UUIDPrimaryKeys) AppendBytes(values ...[]byte) {
+	for _, v := range values {
+		var u [16]byte
+		copy(u[:], v)
+		pks.values = append(pks.values, u)
+	}
+}
+
+func (pks *UUIDPrimaryKeys) Bytes() [][]byte {
+	res := make([][]byte, len(pks.values))
+	for i := range pks.values {
+		res[i] = pks.values[i][:]
+	}
+	return res
+}
+
+func (pks *UUIDPrimaryKeys) Append(values ...PrimaryKey) error {
+	uValues := make([][16]byte, 0, len(values))
+	for _, pk := range values {
+		uPk, ok := pk.(*UUIDPrimaryKey)
+		if !ok {
+			return merr.WrapErrParameterInvalid("UUIDPrimaryKey", "non-uuid pk")
+		}
+		uValues = append(uValues, uPk.Value)
+	}
+
+	pks.AppendRaw(uValues...)
+	return nil
+}
+
+func (pks *UUIDPrimaryKeys) MustAppend(values ...PrimaryKey) {
+	err := pks.Append(values...)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (pks *UUIDPrimaryKeys) Get(idx int) PrimaryKey {
+	return NewUUIDPrimaryKey(pks.values[idx])
+}
+
+func (pks *UUIDPrimaryKeys) Type() schemapb.DataType {
+	return schemapb.DataType_UUID
+}
+
+func (pks *UUIDPrimaryKeys) Len() int {
+	return len(pks.values)
+}
+
+func (pks *UUIDPrimaryKeys) Size() int64 {
+	return int64(len(pks.values)) * 16
+}
+
+func (pks *UUIDPrimaryKeys) MustMerge(another PrimaryKeys) {
+	aPks, ok := another.(*UUIDPrimaryKeys)
+	if !ok {
+		panic("cannot merge different kind of pks")
+	}
+
+	pks.values = append(pks.values, aPks.values...)
+}
+
+func (pks *UUIDPrimaryKeys) Reset() {
+	pks.values = pks.values[:0]
+}

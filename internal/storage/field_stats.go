@@ -119,6 +119,10 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		stats.Max = &VarCharFieldValue{}
 		stats.Min = &VarCharFieldValue{}
 		isScalarField = true
+	case schemapb.DataType_UUID:
+		stats.Max = &VarCharFieldValue{}
+		stats.Min = &VarCharFieldValue{}
+		isScalarField = true
 	case schemapb.DataType_FloatVector:
 		stats.Centroids = []VectorFieldValue{}
 		isScalarField = false
@@ -343,6 +347,21 @@ func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 			stats.UpdateMinMax(pk)
 			stats.BF.AddString(str)
 		}
+	case schemapb.DataType_UUID:
+		if uuidFd, ok := msgs.(*UUIDFieldData); ok {
+			for _, u := range uuidFd.Data {
+				pk := &UUIDPrimaryKey{Value: u}
+				stats.UpdateMinMax(pk)
+				stats.BF.Add(u[:])
+			}
+		} else if strFd, ok := msgs.(*StringFieldData); ok {
+			for _, str := range strFd.Data {
+				if pk, err := NewUUIDPrimaryKey(str); err == nil {
+					stats.UpdateMinMax(pk)
+					stats.BF.Add(pk.Value[:])
+				}
+			}
+		}
 	default:
 		// TODO::
 	}
@@ -387,6 +406,16 @@ func (stats *FieldStats) Update(pk ScalarFieldValue) {
 	case schemapb.DataType_VarChar:
 		data := pk.GetValue().(string)
 		stats.BF.AddString(data)
+	case schemapb.DataType_UUID:
+		if b, ok := pk.GetValue().([16]byte); ok {
+			stats.BF.Add(b[:])
+		} else if str, ok := pk.GetValue().(string); ok {
+			if u, err := typeutil.ParseUUID(str); err == nil {
+				stats.BF.Add(u[:])
+			} else {
+				stats.BF.AddString(str)
+			}
+		}
 	default:
 		// todo support vector field
 	}

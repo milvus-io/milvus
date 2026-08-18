@@ -230,6 +230,18 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
+			if defaultValue != nil {
+				val := defaultValue.GetBytesData()
+				if len(val) == 0 && defaultValue.GetStringData() != "" {
+					if u, err := typeutil.ParseUUID(defaultValue.GetStringData()); err == nil {
+						val = u[:]
+					}
+				}
+				if len(val) > 0 {
+					b.Append(val)
+					return uint64(len(val)), nil
+				}
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -359,6 +371,22 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			}
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) []byte { return defaultValue }),
+				nil)
+		case schemapb.DataType_UUID:
+			bd := builder.(*array.FixedSizeBinaryBuilder)
+			var uuidBytes []byte
+			if len(schema.GetDefaultValue().GetBytesData()) == 16 {
+				uuidBytes = schema.GetDefaultValue().GetBytesData()
+			} else if schema.GetDefaultValue().GetStringData() != "" {
+				if u, err := typeutil.ParseUUID(schema.GetDefaultValue().GetStringData()); err == nil {
+					uuidBytes = u[:]
+				}
+			}
+			if len(uuidBytes) != 16 {
+				uuidBytes = make([]byte, 16)
+			}
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) []byte { return uuidBytes }),
 				nil)
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())

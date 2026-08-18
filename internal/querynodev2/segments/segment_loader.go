@@ -1342,6 +1342,16 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 					pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
 				case schemapb.DataType_VarChar:
 					pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
+				case schemapb.DataType_UUID:
+					col := dl.Column(0)
+					if fsb, ok := col.(*array.FixedSizeBinary); ok {
+						pk = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+					} else if strArr, ok := col.(*array.String); ok {
+						pk, err = storage.NewUUIDPrimaryKey(strArr.Value(i))
+						if err != nil {
+							return err
+						}
+					}
 				}
 				ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
 				err = deltaData.Append(pk, ts)
@@ -2447,6 +2457,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 func DoubleMemoryDataType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_String ||
 		dataType == schemapb.DataType_VarChar ||
+		dataType == schemapb.DataType_UUID ||
 		dataType == schemapb.DataType_JSON
 }
 
