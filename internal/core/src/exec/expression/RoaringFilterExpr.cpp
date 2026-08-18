@@ -153,10 +153,11 @@ PhyRoaringFilterExpr::ExecVisitorImpl(EvalCtx& context) {
 
     const auto& bitmap_input = context.get_bitmap_input();
 
-    auto real_batch_size = GetNextRealBatchSize(input, false);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, false);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
     // bitmap_input is indexed by batch-local position below, so a size that
     // disagrees with the batch would silently read past its end.
     AssertInfo(bitmap_input.empty() ||
@@ -240,10 +241,11 @@ PhyRoaringFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
     // per row, so the same execute_sub_batch shape as the raw-data path works.
     auto* input = context.get_offset_input();
 
-    auto real_batch_size = GetNextRealBatchSize(input, false);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, false);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
