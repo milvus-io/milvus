@@ -243,8 +243,17 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
 JsonKeyStats::~JsonKeyStats() {
     bson_inverted_index_.reset();
     bson_index_cache_slot_.reset();
-    boost::filesystem::remove_all(path_);
-    LOG_INFO("remove json key stats with path: {}", path_);
+    // Destructors are implicitly noexcept: the throwing remove_all overload
+    // would let a filesystem_error during index teardown std::terminate the
+    // process, out of reach of the CGo catch machinery. Best-effort cleanup.
+    boost::system::error_code ec;
+    boost::filesystem::remove_all(path_, ec);
+    if (ec) {
+        LOG_WARN(
+            "failed to remove json key stats path {}: {}", path_, ec.message());
+    } else {
+        LOG_INFO("remove json key stats with path: {}", path_);
+    }
 }
 
 void

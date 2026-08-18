@@ -424,10 +424,15 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 						return false, nil
 					} else if err != nil {
 						log.Warn(ctx, "worker failed to delete on segment", mlog.Err(err))
-						// Retry only failures a retry can fix; a permanent typed
-						// error exits immediately instead of burning ten
-						// attempts before the same offline outcome.
-						return merr.IsRetryableErr(err), err
+						// Stop only on a typed error explicitly classified
+						// non-retriable. merr.IsRetryableErr alone would be
+						// wrong: it is an allowlist over milvusError, so a raw
+						// gRPC Unavailable/DeadlineExceeded from a worker
+						// blipping during a rolling restart would abort on the
+						// first attempt and offline the segment -- worse than
+						// master's ten attempts. Same guard as UpdateSchema and
+						// applyDeleteBatch.
+						return !merr.IsMilvusError(err) || merr.IsRetryableErr(err), err
 					}
 					return false, nil
 				}, retry.Attempts(10))

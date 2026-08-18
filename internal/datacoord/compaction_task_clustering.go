@@ -224,13 +224,39 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			// re-submitting the same planID to the same node would be rejected
 			// with ErrDuplicatedCompactionTask and the task would never leave
 			// the pending queue.
-			t.DropTaskOnWorker(cluster)
+			//
+			// The drop must SUCCEED before the requeue is persisted, otherwise
+			// the task becomes schedulable while the worker still holds the
+			// entry. It is idempotent (DropCompactionPlan -> RemoveTask is a
+			// no-op for an unknown planID and always reports success), so
+			// leaving the task untouched here just makes the next poll redo the
+			// whole transition.
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(),
+				t.GetTaskProto().GetPlanID()); dropErr != nil {
+				mlog.Warn(context.TODO(),
+					"failed to drop clustering compaction plan before requeue, "+
+						"leaving the task on its node for the next poll to retry",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Int64("nodeID", t.GetTaskProto().GetNodeID()),
+					mlog.Err(dropErr))
+				return
+			}
 			err = t.updateAndSaveTaskMeta(
 				setState(datapb.CompactionTaskState_pipelining),
 				setNodeID(NullNodeID),
 				setRetryTimes(t.GetTaskProto().GetRetryTimes()+1))
 			if err != nil {
-				mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
+				// The plan is already gone from the worker, so the next poll
+				// gets a synthetic failed result with no FailStatus and treats
+				// this retryable failure as terminal. Closing that window needs
+				// a durable drop-pending state in the task proto; log loudly so
+				// the (narrow) occurrence is diagnosable meanwhile.
+				mlog.Error(context.TODO(),
+					"clustering compaction plan was dropped but the requeue could "+
+						"not be persisted; the task will be reported as a bare "+
+						"failure on the next poll",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Err(err))
 			}
 			return
 		}

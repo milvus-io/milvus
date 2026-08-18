@@ -43,7 +43,11 @@ find_header_in_cache() {
 }
 
 if [[ -z "$header" ]]; then
-  ref="$(grep -oE 'milvus-common/[0-9][^"#]*' "$ROOT/internal/core/conanfile.py" | head -1 || true)"
+  # Keep the FULL reference including the "#<recipe-revision>" suffix: a
+  # revision-less reference resolves to whatever revision is newest in the
+  # cache/remote, so the gate could read an EasyAssert.h from a different
+  # revision than the one the C++ build pinned -- passing while codes drift.
+  ref="$(grep -oE 'milvus-common/[0-9][^"]*' "$ROOT/internal/core/conanfile.py" | head -1)"
   if [[ -n "$ref" ]]; then
     base="$(conan cache path "$ref" 2>/dev/null || true)"
     if [[ -n "$base" ]]; then
