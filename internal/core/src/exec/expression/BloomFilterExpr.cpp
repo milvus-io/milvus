@@ -153,6 +153,7 @@ PhyBloomFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int64_t>(context);
             break;
         }
+        case DataType::UUID:
         case DataType::VARCHAR: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()

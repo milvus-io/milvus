@@ -990,6 +990,7 @@ IndexFactory::CreatePrimitiveScalarIndex(
             // create string index
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::TEXT: {
             auto& ngram_params = create_index_info.ngram_params;
             if (ngram_params.has_value()) {
@@ -1228,6 +1229,7 @@ IndexFactory::CreateNestedIndexInverted(
                 tantivy_index_version, file_manager_context, false, true, true);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::UUID:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
                 tantivy_index_version, file_manager_context, false, true, true);
         default:
@@ -1258,6 +1260,7 @@ IndexFactory::CreateNestedIndexBitmap(
                                                           true);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::UUID:
             return std::make_unique<BitmapIndex<std::string>>(
                 file_manager_context, true);
         default:
@@ -1294,6 +1297,7 @@ IndexFactory::CreateNestedIndexScalarIndexSort(
                 file_manager_context, true);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::UUID:
             return std::make_unique<StringIndexSort>(file_manager_context,
                                                      true);
         default:
@@ -1360,6 +1364,7 @@ IndexFactory::CreateScalarIndex(
         case DataType::FLOAT:
         case DataType::DOUBLE:
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::STRING:
         case DataType::TEXT:
         case DataType::TIMESTAMPTZ:

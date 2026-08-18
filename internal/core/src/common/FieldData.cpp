@@ -338,6 +338,33 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
             return FillFieldData(string_array);
         }
+        case DataType::UUID: {
+            AssertInfo(
+                array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY ||
+                    array->type()->id() == arrow::Type::type::STRING,
+                "inconsistent data type for UUID");
+            if (array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY) {
+                auto fsb_array =
+                    std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
+                        array);
+                auto field_data = std::make_shared<FieldDataImpl<std::string>>(
+                    DataType::UUID, false);
+                field_data->Reserve(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    if (fsb_array->IsNull(index)) {
+                        field_data->AddNullRow();
+                    } else {
+                        auto val_view = fsb_array->GetString(index);
+                        field_data->AddRow(val_view);
+                    }
+                }
+                return field_data;
+            } else {
+                auto string_array =
+                    std::dynamic_pointer_cast<arrow::StringArray>(array);
+                return FillFieldData(string_array);
+            }
+        }
         case DataType::TEXT: {
             // V3 storage: TEXT is stored as BINARY (LOBReference in parquet)
             // Insert path: TEXT arrives as STRING
@@ -680,7 +707,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             FixedVector<std::string> values(element_count);
             if (default_value.has_value()) {
                 std::fill(
@@ -885,6 +913,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+        case DataType::UUID:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, cap_rows);
         case DataType::JSON:
@@ -920,6 +949,7 @@ InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+        case DataType::UUID:
         case DataType::GEOMETRY:
             return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
         case DataType::JSON:
@@ -981,7 +1011,8 @@ ResizeScalarFieldData(const DataType& type,
         }
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             auto inner_field_data =
                 std::dynamic_pointer_cast<FieldData<std::string>>(field_data);
             AssertInfo(inner_field_data != nullptr,

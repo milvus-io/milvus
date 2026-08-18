@@ -267,7 +267,8 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
                 break;
             }
             case DataType::VARCHAR:
-            case DataType::STRING: {
+            case DataType::STRING:
+            case DataType::UUID: {
                 // Use string_view to avoid copying strings on every comparison
                 const std::string* lhs_str =
                     RowContainer::strAt(lhs, row_column.offset());

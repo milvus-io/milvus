@@ -309,6 +309,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         } else {
             AssertInfo(data_type == DataType::TEXT,
                        "max_length not found for non-Text string field");
+            max_len = 0;
         }
 
         auto get_bool_value = [&](const std::string& key) -> bool {

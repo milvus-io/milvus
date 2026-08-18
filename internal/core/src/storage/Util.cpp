@@ -482,7 +482,8 @@ CreateArrowBuilder(DataType data_type) {
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             return std::make_shared<arrow::StringBuilder>();
         }
         case DataType::ARRAY:
@@ -643,6 +644,7 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
+        case DataType::UUID:
             return std::make_shared<arrow::StringScalar>(
                 default_value.string_data());
         case DataType::JSON:
@@ -692,7 +694,8 @@ CreateArrowSchema(DataType data_type, bool nullable) {
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             return arrow::schema(
                 {arrow::field("val", arrow::utf8(), nullable)});
         }
@@ -1266,6 +1269,7 @@ CreateFieldData(const DataType& type,
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+        case DataType::UUID:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, total_num_rows);
         case DataType::JSON:

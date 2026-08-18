@@ -72,7 +72,10 @@ SkipIndexStatsBuilder::Build(
                 info.min_, info.max_);
             break;
         }
-        case milvus::DataType::VARCHAR: {
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::STRING:
+        case milvus::DataType::TEXT:
+        case milvus::DataType::UUID: {
             auto info =
                 ProcessFieldMetrics<parquet::ByteArrayType, std::string>(
                     statistic);
@@ -154,7 +157,7 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
     if (chunk == nullptr || chunk->RowNums() == 0) {
         return none_ptr;
     }
-    if (data_type == DataType::VARCHAR) {
+    if (IsStringDataType(data_type)) {
         auto string_chunk = static_cast<const StringChunk*>(chunk);
         metricsInfo<std::string> info = ProcessStringFieldMetrics(string_chunk);
         return LoadMetrics<std::string>(info);

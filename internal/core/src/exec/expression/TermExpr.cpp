@@ -105,6 +105,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
@@ -218,7 +219,8 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             }
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             if (CanSkipSegment<std::string>()) {
                 return;
             }
@@ -1311,7 +1313,8 @@ PhyTermFilterExpr::DetermineExecPath() {
     // it (a term set of exact values is better served by the scan / an equality
     // index), while INVERTED and the others accept it (base default). FMINDEX is
     // VARCHAR-only, so only the string path needs the check.
-    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT) &&
+    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT ||
+         data_type == DataType::UUID) &&
         !SegmentExpr::CanUseIndexForOp<std::string>(
             proto::plan::OpType::Equal)) {
         exec_path_ = ExprExecPath::RawData;
@@ -1351,6 +1354,7 @@ PhyTermFilterExpr::PrefetchRawData() {
             PrefetchRawData<double>();
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()

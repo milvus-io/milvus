@@ -85,6 +85,7 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
+    UUID = 31,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -137,6 +138,8 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             return sizeof(double);
         case DataType::TIMESTAMPTZ:
             return sizeof(int64_t);
+        case DataType::UUID:
+            return 16;
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
@@ -195,6 +198,8 @@ ToProtoDataType(DataType data_type) {
             return proto::schema::DataType::Text;
         case DataType::TIMESTAMPTZ:
             return proto::schema::DataType::Timestamptz;
+        case DataType::UUID:
+            return proto::schema::DataType::UUID;
 
         case DataType::VECTOR_BINARY:
             return proto::schema::DataType::BinaryVector;
@@ -245,6 +250,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::VARCHAR:
         case DataType::TEXT:
             return arrow::utf8();
+        case DataType::UUID:
+            return arrow::fixed_size_binary(16);
         case DataType::ARRAY:
         case DataType::JSON:
             return arrow::binary();
@@ -339,6 +346,8 @@ GetDataTypeName(DataType data_type) {
             return "json";
         case DataType::TEXT:
             return "text";
+        case DataType::UUID:
+            return "uuid";
         case DataType::GEOMETRY:
             return "geometry";
         case DataType::VECTOR_FLOAT:
@@ -470,7 +479,8 @@ using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
-    return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
+    return data_type == DataType::INT64 || data_type == DataType::VARCHAR ||
+           data_type == DataType::UUID;
 }
 
 inline bool
@@ -549,6 +559,7 @@ IsPrimitiveType(proto::schema::DataType type) {
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
         case proto::schema::DataType::Timestamptz:
+        case proto::schema::DataType::UUID:
             return true;
         default:
             return false;
@@ -837,6 +848,12 @@ template <>
 struct TypeTraits<DataType::TEXT> : public TypeTraits<DataType::VARCHAR> {
     static constexpr DataType TypeKind = DataType::TEXT;
     static constexpr const char* Name = "TEXT";
+};
+
+template <>
+struct TypeTraits<DataType::UUID> : public TypeTraits<DataType::VARCHAR> {
+    static constexpr DataType TypeKind = DataType::UUID;
+    static constexpr const char* Name = "UUID";
 };
 
 template <>
@@ -1589,6 +1606,8 @@ using RowTypePtr = std::shared_ptr<const RowType>;
                 return PREFIX<milvus::DataType::VARCHAR> SUFFIX(__VA_ARGS__); \
             case milvus::DataType::STRING:                                    \
                 return PREFIX<milvus::DataType::STRING> SUFFIX(__VA_ARGS__);  \
+            case milvus::DataType::UUID:                                      \
+                return PREFIX<milvus::DataType::UUID> SUFFIX(__VA_ARGS__);    \
             case milvus::DataType::JSON:                                      \
                 return PREFIX<milvus::DataType::JSON> SUFFIX(__VA_ARGS__);    \
             case milvus::DataType::ARRAY:                                     \

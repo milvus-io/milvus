@@ -338,6 +338,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                     break;
                 case DataType::STRING:
                 case DataType::VARCHAR:
+                case DataType::UUID:
                     array_len = array_data.data(i).string_data().data_size();
                     break;
                 default:
@@ -619,7 +620,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
                     break;
                 case DataType::VARCHAR:
                 case DataType::TEXT:
-                case DataType::GEOMETRY: {
+                case DataType::GEOMETRY:
+                case DataType::UUID: {
                     auto avg_size = get_variable_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
                     break;
@@ -2055,7 +2057,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             bulk_subscript_ptr_impl<std::string>(op_ctx,
                                                  vec_ptr,
                                                  seg_offsets,
@@ -2430,7 +2433,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                         static_cast<double*>(data));
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             bulk_subscript_ptr_impl<std::string>(
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
             break;

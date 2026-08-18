@@ -269,7 +269,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
         case DataType::DOUBLE:
             return GetMultipleChunkDataAccessor<double>(
                 field_id, current_chunk_id, current_chunk_pos, pinned_index);
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             return GetMultipleChunkDataAccessor<std::string>(
                 field_id, current_chunk_id, current_chunk_pos, pinned_index);
         }
@@ -398,6 +399,7 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
             return GetChunkDataAccessor<double>(
                 field_id, chunk_id, pinned_index);
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::TEXT: {
             return GetChunkDataAccessor<std::string>(
                 field_id, chunk_id, pinned_index);

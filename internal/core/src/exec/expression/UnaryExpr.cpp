@@ -108,6 +108,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
             // not accurate on floating point number, rollback to bruteforce.
             return false;
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::STRING:
             return CanUseIndexForArray<std::string_view>();
         default:
@@ -158,7 +159,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
                     return ExecRangeVisitorImplArray<proto::plan::Array>(
                         context);
                 }
-                case DataType::VARCHAR: {
+                case DataType::VARCHAR:
+                case DataType::UUID: {
                     if (segment_->type() == SegmentType::Growing) {
                         return ExecArrayEqualForIndex<std::string>(
                             context, expr_->op_type_ == proto::plan::NotEqual);
@@ -228,6 +230,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
@@ -1534,7 +1537,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     }
 
     if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
-        if (pk_type_ == DataType::VARCHAR) {
+        if (pk_type_ == DataType::VARCHAR || pk_type_ == DataType::UUID) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
         } else {
             return ExecRangeVisitorImplForPk<int64_t>(context);
@@ -2112,6 +2115,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
                         proto::plan::GenericValue::ValCase::kFloatVal;
                     break;
                 case DataType::VARCHAR:
+                case DataType::UUID:
                 case DataType::STRING:
                     expected_case =
                         proto::plan::GenericValue::ValCase::kStringVal;
@@ -2169,6 +2173,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
         case DataType::TEXT: {
             can_use = SegmentExpr::CanUseIndexForOp<std::string>(
                 expr_->op_type_, StringLiteralForCostGuard());
@@ -2491,6 +2496,7 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
             PrefetchRawData<double>();
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
