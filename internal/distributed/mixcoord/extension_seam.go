@@ -140,9 +140,29 @@ func registerCoordinatorEngineGRPC(reg grpc.ServiceRegistrar) {
 	engine.RegisterOnCoordinator(reg)
 }
 
+// activeNotifier is the slice of the concrete coordinator the seam uses to
+// defer the engine's start to activation. Implemented by mixCoordImpl; a
+// coordinator that does not implement it (a test double) starts the engine
+// immediately, which is also the pre-active-standby behaviour.
+type activeNotifier interface {
+	OnActive(fn func())
+}
+
 // startCoordinatorEngine hands the installed engine its view of the running
-// coordinator and starts it. It returns nil without constructing an adapter
-// when no engine is installed.
+// coordinator and starts it - once this replica is ACTIVE. The adapter is
+// built (and the coordinator's capabilities verified) synchronously, so a
+// coordinator that cannot serve the engine still fails startup immediately;
+// the engine's own Start waits for activation, because (a) before it the
+// sub-coordinators it reads are not initialized, and (b) a standby replica
+// must not run a second engine - one control plane doing resource-group
+// accounting per deployment, not one per replica. On a standby that never
+// activates, Start never runs; gRPC registration (registerCoordinatorEngineGRPC)
+// still happens on every replica so a failover serves the engine's services.
+//
+// An engine that fails to start at activation panics the process: the form
+// declared the capability required, and a coordinator serving traffic without
+// its engine would accept work nothing accounts for. The synchronous path
+// (no OnActive - a test double) returns the error instead.
 func startCoordinatorEngine(ctx context.Context, coord types.MixCoordComponent) error {
 	engine := coordinatorEngine()
 	if engine == nil {
@@ -152,10 +172,22 @@ func startCoordinatorEngine(ctx context.Context, coord types.MixCoordComponent) 
 	if err != nil {
 		return err
 	}
-	if err := engine.Start(ctx, client); err != nil {
-		return err
+	start := func() error {
+		if err := engine.Start(ctx, client); err != nil {
+			return err
+		}
+		mlog.Info(ctx, "coordinator engine started")
+		return nil
 	}
-	mlog.Info(ctx, "coordinator engine started")
+	notifier, ok := coord.(activeNotifier)
+	if !ok {
+		return start()
+	}
+	notifier.OnActive(func() {
+		if err := start(); err != nil {
+			mlog.Panic(ctx, "coordinator engine failed to start on activation; a coordinator serving without its engine would accept work nothing accounts for", mlog.Err(err))
+		}
+	})
 	return nil
 }
 

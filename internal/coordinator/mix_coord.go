@@ -68,9 +68,16 @@ type mixCoordImpl struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 	stateCode           atomic.Int32
-	initOnce            sync.Once
-	startOnce           sync.Once
-	session             *sessionutil.Session
+
+	// onActive holds callbacks to run once this replica becomes ACTIVE -
+	// after initInternal has built the sub-coordinators and the state moved
+	// to Healthy. A standby replica never fires them; see OnActive.
+	onActiveMu sync.Mutex
+	onActive   []func()
+	activated  bool
+	initOnce   sync.Once
+	startOnce  sync.Once
+	session    *sessionutil.Session
 
 	factory dependency.Factory
 
@@ -175,6 +182,10 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 	s.fileResourceObserver.InitProxy(s.rootcoordServer.GetProxyClientManager())
+	// The same manager backs InvalidateShardLeaderCache: it is assigned here,
+	// on the init path, because rootcoord owns the process's only proxy client
+	// manager and it does not exist before rootcoord's Init.
+	s.proxyClientManager = s.rootcoordServer.GetProxyClientManager()
 
 	if err := s.rootcoordServer.Start(); err != nil {
 		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
@@ -244,6 +255,32 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	s.startPosixCleanupTask()
 	RegisterMgrRoute(s)
+
+	s.onActiveMu.Lock()
+	s.activated = true
+	fns := s.onActive
+	s.onActive = nil
+	s.onActiveMu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// OnActive runs fn once this replica is ACTIVE: sub-coordinators initialized,
+// state Healthy. A callback registered after activation runs immediately; one
+// registered on a replica that stays standby never runs, which is the point -
+// work hung off this hook (a coordinator engine doing resource-group
+// accounting, say) must run on exactly one replica, and before activation the
+// sub-coordinators it would read are not initialized at all.
+func (s *mixCoordImpl) OnActive(fn func()) {
+	s.onActiveMu.Lock()
+	if s.activated {
+		s.onActiveMu.Unlock()
+		fn()
+		return
+	}
+	s.onActive = append(s.onActive, fn)
+	s.onActiveMu.Unlock()
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
@@ -1032,6 +1069,12 @@ func (s *mixCoordImpl) DescribeResourceGroup(ctx context.Context, req *querypb.D
 // it by type-asserting the concrete coordinator; see
 // internal/distributed/mixcoord/extension_seam.go.
 func (s *mixCoordImpl) GetLoadPercentageByResourceGroup(ctx context.Context, collectionID int64, rgName string) (int32, error) {
+	// Health-gated like every RPC: before activation querycoord's meta is not
+	// initialized and would answer -1, which a caller cannot tell apart from
+	// "this resource group holds no replica".
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return 0, err
+	}
 	return s.queryCoordServer.GetLoadPercentageByResourceGroup(ctx, collectionID, rgName)
 }
 
@@ -1041,6 +1084,11 @@ func (s *mixCoordImpl) GetLoadPercentageByResourceGroup(ctx context.Context, col
 // callers type-assert the concrete coordinator rather than growing
 // types.MixCoord and every generated mock of it.
 func (s *mixCoordImpl) GetShardLeaderReadinessByResourceGroup(ctx context.Context, collectionID int64, rgName string) (extension.ShardLeaderReadiness, error) {
+	// Same health gate as GetLoadPercentageByResourceGroup: an uninitialized
+	// querycoord reads as "nothing ready", which is not an answer.
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return extension.ShardLeaderReadiness{}, err
+	}
 	return s.queryCoordServer.GetShardLeaderReadinessByResourceGroup(ctx, collectionID, rgName)
 }
 
@@ -1054,7 +1102,11 @@ func (s *mixCoordImpl) GetShardLeaderReadinessByResourceGroup(ctx context.Contex
 // why the fan-out has to live here rather than in the caller.
 func (s *mixCoordImpl) InvalidateShardLeaderCache(ctx context.Context, collectionID int64) error {
 	if s.proxyClientManager == nil {
-		return nil
+		// Not wired yet - initInternal has not run. Failing loudly matters
+		// more than usual here: a caller that just released a collection
+		// treats a nil error as "every proxy has been told", and a silently
+		// skipped fan-out leaves proxies routing to leaders that are gone.
+		return merr.WrapErrServiceUnavailable("proxy client manager not initialized; shard-leader cache not invalidated")
 	}
 	return s.proxyClientManager.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 		CollectionIDs: []int64{collectionID},

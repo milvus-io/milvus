@@ -8,6 +8,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 )
@@ -19,6 +21,7 @@ import (
 // is querycoord's own documented behavior for that state.
 func TestGetShardLeaderReadinessByResourceGroupReachesQueryCoord(t *testing.T) {
 	s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	readiness, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 1, "rg-target")
 	assert.NoError(t, err)
@@ -51,6 +54,7 @@ func TestGetShardLeaderReadinessByResourceGroupForwardsArgumentsAndResult(t *tes
 			}).Build()
 
 		s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+		s.UpdateStateCode(commonpb.StateCode_Healthy)
 		readiness, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 42, "rg-a")
 
 		assert.NoError(t, err)
@@ -65,6 +69,7 @@ func TestGetShardLeaderReadinessByResourceGroupForwardsArgumentsAndResult(t *tes
 			Return(extension.ShardLeaderReadiness{}, want).Build()
 
 		s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+		s.UpdateStateCode(commonpb.StateCode_Healthy)
 		readiness, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 42, "rg-a")
 
 		assert.ErrorIs(t, err, want)

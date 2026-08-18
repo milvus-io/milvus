@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // recordingProxyClientManager captures the invalidation requests the
@@ -49,10 +50,15 @@ func TestInvalidateShardLeaderCacheReportsTheFanOutFailure(t *testing.T) {
 		"a caller that cannot tell a landed invalidation from a lost one cannot decide what to do next")
 }
 
-// The coordinator builds its proxy client manager during Init, so an engine
-// that calls this before then must get an answer rather than a nil dereference
-// that takes the coordinator down.
-func TestInvalidateShardLeaderCacheWithoutAProxyClientManager(t *testing.T) {
+// Before initInternal wires the manager, the call must FAIL, not silently
+// succeed: a caller that just released a collection treats a nil error as
+// "every proxy has been told", and a skipped fan-out leaves proxies routing
+// to leaders that are gone. (The manager is assigned in initInternal, right
+// after rootcoord's Init builds it - the same source fileResourceObserver
+// draws from.)
+func TestInvalidateShardLeaderCacheWithoutAProxyClientManagerFails(t *testing.T) {
 	s := &mixCoordImpl{}
-	assert.NoError(t, s.InvalidateShardLeaderCache(context.Background(), 42))
+	err := s.InvalidateShardLeaderCache(context.Background(), 42)
+	require.Error(t, err, "an invalidation that went nowhere must not read as delivered")
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

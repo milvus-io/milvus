@@ -323,3 +323,39 @@ func TestServerGrpcSetupRegistersEngineServices(t *testing.T) {
 	assert.Contains(t, svr.grpcServer.GetServiceInfo(), "extension.test.EngineService",
 		"a service the engine registers must be live on the serving coordinator server")
 }
+
+// activatableCoord is engineTestCoord plus the activation hook the real
+// coordinator has: callbacks wait until fire() runs them.
+type activatableCoord struct {
+	engineTestCoord
+	pending []func()
+}
+
+func (c *activatableCoord) OnActive(fn func()) { c.pending = append(c.pending, fn) }
+func (c *activatableCoord) fire() {
+	for _, fn := range c.pending {
+		fn()
+	}
+	c.pending = nil
+}
+
+// On a coordinator with active-standby, the engine must not start until this
+// replica is ACTIVE: before activation the sub-coordinators it reads are not
+// initialized, and a standby replica running a second engine would be a
+// second control plane doing resource-group accounting. A replica that never
+// activates never starts it.
+func TestEngineStartWaitsForActivation(t *testing.T) {
+	engine := &recordingEngine{}
+	installEngine(t, engine)
+
+	coord := &activatableCoord{}
+	svr := newTestServer(t, &coord.engineTestCoord)
+	svr.mixCoord = coord // the notifier interface must be visible to the seam
+
+	assert.NoError(t, svr.start())
+	assert.Zero(t, engine.startCount,
+		"the engine must not start on a replica that is not ACTIVE yet")
+
+	coord.fire()
+	assert.Equal(t, 1, engine.startCount, "activation is what starts the engine")
+}
