@@ -2042,12 +2042,8 @@ IterateFieldDataFromManifest(
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
-            auto field_data =
-                CreateFieldData(data_type_v,
-                                element_type_v,
-                                nullable,
-                                dim,
-                                num_rows);
+            auto field_data = CreateFieldData(
+                data_type_v, element_type_v, nullable, dim, num_rows);
             field_data->FillFieldData(chunked_array);
             consumer(std::move(field_data));
             consumed_rows += num_rows;

@@ -1031,15 +1031,16 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                            dim,
                                            fs_);
         } else {
-            field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                    loon_ffi_properties_,
-                                                    field_meta_,
-                                                    data_type,
-                                                    dim,
-                                                    element_type,
-                                                    0,
-                                                    0,
-                                                    GetStorageColumnMapping(GetFieldDataMeta().field_id));
+            field_datas = GetFieldDatasFromManifest(
+                manifest_path_str,
+                loon_ffi_properties_,
+                field_meta_,
+                data_type,
+                dim,
+                element_type,
+                0,
+                0,
+                GetStorageColumnMapping(GetFieldDataMeta().field_id));
         }
     } else {
         for (auto& remote_files_group : all_remote_files) {
@@ -1090,7 +1091,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                       element_type,
                                       max_rows,
                                       offset,
-                                      GetStorageColumnMapping(GetFieldDataMeta().field_id));
+                                      GetStorageColumnMapping(
+                                          GetFieldDataMeta().field_id));
                         if (part_field_datas.empty()) {
                             break;
                         }
