@@ -28,19 +28,15 @@ TEST(UuidTest, EnumValue) {
     ASSERT_EQ(static_cast<int>(DataType::UUID), 31);
 }
 
-// Verify that UUID is treated as a string data type for storage purposes.
-// UUID is stored as a canonical string at the storage layer, reusing the
-// string/VarChar path (PayloadWriter string payloads, Arrow string builders).
-TEST(UuidTest, IsStringDataType) {
-    ASSERT_TRUE(IsStringDataType(DataType::UUID));
+// Verify that UUID is not classified as a generic variable-width string.
+TEST(UuidTest, IsNotStringDataType) {
+    ASSERT_FALSE(IsStringDataType(DataType::UUID));
 }
 
-// Verify that UUID is not a fixed-size type. UUID is variable-width
-// (string-backed), so IsFixedSizeType must return false, matching the
-// IsStringDataType(UUID)==true assertion above and allowing RowContainer
-// and other variable-width paths to allocate pointers instead of inline data.
+// Verify that UUID is a fixed-size 16-byte scalar type.
 TEST(UuidTest, IsFixedSizeType) {
-    ASSERT_FALSE(IsFixedSizeType(DataType::UUID));
+    ASSERT_TRUE(IsFixedSizeType(DataType::UUID));
+    ASSERT_EQ(GetDataTypeSize(DataType::UUID), 16);
 }
 
 // Verify ToProtoDataType maps internal DataType::UUID to proto DataType::UUID.
