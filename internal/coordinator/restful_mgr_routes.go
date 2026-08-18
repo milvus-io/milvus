@@ -1369,8 +1369,11 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// An undeclared key is still deletable, which is where that reasoning
 		// stops: refusing it would strand an operator holding a key an older
 		// build wrote — a secret, or a ParamItem that a later version stopped
-		// declaring — with no way to remove it through this API at all.
-		if paramMgr.IsSensitive(canonicalKey) {
+		// declaring — with no way to remove it through this API at all. Note
+		// the registeredKind test: without it the name-pattern fallback fences
+		// exactly the secret-named legacy key that argument is about, since
+		// that fallback classifies undeclared keys too.
+		if registeredKind != pkgconfig.RegisteredConfigUnknown && paramMgr.IsSensitive(canonicalKey) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify sensitive config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)

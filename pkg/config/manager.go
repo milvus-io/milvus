@@ -47,13 +47,20 @@ const (
 	RegisteredConfigGroup
 )
 
-// sensitiveKeyPatterns is the last-resort classifier for keys no ParamItem or
-// ParamGroup declares. Configuration projections omit undeclared keys outright,
-// so on the main table this only matters for logs — but a manager whose
-// ParamGroup declares the empty prefix (hook.yaml, whose keys are plugin-defined
-// and cannot be enumerated by the core) has nothing else, which is why the list
-// must not be narrower than the audit tripwire in paramtable. Reviewed false
-// positives use explicit NonSensitive metadata, which is consulted first.
+// sensitiveKeyPatterns is the last-resort classifier: it decides any key that
+// no explicit rule claims, whether or not something declares that key.
+//
+// That "whether or not" is easy to misread and matters. A declared ParamItem
+// with a credential-shaped name is caught by this list even though nothing
+// marked it Sensitive, which is why proxy.maxPasswordLength and
+// proxy.minPasswordLength carry NonSensitive: true — they are length bounds,
+// and without the flag they would read as passwords. Declaring a key is not by
+// itself a statement that its value is safe.
+//
+// The list must not be narrower than the audit tripwire in paramtable. A
+// manager whose ParamGroup declares the empty prefix (hook.yaml, whose keys are
+// plugin-defined and cannot be enumerated by the core) has nothing else to go
+// on at all.
 var sensitiveKeyPatterns = []string{
 	"password",
 	"secret",
@@ -701,8 +708,6 @@ func (m *Manager) RegisterNonSensitiveKey(key string) {
 	}
 }
 
-// RegisterSensitivePrefix marks every configuration below a dynamic prefix as
-// sensitive.
 // RegisterSensitivePrefix marks every configuration below a dynamic prefix as
 // sensitive. The empty prefix is accepted and means every key of this manager,
 // which is what Sensitive on a group with no KeyPrefix declares; dropping it as

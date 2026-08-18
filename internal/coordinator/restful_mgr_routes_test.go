@@ -406,17 +406,38 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "sensitive configuration")
 	})
 
-	t.Run("undeclared config may still be deleted", func(t *testing.T) {
+	t.Run("undeclared config may still be deleted, secret-named or not", func(t *testing.T) {
 		// Where the reasoning above stops. An operator holding a key an older
-		// build wrote needs some way to remove it, and nothing here can tell
-		// whether it was a secret.
+		// build wrote needs some way to remove it, and a secret-named one is
+		// precisely the case that argument is about — so the name-pattern guess
+		// must not fence it. Only a key Milvus itself declares to be a
+		// credential is undeletable.
+		for _, legacy := range []string{
+			"test.alter.undeclared.password",
+			"test.alter.undeclared.apiKey",
+			"test.alter.undeclared.private_key",
+		} {
+			reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": legacy}}}
+			body, _ := json.Marshal(reqBody)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			coord.HandleAlterConfig(w, req)
+			assert.NotEqual(t, http.StatusBadRequest, w.Code, legacy)
+			assert.NotContains(t, w.Body.String(), "sensitive configuration", legacy)
+		}
+	})
+
+	t.Run("undeclared config may still be deleted", func(t *testing.T) {
 		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": "test.alter.undeclared.legacy"}}}
 		body, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 		coord.HandleAlterConfig(w, req)
+		// Validation is what this asserts, so assert only that. What happens
+		// after it depends on whether this package has an etcd to talk to, and
+		// TestHandleAlterConfig above requires that it does.
+		assert.NotEqual(t, http.StatusBadRequest, w.Code)
 		assert.NotContains(t, w.Body.String(), "sensitive configuration")
-		assert.Contains(t, w.Body.String(), "etcd source is not enabled")
 	})
 
 	t.Run("sensitive ParamGroup member cannot be set", func(t *testing.T) {
@@ -434,16 +455,15 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 
 	t.Run("unregistered config may still be deleted", func(t *testing.T) {
 		// A key an older build wrote must remain removable even though nothing
-		// declares it any more; only setting one is refused. As above, reaching
-		// the etcd step is what proves validation passed.
+		// declares it any more; only setting one is refused.
 		const key = "test.alter.no.longer.declared"
 		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
 		body, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 		coord.HandleAlterConfig(w, req)
+		assert.NotEqual(t, http.StatusBadRequest, w.Code)
 		assert.NotContains(t, w.Body.String(), "unregistered configuration")
-		assert.Contains(t, w.Body.String(), "etcd source is not enabled")
 	})
 
 	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {

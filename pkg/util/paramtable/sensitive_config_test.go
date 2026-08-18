@@ -349,11 +349,19 @@ func TestOneIdentityHasOneVerdict(t *testing.T) {
 		seeds = append(seeds, key)
 	}
 
+	// Group by the identity a write actually lands on, which is EtcdConfigKey of
+	// the *resolved* key rather than of the caller's spelling. The two differ
+	// under NotFormatPrefix: EtcdConfigKey("KNOWHERE.OPAQUE") collapses to
+	// "knowhereopaque" because the guard is case-sensitive, while resolving it
+	// first lower-cases and so keeps "knowhere.opaque". Grouping by the raw
+	// spelling would split one identity across two buckets and merge two others,
+	// which is exactly the confusion this test exists to detect.
 	byIdentity := make(map[string][]string, len(seeds)*8)
 	for _, seed := range seeds {
 		for _, spelling := range spellingsOf(seed) {
-			identity := config.EtcdConfigKey(spelling)
-			byIdentity[identity] = append(byIdentity[identity], spelling)
+			canonical, _ := mgr.ResolveRegisteredConfigKey(spelling)
+			byIdentity[config.EtcdConfigKey(canonical)] = append(
+				byIdentity[config.EtcdConfigKey(canonical)], spelling)
 		}
 	}
 
