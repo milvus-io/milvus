@@ -127,6 +127,16 @@ class ScalarIndex : public IndexBase {
     virtual TargetBitmap
     IsNotNull() = 0;
 
+    // Some indexes persist absolute null offsets independently of Count().
+    // They may override this to project validity into a caller-owned row
+    // space. The default keeps the capability explicit instead of guessing
+    // that an unknown tail is non-null.
+    virtual TargetBitmap
+    IsNotNull(int64_t /*row_count*/) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "row-count-aware IsNotNull is not supported");
+    }
+
     virtual const TargetBitmap
     InApplyFilter(size_t n,
                   const T* values,
