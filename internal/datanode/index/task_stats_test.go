@@ -180,6 +180,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 }
 
 func (s *TaskStatsSuite) TestRedactStorageConfigForLog() {
+	// #nosec G101 -- test-only sentinels verify that credentials are redacted.
 	config := &indexpb.StorageConfig{
 		Address:           "storage.example.test",
 		StorageType:       "s3",
