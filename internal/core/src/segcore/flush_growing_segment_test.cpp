@@ -1727,7 +1727,7 @@ TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
     constexpr int64_t start = 13;
     constexpr int64_t end = 87;
 
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 16;
@@ -1806,7 +1806,7 @@ TEST_F(FlushGrowingSegmentTest,
     constexpr int64_t start = 13;
     constexpr int64_t end = 87;
 
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 16;
@@ -1914,7 +1914,7 @@ TEST_F(FlushGrowingSegmentTest,
     constexpr int64_t start = 5;
     constexpr int64_t end = 25;
 
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 16;

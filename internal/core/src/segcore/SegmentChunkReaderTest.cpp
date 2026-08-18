@@ -118,7 +118,7 @@ TEST(SegmentChunkReader, GrowingConjunctSkipKeepsNextBatchCorrect) {
     EXEC_EVAL_EXPR_BATCH_SIZE.store(kBatch);
 
     ScopedSegcoreConfigRestore config_restore;
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     config.set_chunk_rows(kChunkRows);
 
     auto schema = std::make_shared<Schema>();

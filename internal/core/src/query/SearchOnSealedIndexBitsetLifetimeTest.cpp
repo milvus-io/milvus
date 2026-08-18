@@ -638,7 +638,7 @@ AssertDirectGrowingFallbackUsesACompatibleSnapshot(bool iterator_v2) {
     auto pk_field = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_field);
 
-    auto& config = segcore::SegcoreConfig::default_config();
+    auto& config = segcore::SegcoreConfig::mutable_default_config();
     segcore::ScopedSegcoreConfigRestore config_restore(config);
     config.set_chunk_rows(64);
     config.set_enable_interim_segment_index(false);
@@ -799,7 +799,7 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
     IndexMetaPtr index_meta =
         std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
 
-    auto& config = segcore::SegcoreConfig::default_config();
+    auto& config = segcore::SegcoreConfig::mutable_default_config();
     segcore::ScopedSegcoreConfigRestore config_restore(config);
     segcore::InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 64;

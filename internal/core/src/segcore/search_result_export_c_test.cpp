@@ -37,6 +37,7 @@
 #include "segcore/reduce/Reduce.h"
 #include "segcore/search_result_export_c.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 
 using milvus::DataType;
@@ -1765,6 +1766,7 @@ TEST(SearchResultExport, GlobalRefine_SkipsDisabledSegmentsDuringRefine) {
 TEST(SearchResultExport, GlobalRefine_EndToEnd_ForcedSealedRefine) {
     using milvus::segcore::DataGen;
     using milvus::segcore::ScopedSchemaHandle;
+    using milvus::segcore::ScopedSegcoreConfigRestore;
     using milvus::segcore::SegcoreConfig;
 
     // --- 1. Schema: int64 PK + 16-dim float vector (L2). ---
@@ -1792,7 +1794,12 @@ TEST(SearchResultExport, GlobalRefine_EndToEnd_ForcedSealedRefine) {
     auto collection_index_meta = std::make_shared<milvus::CollectionIndexMeta>(
         /*max_index_row_cnt=*/226985, std::move(field_map));
 
-    auto& segcore_config = SegcoreConfig::default_config();
+    // These three settings are process-wide. Without the guard they stay in
+    // effect for every later test in the same all_tests process - in
+    // particular enable_interim_segment_index, which changes how later tests
+    // build their indexes.
+    ScopedSegcoreConfigRestore config_restore;
+    auto& segcore_config = SegcoreConfig::mutable_default_config();
     segcore_config.set_enable_interim_segment_index(true);
     segcore_config.set_nlist(16);
     segcore_config.set_chunk_rows(1024);

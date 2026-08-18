@@ -1995,7 +1995,7 @@ TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {
     IndexMetaPtr index_meta =
         std::make_shared<CollectionIndexMeta>(total_rows, std::move(field_map));
 
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     config.set_chunk_rows(16);
     config.set_nlist(1);
@@ -2105,7 +2105,7 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
     IndexMetaPtr index_meta =
         std::make_shared<CollectionIndexMeta>(max_rows, std::move(field_map));
 
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     config.set_chunk_rows(16);
     config.set_nlist(1);

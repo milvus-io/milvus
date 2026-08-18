@@ -905,11 +905,11 @@ namespace {
 // flag into later tests).
 struct GisSplitFusionFlagGuard {
     explicit GisSplitFusionFlagGuard(bool enable) {
-        milvus::segcore::SegcoreConfig::default_config()
+        milvus::segcore::SegcoreConfig::mutable_default_config()
             .set_enable_gis_split_fusion(enable);
     }
     ~GisSplitFusionFlagGuard() {
-        milvus::segcore::SegcoreConfig::default_config()
+        milvus::segcore::SegcoreConfig::mutable_default_config()
             .set_enable_gis_split_fusion(false);
     }
 };

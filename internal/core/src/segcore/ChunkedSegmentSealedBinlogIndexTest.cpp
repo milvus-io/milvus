@@ -772,7 +772,7 @@ TEST(test_chunk_segment,
     ASSERT_NO_THROW(segment->LoadIndex(load_info));
     ASSERT_TRUE(segment->HasIndex(vec_field_id));
 
-    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto& segcore_config = milvus::segcore::SegcoreConfig::mutable_default_config();
     auto previous_prefer_field_data =
         segcore_config.get_prefer_field_data_when_index_has_raw_data();
     struct PreferFieldDataGuard {
@@ -830,7 +830,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     LoadOtherFields();
 
     ApplyBinlogInterimIndexConfigForTest();
-    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto& segcore_config = milvus::segcore::SegcoreConfig::mutable_default_config();
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField();
 
@@ -1106,7 +1106,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
     LoadOtherFields();
 
     ApplyBinlogInterimIndexConfigForTest();
-    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto& segcore_config = milvus::segcore::SegcoreConfig::mutable_default_config();
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField("./data/mmap-test");
 

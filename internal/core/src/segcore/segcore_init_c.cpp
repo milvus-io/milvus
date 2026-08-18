@@ -40,42 +40,42 @@ SegcoreInit(const char* conf_file) {
 extern "C" void
 SegcoreSetChunkRows(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_chunk_rows(value);
 }
 
 extern "C" void
 SegcoreSetEnableInterminSegmentIndex(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_enable_interim_segment_index(value);
 }
 
 extern "C" void
 SegcoreSetStorageV3Enabled(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_storage_v3_enabled(value);
 }
 
 extern "C" void
 SegcoreSetEnableGrowingSourceFlush(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_enable_growing_source_flush(value);
 }
 
 extern "C" void
 SegcoreSetEnableGeometryCache(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_enable_geometry_cache(value);
 }
 
 extern "C" void
 SegcoreSetEnableGISSplitFusion(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_enable_gis_split_fusion(value);
 }
 
@@ -91,35 +91,35 @@ SegcoreSetVisibilityFilterEnabled(const bool value) {
 extern "C" void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_prefer_field_data_when_index_has_raw_data(value);
 }
 
 extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_nlist(value);
 }
 
 extern "C" void
 SegcoreSetFMIndexCostRatio(const float value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_fmindex_cost_ratio(value);
 }
 
 extern "C" void
 SegcoreSetNprobe(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_nprobe(value);
 }
 
 extern "C" CStatus
 SegcoreSetDenseVectorInterminIndexType(const char* value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     try {
         config.set_dense_vector_intermin_index_type(std::string(value));
         auto status = CStatus();
@@ -134,7 +134,7 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
 extern "C" CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     try {
         config.set_refine_quant_type(std::string(value));
         auto status = CStatus();
@@ -149,42 +149,42 @@ SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
 extern "C" void
 SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_refine_with_quant_flag(value);
 }
 
 extern "C" void
 SegcoreSetInterimIndexMemExpansionRate(const float value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_interim_index_mem_expansion_rate(value);
 }
 
 extern "C" void
 SegcoreSetMaxGroupByGroups(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_max_group_by_groups(value);
 }
 
 extern "C" void
 SegcoreSetSubDim(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_sub_dim(value);
 }
 
 extern "C" void
 SegcoreSetRefineRatio(const float value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_refine_ratio(value);
 }
 
 extern "C" void
 SegcoreSetIndexBuildRatio(const float value) {
     milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+        milvus::segcore::SegcoreConfig::mutable_default_config();
     config.set_build_ratio(value);
 }
 
@@ -314,7 +314,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
         std::chrono::milliseconds(loading_timeout_ms),
         std::chrono::milliseconds(warmup_loading_timeout_ms),
         prefetch_pool_threads);
-    milvus::segcore::SegcoreConfig::default_config()
+    milvus::segcore::SegcoreConfig::mutable_default_config()
         .set_reject_remote_vector_output(reject_remote_vector_output);
 }
 
@@ -336,7 +336,7 @@ UpdateTieredStorageConfig(
          vectorFieldCacheWarmupPolicy,
          scalarIndexCacheWarmupPolicy,
          vectorIndexCacheWarmupPolicy});
-    milvus::segcore::SegcoreConfig::default_config()
+    milvus::segcore::SegcoreConfig::mutable_default_config()
         .set_reject_remote_vector_output(reject_remote_vector_output);
 }
 
