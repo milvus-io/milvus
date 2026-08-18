@@ -27,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -38,6 +39,34 @@ import (
 // It checks if authentication is enabled and validates username/password.
 func TelemetryAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// These routes push commands to connected clients and delete queued
+		// ones, so once the gate is on they run the root check themselves
+		// rather than trusting the caller of RegisterRestRouter to have
+		// installed the group middleware: a second mount point would publish
+		// them anonymously and every test here would stay green.
+		//
+		// The marker says the group already did it, in which case repeating it
+		// would charge a second bcrypt and count the decision twice.
+		if _, checked := c.Get(internalhttp.AdminAuthCheckedKey); checked {
+			c.Next()
+			return
+		}
+		if internalhttp.AdminAuthEnabled() {
+			status, msg, ok := internalhttp.CheckAdminRequest(c.Request, c.FullPath(), false)
+			if !ok {
+				// The group middleware's shape, not this file's legacy
+				// {"error": ...}: the same route must not change reply shape
+				// depending on which check answered.
+				c.AbortWithStatusJSON(status, gin.H{
+					internalhttp.HTTPReturnCode:    internalhttp.AuthErrorCode(status),
+					internalhttp.HTTPReturnMessage: msg,
+				})
+				return
+			}
+			c.Next()
+			return
+		}
+
 		// Check if authorization is enabled
 		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 			c.Next()

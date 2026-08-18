@@ -126,6 +126,134 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
+// adminAuthMiddleware applies the root gate to routes served by the proxy's Gin
+// tree, sharing its implementation with the net/http handlers registered
+// through mhttp.Register so the two cannot drift apart.
+//
+// challenge belongs to the console routes only: the console has no login form
+// of its own, so without WWW-Authenticate the browser takes the 401 silently
+// and every panel renders an error the operator cannot clear. The data-plane
+// routes must not send it, or the browser starts holding root's credential for
+// paths that drop collections.
+func adminAuthMiddleware(challenge bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		status, msg, ok := mhttp.CheckAdminRequest(c.Request, c.FullPath(), false)
+		if ok {
+			// Tell the routes that carry their own copy of this check that it
+			// has already run, so they neither repeat the work nor count the
+			// same decision twice.
+			c.Set(mhttp.AdminAuthCheckedKey, true)
+			return
+		}
+		if challenge && status == http.StatusUnauthorized {
+			mhttp.WriteBasicAuthChallenge(c.Writer)
+		}
+		abortWithAuthError(c, status, msg)
+	}
+}
+
+// abortWithAuthError keeps the gate's reply the same shape as the data plane's
+// own 401 on the same route (see authenticate). A caller parsing one of them
+// should not have to know which rule ran.
+func abortWithAuthError(c *gin.Context, status int, msg string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		mhttp.HTTPReturnCode:    mhttp.AuthErrorCode(status),
+		mhttp.HTTPReturnMessage: msg,
+	})
+}
+
+// metricsPortAuthMiddleware is the authentication rule for everything the
+// proxy serves on the metrics port under /api/v1.
+//
+// It is installed once, on the parent group, rather than per route class.
+// RouterGroup.Group snapshots the parent's handler slice, so a second stacked
+// check either runs ahead of this one and answers the console's 401 without
+// the WWW-Authenticate a browser needs, or is skipped entirely, depending on
+// where the Use() sits relative to the Group() — and neither failure shows up
+// in a test that exercises a middleware on its own.
+//
+// The port carries two different things once the gate is on: the web console
+// API (/api/v1/_*) is operator surface and requires root, while the legacy REST
+// data plane follows authorizationEnabled where that is set and requires root
+// where it is not. Every gated branch runs the cross-site check first, because
+// the browser replays root's cached credential at the data-plane routes on this
+// origin just as readily as at the console ones.
+//
+// While the gate is off, behavior is exactly what it was before it existed:
+// the legacy rule, applied only when authorizationEnabled is set.
+func metricsPortAuthMiddleware() gin.HandlerFunc {
+	consoleAuth := adminAuthMiddleware(true)
+	dataPlaneAuth := adminAuthMiddleware(false)
+	legacyEnabled := proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool()
+	return func(c *gin.Context) {
+		gateOn := mhttp.AdminAuthEnabled()
+		if isOpenMetricsPortPath(c) {
+			// /api/v1/health is a liveness probe that predates /healthz and is
+			// still wired into load balancers. Turning a flag named after the
+			// management plane into a health-check outage is not a trade
+			// anyone opted into. The exemption is from the new gate only:
+			// authorizationEnabled's existing coverage of this path stays,
+			// because a hardening flag must never loosen an existing check.
+			if legacyEnabled {
+				authenticateAndCount(c)
+			}
+			return
+		}
+		switch {
+		case gateOn && isConsoleAPIPath(c):
+			consoleAuth(c)
+		case legacyEnabled:
+			// The data plane's own rule. It still has to refuse a cross-site
+			// request, because the console's challenge teaches the browser to
+			// replay a credential at this origin; consoleAuth and dataPlaneAuth
+			// get that from CheckAdminRequest, this branch does not.
+			if gateOn {
+				if status, msg, ok := mhttp.CheckCrossSite(c.Request, c.FullPath(), false); !ok {
+					abortWithAuthError(c, status, msg)
+					return
+				}
+			}
+			authenticateAndCount(c)
+		case gateOn:
+			dataPlaneAuth(c)
+		}
+	}
+}
+
+// authenticateAndCount runs the data plane's own rule and records the outcome,
+// so milvus_admin_auth_total covers every decision made on this port rather
+// than only the ones the root gate made.
+func authenticateAndCount(c *gin.Context) {
+	authenticate(c)
+	result := metrics.AdminAuthAllowed
+	if c.IsAborted() {
+		result = metrics.AdminAuthUnauthenticated
+	}
+	metrics.AdminAuthTotal.WithLabelValues(c.FullPath(), result).Inc()
+}
+
+// openMetricsPortPaths stay reachable without credentials while the gate is on.
+var openMetricsPortPaths = map[string]struct{}{
+	apiPathPrefix + "/health": {},
+}
+
+// consoleAPIPrefix is what every web console route under /api/v1 starts with:
+// /_cluster, /_db, /_collection, /_index, /_qc, /_dc, /_qn, /_dn, /_hook and
+// /_telemetry. Nothing on the legacy data plane uses a leading underscore.
+const consoleAPIPrefix = apiPathPrefix + "/_"
+
+// isConsoleAPIPath and isOpenMetricsPortPath both read FullPath, the matched
+// route template, so neither can be steered by a crafted URL the way the raw
+// path can.
+func isConsoleAPIPath(c *gin.Context) bool {
+	return strings.HasPrefix(c.FullPath(), consoleAPIPrefix)
+}
+
+func isOpenMetricsPortPath(c *gin.Context) bool {
+	_, ok := openMetricsPortPaths[c.FullPath()]
+	return ok
+}
+
 func authenticate(c *gin.Context) {
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
@@ -165,24 +293,39 @@ func (s *Server) registerHTTPServer() {
 	if !proxy.Params.HTTPCfg.DebugMode.GetAsBool() {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	metricsGinHandler := gin.Default()
-	apiv1 := metricsGinHandler.Group(apiPathPrefix)
-	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
-	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		apiv1.Use(authenticate)
-	}
-	handlers := httpserver.NewHandlers(s.proxy)
-	handlers.RegisterRoutesTo(apiv1)
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
-	}
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
-		Handler:     metricsGinHandler.Handler(),
+		Handler:     newMetricsPortEngine(gin.Default(), s.proxy).Handler(),
 	})
+}
+
+// newMetricsPortEngine mounts everything the proxy serves on the metrics port.
+//
+// One group, one auth middleware, passed to Group rather than Use'd after it,
+// so the handler slice the routes inherit is the one this builds. Tests drive
+// this function rather than repeating its shape, because a test that
+// reassembles the tree by hand cannot notice the assembly changing under it —
+// and the assembly is exactly what makes the gate apply.
+func newMetricsPortEngine(engine *gin.Engine, proxyComponent types.ProxyComponent) *gin.Engine {
+	apiv1 := engine.Group(apiPathPrefix,
+		httpserver.RequestHandlerFunc, metricsPortAuthMiddleware())
+	httpserver.NewHandlers(proxyComponent).RegisterRoutesTo(apiv1)
+	if p, ok := proxyComponent.(consoleRouterRegistrar); ok {
+		// The web console API — cluster info and configs, database and
+		// collection listings, slow queries, coordinator and node distribution,
+		// plus the telemetry routes that push commands to connected clients.
+		p.RegisterRestRouter(apiv1)
+	}
+	return engine
+}
+
+// consoleRouterRegistrar is what *proxy.Proxy satisfies. Asserting on the
+// behavior rather than the concrete type is what lets a test put the console
+// routes on this tree; with a concrete assertion the whole console surface is
+// unreachable from any test and silently uncovered.
+type consoleRouterRegistrar interface {
+	RegisterRestRouter(router gin.IRouter)
 }
 
 func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {

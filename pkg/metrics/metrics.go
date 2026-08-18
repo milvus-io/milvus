@@ -17,11 +17,13 @@
 package metrics
 
 import (
-	// #nosec
-	_ "net/http/pprof"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// Note: this package no longer blank-imports net/http/pprof. Exposing profiling
+// handlers as a side effect of importing a metrics package hid the decision from
+// every registration site; internal/http now registers them explicitly, with an
+// auth posture visible at the registration site.
 
 const (
 	milvusNamespace = "milvus"
@@ -239,5 +241,30 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(RuntimeInfo)
 	r.MustRegister(ThreadNum)
 	r.MustRegister(ThreadCPUActiveNumByPool)
+	r.MustRegister(AdminAuthTotal)
 	metricRegisterer = r
 }
+
+// Values of AdminAuthTotal's "result" label.
+const (
+	AdminAuthAllowed         = "allowed"
+	AdminAuthUnauthenticated = "unauthenticated" // 401: no credentials, or the root password is wrong
+	AdminAuthForbidden       = "forbidden"       // 403: a non-root username
+	AdminAuthUnavailable     = "unavailable"     // 503: the credential could not be checked
+	AdminAuthCrossSite       = "cross_site"      // 403: a browser reported another site as the initiator
+	AdminAuthError           = "error"
+)
+
+// AdminAuthTotal counts management-plane authentication outcomes.
+//
+// The gate fails closed, so without this an operator cannot tell a node that is
+// rejecting credentials from one that cannot reach its credential store, nor
+// see a credential-stuffing run at all -- the log lines for both are rate
+// limited. The endpoint label is the registered route pattern, never the raw
+// request path, which is caller-controlled under the subtree patterns.
+var AdminAuthTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Name:      "admin_auth_total",
+		Help:      "Total number of management-plane authentication decisions",
+	}, []string{"endpoint", "result"})
