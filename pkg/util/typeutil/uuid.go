@@ -17,9 +17,9 @@
 package typeutil
 
 import (
-	"errors"
-
 	"github.com/google/uuid"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // NormalizeUUID parses s and returns its canonical lowercase form
@@ -29,7 +29,7 @@ import (
 func NormalizeUUID(s string) (string, error) {
 	u, err := uuid.Parse(s)
 	if err != nil {
-		return "", err
+		return "", merr.WrapErrParameterInvalid("valid UUID string", s, err.Error())
 	}
 	return u.String(), nil
 }
@@ -38,7 +38,7 @@ func NormalizeUUID(s string) (string, error) {
 func ParseUUID(s string) ([16]byte, error) {
 	u, err := uuid.Parse(s)
 	if err != nil {
-		return [16]byte{}, err
+		return [16]byte{}, merr.WrapErrParameterInvalid("valid UUID string", s, err.Error())
 	}
 	return [16]byte(u), nil
 }
@@ -51,7 +51,7 @@ func UUIDToString(u [16]byte) string {
 // BytesToUUID converts a 16-byte slice to a 16-byte array.
 func BytesToUUID(b []byte) ([16]byte, error) {
 	if len(b) != 16 {
-		return [16]byte{}, errors.New("invalid uuid bytes length, expected 16")
+		return [16]byte{}, merr.WrapErrParameterInvalidMsg("invalid uuid bytes length %d, expected 16", len(b))
 	}
 	var u [16]byte
 	copy(u[:], b)
