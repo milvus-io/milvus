@@ -506,6 +506,7 @@ func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOf
 		dataView.GetCollectionId(),
 		dataView.GetDataVersion().GetStreamingVersion(),
 		dataView.GetDataVersion().GetCompactVersion(),
+		dataView.GetDataVersion().GetTransformVersion(),
 	)
 	value, err := proto.Marshal(dataView)
 	if err != nil {
@@ -540,7 +541,12 @@ func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) (
 }
 
 func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
-	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(collectionID, dataVersion.GetStreamingVersion(), dataVersion.GetCompactVersion()))
+	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(
+		collectionID,
+		dataVersion.GetStreamingVersion(),
+		dataVersion.GetCompactVersion(),
+		dataVersion.GetTransformVersion(),
+	))
 }
 
 func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {

@@ -88,7 +88,7 @@ func TestDataViewCatalogLifecycle(t *testing.T) {
 	catalog := NewCatalog(store, "", "")
 	dataView := &viewpb.DataViewOfCollection{
 		CollectionId: 100,
-		DataVersion:  &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1, TransformVersion: 3},
 		Shards: []*viewpb.DataViewOfShard{{
 			Vchannel: "ch-1",
 			Partitions: []*viewpb.DataViewOfPartition{{
@@ -99,6 +99,7 @@ func TestDataViewCatalogLifecycle(t *testing.T) {
 	}
 
 	require.NoError(t, catalog.SaveDataView(ctx, dataView))
+	require.Contains(t, store.values, "coord/dv/100/versions/2/1/3")
 	views, err := catalog.ListDataViews(ctx, 100)
 	require.NoError(t, err)
 	require.Len(t, views, 1)
@@ -118,4 +119,19 @@ func TestDataViewCatalogLifecycle(t *testing.T) {
 	views, err = catalog.ListDataViews(ctx, 100)
 	require.NoError(t, err)
 	require.Empty(t, views)
+}
+
+func TestDataViewCatalogUsesLegacyKeyForZeroTransformVersion(t *testing.T) {
+	ctx := context.Background()
+	store := newDataViewMetaKV()
+	catalog := NewCatalog(store, "", "")
+	dataView := &viewpb.DataViewOfCollection{
+		CollectionId: 100,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
+	}
+
+	require.NoError(t, catalog.SaveDataView(ctx, dataView))
+	require.Contains(t, store.values, "coord/dv/100/versions/2/1")
+	require.NoError(t, catalog.DropDataView(ctx, 100, dataView.GetDataVersion()))
+	require.Empty(t, store.values)
 }

@@ -6656,6 +6656,48 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		require.NoError(t, err)
 		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
 	})
+
+	t.Run("sort retries DataView replacement after SegmentMeta commit", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		// Simulate a Segment flushed by an older coordinator that still used the
+		// delayed-visibility SortCompaction protocol.
+		meta.segments.GetSegment(1).IsInvisible = true
+		meta.dataViewManager = &failOnceCompactDataViewManager{Manager: manager, fail: true}
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_SortCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+			SegmentID: 3,
+			NumOfRows: 100,
+			IsSorted:  true,
+		}}}
+
+		segments, mutation, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.Error(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(1).GetState())
+		require.NotNil(t, meta.segments.GetSegment(3))
+
+		require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		segments, mutation, err = meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		require.ElementsMatch(t, []int64{2, 3}, dataViewSegmentIDs(t, manager))
+
+		ref, err := manager.Latest(ctx, 100)
+		require.NoError(t, err)
+		require.NotNil(t, ref)
+		defer ref.Deref()
+		require.Equal(t, int64(2), ref.Version().GetCompactVersion())
+	})
 }
 
 type blockingCompactDataViewManager struct {
@@ -6663,6 +6705,19 @@ type blockingCompactDataViewManager struct {
 	once    sync.Once
 	entered chan struct{}
 	release chan struct{}
+}
+
+type failOnceCompactDataViewManager struct {
+	dataviewpkg.Manager
+	fail bool
+}
+
+func (m *failOnceCompactDataViewManager) OnCompact(ctx context.Context, event dataviewpkg.CompactDataViewEvent) (*viewpb.DataVersion, error) {
+	if m.fail {
+		m.fail = false
+		return nil, merr.WrapErrServiceUnavailable("injected DataView publication failure")
+	}
+	return m.Manager.OnCompact(ctx, event)
 }
 
 func (m *blockingCompactDataViewManager) OnCompact(ctx context.Context, event dataviewpkg.CompactDataViewEvent) (*viewpb.DataVersion, error) {

@@ -840,6 +840,58 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
 }
 
+func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentRemainsVisibleBeforeSortCompaction() {
+	paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+	})
+
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 100})
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  100,
+		PartitionID:   20,
+		InsertChannel: "ch-1",
+		State:         commonpb.SegmentState_Growing,
+		Level:         datapb.SegmentLevel_L1,
+	})
+	s.Require().NoError(s.testServer.meta.AddSegment(context.Background(), segment))
+
+	status, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		SegmentID:    10,
+		CollectionID: 100,
+		PartitionID:  20,
+		Channel:      "ch-1",
+		SegLevel:     datapb.SegmentLevel_L1,
+		Field2BinlogPaths: []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    "/by-dev/insert_log/100/20/10/1/1",
+				EntriesNum: 1,
+			}},
+		}},
+		Field2StatslogPaths: []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    "/by-dev/stats_log/100/20/10/1/2",
+				EntriesNum: 1,
+			}},
+		}},
+		CheckPoints: []*datapb.CheckPoint{{
+			SegmentID: 10,
+			NumOfRows: 1,
+		}},
+		Flushed: true,
+	})
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(status))
+
+	flushed := s.testServer.meta.GetSegment(context.Background(), 10)
+	s.Require().NotNil(flushed)
+	s.Equal(commonpb.SegmentState_Flushed, flushed.GetState())
+	s.False(flushed.GetIsInvisible())
+}
+
 func (s *ServerSuite) TestFlush_NormalCase() {
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{

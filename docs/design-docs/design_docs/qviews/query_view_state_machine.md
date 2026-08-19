@@ -21,17 +21,24 @@ through Ready, Up, Down, Unrecoverable, and Dropping, and release it only after
 Dropped destroys the instance. On recovery, persisted QueryViews must reacquire
 their DataVersions before DataView snapshot GC is enabled.
 
-L0 compaction is a same-DataVersion metadata refresh: it replaces only the
-latest DataView's Manifest versions and delete frontier, without creating a new
-QueryView state-machine instance. QueryView integration must propagate that
-refresh separately and replace its retained Ref when it adopts the refreshed
-snapshot. This ownership and refresh wiring is not implemented by the current
+L0 compaction advances only DataView TransformVersion. It does not invalidate
+the current QueryView: the existing state-machine instance keeps its exact old
+DataViewRef and continues applying equivalent deletes from TransformLog. The
+manager coalesces such soft updates and eventually creates a new QueryView at
+the latest TransformVersion so the old recovery and retention frontier can be
+released. The scheduling policy is not implemented by the current
 DataView-only PR.
 
 ### 1.1 Preparing
 
 **Entry Conditions:**
-- Balancer generates a new view (triggers: DataView membership-version change, balance request, QN online/offline, previous view becomes Unrecoverable, load config change such as LoadPartition/ReleasePartition). An L0 same-version refresh updates the existing QueryView instead of creating a new state-machine instance.
+- Balancer generates a new view (hard triggers: StreamingVersion or
+  CompactVersion change, balance request, QN online/offline, previous view
+  becomes Unrecoverable, or load config changes such as
+  LoadPartition/ReleasePartition). A TransformVersion-only change is a soft
+  trigger: the current QueryView remains valid, updates are coalesced, and a
+  later hard trigger or retention/maintenance policy eventually creates the
+  replacement QueryView.
 - Recovery: loaded from ETCD in Preparing state.
 
 **Automatic Behavior:**

@@ -93,20 +93,24 @@ func (s StateTransition) IsStateTransition() bool {
 }
 
 // DataVersion is the composite version of a data view.
-// Ordered lexicographically by (StreamingVersion, CompactVersion).
+// Ordered lexicographically by
+// (StreamingVersion, CompactVersion, TransformVersion).
 type DataVersion struct {
 	StreamingVersion int64
 	CompactVersion   int64
+	TransformVersion int64
 }
 
 // String returns the string representation of the data version.
 func (dv DataVersion) String() string {
-	return fmt.Sprintf("%d/%d", dv.StreamingVersion, dv.CompactVersion)
+	return fmt.Sprintf("%d/%d/%d", dv.StreamingVersion, dv.CompactVersion, dv.TransformVersion)
 }
 
 // EQ returns true if dv is equal to other.
 func (dv DataVersion) EQ(other DataVersion) bool {
-	return dv.StreamingVersion == other.StreamingVersion && dv.CompactVersion == other.CompactVersion
+	return dv.StreamingVersion == other.StreamingVersion &&
+		dv.CompactVersion == other.CompactVersion &&
+		dv.TransformVersion == other.TransformVersion
 }
 
 // GT returns true if dv is strictly greater than other (lexicographic).
@@ -114,7 +118,10 @@ func (dv DataVersion) GT(other DataVersion) bool {
 	if dv.StreamingVersion != other.StreamingVersion {
 		return dv.StreamingVersion > other.StreamingVersion
 	}
-	return dv.CompactVersion > other.CompactVersion
+	if dv.CompactVersion != other.CompactVersion {
+		return dv.CompactVersion > other.CompactVersion
+	}
+	return dv.TransformVersion > other.TransformVersion
 }
 
 // GTE returns true if dv is greater than or equal to other.
@@ -127,6 +134,7 @@ func FromProtoDataVersion(dv *viewpb.DataVersion) DataVersion {
 	return DataVersion{
 		StreamingVersion: dv.StreamingVersion,
 		CompactVersion:   dv.CompactVersion,
+		TransformVersion: dv.TransformVersion,
 	}
 }
 
@@ -135,6 +143,7 @@ func (dv DataVersion) IntoProto() *viewpb.DataVersion {
 	return &viewpb.DataVersion{
 		StreamingVersion: dv.StreamingVersion,
 		CompactVersion:   dv.CompactVersion,
+		TransformVersion: dv.TransformVersion,
 	}
 }
 

@@ -127,6 +127,7 @@ type dataViewAdvance int
 const (
 	dataViewAdvanceStreaming dataViewAdvance = iota
 	dataViewAdvanceCompact
+	dataViewAdvanceTransform
 )
 
 type membershipMutation struct {
@@ -316,7 +317,8 @@ func (m *dataViewManager) OnL0Compact(ctx context.Context, event L0CompactDataVi
 	if !changed {
 		return dataVersionFromView(base), nil
 	}
-	if err := m.replaceLatestLocked(ctx, state, next); err != nil {
+	next.DataVersion = nextDataVersion(base, dataViewAdvanceTransform)
+	if err := m.persistLocked(ctx, state, next); err != nil {
 		return nil, err
 	}
 	return cloneDataVersion(next.GetDataVersion()), nil
@@ -466,18 +468,6 @@ func (m *dataViewManager) persistLocked(ctx context.Context, state *collectionSt
 	return nil
 }
 
-func (m *dataViewManager) replaceLatestLocked(ctx context.Context, state *collectionState, view *viewpb.DataViewOfCollection) error {
-	persisted := canonicalDataViewClone(view)
-	if err := m.catalog.SaveDataView(ctx, persisted); err != nil {
-		return err
-	}
-	entry := newVersionEntry(persisted)
-	entry.refs = state.latest.refs
-	state.versions[dataVersionKey(persisted.GetDataVersion())] = entry
-	state.latest = entry
-	return nil
-}
-
 func (m *dataViewManager) getState(collectionID int64) *collectionState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -561,9 +551,16 @@ func nextDataVersion(base *viewpb.DataViewOfCollection, advance dataViewAdvance)
 	if advance == dataViewAdvanceStreaming {
 		return &viewpb.DataVersion{StreamingVersion: current.GetStreamingVersion() + 1}
 	}
+	if advance == dataViewAdvanceCompact {
+		return &viewpb.DataVersion{
+			StreamingVersion: current.GetStreamingVersion(),
+			CompactVersion:   current.GetCompactVersion() + 1,
+		}
+	}
 	return &viewpb.DataVersion{
 		StreamingVersion: current.GetStreamingVersion(),
-		CompactVersion:   current.GetCompactVersion() + 1,
+		CompactVersion:   current.GetCompactVersion(),
+		TransformVersion: current.GetTransformVersion() + 1,
 	}
 }
 
@@ -928,15 +925,17 @@ func cloneDataVersion(version *viewpb.DataVersion) *viewpb.DataVersion {
 }
 
 func compareDataVersion(left, right *viewpb.DataVersion) int {
-	leftStreaming, leftCompact := int64(0), int64(0)
+	leftStreaming, leftCompact, leftTransform := int64(0), int64(0), int64(0)
 	if left != nil {
 		leftStreaming = left.GetStreamingVersion()
 		leftCompact = left.GetCompactVersion()
+		leftTransform = left.GetTransformVersion()
 	}
-	rightStreaming, rightCompact := int64(0), int64(0)
+	rightStreaming, rightCompact, rightTransform := int64(0), int64(0), int64(0)
 	if right != nil {
 		rightStreaming = right.GetStreamingVersion()
 		rightCompact = right.GetCompactVersion()
+		rightTransform = right.GetTransformVersion()
 	}
 	if leftStreaming != rightStreaming {
 		if leftStreaming > rightStreaming {
@@ -950,12 +949,23 @@ func compareDataVersion(left, right *viewpb.DataVersion) int {
 		}
 		return -1
 	}
+	if leftTransform != rightTransform {
+		if leftTransform > rightTransform {
+			return 1
+		}
+		return -1
+	}
 	return 0
 }
 
 func dataVersionKey(version *viewpb.DataVersion) string {
 	if version == nil {
-		return "0/0"
+		return "0/0/0"
 	}
-	return fmt.Sprintf("%d/%d", version.GetStreamingVersion(), version.GetCompactVersion())
+	return fmt.Sprintf(
+		"%d/%d/%d",
+		version.GetStreamingVersion(),
+		version.GetCompactVersion(),
+		version.GetTransformVersion(),
+	)
 }

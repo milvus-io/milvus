@@ -86,8 +86,12 @@ data ([B1] and [A1]). A version number DataVersion is introduced:
 - **compact_version**: Incremented for every other loadable-membership change,
   including import, copy completion, compaction, external refresh, partition
   drop, and truncate.
+- **transform_version**: Incremented when L0 compaction advances Segment
+  Manifest versions or the delete-materialization frontier without changing
+  loadable membership.
 
-Version numbers are ordered lexicographically by `(streaming_version, compact_version)`.
+Version numbers are ordered lexicographically by
+`(streaming_version, compact_version, transform_version)`.
 
 Completeness and logical non-duplication are publication contracts, not facts
 derived by DataViewManager. The manager validates unique Segment-ID placement,
@@ -112,12 +116,13 @@ The following timeline shows the current Collection-level snapshot behavior:
 
 | Step | Event | DataView Version | Segments in the View |
 |---|---|---|---|
-| 1 | Create Collection | `(1,0)` | none; declared VChannels only |
-| 2 | Flush Segments 1 and 2 | `(2,0)` | `1, 2` |
-| 3 | Flush Segment 3 | `(3,0)` | `1, 2, 3` |
-| 4 | Compact Segments 1 and 2 into Segments 4 and 5 | `(3,1)` | `3, 4, 5` |
-| 5 | Cluster compaction or reshard | `(3,2)` | `6, 7, 8, 9` |
-| 6 | Import Segment 10 | `(3,3)` | `6, 7, 8, 9, 10` |
+| 1 | Create Collection | `(1,0,0)` | none; declared VChannels only |
+| 2 | Flush Segments 1 and 2 | `(2,0,0)` | `1, 2` |
+| 3 | Flush Segment 3 | `(3,0,0)` | `1, 2, 3` |
+| 4 | L0 compact updates Segment 1 Manifest | `(3,0,1)` | `1, 2, 3` |
+| 5 | Compact Segments 1 and 2 into Segments 4 and 5 | `(3,1,0)` | `3, 4, 5` |
+| 6 | Cluster compaction or reshard | `(3,2,0)` | `6, 7, 8, 9` |
+| 7 | Import Segment 10 | `(3,3,0)` | `6, 7, 8, 9, 10` |
 
 Each row is a complete immutable snapshot. Every Segment entry also has a
 Manifest version; the table omits the value for readability. Existing producers
@@ -126,22 +131,26 @@ The Collection snapshot is still identified and ordered by `DataVersion`.
 
 Key observations:
 - Only Flush operations cause streaming_version to increment (for example,
-  `(1,0) → (2,0) → (3,0)`).
+  `(1,0,0) → (2,0,0) → (3,0,0)`).
 - All other membership changes cause compact_version to increment (for
-  example, `(3,0) → (3,1) → (3,2) → (3,3)`).
+  example, `(3,0,1) → (3,1,0) → (3,2,0) → (3,3,0)`).
+- L0 compaction changes no membership and increments only transform_version;
+  repeated L0 updates can be coalesced before a QueryView adopts them.
 - Compaction replaces its input membership with output membership in one
   snapshot.
+- Until StreamingNode performs Flush sorting directly, SortCompaction first
+  publishes the immediately loadable flushed Segment and later replaces it
+  with the final sorted Segment through a CompactVersion update. The flushed
+  Segment is not hidden while sorting waits or runs.
 - A Segment's Manifest version is monotonic across DataViews. Replaying the
   same version is a no-op, a higher version advances it, and a lower version is
   rejected.
 - L0 compaction persists higher target Segment Manifest versions and the shard
-  `transform_start_after_timetick` by replacing the latest snapshot under the
-  same DataVersion.
+  `transform_start_after_timetick` in a new immutable TransformVersion.
 
 ### 5.4 Constraints
 
-- Membership changes create new DataVersions. L0 compaction is a same-version
-  latest-snapshot replacement for Manifest and delete-frontier changes.
+- Membership and L0 materialization changes create immutable DataVersions.
 - DataViewManager does not understand compaction lineage. Event producers must
   not publish a superseded input Segment again after compaction removes it.
 - SegmentMeta and Manifest updates do not automatically rewrite DataView.
@@ -150,17 +159,23 @@ Key observations:
   L0-specific event; there is no generic Manifest-update API.
 - The storage view version number is at the Collection level (laying the groundwork for future capabilities such as Shard splitting).
 - DataView tracks loadable Segment membership and monotonically increasing
-  Manifest versions. Delete-frontier refreshes do not advance DataVersion.
+  Manifest versions. Delete-frontier refreshes advance TransformVersion.
 
 ## 6. Query Side — Query View (QueryView)
 
 ### 6.1 Version Number
 
 Each query view version number is `(D, Q)`, where
-`D = (streaming_version, compact_version)`. The full ordering is therefore
-lexicographic by `(streaming_version, compact_version, query_version)`:
+`D = (streaming_version, compact_version, transform_version)`. The full
+ordering is therefore lexicographic by `(streaming_version, compact_version,
+transform_version, query_version)`:
 
-- **D increases**: DataView membership changes.
+- **StreamingVersion or CompactVersion increases**: immediately generate a
+  QueryView because the growing/sealed handoff or loaded data changed.
+- **Only TransformVersion increases**: keep the current QueryView serving and
+  coalesce the update. A later hard update, balance, retention threshold, or
+  maintenance interval eventually generates a QueryView at the latest
+  TransformVersion.
 - **Q increases**: Data undergoes load-level redistribution.
 
 The query view version number is at the **ShardOnReplica level**, and its lifecycle is the same as the Load operation lifecycle of the corresponding replica.

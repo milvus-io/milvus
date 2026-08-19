@@ -611,8 +611,11 @@ func (t *clusteringCompactionTask) completeTask() error {
 				segments = append(segments, segment)
 			}
 		}
-		meta.publishDataViewAfterCompaction(context.TODO(), t.GetTaskProto(), segments)
+		err = meta.publishDataViewAfterCompaction(context.TODO(), t.GetTaskProto(), segments)
 		meta.segMu.Unlock()
+		if err != nil {
+			return err
+		}
 	}
 
 	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {

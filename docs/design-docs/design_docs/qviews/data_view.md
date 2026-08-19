@@ -68,7 +68,7 @@ The normal Collection lifecycle is:
 
 ```text
 absent
-  -> OnCreateCollection: persist the empty (1,0) snapshot
+  -> OnCreateCollection: persist the empty (1,0,0) snapshot
   -> active: append immutable snapshots for membership changes
   -> CollectionMeta Dropping: delete every persisted snapshot and manager state
   -> absent from DataViewManager
@@ -84,9 +84,9 @@ Every `On*` call is serialized by the Collection lock, clones the latest
 immutable snapshot, applies the mutation, canonicalizes the result, persists
 the complete snapshot, and only then publishes it as the new in-memory latest.
 A failed catalog write therefore leaves the previous latest unchanged.
-Membership events write a new DataVersion. `OnL0Compact` overwrites the latest
-version's persisted key and replaces the latest in-memory entry without
-changing DataVersion; already issued Refs retain the prior immutable entry.
+Membership events and effective `OnL0Compact` updates write a new immutable
+DataVersion. Already issued Refs retain the prior entry, while `Latest` returns
+the newly persisted entry.
 
 Collection drop is coordinated by CollectionMeta rather than by a DataView
 state or tombstone. RootCoord first persists CollectionMeta as Dropping, then
@@ -97,14 +97,14 @@ issued `DataViewRef` continues to own its in-memory snapshot until `Deref`.
 ## Versioning
 
 DataVersion is ordered lexicographically as `(streaming_version,
-compact_version)`.
+compact_version, transform_version)`.
 
 | Event | Version transition |
 |---|---|
-| Create | first snapshot `(1,0)` |
-| Flush | `(S,C) -> (S+1,0)` |
-| Import, copy completion, compact, external refresh, drop partition, truncate | `(S,C) -> (S,C+1)` |
-| L0 compact | unchanged; overwrite and persist the latest snapshot |
+| Create | first snapshot `(1,0,0)` |
+| Flush | `(S,C,T) -> (S+1,0,0)` |
+| Import, copy completion, compact, external refresh, drop partition, truncate | `(S,C,T) -> (S,C+1,0)` |
+| L0 compact | `(S,C,T) -> (S,C,T+1)` when Manifest or frontier advances |
 | No membership or Manifest-version change | return the current version without persisting |
 | Drop collection | delete all persisted snapshots; no new snapshot |
 
@@ -112,9 +112,10 @@ compact_version)`.
 whether a flushed Segment must still participate in growing-side queries. Only
 StreamingNode Flush performs that growing-to-sealed handoff. Every other
 membership-changing event advances `compact_version`, even when it only adds
-Segments. L0 compaction is the exception: it advances target Segment Manifest
-versions and the shard delete frontier in the latest snapshot without changing
-DataVersion.
+Segments. L0 compaction advances `transform_version`: it changes target Segment
+Manifest versions and the shard delete frontier without changing membership.
+Streaming and compact advances reset their lower-order version components
+because their new snapshot already absorbs the latest transform state.
 
 StreamingNode Flush has a stronger completion contract: a successful `OnFlush`
 means every supplied Segment is immediately allowed to load on QueryNode and is
@@ -151,6 +152,17 @@ addition as one DataView commit. A retry whose inputs are already absent and
 whose outputs are already present is a no-op. A partially applied or otherwise
 inconsistent replacement is rejected without changing the snapshot.
 
+SortCompaction follows the same replacement contract. Its flushed input
+Segment is immediately loadable and is first published by `OnFlush`; it is not
+kept invisible while waiting for sorting. After the sorted output Segment is
+durably loadable, the compaction owner publishes one `OnCompact` event that
+removes the flushed input and adds the final output, advancing CompactVersion.
+If SegmentMeta replacement succeeds but DataView publication fails, the
+persisted compaction lineage makes completion replayable and the task retries
+the idempotent DataView replacement. A future implementation should perform
+sorting of newly flushed Segments on StreamingNode and publish the final sorted
+Segment directly, eliminating this intermediate replacement.
+
 Intermediate invisible Segments do not produce DataView membership events.
 In particular, clustering compaction does not publish its temporary Segments;
 it publishes exactly once after its final result Segments are visible and
@@ -180,7 +192,9 @@ reference and must call `Deref()` exactly when it finishes using the snapshot;
 `Deref()` is idempotent.
 
 `OnL0Compact` accepts one vchannel, the affected Segment Manifest versions, and
-`transform_start_after_timetick`. It never changes membership or DataVersion.
+`transform_start_after_timetick`. It never changes membership. An effective
+update advances TransformVersion and appends an immutable snapshot; an event
+that advances neither Manifest versions nor the frontier is a no-op.
 Manifest versions may only increase; a lower version is rejected. The shard
 timetick advances by max so out-of-order completion cannot move it backward.
 Segments absent from the latest DataView are ignored rather than added.
@@ -201,20 +215,29 @@ pinned. QueryView generation may coalesce intermediate DataVersions, but every
 loaded Shard must eventually converge to the latest Collection DataVersion so
 old Collection refs can be released.
 
+TransformVersion is a soft QueryView trigger. A QueryView at an older
+TransformVersion remains query-correct because it keeps its old DataViewRef and
+consumes the equivalent deletes from TransformLog. It is not invalidated by
+each L0 completion. The system must nevertheless generate a newer QueryView
+eventually—usually piggybacked on the next hard update or balance, or forced by
+time/retention pressure—so the old Manifest and TransformLog frontier can be
+garbage-collected. That QueryView scheduling is outside the current
+DataView-only PR.
+
 ## Persistence and recovery
 
 Each version is stored as one complete snapshot under:
 
 ```text
-coord/dv/{collectionID}/versions/{streaming}/{compact}
+coord/dv/{collectionID}/versions/{streaming}/{compact}/{transform}
 ```
 
-Normal commits append a new key. `OnL0Compact` persists by overwriting the
-current latest key with the same DataVersion. A new `Latest` or `Get` observes
-the replacement; a Ref acquired before the overwrite continues to own its old
-in-memory snapshot until `Deref()`. The old and replacement entries share the
-same per-DataVersion reference counter, so GC retains the persisted version
-until every Ref from either generation has been released.
+Every effective commit, including `OnL0Compact`, appends a new immutable key.
+For compatibility, versions whose TransformVersion is zero retain the legacy
+two-component key; positive TransformVersions use the third path component.
+A new `Latest` observes the new entry, while `Get` can still acquire any exact
+retained version. Each version has its own reference counter and remains
+protected from GC while a QueryView holds its Ref.
 
 Recovery scans every snapshot under `coord/dv`, groups them by Collection, and
 asks the already-recovered CollectionMeta for a decision. A Created Collection
