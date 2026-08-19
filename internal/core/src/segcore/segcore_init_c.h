@@ -140,6 +140,11 @@ ConfigureTieredStorage(
     const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
     const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
     const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+    // Cache eviction defaults
+    const bool scalarFieldEvictable,
+    const bool vectorFieldEvictable,
+    const bool scalarIndexEvictable,
+    const bool vectorIndexEvictable,
     // watermarks
     const int64_t memory_low_watermark_bytes,
     const int64_t memory_high_watermark_bytes,
@@ -174,7 +179,11 @@ UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
                           const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
-                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy);
+                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                          const bool scalarFieldEvictable,
+                          const bool vectorFieldEvictable,
+                          const bool scalarIndexEvictable,
+                          const bool vectorIndexEvictable);
 
 #ifdef __cplusplus
 }

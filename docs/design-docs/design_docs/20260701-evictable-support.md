@@ -72,8 +72,8 @@ queryNode:
         vectorIndex: true
 ```
 
-The Go client adds typed helpers for collection create/alter defaults, field
-alter, and index create/alter.
+The Go client exposes these settings through its generic collection/field
+property and index extra-parameter helpers.
 
 PyMilvus currently accesses these settings through its generic metadata maps.
 Python booleans are serialized as `True` or `False`, and Milvus accepts the
@@ -104,6 +104,8 @@ available through the existing generic `properties` and index `params` maps.
 - Change manual release or unload behavior.
 - Dynamically update existing cache slots after a collection is already loaded.
 - Add separate controls for JSON stats or text stats in the first version.
+- Configure eviction behavior for internal timestamp or primary-key indexes;
+  this remains future work.
 - Change the core cachinglayer eviction algorithm.
 
 ## Design Details
@@ -120,6 +122,11 @@ QueryNode defaults only have runtime eviction effect when
 `queryNode.segcore.tieredStorage.evictionEnabled` is enabled. If eviction is
 disabled globally, `evictable` is still persisted but no
 policy-based eviction occurs.
+
+The four QueryNode defaults are refreshable. A refreshed value is resolved when
+a new cache slot is created; cache slots that already exist keep the
+`support_eviction` value captured at their creation time. Field/index and
+collection metadata continue to take precedence over these local defaults.
 
 ### Metadata Validation
 
@@ -174,7 +181,9 @@ Load translators pass the computed bool into `cachinglayer::Meta` instead of
 hard-coding user-loadable resources as evictable.
 
 Vector lazy-load metadata keeps its existing non-evictable exception.
-System indexes keep their existing default behavior.
+Internal timestamp and primary-key indexes are not covered by the user-facing
+`evictable` properties in this version and keep their existing hard-coded
+behavior. Making their eviction behavior configurable is a future TODO.
 
 ## Compatibility, Deprecation, and Migration Plan
 
@@ -199,7 +208,7 @@ The implementation includes tests for:
 - QueryCoord load-info propagation and precedence.
 - QueryNode parsing, resource estimates, and CGo request construction.
 - C++ load structs and translator propagation into `support_eviction`.
-- Go client typed helpers.
+- Go client generic property and extra-parameter helpers.
 
 Validation commands used by the implementation PR:
 

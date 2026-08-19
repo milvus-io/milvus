@@ -368,17 +368,17 @@ func (s *CollectionSuite) TestAlterCollectionProperties() {
 	})
 }
 
-func (s *CollectionSuite) TestCollectionEvictableOptions() {
+func (s *CollectionSuite) TestCollectionEvictableProperties() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 	schema := entity.NewSchema().
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("vector").WithDim(128).WithDataType(entity.FieldTypeFloatVector))
 
 	createReq := NewCreateCollectionOption(collectionName, schema).
-		WithEvictableScalarField(false).
-		WithEvictableVectorField(false).
-		WithEvictableScalarIndex(false).
-		WithEvictableVectorIndex(false).
+		WithProperty(common.EvictableScalarFieldKey, false).
+		WithProperty(common.EvictableVectorFieldKey, false).
+		WithProperty(common.EvictableScalarIndexKey, false).
+		WithProperty(common.EvictableVectorIndexKey, false).
 		Request()
 	createProps := entity.KvPairsMap(createReq.GetProperties())
 	s.Equal("false", createProps[common.EvictableScalarFieldKey])
@@ -387,10 +387,10 @@ func (s *CollectionSuite) TestCollectionEvictableOptions() {
 	s.Equal("false", createProps[common.EvictableVectorIndexKey])
 
 	alterReq := NewAlterCollectionPropertiesOption(collectionName).
-		WithEvictableScalarField(false).
-		WithEvictableVectorField(false).
-		WithEvictableScalarIndex(false).
-		WithEvictableVectorIndex(false).
+		WithProperty(common.EvictableScalarFieldKey, false).
+		WithProperty(common.EvictableVectorFieldKey, false).
+		WithProperty(common.EvictableScalarIndexKey, false).
+		WithProperty(common.EvictableVectorIndexKey, false).
 		Request()
 	alterProps := entity.KvPairsMap(alterReq.GetProperties())
 	s.Equal("false", alterProps[common.EvictableScalarFieldKey])
@@ -399,7 +399,7 @@ func (s *CollectionSuite) TestCollectionEvictableOptions() {
 	s.Equal("false", alterProps[common.EvictableVectorIndexKey])
 
 	fieldReq := NewAlterCollectionFieldPropertiesOption(collectionName, "vector").
-		WithEvictable(false).
+		WithProperty(common.EvictableKey, false).
 		Request()
 	fieldProps := entity.KvPairsMap(fieldReq.GetProperties())
 	s.Equal("false", fieldProps[common.EvictableKey])

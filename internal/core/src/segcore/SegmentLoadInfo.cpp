@@ -98,7 +98,11 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
                                   IsVectorDataType(field_meta.get_data_type()),
                                   /*is_index=*/true);
     load_index_info.support_eviction =
-        has_evictable_setting ? evictable_enabled : true;
+        has_evictable_setting
+            ? evictable_enabled
+            : SegcoreConfig::default_config().get_evictable_default(
+                  IsVectorDataType(field_meta.get_data_type()),
+                  /*is_index=*/true);
 
     // Set index metadata
     load_index_info.index_id = field_index_info->indexid();
@@ -218,8 +222,11 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
     auto [field_has_evictable, field_evictable_enabled] =
         schema_->EvictableEnabled(
             field_id, /*is_vector=*/false, /*is_index=*/false);
-    info->set_support_eviction(field_has_evictable ? field_evictable_enabled
-                                                   : true);
+    info->set_support_eviction(
+        field_has_evictable
+            ? field_evictable_enabled
+            : SegcoreConfig::default_config().get_evictable_default(
+                  /*is_vector=*/false, /*is_index=*/false));
 
     // Propagate base_path for unified (basePath + relativeFiles) model
     if (!text_index_stats.base_path().empty()) {
@@ -262,8 +269,11 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     auto [field_has_evictable, field_evictable_enabled] =
         schema_->EvictableEnabled(
             field_id, /*is_vector=*/false, /*is_index=*/false);
-    info->set_support_eviction(field_has_evictable ? field_evictable_enabled
-                                                   : true);
+    info->set_support_eviction(
+        field_has_evictable
+            ? field_evictable_enabled
+            : SegcoreConfig::default_config().get_evictable_default(
+                  /*is_vector=*/false, /*is_index=*/false));
 
     if (!json_key_stats.base_path().empty()) {
         info->set_base_path(json_key_stats.base_path());

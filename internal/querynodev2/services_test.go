@@ -1207,7 +1207,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 	})
 }
 
-func TestMaterializeLoadSegmentsEvictableDefaults(t *testing.T) {
+func TestMaterializeLoadSegmentsEvictableOverrides(t *testing.T) {
 	paramtable.Init()
 	schema := &schemapb.CollectionSchema{
 		Properties: []*commonpb.KeyValuePair{
@@ -1278,7 +1278,7 @@ func TestMaterializeLoadSegmentsEvictableDefaults(t *testing.T) {
 	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue(oldScalarIndex)
 	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue(oldVectorIndex)
 
-	materialized := materializeLoadSegmentsEvictableDefaults(req)
+	materialized := materializeLoadSegmentsEvictableOverrides(req)
 
 	require.NotSame(t, req, materialized)
 	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 1))
@@ -1319,7 +1319,7 @@ func TestMaterializeLoadSegmentsEvictableDefaults(t *testing.T) {
 	paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("true")
 	paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
 	paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("true")
-	second := materializeLoadSegmentsEvictableDefaults(req)
+	second := materializeLoadSegmentsEvictableOverrides(req)
 	secondField, err := typeutil.CreateSchemaHelper(second.GetSchema())
 	require.NoError(t, err)
 	secondScalar, err := secondField.GetFieldFromID(1)
@@ -1346,7 +1346,7 @@ func TestMaterializeLoadSegmentsEvictableDefaults(t *testing.T) {
 	assert.False(t, actual, "a later materialization must not mutate an earlier clone")
 }
 
-func (suite *ServiceSuite) TestLoadSegmentsMaterializesEvictableDefaultsAtWorkerBoundary() {
+func (suite *ServiceSuite) TestLoadSegmentsLeavesEvictableDefaultsUnmaterializedAtWorkerBoundary() {
 	ctx := context.Background()
 	schema := &schemapb.CollectionSchema{
 		Name: suite.collectionName,
@@ -1397,8 +1397,7 @@ func (suite *ServiceSuite) TestLoadSegmentsMaterializesEvictableDefaultsAtWorker
 		suite.collectionID,
 		mock.MatchedBy(func(schema *schemapb.CollectionSchema) bool {
 			for _, field := range schema.GetFields() {
-				evictable, exist := common.IsEvictableEnabled(field.GetTypeParams()...)
-				if !exist || evictable {
+				if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); exist {
 					return false
 				}
 			}
@@ -1409,8 +1408,8 @@ func (suite *ServiceSuite) TestLoadSegmentsMaterializesEvictableDefaultsAtWorker
 	).Return(nil).Once()
 	collectionManager.EXPECT().Unref(suite.collectionID, uint32(1)).Return(true).Once()
 	loader.EXPECT().ReopenSegments(mock.Anything, mock.MatchedBy(func(infos []*querypb.SegmentLoadInfo) bool {
-		evictable, exist := common.IsEvictableEnabled(infos[0].GetIndexInfos()[0].GetIndexParams()...)
-		return exist && !evictable
+		_, exist := common.IsEvictableEnabled(infos[0].GetIndexInfos()[0].GetIndexParams()...)
+		return !exist
 	})).Return(nil).Once()
 
 	status, err := suite.node.LoadSegments(ctx, request)

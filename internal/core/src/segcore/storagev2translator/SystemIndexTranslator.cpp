@@ -134,13 +134,15 @@ TimestampIndexTranslator::TimestampIndexTranslator(
       column_(std::move(column)),
       num_rows_(num_rows),
       key_(fmt::format("seg_{}_ts_index", segment_id)),
-      meta_(milvus::cachinglayer::StorageType::MEMORY,
-            milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
-            milvus::cachinglayer::CellDataType::SCALAR_INDEX,
-            milvus::segcore::getCacheWarmupPolicy(warmup_policy,
-                                                  /* is_vector */ false,
-                                                  /* is_index */ false),
-            /* support_eviction */ true) {
+      meta_(
+          milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+          milvus::cachinglayer::CellDataType::SCALAR_INDEX,
+          milvus::segcore::getCacheWarmupPolicy(warmup_policy,
+                                                /* is_vector */ false,
+                                                /* is_index */ false),
+          // TODO: Support configuring eviction for internal timestamp indexes.
+          /* support_eviction */ true) {
 }
 
 size_t
@@ -232,13 +234,15 @@ PkIndexTranslator::PkIndexTranslator(
       data_type_(data_type),
       is_sorted_by_pk_(is_sorted_by_pk),
       key_(fmt::format("seg_{}_pk_index", segment_id)),
-      meta_(milvus::cachinglayer::StorageType::MEMORY,
-            milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
-            milvus::cachinglayer::CellDataType::OTHER,
-            milvus::segcore::getCacheWarmupPolicy(/* warmup_policy */ "",
-                                                  /* is_vector */ false,
-                                                  /* is_index */ true),
-            /* support_eviction */ true) {
+      meta_(
+          milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+          milvus::cachinglayer::CellDataType::OTHER,
+          milvus::segcore::getCacheWarmupPolicy(/* warmup_policy */ "",
+                                                /* is_vector */ false,
+                                                /* is_index */ true),
+          // TODO: Support configuring eviction for internal primary-key indexes.
+          /* support_eviction */ true) {
 }
 
 size_t
