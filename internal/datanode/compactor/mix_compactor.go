@@ -132,15 +132,15 @@ func (t *mixCompactionTask) preCompact() error {
 	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
 		for i, fieldBinlog := range segmentBinlog.GetFieldBinlogs() {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
-				// numRows just need to add entries num of ONE field.
 				if i == 0 {
 					t.maxRows += binlog.GetEntriesNum()
 				}
-
-				// MemorySize might be incorrectly
 				currSize += binlog.GetMemorySize()
 			}
 		}
+	}
+	if t.maxRows == 0 {
+		t.maxRows = t.plan.GetTotalRows()
 	}
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
@@ -465,18 +465,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		mlog.Warn(context.TODO(), "compact wrong, fail to decompress compaction binlogs", mlog.Err(err))
 		return nil, err
 	}
-	// Unable to deal with all empty segments cases, so return error
-	isEmpty := lo.EveryBy(lo.FlatMap(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) []*datapb.FieldBinlog {
-		return seg.GetFieldBinlogs()
-	}), func(field *datapb.FieldBinlog) bool {
-		return len(field.GetBinlogs()) == 0
-	})
-
-	if isEmpty {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
-	}
-
 	if err := t.ensureLOBCompactionContext(ctx); err != nil {
 		return nil, err
 	}
