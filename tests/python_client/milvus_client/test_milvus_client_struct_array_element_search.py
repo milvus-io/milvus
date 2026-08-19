@@ -7,7 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa
-from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker, WeightedRanker
 from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
 
@@ -8058,6 +8058,148 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         )
         assert check
         assert len(results) > 0
+
+
+# ==================== Regression: Element-Level Search With Function Rerank ====================
+
+
+class TestMilvusClientStructArrayElementSearchFunctionRerank(TestMilvusClientV2Base):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_function_rerank_preserves_element_identity_and_fields(self):
+        """
+        target: ordinary Struct Array element-level search with FunctionScore L2 rerank
+        method: make two elements from the same PK rank first, then apply a decay reranker
+        expected: both element hits survive rerank and their offsets remain aligned with Struct Array fields
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_function_rerank")
+        dim = 4
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=128)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        _, check = self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+        )
+        assert check
+
+        rows = [
+            {
+                "id": 0,
+                "doc_int": 0,
+                "structA": [
+                    {
+                        "embedding": [1.0, 0.0, 0.0, 0.0],
+                        "int_val": 0,
+                        "str_val": "row_0_elem_0",
+                    },
+                    {
+                        "embedding": [0.99, 0.01, 0.0, 0.0],
+                        "int_val": 1,
+                        "str_val": "row_0_elem_1",
+                    },
+                ],
+            },
+            {
+                "id": 1,
+                "doc_int": 10,
+                "structA": [
+                    {
+                        "embedding": [0.8, 0.6, 0.0, 0.0],
+                        "int_val": 100,
+                        "str_val": "row_1_elem_0",
+                    },
+                    {
+                        "embedding": [0.6, 0.8, 0.0, 0.0],
+                        "int_val": 101,
+                        "str_val": "row_1_elem_1",
+                    },
+                ],
+            },
+            {
+                "id": 2,
+                "doc_int": 20,
+                "structA": [
+                    {
+                        "embedding": [0.2, 0.98, 0.0, 0.0],
+                        "int_val": 200,
+                        "str_val": "row_2_elem_0",
+                    },
+                    {
+                        "embedding": [0.0, 1.0, 0.0, 0.0],
+                        "int_val": 201,
+                        "str_val": "row_2_elem_1",
+                    },
+                ],
+            },
+        ]
+        _, check = self.insert(client, collection_name, rows)
+        assert check
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        decay_reranker = Function(
+            name="element_identity_decay",
+            input_field_names=["doc_int"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 1000,
+            },
+        )
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[[1.0, 0.0, 0.0, 0.0]],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=4,
+            output_fields=["id", "doc_int", "structA"],
+            ranker=decay_reranker,
+        )
+        assert check
+        assert len(results) == 1
+        assert len(results[0]) == 4
+
+        hits = results[0]
+        element_keys = [(hit["id"], hit["offset"]) for hit in hits]
+        assert element_keys[:2] == [(0, 0), (0, 1)]
+        assert len(element_keys) == len(set(element_keys))
+
+        expected_doc_int = {row["id"]: row["doc_int"] for row in rows}
+        for hit in hits:
+            row_id = hit["id"]
+            element_offset = hit["offset"]
+            assert hit["doc_int"] == expected_doc_int[row_id]
+            element = hit["structA"][element_offset]
+            assert element["int_val"] == row_id * 100 + element_offset
+            assert element["str_val"] == f"row_{row_id}_elem_{element_offset}"
 
 
 # ==================== Test Case 9: Element-Level Search Without Filter ====================

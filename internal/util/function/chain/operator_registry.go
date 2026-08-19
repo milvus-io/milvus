@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -29,8 +30,20 @@ import (
 // Operator Registry
 // =============================================================================
 
-// OperatorFactory is a function that creates an Operator from OperatorRepr.
-type OperatorFactory func(repr *OperatorRepr) (Operator, error)
+// OperatorFactory creates an Operator from its serialized representation and
+// request-scoped build context. Stateless operators ignore buildCtx.
+type OperatorFactory func(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error)
+
+// statelessOperatorFactory adapts a context-free operator constructor to the
+// common context-aware registry contract.
+func statelessOperatorFactory(factory func(repr *OperatorRepr) (Operator, error)) OperatorFactory {
+	if factory == nil {
+		return nil
+	}
+	return func(repr *OperatorRepr, _ types.FunctionBuildContext) (Operator, error) {
+		return factory(repr)
+	}
+}
 
 var (
 	operatorRegistryMu sync.RWMutex
@@ -49,7 +62,6 @@ func RegisterOperator(opType string, factory OperatorFactory) error {
 
 	operatorRegistryMu.Lock()
 	defer operatorRegistryMu.Unlock()
-
 	if _, exists := operatorRegistry[opType]; exists {
 		return merr.WrapErrServiceInternalMsg("operator %q already registered", opType)
 	}

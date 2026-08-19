@@ -48,21 +48,155 @@ const (
 	MergeStrategyAvg      MergeStrategy = "avg"
 )
 
+const (
+	MergeParamStrategy  = "strategy"
+	MergeParamK         = "k"
+	MergeParamWeights   = "weights"
+	MergeParamNormScore = "norm_score"
+)
+
+func init() {
+	MustRegisterOperator(types.OpTypeMerge, NewMergeOpFromReprWithContext)
+}
+
+type mergeSpec struct {
+	strategy  MergeStrategy
+	rrfK      float64
+	weights   []float64
+	normalize bool
+}
+
+// NewMergeOpFromReprWithContext creates a MergeOp from its declarative
+// representation and runtime-only search input information.
+func NewMergeOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
+	spec, err := parseMergeSpec(repr)
+	if err != nil {
+		return nil, err
+	}
+	if buildCtx.Search == nil {
+		return nil, merr.WrapErrServiceInternal("merge_op: search runtime info is required")
+	}
+
+	metricTypes := append([]string(nil), buildCtx.Search.MetricTypes...)
+	if len(metricTypes) == 0 {
+		return nil, merr.WrapErrServiceInternal("merge_op: search runtime metric types are empty")
+	}
+
+	opts := []MergeOption{withExpectedInputs(len(metricTypes))}
+	switch spec.strategy {
+	case MergeStrategyRRF:
+		opts = append(opts, WithRRFK(spec.rrfK))
+	case MergeStrategyWeighted:
+		if len(spec.weights) != len(metricTypes) {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"merge_op: weights count %d does not match search input count %d",
+				len(spec.weights), len(metricTypes))
+		}
+		opts = append(opts,
+			WithWeights(spec.weights),
+			WithNormalize(spec.normalize),
+			WithMetricTypes(metricTypes))
+	case MergeStrategyMax, MergeStrategySum, MergeStrategyAvg:
+		opts = append(opts,
+			WithNormalize(spec.normalize),
+			WithMetricTypes(metricTypes))
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: unsupported strategy %q", spec.strategy)
+	}
+
+	return NewMergeOp(spec.strategy, opts...), nil
+}
+
+func parseMergeSpec(repr *OperatorRepr) (*mergeSpec, error) {
+	if repr == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: operator representation is nil")
+	}
+	if strings.TrimSpace(repr.Type) != types.OpTypeMerge {
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: operator type must be %q", types.OpTypeMerge)
+	}
+	if repr.Function != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: expr is not supported")
+	}
+	if len(repr.Inputs) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: explicit inputs are not supported")
+	}
+	if len(repr.Outputs) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: explicit outputs are not supported")
+	}
+
+	reader := types.NewParamReader("merge_op", repr.Params)
+	strategyName, err := reader.String(MergeParamStrategy, true)
+	if err != nil {
+		return nil, err
+	}
+	strategy := MergeStrategy(strings.ToLower(strings.TrimSpace(strategyName)))
+
+	allowed := map[string]struct{}{MergeParamStrategy: {}}
+	switch strategy {
+	case MergeStrategyRRF:
+		allowed[MergeParamK] = struct{}{}
+	case MergeStrategyWeighted:
+		allowed[MergeParamWeights] = struct{}{}
+		allowed[MergeParamNormScore] = struct{}{}
+	case MergeStrategyMax, MergeStrategySum, MergeStrategyAvg:
+		allowed[MergeParamNormScore] = struct{}{}
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: unsupported strategy %q", strategyName)
+	}
+
+	for key := range repr.Params {
+		if _, ok := allowed[key]; !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("merge_op: parameter %q is not supported for strategy %q", key, strategy)
+		}
+	}
+
+	spec := &mergeSpec{strategy: strategy, rrfK: 60}
+	switch strategy {
+	case MergeStrategyRRF:
+		spec.rrfK, err = reader.Float64(MergeParamK, false, 60)
+		if err != nil {
+			return nil, err
+		}
+		if !isFiniteFloat64(spec.rrfK) || spec.rrfK <= 0 || spec.rrfK >= 16384 {
+			return nil, merr.WrapErrParameterInvalidMsg("merge_op: k must be finite and in range (0, 16384)")
+		}
+	case MergeStrategyWeighted:
+		spec.weights, err = reader.Float64Slice(MergeParamWeights, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(spec.weights) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("merge_op: weights must not be empty")
+		}
+		for i, weight := range spec.weights {
+			if !isFiniteFloat64(weight) || weight < 0 || weight > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg("merge_op: weights[%d] must be finite and in range [0, 1]", i)
+			}
+		}
+		spec.normalize, err = reader.Bool(MergeParamNormScore, false, false)
+		if err != nil {
+			return nil, err
+		}
+	case MergeStrategyMax, MergeStrategySum, MergeStrategyAvg:
+		spec.normalize, err = reader.Bool(MergeParamNormScore, false, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return spec, nil
+}
+
+func isFiniteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 // =============================================================================
 // MergeOp
 // =============================================================================
 
-// NOTE: MergeOp does NOT register itself via init() / MustRegisterOperator like other operators.
-// Reasons:
-//   1. MergeOp requires runtime context (metricTypes, weights, rrfK, normalize) that comes from
-//      the search request and collection schema, which cannot be recovered from a static OperatorRepr alone.
-//   2. MergeOp can only appear at position 0 in a chain (enforced by FuncChain.validate) and is always
-//      constructed programmatically by builder functions (e.g. BuildRerankChain) via NewMergeOp().
-//   3. There is no NewMergeOpFromRepr factory — the functional-options pattern (WithWeights, WithMetricTypes, etc.)
-//      does not map cleanly to the generic OperatorRepr dictionary.
-//
-// TODO: refactor MergeOp to support OperatorRepr-based construction and register it in the operator registry,
-// so that merge chains can be fully described and deserialized from a declarative representation.
+// MergeOp's context-aware representation factory is registered in the common
+// operator registry. Search metrics are supplied through FunctionBuildContext
+// when a declarative chain is constructed.
 
 // MergeOp merges multiple DataFrames into one with optional normalization.
 // This operator is typically used as the first operator in a rerank chain.
@@ -76,6 +210,7 @@ type MergeOp struct {
 	rrfK           float64         // for rrf strategy, default 60
 	sortDescending bool            // pre-computed: true means larger score = better match
 	scoreNormFuncs []normalizeFunc // pre-computed per-input normalization; nil entry = no-op
+	expectedInputs int             // derived runtime input count; zero skips the check for legacy builders
 }
 
 // mergeConfig collects construction-time parameters from functional options.
@@ -87,6 +222,7 @@ type mergeConfig struct {
 	metricTypes     []string
 	normalize       bool
 	forceDescending bool
+	expectedInputs  int
 }
 
 // MergeOption is a functional option for MergeOp.
@@ -95,7 +231,7 @@ type MergeOption func(*mergeConfig)
 // WithWeights sets the weights for weighted merge strategy.
 func WithWeights(weights []float64) MergeOption {
 	return func(cfg *mergeConfig) {
-		cfg.weights = weights
+		cfg.weights = append([]float64(nil), weights...)
 	}
 }
 
@@ -109,7 +245,15 @@ func WithRRFK(k float64) MergeOption {
 // WithMetricTypes sets the metric types for each input.
 func WithMetricTypes(metricTypes []string) MergeOption {
 	return func(cfg *mergeConfig) {
-		cfg.metricTypes = metricTypes
+		cfg.metricTypes = append([]string(nil), metricTypes...)
+	}
+}
+
+// withExpectedInputs records an input count derived from runtime search input
+// metadata. It is intentionally not exported as public Merge configuration.
+func withExpectedInputs(count int) MergeOption {
+	return func(cfg *mergeConfig) {
+		cfg.expectedInputs = count
 	}
 }
 
@@ -158,10 +302,11 @@ func NewMergeOp(strategy MergeStrategy, opts ...MergeOption) *MergeOp {
 			outputs: []string{},
 		},
 		strategy:       strategy,
-		weights:        cfg.weights,
+		weights:        append([]float64(nil), cfg.weights...),
 		rrfK:           cfg.rrfK,
 		sortDescending: sortDesc,
 		scoreNormFuncs: normFuncs,
+		expectedInputs: cfg.expectedInputs,
 	}
 }
 
@@ -184,13 +329,62 @@ func (op *MergeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 // ExecuteMulti merges multiple DataFrames into one.
 func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*DataFrame, error) {
+	layout, err := op.validateInputs(ctx, inputs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge based on strategy (works for both single and multiple inputs)
+	switch op.strategy {
+	case MergeStrategyRRF:
+		return op.mergeRRF(ctx, inputs, layout)
+	case MergeStrategyWeighted:
+		return op.mergeWeighted(ctx, inputs, layout)
+	case MergeStrategyMax:
+		return op.mergeNumCombine(ctx, inputs, layout, maxMergeFunc)
+	case MergeStrategySum:
+		return op.mergeNumCombine(ctx, inputs, layout, sumMergeFunc)
+	case MergeStrategyAvg:
+		return op.mergeNumCombine(ctx, inputs, layout, avgMergeFunc)
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
+	}
+}
+
+// mergeInputLayout is resolved and validated once before any strategy reads
+// Arrow values. Candidate identity is determined only by fixed system columns.
+type mergeInputLayout struct {
+	numChunks  int
+	idType     arrow.DataType
+	hasElement bool
+}
+
+func (op *MergeOp) validateInputs(ctx *types.FuncContext, inputs []*DataFrame) (*mergeInputLayout, error) {
+	if ctx == nil {
+		return nil, merr.WrapErrServiceInternal("merge_op: function context is nil")
+	}
 	if len(inputs) == 0 {
 		return nil, merr.WrapErrServiceInternal("merge_op: no inputs provided")
 	}
+	if op.expectedInputs > 0 && len(inputs) != op.expectedInputs {
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: input count %d != expected count %d", len(inputs), op.expectedInputs)
+	}
+	if op.strategy != MergeStrategyRRF && op.strategy != MergeStrategyWeighted &&
+		op.strategy != MergeStrategyMax && op.strategy != MergeStrategySum && op.strategy != MergeStrategyAvg {
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
+	}
 
-	// Validate inputs have same number of chunks (NQ)
+	if inputs[0] == nil {
+		return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[0] is nil")
+	}
 	numChunks := inputs[0].NumChunks()
+	if numChunks == 0 {
+		return nil, merr.WrapErrFunctionFailedMsg("merge_op: inputs have no query chunks")
+	}
 	for i, df := range inputs {
+		if df == nil {
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] is nil", i)
+		}
 		if df.NumChunks() != numChunks {
 			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] has %d chunks, expected %d", i, df.NumChunks(), numChunks)
 		}
@@ -208,39 +402,141 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 		}
 	}
 
-	// Merge based on strategy (works for both single and multiple inputs)
-	switch op.strategy {
-	case MergeStrategyRRF:
-		return op.mergeRRF(ctx, inputs)
-	case MergeStrategyWeighted:
-		return op.mergeWeighted(ctx, inputs)
-	case MergeStrategyMax:
-		return op.mergeNumCombine(ctx, inputs, maxMergeFunc)
-	case MergeStrategySum:
-		return op.mergeNumCombine(ctx, inputs, sumMergeFunc)
-	case MergeStrategyAvg:
-		return op.mergeNumCombine(ctx, inputs, avgMergeFunc)
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
+	hasElement := inputs[0].HasColumn(types.ElementIndicesFieldName)
+	var idType arrow.DataType
+	for inputIdx, df := range inputs {
+		if df.HasColumn(types.ElementIndicesFieldName) != hasElement {
+			return nil, merr.WrapErrFunctionFailedMsg(
+				"merge_op: input[%d] has inconsistent %s presence", inputIdx, types.ElementIndicesFieldName)
+		}
+
+		idCol := df.Column(types.IDFieldName)
+		if idCol == nil {
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName)
+		}
+		if len(idCol.Chunks()) != numChunks {
+			return nil, merr.WrapErrFunctionFailedMsg(
+				"merge_op: input[%d] column %s has %d chunks, expected %d",
+				inputIdx, types.IDFieldName, len(idCol.Chunks()), numChunks)
+		}
+		if idCol.Len() > 0 {
+			if idCol.DataType().ID() != arrow.INT64 && idCol.DataType().ID() != arrow.STRING {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] column %s has unsupported type %s",
+					inputIdx, types.IDFieldName, idCol.DataType())
+			}
+			if idType == nil {
+				idType = idCol.DataType()
+			} else if idType.ID() != idCol.DataType().ID() {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] column %s type %s does not match %s",
+					inputIdx, types.IDFieldName, idCol.DataType(), idType)
+			}
+		}
+
+		var scoreCol *arrow.Chunked
+		if op.strategy != MergeStrategyRRF {
+			scoreCol = df.Column(types.ScoreFieldName)
+			if scoreCol == nil {
+				return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", inputIdx, types.ScoreFieldName)
+			}
+			if scoreCol.DataType().ID() != arrow.FLOAT32 {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] column %s is not Float32", inputIdx, types.ScoreFieldName)
+			}
+			if len(scoreCol.Chunks()) != numChunks {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] column %s has %d chunks, expected %d",
+					inputIdx, types.ScoreFieldName, len(scoreCol.Chunks()), numChunks)
+			}
+		}
+
+		var elementCol *arrow.Chunked
+		if hasElement {
+			elementCol = df.Column(types.ElementIndicesFieldName)
+			if elementCol.DataType().ID() != arrow.INT32 {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] column %s is not Int32", inputIdx, types.ElementIndicesFieldName)
+			}
+			if len(elementCol.Chunks()) != numChunks {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] column %s has %d chunks, expected %d",
+					inputIdx, types.ElementIndicesFieldName, len(elementCol.Chunks()), numChunks)
+			}
+		}
+
+		for chunkIdx, expectedRows := range df.chunkSizes {
+			idChunk := idCol.Chunk(chunkIdx)
+			if idChunk.Len() != int(expectedRows) {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] chunk[%d] column %s has %d rows, expected %d",
+					inputIdx, chunkIdx, types.IDFieldName, idChunk.Len(), expectedRows)
+			}
+			if idChunk.DataType().ID() != arrow.INT64 && idChunk.DataType().ID() != arrow.STRING {
+				return nil, merr.WrapErrFunctionFailedMsg(
+					"merge_op: input[%d] chunk[%d] column %s has unsupported type %s",
+					inputIdx, chunkIdx, types.IDFieldName, idChunk.DataType())
+			}
+			for rowIdx := 0; rowIdx < idChunk.Len(); rowIdx++ {
+				if idChunk.IsNull(rowIdx) {
+					return nil, merr.WrapErrFunctionFailedMsg(
+						"merge_op: input[%d] chunk[%d] column %s has null at row %d",
+						inputIdx, chunkIdx, types.IDFieldName, rowIdx)
+				}
+			}
+
+			if scoreCol != nil {
+				scoreChunk := scoreCol.Chunk(chunkIdx)
+				if scoreChunk.Len() != idChunk.Len() {
+					return nil, merr.WrapErrFunctionFailedMsg(
+						"merge_op: input[%d] chunk[%d] column %s has %d rows, expected %d",
+						inputIdx, chunkIdx, types.ScoreFieldName, scoreChunk.Len(), idChunk.Len())
+				}
+				for rowIdx := 0; rowIdx < scoreChunk.Len(); rowIdx++ {
+					if scoreChunk.IsNull(rowIdx) {
+						return nil, merr.WrapErrFunctionFailedMsg(
+							"merge_op: input[%d] chunk[%d] column %s has null at row %d",
+							inputIdx, chunkIdx, types.ScoreFieldName, rowIdx)
+					}
+				}
+			}
+
+			if elementCol != nil {
+				elementChunk := elementCol.Chunk(chunkIdx)
+				if elementChunk.Len() != idChunk.Len() {
+					return nil, merr.WrapErrFunctionFailedMsg(
+						"merge_op: input[%d] chunk[%d] column %s has %d rows, expected %d",
+						inputIdx, chunkIdx, types.ElementIndicesFieldName, elementChunk.Len(), idChunk.Len())
+				}
+				for rowIdx := 0; rowIdx < elementChunk.Len(); rowIdx++ {
+					if elementChunk.IsNull(rowIdx) {
+						return nil, merr.WrapErrFunctionFailedMsg(
+							"merge_op: input[%d] chunk[%d] column %s has null at row %d",
+							inputIdx, chunkIdx, types.ElementIndicesFieldName, rowIdx)
+					}
+				}
+			}
+		}
 	}
+
+	if idType == nil {
+		idType = arrow.PrimitiveTypes.Int64
+	}
+	return &mergeInputLayout{numChunks: numChunks, idType: idType, hasElement: hasElement}, nil
 }
 
 // =============================================================================
 // Merge Strategies
 // =============================================================================
 
-// mergeRRF implements Reciprocal Rank Fusion.
-// scoreCollectFunc collects scores for a single chunk, returning per-ID scores and locations.
-type scoreCollectFunc func(inputs []*DataFrame, chunkIdx int) (map[any]float32, map[any]idLocation, error)
+// scoreCollectFunc collects scores for a single chunk, returning per-candidate
+// scores and representative source locations.
+type scoreCollectFunc func(inputs []*DataFrame, chunkIdx int, layout *mergeInputLayout) (map[candidateKey]float32, map[candidateKey]idLocation, error)
 
 // mergeWithScoreCollector is the common merge skeleton shared by all strategies.
 // The only varying part — how scores are collected per chunk — is injected via collectFn.
-func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*DataFrame, collectFn scoreCollectFunc) (*DataFrame, error) {
-	numChunks := inputs[0].NumChunks()
-
-	// Resolved once for the whole merge: every chunk's $id array must share one
-	// arrow type, otherwise AddColumnFromChunks below cannot chunk them together.
-	idType := resolveIDType(inputs)
+func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*DataFrame, layout *mergeInputLayout, collectFn scoreCollectFunc) (*DataFrame, error) {
+	numChunks := layout.numChunks
 
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
@@ -260,18 +556,19 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 	}()
 
 	for chunkIdx := 0; chunkIdx < numChunks; chunkIdx++ {
-		idScores, idLocs, err := collectFn(inputs, chunkIdx)
+		candidateScores, candidateLocs, err := collectFn(inputs, chunkIdx, layout)
 		if err != nil {
 			return nil, err
 		}
 
-		ids, scores, locs := sortAndExtractResults(idScores, idLocs, op.SortDescending())
-		newChunkSizes[chunkIdx] = int64(len(ids))
+		scores, locs := sortAndExtractResults(candidateScores, candidateLocs, op.SortDescending())
+		newChunkSizes[chunkIdx] = int64(len(scores))
 
-		idArr, scoreArr, err := op.buildResultArrays(ctx, ids, scores, idType)
+		idArr, err := op.buildFieldArrayOfType(ctx, types.IDFieldName, locs, inputs, chunkIdx, layout.idType)
 		if err != nil {
 			return nil, err
 		}
+		scoreArr := buildScoreArray(ctx.Pool(), scores)
 		idChunks[chunkIdx] = idArr
 		scoreChunks[chunkIdx] = scoreArr
 
@@ -289,6 +586,12 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 		return nil, err
 	}
 	idChunks = nil
+	for _, input := range inputs {
+		if col := input.Column(types.IDFieldName); col != nil && col.DataType().ID() == layout.idType.ID() {
+			builder.CopyFieldMetadata(input, types.IDFieldName)
+			break
+		}
+	}
 
 	if err := builder.AddColumnFromChunks(types.ScoreFieldName, scoreChunks); err != nil {
 		return nil, err
@@ -316,74 +619,65 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 }
 
 // mergeRRF implements Reciprocal Rank Fusion.
-func (op *MergeOp) mergeRRF(ctx *types.FuncContext, inputs []*DataFrame) (*DataFrame, error) {
-	return op.mergeWithScoreCollector(ctx, inputs, op.collectRRFScores)
+func (op *MergeOp) mergeRRF(ctx *types.FuncContext, inputs []*DataFrame, layout *mergeInputLayout) (*DataFrame, error) {
+	return op.mergeWithScoreCollector(ctx, inputs, layout, op.collectRRFScores)
 }
 
 // collectRRFScores collects RRF scores for a single chunk.
-func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int) (map[any]float32, map[any]idLocation, error) {
-	idScores := make(map[any]float32)
-	idLocs := make(map[any]idLocation)
+func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int, layout *mergeInputLayout) (map[candidateKey]float32, map[candidateKey]idLocation, error) {
+	candidateScores := make(map[candidateKey]float32)
+	candidateLocs := make(map[candidateKey]idLocation)
 
 	for inputIdx, df := range inputs {
 		idCol := df.Column(types.IDFieldName)
-		if idCol == nil {
-			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName)
-		}
-
 		idChunk := idCol.Chunk(chunkIdx)
+		var elementChunk arrow.Array
+		if layout.hasElement {
+			elementChunk = df.Column(types.ElementIndicesFieldName).Chunk(chunkIdx)
+		}
 		for rowIdx := 0; rowIdx < idChunk.Len(); rowIdx++ {
-			id := getIDValue(idChunk, rowIdx)
-			if id == nil {
-				continue
-			}
+			key := readCandidateKey(idChunk, elementChunk, rowIdx)
 
 			// RRF score: 1 / (k + rank), rank is 1-based
 			rrfScore := float32(1.0 / (op.rrfK + float64(rowIdx+1)))
 
-			if existingScore, exists := idScores[id]; exists {
-				idScores[id] = existingScore + rrfScore
+			if existingScore, exists := candidateScores[key]; exists {
+				candidateScores[key] = existingScore + rrfScore
 			} else {
-				idScores[id] = rrfScore
-				idLocs[id] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
+				candidateScores[key] = rrfScore
+				candidateLocs[key] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
 			}
 		}
 	}
 
-	return idScores, idLocs, nil
+	return candidateScores, candidateLocs, nil
 }
 
 // mergeWeighted implements weighted score merge.
-func (op *MergeOp) mergeWeighted(ctx *types.FuncContext, inputs []*DataFrame) (*DataFrame, error) {
-	return op.mergeWithScoreCollector(ctx, inputs, op.collectWeightedScores)
+func (op *MergeOp) mergeWeighted(ctx *types.FuncContext, inputs []*DataFrame, layout *mergeInputLayout) (*DataFrame, error) {
+	return op.mergeWithScoreCollector(ctx, inputs, layout, op.collectWeightedScores)
 }
 
 // collectWeightedScores collects weighted scores for a single chunk.
-func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int) (map[any]float32, map[any]idLocation, error) {
-	idScores := make(map[any]float32)
-	idLocs := make(map[any]idLocation)
+func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int, layout *mergeInputLayout) (map[candidateKey]float32, map[candidateKey]idLocation, error) {
+	candidateScores := make(map[candidateKey]float32)
+	candidateLocs := make(map[candidateKey]idLocation)
 
 	for inputIdx, df := range inputs {
 		idCol := df.Column(types.IDFieldName)
 		scoreCol := df.Column(types.ScoreFieldName)
-		if idCol == nil || scoreCol == nil {
-			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing ID or score column", inputIdx)
-		}
-
 		idChunk := idCol.Chunk(chunkIdx)
-		scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
-		if !ok {
-			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx)
+		scoreChunk := scoreCol.Chunk(chunkIdx).(*array.Float32)
+		var elementChunk arrow.Array
+		if layout.hasElement {
+			elementChunk = df.Column(types.ElementIndicesFieldName).Chunk(chunkIdx)
 		}
 
 		weight := float32(op.weights[inputIdx])
 		normFunc := op.scoreNormFunc(inputIdx)
 
 		for rowIdx := 0; rowIdx < idChunk.Len(); rowIdx++ {
-			id := getIDValue(idChunk, rowIdx)
-			if id == nil {
-				continue
-			}
+			key := readCandidateKey(idChunk, elementChunk, rowIdx)
 
 			score := scoreChunk.Value(rowIdx)
 			if normFunc != nil {
@@ -391,16 +685,16 @@ func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int) (map
 			}
 			weightedScore := weight * score
 
-			if existingScore, exists := idScores[id]; exists {
-				idScores[id] = existingScore + weightedScore
+			if existingScore, exists := candidateScores[key]; exists {
+				candidateScores[key] = existingScore + weightedScore
 			} else {
-				idScores[id] = weightedScore
-				idLocs[id] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
+				candidateScores[key] = weightedScore
+				candidateLocs[key] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
 			}
 		}
 	}
 
-	return idScores, idLocs, nil
+	return candidateScores, candidateLocs, nil
 }
 
 // scoreMergeFunc defines how to merge scores for the same ID.
@@ -423,71 +717,65 @@ func avgMergeFunc(existing, new float32, count int) (float32, int) {
 }
 
 // mergeNumCombine implements max/sum/avg score merge.
-func (op *MergeOp) mergeNumCombine(ctx *types.FuncContext, inputs []*DataFrame, mergeFunc scoreMergeFunc) (*DataFrame, error) {
-	return op.mergeWithScoreCollector(ctx, inputs, func(inputs []*DataFrame, chunkIdx int) (map[any]float32, map[any]idLocation, error) {
-		idScores, idCounts, idLocs, err := op.collectCombinedScores(inputs, chunkIdx, mergeFunc)
+func (op *MergeOp) mergeNumCombine(ctx *types.FuncContext, inputs []*DataFrame, layout *mergeInputLayout, mergeFunc scoreMergeFunc) (*DataFrame, error) {
+	return op.mergeWithScoreCollector(ctx, inputs, layout, func(inputs []*DataFrame, chunkIdx int, layout *mergeInputLayout) (map[candidateKey]float32, map[candidateKey]idLocation, error) {
+		candidateScores, candidateCounts, candidateLocs, err := op.collectCombinedScores(inputs, chunkIdx, layout, mergeFunc)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		// For avg strategy, compute final average
 		if op.strategy == MergeStrategyAvg {
-			for id, score := range idScores {
-				if count, exists := idCounts[id]; exists && count > 0 {
-					idScores[id] = score / float32(count)
+			for key, score := range candidateScores {
+				if count, exists := candidateCounts[key]; exists && count > 0 {
+					candidateScores[key] = score / float32(count)
 				}
 			}
 		}
 
-		return idScores, idLocs, nil
+		return candidateScores, candidateLocs, nil
 	})
 }
 
 // collectCombinedScores collects combined scores for max/sum/avg strategies.
-func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, mergeFunc scoreMergeFunc) (map[any]float32, map[any]int, map[any]idLocation, error) {
-	idScores := make(map[any]float32)
-	idCounts := make(map[any]int)
-	idLocs := make(map[any]idLocation)
+func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, layout *mergeInputLayout, mergeFunc scoreMergeFunc) (map[candidateKey]float32, map[candidateKey]int, map[candidateKey]idLocation, error) {
+	candidateScores := make(map[candidateKey]float32)
+	candidateCounts := make(map[candidateKey]int)
+	candidateLocs := make(map[candidateKey]idLocation)
 
 	for inputIdx, df := range inputs {
 		idCol := df.Column(types.IDFieldName)
 		scoreCol := df.Column(types.ScoreFieldName)
-		if idCol == nil || scoreCol == nil {
-			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing ID or score column", inputIdx)
-		}
-
 		idChunk := idCol.Chunk(chunkIdx)
-		scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
-		if !ok {
-			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx)
+		scoreChunk := scoreCol.Chunk(chunkIdx).(*array.Float32)
+		var elementChunk arrow.Array
+		if layout.hasElement {
+			elementChunk = df.Column(types.ElementIndicesFieldName).Chunk(chunkIdx)
 		}
 
 		normFunc := op.scoreNormFunc(inputIdx)
 
 		for rowIdx := 0; rowIdx < idChunk.Len(); rowIdx++ {
-			id := getIDValue(idChunk, rowIdx)
-			if id == nil {
-				continue
-			}
+			key := readCandidateKey(idChunk, elementChunk, rowIdx)
 
 			score := scoreChunk.Value(rowIdx)
 			if normFunc != nil {
 				score = normFunc(score)
 			}
 
-			if existingScore, exists := idScores[id]; exists {
-				newScore, newCount := mergeFunc(existingScore, score, idCounts[id])
-				idScores[id] = newScore
-				idCounts[id] = newCount
+			if existingScore, exists := candidateScores[key]; exists {
+				newScore, newCount := mergeFunc(existingScore, score, candidateCounts[key])
+				candidateScores[key] = newScore
+				candidateCounts[key] = newCount
 			} else {
-				idScores[id] = score
-				idCounts[id] = 1
-				idLocs[id] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
+				candidateScores[key] = score
+				candidateCounts[key] = 1
+				candidateLocs[key] = idLocation{inputIdx: inputIdx, rowIdx: rowIdx}
 			}
 		}
 	}
 
-	return idScores, idCounts, idLocs, nil
+	return candidateScores, candidateCounts, candidateLocs, nil
 }
 
 // =============================================================================
@@ -498,6 +786,40 @@ func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, merg
 type idLocation struct {
 	inputIdx int
 	rowIdx   int
+}
+
+type candidateIDKind uint8
+
+const (
+	candidateIDInt64 candidateIDKind = iota
+	candidateIDString
+)
+
+// candidateKey is the internal deduplication identity. The public primary key
+// stays in the source DataFrame and is gathered from the representative row.
+type candidateKey struct {
+	kind         candidateIDKind
+	intID        int64
+	stringID     string
+	elementIndex int32
+	hasElement   bool
+}
+
+// readCandidateKey operates on input that has already passed validateInputs.
+func readCandidateKey(idChunk arrow.Array, elementChunk arrow.Array, rowIdx int) candidateKey {
+	key := candidateKey{hasElement: elementChunk != nil}
+	switch ids := idChunk.(type) {
+	case *array.Int64:
+		key.kind = candidateIDInt64
+		key.intID = ids.Value(rowIdx)
+	case *array.String:
+		key.kind = candidateIDString
+		key.stringID = ids.Value(rowIdx)
+	}
+	if elementChunk != nil {
+		key.elementIndex = elementChunk.(*array.Int32).Value(rowIdx)
+	}
+	return key
 }
 
 // normalizeFunc normalizes a score based on metric type.
@@ -612,22 +934,6 @@ func getNormalizeFunc(metricType string) normalizeFunc {
 	}
 }
 
-// getIDValue extracts ID value from an array at given index.
-func getIDValue(arr arrow.Array, idx int) any {
-	if arr.IsNull(idx) {
-		return nil
-	}
-
-	switch a := arr.(type) {
-	case *array.Int64:
-		return a.Value(idx)
-	case *array.String:
-		return a.Value(idx)
-	default:
-		return nil
-	}
-}
-
 // collectOrderedFieldNames returns field names (excluding $id and $score)
 // in deterministic order, preserving first-seen order from inputs.
 func collectOrderedFieldNames(inputs []*DataFrame) []string {
@@ -647,36 +953,34 @@ func collectOrderedFieldNames(inputs []*DataFrame) []string {
 	return names
 }
 
-// sortAndExtractResults sorts IDs by score and extracts results.
+// sortAndExtractResults sorts candidates by score and extracts results.
 // When descending is true, larger scores sort first (higher = better match).
 // When descending is false, smaller scores sort first (lower = better match, e.g. L2).
-// scoredID carries the score and location alongside the id so that sorting does
+// scoredID carries the score and location alongside the key so that sorting does
 // not have to look them up. Sorting a slice of these with slices.SortStableFunc
 // also avoids sort.SliceStable's reflect-based swapper.
 type scoredID struct {
-	id    any
+	key   candidateKey
 	score float32
 	loc   idLocation
 }
 
-func sortAndExtractResults(idScores map[any]float32, idLocs map[any]idLocation, descending bool) ([]any, []float32, []idLocation) {
-	entries := make([]scoredID, 0, len(idScores))
-	for id, score := range idScores {
-		entries = append(entries, scoredID{id: id, score: score, loc: idLocs[id]})
+func sortAndExtractResults(candidateScores map[candidateKey]float32, candidateLocs map[candidateKey]idLocation, descending bool) ([]float32, []idLocation) {
+	entries := make([]scoredID, 0, len(candidateScores))
+	for key, score := range candidateScores {
+		entries = append(entries, scoredID{key: key, score: score, loc: candidateLocs[key]})
 	}
 
 	sortScoredIDs(entries, descending)
 
-	ids := make([]any, len(entries))
 	scores := make([]float32, len(entries))
 	locs := make([]idLocation, len(entries))
 	for i, e := range entries {
-		ids[i] = e.id
 		scores[i] = e.score
 		locs[i] = e.loc
 	}
 
-	return ids, scores, locs
+	return scores, locs
 }
 
 // lessScoredID is the ordering sortIDs used to express directly, kept as a
@@ -690,7 +994,42 @@ func lessScoredID(a, b scoredID, descending bool) bool {
 		}
 		return a.score < b.score
 	}
-	return compareIDs(a.id, b.id) < 0
+	return compareCandidateKeys(a.key, b.key) < 0
+}
+
+func compareCandidateKeys(a, b candidateKey) int {
+	if a.kind != b.kind {
+		if a.kind < b.kind {
+			return -1
+		}
+		return 1
+	}
+
+	var cmp int
+	switch a.kind {
+	case candidateIDInt64:
+		cmp = compareIDs(a.intID, b.intID)
+	case candidateIDString:
+		cmp = compareIDs(a.stringID, b.stringID)
+	}
+	if cmp != 0 {
+		return cmp
+	}
+	if a.hasElement != b.hasElement {
+		if !a.hasElement {
+			return -1
+		}
+		return 1
+	}
+	if a.hasElement {
+		if a.elementIndex < b.elementIndex {
+			return -1
+		}
+		if a.elementIndex > b.elementIndex {
+			return 1
+		}
+	}
+	return 0
 }
 
 // sortScoredIDs sorts by score with stable tie-breaking by ID.
@@ -736,89 +1075,11 @@ func compareIDs(a, b any) int {
 	}
 }
 
-// resolveIDType returns the arrow type of the merged $id column, taken from the
-// first input that actually carries IDs. Zero-row inputs cannot be trusted for
-// this: an empty result carries no ID type of its own and is materialized as an
-// empty Int64 column regardless of the collection's PK type (see importEmptyIDs
-// in converter.go). Falls back to Int64 when every input is empty, which is
-// self-consistent because then every chunk is empty as well.
-func resolveIDType(inputs []*DataFrame) arrow.DataType {
-	for _, df := range inputs {
-		if col := df.Column(types.IDFieldName); col != nil && col.Len() > 0 {
-			return col.DataType()
-		}
-	}
-	return arrow.PrimitiveTypes.Int64
-}
-
-// buildResultArrays builds ID and score arrays from results.
-// idType types the ID array of a zero-hit chunk, which has no IDs to infer it from.
-func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores []float32, idType arrow.DataType) (arrow.Array, arrow.Array, error) {
-	if len(ids) == 0 {
-		// Empty result: type the empty array after the other chunks, otherwise
-		// arrow.NewChunked rejects the column (e.g. "mismatch data type int64 vs utf8").
-		scoreBuilder := array.NewFloat32Builder(ctx.Pool())
-		defer scoreBuilder.Release()
-
-		var idBuilder array.Builder
-		switch idType.ID() {
-		case arrow.STRING:
-			idBuilder = array.NewStringBuilder(ctx.Pool())
-		case arrow.INT64:
-			idBuilder = array.NewInt64Builder(ctx.Pool())
-		default:
-			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: unsupported ID type %s", idType)
-		}
-		defer idBuilder.Release()
-
-		return idBuilder.NewArray(), scoreBuilder.NewArray(), nil
-	}
-
-	// Determine ID type from first ID
-	switch ids[0].(type) {
-	case int64:
-		return op.buildInt64Results(ctx, ids, scores)
-	case string:
-		return op.buildStringResults(ctx, ids, scores)
-	default:
-		return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: unsupported ID type %T", ids[0])
-	}
-}
-
-func (op *MergeOp) buildInt64Results(ctx *types.FuncContext, ids []any, scores []float32) (arrow.Array, arrow.Array, error) {
-	idBuilder := array.NewInt64Builder(ctx.Pool())
-	scoreBuilder := array.NewFloat32Builder(ctx.Pool())
-	defer idBuilder.Release()
-	defer scoreBuilder.Release()
-
-	for i, id := range ids {
-		v, ok := id.(int64)
-		if !ok {
-			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: expected int64 ID at index %d, got %T", i, id)
-		}
-		idBuilder.Append(v)
-		scoreBuilder.Append(scores[i])
-	}
-
-	return idBuilder.NewArray(), scoreBuilder.NewArray(), nil
-}
-
-func (op *MergeOp) buildStringResults(ctx *types.FuncContext, ids []any, scores []float32) (arrow.Array, arrow.Array, error) {
-	idBuilder := array.NewStringBuilder(ctx.Pool())
-	scoreBuilder := array.NewFloat32Builder(ctx.Pool())
-	defer idBuilder.Release()
-	defer scoreBuilder.Release()
-
-	for i, id := range ids {
-		v, ok := id.(string)
-		if !ok {
-			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: expected string ID at index %d, got %T", i, id)
-		}
-		idBuilder.Append(v)
-		scoreBuilder.Append(scores[i])
-	}
-
-	return idBuilder.NewArray(), scoreBuilder.NewArray(), nil
+func buildScoreArray(pool memory.Allocator, scores []float32) arrow.Array {
+	builder := array.NewFloat32Builder(pool)
+	defer builder.Release()
+	builder.AppendValues(scores, nil)
+	return builder.NewArray()
 }
 
 // collectFieldData collects field data for merged results.
@@ -863,17 +1124,6 @@ func (op *MergeOp) collectFieldData(ctx *types.FuncContext, collectors map[strin
 
 // buildFieldArray builds a field array from merged locations.
 func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs []idLocation, inputs []*DataFrame, chunkIdx int) (arrow.Array, error) {
-	if len(locs) == 0 {
-		// Return empty array of appropriate type
-		// Find type from first input that has this column
-		for _, df := range inputs {
-			if col := df.Column(colName); col != nil {
-				return buildEmptyArray(ctx.Pool(), col.DataType())
-			}
-		}
-		return nil, merr.WrapErrServiceInternalMsg("merge_op: cannot determine type for column %s", colName)
-	}
-
 	// Find the data type from first input that has this column
 	var dataType arrow.DataType
 	for _, df := range inputs {
@@ -887,6 +1137,13 @@ func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs 
 		return nil, merr.WrapErrServiceInternalMsg("merge_op: column %s not found in any input", colName)
 	}
 
+	return op.buildFieldArrayOfType(ctx, colName, locs, inputs, chunkIdx, dataType)
+}
+
+func (op *MergeOp) buildFieldArrayOfType(ctx *types.FuncContext, colName string, locs []idLocation, inputs []*DataFrame, chunkIdx int, dataType arrow.DataType) (arrow.Array, error) {
+	if len(locs) == 0 {
+		return buildEmptyArray(ctx.Pool(), dataType)
+	}
 	return buildArrayFromLocations(ctx.Pool(), colName, locs, inputs, dataType, chunkIdx)
 }
 
@@ -934,21 +1191,21 @@ func buildEmptyArray(pool memory.Allocator, dt arrow.DataType) (arrow.Array, err
 func buildArrayFromLocations(pool memory.Allocator, colName string, locs []idLocation, inputs []*DataFrame, dt arrow.DataType, chunkIdx int) (arrow.Array, error) {
 	switch dt.ID() {
 	case arrow.BOOL:
-		return buildTypedArrayFromLocations[bool](pool, colName, locs, inputs, array.NewBooleanBuilder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[bool](colName, locs, inputs, array.NewBooleanBuilder(pool), chunkIdx, dt.ID())
 	case arrow.INT8:
-		return buildTypedArrayFromLocations[int8](pool, colName, locs, inputs, array.NewInt8Builder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[int8](colName, locs, inputs, array.NewInt8Builder(pool), chunkIdx, dt.ID())
 	case arrow.INT16:
-		return buildTypedArrayFromLocations[int16](pool, colName, locs, inputs, array.NewInt16Builder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[int16](colName, locs, inputs, array.NewInt16Builder(pool), chunkIdx, dt.ID())
 	case arrow.INT32:
-		return buildTypedArrayFromLocations[int32](pool, colName, locs, inputs, array.NewInt32Builder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[int32](colName, locs, inputs, array.NewInt32Builder(pool), chunkIdx, dt.ID())
 	case arrow.INT64:
-		return buildTypedArrayFromLocations[int64](pool, colName, locs, inputs, array.NewInt64Builder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[int64](colName, locs, inputs, array.NewInt64Builder(pool), chunkIdx, dt.ID())
 	case arrow.FLOAT32:
-		return buildTypedArrayFromLocations[float32](pool, colName, locs, inputs, array.NewFloat32Builder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[float32](colName, locs, inputs, array.NewFloat32Builder(pool), chunkIdx, dt.ID())
 	case arrow.FLOAT64:
-		return buildTypedArrayFromLocations[float64](pool, colName, locs, inputs, array.NewFloat64Builder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[float64](colName, locs, inputs, array.NewFloat64Builder(pool), chunkIdx, dt.ID())
 	case arrow.STRING:
-		return buildTypedArrayFromLocations[string](pool, colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx)
+		return buildTypedArrayFromLocations[string](colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx, dt.ID())
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
@@ -963,7 +1220,7 @@ type typedArrayBuilder[T any] interface {
 }
 
 // buildTypedArrayFromLocations builds a typed array from locations.
-func buildTypedArrayFromLocations[T any, B typedArrayBuilder[T]](pool memory.Allocator, colName string, locs []idLocation, inputs []*DataFrame, builder B, chunkIdx int) (arrow.Array, error) {
+func buildTypedArrayFromLocations[T any, B typedArrayBuilder[T]](colName string, locs []idLocation, inputs []*DataFrame, builder B, chunkIdx int, expectedType arrow.Type) (arrow.Array, error) {
 	defer builder.Release()
 
 	for _, loc := range locs {
@@ -973,8 +1230,22 @@ func buildTypedArrayFromLocations[T any, B typedArrayBuilder[T]](pool memory.All
 			builder.AppendNull()
 			continue
 		}
+		if col.DataType().ID() != expectedType {
+			return nil, merr.WrapErrFunctionFailedMsg(
+				"merge_op: input[%d] column %s type %s does not match output type",
+				loc.inputIdx, colName, col.DataType())
+		}
+		if chunkIdx >= len(col.Chunks()) {
+			return nil, merr.WrapErrFunctionFailedMsg(
+				"merge_op: input[%d] column %s missing chunk %d", loc.inputIdx, colName, chunkIdx)
+		}
 
 		chunk := col.Chunk(chunkIdx)
+		if loc.rowIdx >= chunk.Len() {
+			return nil, merr.WrapErrFunctionFailedMsg(
+				"merge_op: input[%d] chunk[%d] column %s has no row %d",
+				loc.inputIdx, chunkIdx, colName, loc.rowIdx)
+		}
 		if chunk.IsNull(loc.rowIdx) {
 			builder.AppendNull()
 			continue
