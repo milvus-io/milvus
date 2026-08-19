@@ -423,15 +423,10 @@ func TestRateLimitInterceptor(t *testing.T) {
 				databaseNames = append(databaseNames, database)
 			}).
 			Return(&databaseInfo{
-				dbID:             100,
-				createdTimestamp: 1,
+				DBID:             100,
+				CreatedTimestamp: 1,
 			}, nil)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-		originCache := globalMetaCache
-		globalMetaCache = mockCache
-		defer func() {
-			globalMetaCache = originCache
-		}()
 
 		testCases := []struct {
 			name            string
@@ -502,7 +497,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 			handlerCalls++
 			return merr.Success(), nil
 		}
-		interceptor := RateLimitInterceptor(limiter)
+		interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, limiter)
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockSnapshotMethod"}
 
 		for _, testCase := range testCases {
