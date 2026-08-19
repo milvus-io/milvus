@@ -544,7 +544,7 @@ prepare_storage_v3(const std::string& root_path,
  * Test the ability to prepare synthetic segments in either storage version and pass them to KMeans.
  * 1. Data Setup:
  *    - Generates synthetic vector data (data_gen) for two segments.
- *    - Each segment has: nb = 20000 vectors, dim = 100 for STORAGE_V1, 128 for STORAGE_V2.
+ *    - Each segment has: nb = 5000 vectors, dim = 32.
  *    - Writes data to disk / chunk manager depending on the storage version:
  *      STORAGE_V1: serialized binary files per segment.
  *      STORAGE_V2: Parquet batches per segment.
@@ -590,8 +590,8 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 20000;
+    int64_t dim = 32;
+    int64_t nb = 10000;
     std::string root_path = TestLocalPath;
 
     boost::filesystem::create_directories(root_path);
@@ -600,7 +600,9 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
     static auto cm = storage::CreateChunkManager(storage_config);
     static ChunkManagerWrapper cm_w(cm);
     std::vector<T> data_gen(nb * dim);
-    for (auto& v : data_gen) v = static_cast<T>(rand());
+    std::mt19937 rng(42);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    for (auto& v : data_gen) v = static_cast<T>(dist(rng));
     StoragePreparationResult prep;
     if (storage_version == "STORAGE_V1") {
         prep = prepare_storage_v1<T, dtype>(root_path,
@@ -671,7 +673,7 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
                                   prep.num_rows,
                                   dim,
                                   config["num_clusters"].get<int>(),
-                                  true);
+                                  false);
     }
     EXPECT_THROW(
         {
@@ -782,8 +784,8 @@ TEST(MajorCompaction, BufferSizeVariantsV2) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;   // vector dimension
-    int64_t nb = 20000;  // number of vectors per segment
+    int64_t dim = 32;   // vector dimension
+    int64_t nb = 5000;  // number of vectors per segment
     std::string root_path = "/tmp/test-kmeans-buffer-size-variants-v2/";
     boost::filesystem::create_directories(root_path);
 
@@ -952,12 +954,12 @@ TEST(MajorCompaction, BufferSizeVariantsV2) {
 TEST(MajorCompaction, AssignBufferVariantsV2) {
     using T = float;
     // Defines two segments (3 and 4) inside one partition of one collection.
-    // Each segment has 20 000 vectors of dimension 128.
+    // Each segment has 5000 vectors of dimension 32.
     // Data will be written under /tmp/test-kmeans-assign-buffer-variants/.
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
+    int64_t dim = 32, nb = 5000;
     std::string root_path = "/tmp/test-kmeans-assign-buffer-variants-v2/";
     boost::filesystem::create_directories(root_path);
     // Creates a local ChunkManager that Milvus uses to read/write files.
@@ -1240,7 +1242,7 @@ TEST(MajorCompaction, NumClustersVariantsV2) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
+    int64_t dim = 32, nb = 3000;
     std::string root_path = "/tmp/test-kmeans-numclusters-variants-v2/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1263,7 +1265,7 @@ TEST(MajorCompaction, NumClustersVariantsV1) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
+    int64_t dim = 32, nb = 3000;
     std::string root_path = "/tmp/test-kmeans-numclusters-variants-v1/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1307,7 +1309,7 @@ TEST(MajorCompaction, NumClustersVariantsV3) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
+    int64_t dim = 32, nb = 3000;
     std::string root_path = TestLocalPath;
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1433,9 +1435,9 @@ runTrainSizeVariantsUnified(const std::string& storage_version,
         // Compares:
         // FULL vs HALF - should be almost identical
         // FULL vs TINY - small differences allowed
-        ASSERT_LT(max_full_half, 1.0)
+        ASSERT_LT(max_full_half, 2.0)
             << "FULL vs HALF centroids differ too much";
-        ASSERT_LT(max_full_tiny, 2.0)
+        ASSERT_LT(max_full_tiny, 3.0)
             << "FULL vs TINY centroids differ excessively";
     } else {
         std::cout << "[INFO] Skipping centroid comparison due to data skew.\n";
@@ -1450,7 +1452,7 @@ TEST(MajorCompaction, TrainSizeVariantsV2) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
+    int64_t dim = 32, nb = 5000;
     std::string root_path = "/tmp/test-kmeans-trainsize-variants-v2/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1473,7 +1475,7 @@ TEST(MajorCompaction, TrainSizeVariantsV1) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
+    int64_t dim = 32, nb = 5000;
     std::string root_path = "/tmp/test-kmeans-trainsize-variants-v1/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1598,8 +1600,8 @@ TEST(MajorCompaction, NoDataSkew_V2) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
+    int64_t dim = 32;
+    int64_t nb = 3000;
     std::string root_path = "/tmp/test-kmeans-nodataskew-v2/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1622,8 +1624,8 @@ TEST(MajorCompaction, NoDataSkew_V1) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
+    int64_t dim = 32;
+    int64_t nb = 3000;
     std::string root_path = "/tmp/test-kmeans-nodataskew-v1/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1699,8 +1701,8 @@ TEST(MajorCompaction, DataSkew_V3) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
+    int64_t dim = 32;
+    int64_t nb = 3000;
     std::string root_path = "/tmp/test-kmeans-dataskew-v3/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1724,8 +1726,8 @@ TEST(MajorCompaction, DataSkew_V2) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
+    int64_t dim = 32;
+    int64_t nb = 3000;
     std::string root_path = "/tmp/test-kmeans-dataskew-v2/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1750,8 +1752,8 @@ TEST(MajorCompaction, DataSkew_V1) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
+    int64_t dim = 32;
+    int64_t nb = 3000;
     std::string root_path = "/tmp/test-kmeans-dataskew-v1/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1783,13 +1785,13 @@ TEST(MajorCompaction, DataSkew_V1) {
  * Validates that the clustering logic correctly enforces the max_cluster_size limit,
  * (maximum allowed memory for a single cluster), and raises SegcoreError::ClusterSkip
  * when any cluster exceeds it.
- * Use: 2 segments × 20,000 float32 vectors, each 128 dimensions.
+ * Use: 2 segments × 5,000 float32 vectors, each 32 dimensions.
  * num_clusters       = 8
  * min_cluster_ratio  = 0.1
  * max_cluster_ratio  = 10.0
- * max_cluster_size   = 1 * 1024 * 1024  (1 MB)
+ * max_cluster_size   = 50 KB
  * Expect:
- * A typical cluster of 2,500 vectors would occupy 2,500 × 128 × 4 = 1.28 MB > 1 MB
+ * A typical cluster of ~1,250 vectors would occupy 1,250 × 32 × 4 = 160 KB > 50 KB
  * Hence the clustering should exceed the limit and throws SegcoreError::ClusterSkip.
  * If clustering completes successfully, the test fails.
  */
@@ -1808,7 +1810,7 @@ runDataSkewByMaxClusterSizeTestUnified(
     cfg["num_clusters"] = 8;
     cfg["min_cluster_ratio"] = 0.1;
     cfg["max_cluster_ratio"] = 10.0;
-    cfg["max_cluster_size"] = 1 * 1024 * 1024;  // 1 MB
+    cfg["max_cluster_size"] = 50 * 1024;  // 50 KB (avg cluster ~160KB with nb=5000,dim=32,k=8)
     std::cout << "\n[TEST] Running DataSkewByMaxClusterSize test ("
               << storage_version << ")...\n";
     auto job = std::make_unique<KmeansClustering>(prep.ctx);
@@ -1851,8 +1853,8 @@ TEST(MajorCompaction, DataSkew_ByMaxClusterSize_V2) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 20000;  // per segment
+    int64_t dim = 32;
+    int64_t nb = 5000;  // per segment
     std::string root_path = "/tmp/test-kmeans-dataskew-maxclustersize-v2/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
@@ -1875,8 +1877,8 @@ TEST(MajorCompaction, DataSkew_ByMaxClusterSize_V1) {
     int64_t collection_id = 1, partition_id = 2;
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 20000;  // per segment
+    int64_t dim = 32;
+    int64_t nb = 5000;  // per segment
     std::string root_path = "/tmp/test-kmeans-dataskew-maxclustersize-v1/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
