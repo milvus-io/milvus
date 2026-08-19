@@ -525,10 +525,9 @@ func (t *l0CompactionTask) publishDataViewAfterL0Compact(ctx context.Context, ou
 
 	task := t.GetTaskProto()
 	_, err := meta.dataViewManager.OnL0Compact(ctx, L0CompactDataViewEvent{
-		CollectionID:                task.GetCollectionID(),
-		VChannel:                    task.GetChannel(),
-		SegmentManifestVersions:     versions,
-		TransformStartAfterTimetick: task.GetPos().GetTimestamp(),
+		CollectionID:            task.GetCollectionID(),
+		VChannel:                task.GetChannel(),
+		SegmentManifestVersions: versions,
 	})
 	return err
 }

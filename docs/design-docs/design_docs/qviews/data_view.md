@@ -59,8 +59,11 @@ or by `OnL0Compact`. There is no generic Manifest-update API. Current membership
 event producers publish zero; L0 compaction can replace it with the committed
 Manifest version after updating the target Segment.
 
-`transform_start_after_timetick` is persisted on the latest shard snapshot.
-`OnL0Compact` advances it monotonically using the completed compaction event.
+TODO: The current branch deliberately does not persist or publish
+`transform_start_after_timetick`. A safe monotonic frontier depends on a
+StreamingNode-owned shard Flush barrier that is outside this PR. The required
+producer protocol is described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md).
 
 ## Lifecycle
 
@@ -104,7 +107,7 @@ compact_version, transform_version)`.
 | Create | first snapshot `(1,0,0)` |
 | Flush | `(S,C,T) -> (S+1,0,0)` |
 | Import, copy completion, compact, external refresh, drop partition, truncate | `(S,C,T) -> (S,C+1,0)` |
-| L0 compact | `(S,C,T) -> (S,C,T+1)` when Manifest or frontier advances |
+| L0 compact | `(S,C,T) -> (S,C,T+1)` when a Manifest version advances |
 | No membership or Manifest-version change | return the current version without persisting |
 | Drop collection | delete all persisted snapshots; no new snapshot |
 
@@ -113,7 +116,7 @@ whether a flushed Segment must still participate in growing-side queries. Only
 StreamingNode Flush performs that growing-to-sealed handoff. Every other
 membership-changing event advances `compact_version`, even when it only adds
 Segments. L0 compaction advances `transform_version`: it changes target Segment
-Manifest versions and the shard delete frontier without changing membership.
+Manifest versions without changing membership.
 Streaming and compact advances reset their lower-order version components
 because their new snapshot already absorbs the latest transform state.
 
@@ -191,13 +194,12 @@ Get(ctx, collectionID, version) (DataViewRef, error)
 reference and must call `Deref()` exactly when it finishes using the snapshot;
 `Deref()` is idempotent.
 
-`OnL0Compact` accepts one vchannel, the affected Segment Manifest versions, and
-`transform_start_after_timetick`. It never changes membership. An effective
-update advances TransformVersion and appends an immutable snapshot; an event
-that advances neither Manifest versions nor the frontier is a no-op.
-Manifest versions may only increase; a lower version is rejected. The shard
-timetick advances by max so out-of-order completion cannot move it backward.
-Segments absent from the latest DataView are ignored rather than added.
+`OnL0Compact` accepts one vchannel and the affected Segment Manifest versions.
+It never changes membership. An effective Manifest-version update advances
+TransformVersion and appends an immutable snapshot; an event that advances no
+Manifest version is a no-op. Manifest versions may only increase; a lower
+version is rejected. Segments absent from the latest DataView are ignored
+rather than added.
 
 `Latest` returns a Ref to the current latest entry and `Get` returns a Ref to
 the exact requested version. An unknown Collection, a nil version, or a version
@@ -220,9 +222,9 @@ TransformVersion remains query-correct because it keeps its old DataViewRef and
 consumes the equivalent deletes from TransformLog. It is not invalidated by
 each L0 completion. The system must nevertheless generate a newer QueryView
 eventually—usually piggybacked on the next hard update or balance, or forced by
-time/retention pressure—so the old Manifest and TransformLog frontier can be
-garbage-collected. That QueryView scheduling is outside the current
-DataView-only PR.
+maintenance policy—so the old Manifest can be garbage-collected. TransformLog
+frontier and retention integration is deferred to the TODO design linked
+above. QueryView scheduling is outside the current DataView-only PR.
 
 ## Persistence and recovery
 
@@ -300,5 +302,6 @@ recognizes the CollectionMeta tombstone and removes the remaining DataView keys.
 The manager no longer owns `SegmentStore`, loadability checks, resident/visible
 split, temporary flush snapshots, SegmentMeta-derived delete-frontier
 projection, repair/reconciliation, Balancer snapshots, Segment reference
-queries, or caller-supplied protected-version lists. `OnL0Compact` now accepts
-explicit Manifest versions and a delete frontier from its event producer.
+queries, or caller-supplied protected-version lists. `OnL0Compact` accepts
+explicit Manifest versions only. The delete frontier remains a TODO until the
+StreamingNode shard barrier is implemented.

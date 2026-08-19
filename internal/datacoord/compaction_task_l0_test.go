@@ -164,7 +164,6 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUpdatesLatestDataViewWithoutV
 	s.Equal(int64(2), view.GetDataVersion().GetStreamingVersion())
 	s.Equal(int64(0), view.GetDataVersion().GetCompactVersion())
 	s.Equal(int64(1), view.GetDataVersion().GetTransformVersion())
-	s.Equal(uint64(800), view.GetShards()[0].GetTransformStartAfterTimetick())
 	s.Equal([]int64{4}, view.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
 }
 

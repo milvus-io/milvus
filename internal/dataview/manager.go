@@ -100,10 +100,9 @@ type SegmentManifestVersion struct {
 }
 
 type L0CompactDataViewEvent struct {
-	CollectionID                int64
-	VChannel                    string
-	SegmentManifestVersions     []SegmentManifestVersion
-	TransformStartAfterTimetick uint64
+	CollectionID            int64
+	VChannel                string
+	SegmentManifestVersions []SegmentManifestVersion
 }
 
 type ExternalRefreshDataViewEvent struct {
@@ -660,23 +659,18 @@ func applyL0Compact(view *viewpb.DataViewOfCollection, event L0CompactDataViewEv
 	if event.VChannel == "" {
 		return false, merr.WrapErrServiceInternalMsg("L0 DataView event has no vchannel")
 	}
-	var targetShard *viewpb.DataViewOfShard
+	shardExists := false
 	for _, shard := range view.GetShards() {
 		if shard.GetVchannel() == event.VChannel {
-			targetShard = shard
+			shardExists = true
 			break
 		}
 	}
-	if targetShard == nil {
+	if !shardExists {
 		return false, merr.WrapErrDataIntegrityMsg("L0 DataView event references unknown vchannel %q", event.VChannel)
 	}
 
 	changed := false
-	if event.TransformStartAfterTimetick > targetShard.GetTransformStartAfterTimetick() {
-		targetShard.TransformStartAfterTimetick = event.TransformStartAfterTimetick
-		changed = true
-	}
-
 	slots := dataViewSegmentSlots(view)
 	for _, update := range event.SegmentManifestVersions {
 		if update.SegmentID == 0 || update.ManifestVersion < 0 {

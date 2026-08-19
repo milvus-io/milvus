@@ -32,9 +32,9 @@ message DataViewOfCollection {
 message DataViewOfShard {
     string vchannel = 1;
     repeated DataViewOfPartition partitions = 2;
-    // Delete-retention frontier persisted in the latest DataView. L0
-    // compaction advances it together with transform_version.
-    uint64 transform_start_after_timetick = 3;
+    // TODO: Add the shard transform_start_after_timetick only after
+    // StreamingNode provides the shard-level Growing-Segment Flush barrier
+    // required to publish a safe, monotonic Transform frontier.
 }
 
 message DataViewOfPartition {
@@ -46,12 +46,6 @@ message DataViewOfPartition {
     // partition, Segment ID, and this version alone.
     repeated int64 segment_ids = 2 [packed = true];
     repeated int64 segment_manifest_versions = 3 [packed = true];
-}
-
-// DataViewShardTimeTick is a derived delete-retention projection.
-message DataViewShardTimeTick {
-    string vchannel = 1;
-    uint64 transform_start_after_timetick = 2;
 }
 
 // QueryViewState represents the distributed lifecycle of a QueryView.

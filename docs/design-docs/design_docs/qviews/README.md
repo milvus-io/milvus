@@ -87,8 +87,7 @@ data ([B1] and [A1]). A version number DataVersion is introduced:
   including import, copy completion, compaction, external refresh, partition
   drop, and truncate.
 - **transform_version**: Incremented when L0 compaction advances Segment
-  Manifest versions or the delete-materialization frontier without changing
-  loadable membership.
+  Manifest versions without changing loadable membership.
 
 Version numbers are ordered lexicographically by
 `(streaming_version, compact_version, transform_version)`.
@@ -145,8 +144,12 @@ Key observations:
 - A Segment's Manifest version is monotonic across DataViews. Replaying the
   same version is a no-op, a higher version advances it, and a lower version is
   rejected.
-- L0 compaction persists higher target Segment Manifest versions and the shard
-  `transform_start_after_timetick` in a new immutable TransformVersion.
+- L0 compaction persists higher target Segment Manifest versions in a new
+  immutable TransformVersion.
+- TODO: A future StreamingNode refactor will add the safe, monotonic shard
+  `transform_start_after_timetick` protocol described in
+  [Transform Start-After TimeTick](transform_start_after_timetick.md). The
+  current branch does not persist or publish this frontier.
 
 ### 5.4 Constraints
 
@@ -159,7 +162,7 @@ Key observations:
   L0-specific event; there is no generic Manifest-update API.
 - The storage view version number is at the Collection level (laying the groundwork for future capabilities such as Shard splitting).
 - DataView tracks loadable Segment membership and monotonically increasing
-  Manifest versions. Delete-frontier refreshes advance TransformVersion.
+  Manifest versions.
 
 ## 6. Query Side — Query View (QueryView)
 

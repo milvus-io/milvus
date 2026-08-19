@@ -25,9 +25,11 @@ L0 compaction advances only DataView TransformVersion. It does not invalidate
 the current QueryView: the existing state-machine instance keeps its exact old
 DataViewRef and continues applying equivalent deletes from TransformLog. The
 manager coalesces such soft updates and eventually creates a new QueryView at
-the latest TransformVersion so the old recovery and retention frontier can be
-released. The scheduling policy is not implemented by the current
-DataView-only PR.
+the latest TransformVersion so the old Manifest revision can be released. The
+TransformLog start frontier remains a TODO pending the StreamingNode shard
+barrier described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md). The
+scheduling policy is not implemented by the current DataView-only PR.
 
 ### 1.1 Preparing
 

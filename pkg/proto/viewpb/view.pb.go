@@ -228,9 +228,6 @@ type DataViewOfShard struct {
 
 	Vchannel   string                 `protobuf:"bytes,1,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
 	Partitions []*DataViewOfPartition `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
-	// Delete-retention frontier persisted in the latest DataView. L0
-	// compaction advances it together with transform_version.
-	TransformStartAfterTimetick uint64 `protobuf:"varint,3,opt,name=transform_start_after_timetick,json=transformStartAfterTimetick,proto3" json:"transform_start_after_timetick,omitempty"`
 }
 
 func (x *DataViewOfShard) Reset() {
@@ -277,13 +274,6 @@ func (x *DataViewOfShard) GetPartitions() []*DataViewOfPartition {
 		return x.Partitions
 	}
 	return nil
-}
-
-func (x *DataViewOfShard) GetTransformStartAfterTimetick() uint64 {
-	if x != nil {
-		return x.TransformStartAfterTimetick
-	}
-	return 0
 }
 
 type DataViewOfPartition struct {
@@ -354,62 +344,6 @@ func (x *DataViewOfPartition) GetSegmentManifestVersions() []int64 {
 	return nil
 }
 
-// DataViewShardTimeTick is a derived delete-retention projection.
-type DataViewShardTimeTick struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Vchannel                    string `protobuf:"bytes,1,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
-	TransformStartAfterTimetick uint64 `protobuf:"varint,2,opt,name=transform_start_after_timetick,json=transformStartAfterTimetick,proto3" json:"transform_start_after_timetick,omitempty"`
-}
-
-func (x *DataViewShardTimeTick) Reset() {
-	*x = DataViewShardTimeTick{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[4]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *DataViewShardTimeTick) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DataViewShardTimeTick) ProtoMessage() {}
-
-func (x *DataViewShardTimeTick) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[4]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DataViewShardTimeTick.ProtoReflect.Descriptor instead.
-func (*DataViewShardTimeTick) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *DataViewShardTimeTick) GetVchannel() string {
-	if x != nil {
-		return x.Vchannel
-	}
-	return ""
-}
-
-func (x *DataViewShardTimeTick) GetTransformStartAfterTimetick() uint64 {
-	if x != nil {
-		return x.TransformStartAfterTimetick
-	}
-	return 0
-}
-
 // QueryViewOfShard is the state-machine snapshot for one shard and replica.
 type QueryViewOfShard struct {
 	state         protoimpl.MessageState
@@ -424,7 +358,7 @@ type QueryViewOfShard struct {
 func (x *QueryViewOfShard) Reset() {
 	*x = QueryViewOfShard{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[5]
+		mi := &file_view_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -437,7 +371,7 @@ func (x *QueryViewOfShard) String() string {
 func (*QueryViewOfShard) ProtoMessage() {}
 
 func (x *QueryViewOfShard) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[5]
+	mi := &file_view_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -450,7 +384,7 @@ func (x *QueryViewOfShard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryViewOfShard.ProtoReflect.Descriptor instead.
 func (*QueryViewOfShard) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{5}
+	return file_view_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *QueryViewOfShard) GetMeta() *QueryViewMeta {
@@ -492,7 +426,7 @@ type QueryViewMeta struct {
 func (x *QueryViewMeta) Reset() {
 	*x = QueryViewMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[6]
+		mi := &file_view_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -505,7 +439,7 @@ func (x *QueryViewMeta) String() string {
 func (*QueryViewMeta) ProtoMessage() {}
 
 func (x *QueryViewMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[6]
+	mi := &file_view_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -518,7 +452,7 @@ func (x *QueryViewMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryViewMeta.ProtoReflect.Descriptor instead.
 func (*QueryViewMeta) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{6}
+	return file_view_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *QueryViewMeta) GetCollectionId() int64 {
@@ -581,7 +515,7 @@ type QueryViewOfStreamingNode struct {
 func (x *QueryViewOfStreamingNode) Reset() {
 	*x = QueryViewOfStreamingNode{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[7]
+		mi := &file_view_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -594,7 +528,7 @@ func (x *QueryViewOfStreamingNode) String() string {
 func (*QueryViewOfStreamingNode) ProtoMessage() {}
 
 func (x *QueryViewOfStreamingNode) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[7]
+	mi := &file_view_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -607,7 +541,7 @@ func (x *QueryViewOfStreamingNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryViewOfStreamingNode.ProtoReflect.Descriptor instead.
 func (*QueryViewOfStreamingNode) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{7}
+	return file_view_proto_rawDescGZIP(), []int{6}
 }
 
 // QueryViewOfQueryNode contains the segment assignments for one QueryNode.
@@ -623,7 +557,7 @@ type QueryViewOfQueryNode struct {
 func (x *QueryViewOfQueryNode) Reset() {
 	*x = QueryViewOfQueryNode{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[8]
+		mi := &file_view_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -636,7 +570,7 @@ func (x *QueryViewOfQueryNode) String() string {
 func (*QueryViewOfQueryNode) ProtoMessage() {}
 
 func (x *QueryViewOfQueryNode) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[8]
+	mi := &file_view_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +583,7 @@ func (x *QueryViewOfQueryNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryViewOfQueryNode.ProtoReflect.Descriptor instead.
 func (*QueryViewOfQueryNode) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{8}
+	return file_view_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *QueryViewOfQueryNode) GetNodeId() int64 {
@@ -680,7 +614,7 @@ type QueryViewVersion struct {
 func (x *QueryViewVersion) Reset() {
 	*x = QueryViewVersion{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[9]
+		mi := &file_view_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -693,7 +627,7 @@ func (x *QueryViewVersion) String() string {
 func (*QueryViewVersion) ProtoMessage() {}
 
 func (x *QueryViewVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[9]
+	mi := &file_view_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +640,7 @@ func (x *QueryViewVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryViewVersion.ProtoReflect.Descriptor instead.
 func (*QueryViewVersion) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{9}
+	return file_view_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *QueryViewVersion) GetDataVersion() *DataVersion {
@@ -737,7 +671,7 @@ type QueryViewOfPartition struct {
 func (x *QueryViewOfPartition) Reset() {
 	*x = QueryViewOfPartition{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[10]
+		mi := &file_view_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -750,7 +684,7 @@ func (x *QueryViewOfPartition) String() string {
 func (*QueryViewOfPartition) ProtoMessage() {}
 
 func (x *QueryViewOfPartition) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[10]
+	mi := &file_view_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -763,7 +697,7 @@ func (x *QueryViewOfPartition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryViewOfPartition.ProtoReflect.Descriptor instead.
 func (*QueryViewOfPartition) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{10}
+	return file_view_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *QueryViewOfPartition) GetPartitionId() int64 {
@@ -803,7 +737,7 @@ type SyncRequest struct {
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[11]
+		mi := &file_view_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -816,7 +750,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[11]
+	mi := &file_view_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +763,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{11}
+	return file_view_proto_rawDescGZIP(), []int{10}
 }
 
 func (m *SyncRequest) GetRequest() isSyncRequest_Request {
@@ -881,7 +815,7 @@ type SyncQueryViewsRequest struct {
 func (x *SyncQueryViewsRequest) Reset() {
 	*x = SyncQueryViewsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[12]
+		mi := &file_view_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -894,7 +828,7 @@ func (x *SyncQueryViewsRequest) String() string {
 func (*SyncQueryViewsRequest) ProtoMessage() {}
 
 func (x *SyncQueryViewsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[12]
+	mi := &file_view_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -907,7 +841,7 @@ func (x *SyncQueryViewsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncQueryViewsRequest.ProtoReflect.Descriptor instead.
 func (*SyncQueryViewsRequest) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{12}
+	return file_view_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SyncQueryViewsRequest) GetQueryViews() []*QueryViewOfShard {
@@ -926,7 +860,7 @@ type SyncCloseRequest struct {
 func (x *SyncCloseRequest) Reset() {
 	*x = SyncCloseRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[13]
+		mi := &file_view_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -939,7 +873,7 @@ func (x *SyncCloseRequest) String() string {
 func (*SyncCloseRequest) ProtoMessage() {}
 
 func (x *SyncCloseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[13]
+	mi := &file_view_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -952,7 +886,7 @@ func (x *SyncCloseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncCloseRequest.ProtoReflect.Descriptor instead.
 func (*SyncCloseRequest) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{13}
+	return file_view_proto_rawDescGZIP(), []int{12}
 }
 
 // SyncResponse carries follower state reports or acknowledges stream close.
@@ -971,7 +905,7 @@ type SyncResponse struct {
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[14]
+		mi := &file_view_proto_msgTypes[13]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -984,7 +918,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[14]
+	mi := &file_view_proto_msgTypes[13]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -997,7 +931,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{14}
+	return file_view_proto_rawDescGZIP(), []int{13}
 }
 
 func (m *SyncResponse) GetResponse() isSyncResponse_Response {
@@ -1049,7 +983,7 @@ type SyncQueryViewsResponse struct {
 func (x *SyncQueryViewsResponse) Reset() {
 	*x = SyncQueryViewsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[15]
+		mi := &file_view_proto_msgTypes[14]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1062,7 +996,7 @@ func (x *SyncQueryViewsResponse) String() string {
 func (*SyncQueryViewsResponse) ProtoMessage() {}
 
 func (x *SyncQueryViewsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[15]
+	mi := &file_view_proto_msgTypes[14]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1075,7 +1009,7 @@ func (x *SyncQueryViewsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncQueryViewsResponse.ProtoReflect.Descriptor instead.
 func (*SyncQueryViewsResponse) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{15}
+	return file_view_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SyncQueryViewsResponse) GetQueryViews() []*QueryViewOfShard {
@@ -1094,7 +1028,7 @@ type SyncCloseResponse struct {
 func (x *SyncCloseResponse) Reset() {
 	*x = SyncCloseResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[16]
+		mi := &file_view_proto_msgTypes[15]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1107,7 +1041,7 @@ func (x *SyncCloseResponse) String() string {
 func (*SyncCloseResponse) ProtoMessage() {}
 
 func (x *SyncCloseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[16]
+	mi := &file_view_proto_msgTypes[15]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1120,7 +1054,7 @@ func (x *SyncCloseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncCloseResponse.ProtoReflect.Descriptor instead.
 func (*SyncCloseResponse) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{16}
+	return file_view_proto_rawDescGZIP(), []int{15}
 }
 
 // ShardID identifies one shard within a replica.
@@ -1136,7 +1070,7 @@ type ShardID struct {
 func (x *ShardID) Reset() {
 	*x = ShardID{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[17]
+		mi := &file_view_proto_msgTypes[16]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1149,7 +1083,7 @@ func (x *ShardID) String() string {
 func (*ShardID) ProtoMessage() {}
 
 func (x *ShardID) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[17]
+	mi := &file_view_proto_msgTypes[16]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1162,7 +1096,7 @@ func (x *ShardID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardID.ProtoReflect.Descriptor instead.
 func (*ShardID) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{17}
+	return file_view_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ShardID) GetReplicaId() int64 {
@@ -1205,36 +1139,24 @@ var file_view_proto_rawDesc = []byte{
 	0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x44, 0x61, 0x74, 0x61, 0x56, 0x65, 0x72, 0x73, 0x69,
 	0x6f, 0x6e, 0x52, 0x0b, 0x64, 0x61, 0x74, 0x61, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22,
-	0xba, 0x01, 0x0a, 0x0f, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77, 0x4f, 0x66, 0x53, 0x68,
-	0x61, 0x72, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12,
-	0x46, 0x0a, 0x0a, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x02, 0x20,
-	0x03, 0x28, 0x0b, 0x32, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77,
-	0x4f, 0x66, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x0a, 0x70, 0x61, 0x72,
-	0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x43, 0x0a, 0x1e, 0x74, 0x72, 0x61, 0x6e, 0x73,
-	0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x5f, 0x61, 0x66, 0x74, 0x65, 0x72,
-	0x5f, 0x74, 0x69, 0x6d, 0x65, 0x74, 0x69, 0x63, 0x6b, 0x18, 0x03, 0x20, 0x01, 0x28, 0x04, 0x52,
-	0x1b, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x53, 0x74, 0x61, 0x72, 0x74, 0x41,
-	0x66, 0x74, 0x65, 0x72, 0x54, 0x69, 0x6d, 0x65, 0x74, 0x69, 0x63, 0x6b, 0x22, 0x9d, 0x01, 0x0a,
-	0x13, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77, 0x4f, 0x66, 0x50, 0x61, 0x72, 0x74, 0x69,
-	0x74, 0x69, 0x6f, 0x6e, 0x12, 0x21, 0x0a, 0x0c, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f,
-	0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0b, 0x70, 0x61, 0x72, 0x74,
-	0x69, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x23, 0x0a, 0x0b, 0x73, 0x65, 0x67, 0x6d, 0x65,
-	0x6e, 0x74, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x42, 0x02, 0x10, 0x01,
-	0x52, 0x0a, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x64, 0x73, 0x12, 0x3e, 0x0a, 0x19,
-	0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74,
-	0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x03, 0x42,
-	0x02, 0x10, 0x01, 0x52, 0x17, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x4d, 0x61, 0x6e, 0x69,
-	0x66, 0x65, 0x73, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x22, 0x78, 0x0a, 0x15,
-	0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77, 0x53, 0x68, 0x61, 0x72, 0x64, 0x54, 0x69, 0x6d,
-	0x65, 0x54, 0x69, 0x63, 0x6b, 0x12, 0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
-	0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
-	0x6c, 0x12, 0x43, 0x0a, 0x1e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x73,
-	0x74, 0x61, 0x72, 0x74, 0x5f, 0x61, 0x66, 0x74, 0x65, 0x72, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x74,
-	0x69, 0x63, 0x6b, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52, 0x1b, 0x74, 0x72, 0x61, 0x6e, 0x73,
-	0x66, 0x6f, 0x72, 0x6d, 0x53, 0x74, 0x61, 0x72, 0x74, 0x41, 0x66, 0x74, 0x65, 0x72, 0x54, 0x69,
-	0x6d, 0x65, 0x74, 0x69, 0x63, 0x6b, 0x22, 0xe4, 0x01, 0x0a, 0x10, 0x51, 0x75, 0x65, 0x72, 0x79,
+	0x75, 0x0a, 0x0f, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77, 0x4f, 0x66, 0x53, 0x68, 0x61,
+	0x72, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x46,
+	0x0a, 0x0a, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x02, 0x20, 0x03,
+	0x28, 0x0b, 0x32, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77, 0x4f,
+	0x66, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x0a, 0x70, 0x61, 0x72, 0x74,
+	0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x22, 0x9d, 0x01, 0x0a, 0x13, 0x44, 0x61, 0x74, 0x61, 0x56,
+	0x69, 0x65, 0x77, 0x4f, 0x66, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x21,
+	0x0a, 0x0c, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x03, 0x52, 0x0b, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x49,
+	0x64, 0x12, 0x23, 0x0a, 0x0b, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x73,
+	0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x42, 0x02, 0x10, 0x01, 0x52, 0x0a, 0x73, 0x65, 0x67, 0x6d,
+	0x65, 0x6e, 0x74, 0x49, 0x64, 0x73, 0x12, 0x3e, 0x0a, 0x19, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e,
+	0x74, 0x5f, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69,
+	0x6f, 0x6e, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x03, 0x42, 0x02, 0x10, 0x01, 0x52, 0x17, 0x73,
+	0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x4d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x56, 0x65,
+	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x22, 0xe4, 0x01, 0x0a, 0x10, 0x51, 0x75, 0x65, 0x72, 0x79,
 	0x56, 0x69, 0x65, 0x77, 0x4f, 0x66, 0x53, 0x68, 0x61, 0x72, 0x64, 0x12, 0x34, 0x0a, 0x04, 0x6d,
 	0x65, 0x74, 0x61, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
 	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51, 0x75,
@@ -1377,47 +1299,46 @@ func file_view_proto_rawDescGZIP() []byte {
 }
 
 var file_view_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_view_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_view_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_view_proto_goTypes = []interface{}{
 	(QueryViewState)(0),              // 0: milvus.proto.view.QueryViewState
 	(*DataVersion)(nil),              // 1: milvus.proto.view.DataVersion
 	(*DataViewOfCollection)(nil),     // 2: milvus.proto.view.DataViewOfCollection
 	(*DataViewOfShard)(nil),          // 3: milvus.proto.view.DataViewOfShard
 	(*DataViewOfPartition)(nil),      // 4: milvus.proto.view.DataViewOfPartition
-	(*DataViewShardTimeTick)(nil),    // 5: milvus.proto.view.DataViewShardTimeTick
-	(*QueryViewOfShard)(nil),         // 6: milvus.proto.view.QueryViewOfShard
-	(*QueryViewMeta)(nil),            // 7: milvus.proto.view.QueryViewMeta
-	(*QueryViewOfStreamingNode)(nil), // 8: milvus.proto.view.QueryViewOfStreamingNode
-	(*QueryViewOfQueryNode)(nil),     // 9: milvus.proto.view.QueryViewOfQueryNode
-	(*QueryViewVersion)(nil),         // 10: milvus.proto.view.QueryViewVersion
-	(*QueryViewOfPartition)(nil),     // 11: milvus.proto.view.QueryViewOfPartition
-	(*SyncRequest)(nil),              // 12: milvus.proto.view.SyncRequest
-	(*SyncQueryViewsRequest)(nil),    // 13: milvus.proto.view.SyncQueryViewsRequest
-	(*SyncCloseRequest)(nil),         // 14: milvus.proto.view.SyncCloseRequest
-	(*SyncResponse)(nil),             // 15: milvus.proto.view.SyncResponse
-	(*SyncQueryViewsResponse)(nil),   // 16: milvus.proto.view.SyncQueryViewsResponse
-	(*SyncCloseResponse)(nil),        // 17: milvus.proto.view.SyncCloseResponse
-	(*ShardID)(nil),                  // 18: milvus.proto.view.ShardID
+	(*QueryViewOfShard)(nil),         // 5: milvus.proto.view.QueryViewOfShard
+	(*QueryViewMeta)(nil),            // 6: milvus.proto.view.QueryViewMeta
+	(*QueryViewOfStreamingNode)(nil), // 7: milvus.proto.view.QueryViewOfStreamingNode
+	(*QueryViewOfQueryNode)(nil),     // 8: milvus.proto.view.QueryViewOfQueryNode
+	(*QueryViewVersion)(nil),         // 9: milvus.proto.view.QueryViewVersion
+	(*QueryViewOfPartition)(nil),     // 10: milvus.proto.view.QueryViewOfPartition
+	(*SyncRequest)(nil),              // 11: milvus.proto.view.SyncRequest
+	(*SyncQueryViewsRequest)(nil),    // 12: milvus.proto.view.SyncQueryViewsRequest
+	(*SyncCloseRequest)(nil),         // 13: milvus.proto.view.SyncCloseRequest
+	(*SyncResponse)(nil),             // 14: milvus.proto.view.SyncResponse
+	(*SyncQueryViewsResponse)(nil),   // 15: milvus.proto.view.SyncQueryViewsResponse
+	(*SyncCloseResponse)(nil),        // 16: milvus.proto.view.SyncCloseResponse
+	(*ShardID)(nil),                  // 17: milvus.proto.view.ShardID
 }
 var file_view_proto_depIdxs = []int32{
 	3,  // 0: milvus.proto.view.DataViewOfCollection.shards:type_name -> milvus.proto.view.DataViewOfShard
 	1,  // 1: milvus.proto.view.DataViewOfCollection.data_version:type_name -> milvus.proto.view.DataVersion
 	4,  // 2: milvus.proto.view.DataViewOfShard.partitions:type_name -> milvus.proto.view.DataViewOfPartition
-	7,  // 3: milvus.proto.view.QueryViewOfShard.meta:type_name -> milvus.proto.view.QueryViewMeta
-	9,  // 4: milvus.proto.view.QueryViewOfShard.query_node:type_name -> milvus.proto.view.QueryViewOfQueryNode
-	8,  // 5: milvus.proto.view.QueryViewOfShard.streaming_node:type_name -> milvus.proto.view.QueryViewOfStreamingNode
-	10, // 6: milvus.proto.view.QueryViewMeta.version:type_name -> milvus.proto.view.QueryViewVersion
+	6,  // 3: milvus.proto.view.QueryViewOfShard.meta:type_name -> milvus.proto.view.QueryViewMeta
+	8,  // 4: milvus.proto.view.QueryViewOfShard.query_node:type_name -> milvus.proto.view.QueryViewOfQueryNode
+	7,  // 5: milvus.proto.view.QueryViewOfShard.streaming_node:type_name -> milvus.proto.view.QueryViewOfStreamingNode
+	9,  // 6: milvus.proto.view.QueryViewMeta.version:type_name -> milvus.proto.view.QueryViewVersion
 	0,  // 7: milvus.proto.view.QueryViewMeta.state:type_name -> milvus.proto.view.QueryViewState
-	11, // 8: milvus.proto.view.QueryViewOfQueryNode.partitions:type_name -> milvus.proto.view.QueryViewOfPartition
+	10, // 8: milvus.proto.view.QueryViewOfQueryNode.partitions:type_name -> milvus.proto.view.QueryViewOfPartition
 	1,  // 9: milvus.proto.view.QueryViewVersion.data_version:type_name -> milvus.proto.view.DataVersion
-	13, // 10: milvus.proto.view.SyncRequest.views:type_name -> milvus.proto.view.SyncQueryViewsRequest
-	14, // 11: milvus.proto.view.SyncRequest.close:type_name -> milvus.proto.view.SyncCloseRequest
-	6,  // 12: milvus.proto.view.SyncQueryViewsRequest.query_views:type_name -> milvus.proto.view.QueryViewOfShard
-	16, // 13: milvus.proto.view.SyncResponse.views:type_name -> milvus.proto.view.SyncQueryViewsResponse
-	17, // 14: milvus.proto.view.SyncResponse.close:type_name -> milvus.proto.view.SyncCloseResponse
-	6,  // 15: milvus.proto.view.SyncQueryViewsResponse.query_views:type_name -> milvus.proto.view.QueryViewOfShard
-	12, // 16: milvus.proto.view.ViewSyncService.SyncQueryView:input_type -> milvus.proto.view.SyncRequest
-	15, // 17: milvus.proto.view.ViewSyncService.SyncQueryView:output_type -> milvus.proto.view.SyncResponse
+	12, // 10: milvus.proto.view.SyncRequest.views:type_name -> milvus.proto.view.SyncQueryViewsRequest
+	13, // 11: milvus.proto.view.SyncRequest.close:type_name -> milvus.proto.view.SyncCloseRequest
+	5,  // 12: milvus.proto.view.SyncQueryViewsRequest.query_views:type_name -> milvus.proto.view.QueryViewOfShard
+	15, // 13: milvus.proto.view.SyncResponse.views:type_name -> milvus.proto.view.SyncQueryViewsResponse
+	16, // 14: milvus.proto.view.SyncResponse.close:type_name -> milvus.proto.view.SyncCloseResponse
+	5,  // 15: milvus.proto.view.SyncQueryViewsResponse.query_views:type_name -> milvus.proto.view.QueryViewOfShard
+	11, // 16: milvus.proto.view.ViewSyncService.SyncQueryView:input_type -> milvus.proto.view.SyncRequest
+	14, // 17: milvus.proto.view.ViewSyncService.SyncQueryView:output_type -> milvus.proto.view.SyncResponse
 	17, // [17:18] is the sub-list for method output_type
 	16, // [16:17] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
@@ -1480,18 +1401,6 @@ func file_view_proto_init() {
 			}
 		}
 		file_view_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DataViewShardTimeTick); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_view_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*QueryViewOfShard); i {
 			case 0:
 				return &v.state
@@ -1503,7 +1412,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*QueryViewMeta); i {
 			case 0:
 				return &v.state
@@ -1515,7 +1424,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*QueryViewOfStreamingNode); i {
 			case 0:
 				return &v.state
@@ -1527,7 +1436,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*QueryViewOfQueryNode); i {
 			case 0:
 				return &v.state
@@ -1539,7 +1448,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*QueryViewVersion); i {
 			case 0:
 				return &v.state
@@ -1551,7 +1460,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*QueryViewOfPartition); i {
 			case 0:
 				return &v.state
@@ -1563,7 +1472,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SyncRequest); i {
 			case 0:
 				return &v.state
@@ -1575,7 +1484,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SyncQueryViewsRequest); i {
 			case 0:
 				return &v.state
@@ -1587,7 +1496,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SyncCloseRequest); i {
 			case 0:
 				return &v.state
@@ -1599,7 +1508,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SyncResponse); i {
 			case 0:
 				return &v.state
@@ -1611,7 +1520,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SyncQueryViewsResponse); i {
 			case 0:
 				return &v.state
@@ -1623,7 +1532,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SyncCloseResponse); i {
 			case 0:
 				return &v.state
@@ -1635,7 +1544,7 @@ func file_view_proto_init() {
 				return nil
 			}
 		}
-		file_view_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
+		file_view_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ShardID); i {
 			case 0:
 				return &v.state
@@ -1648,11 +1557,11 @@ func file_view_proto_init() {
 			}
 		}
 	}
-	file_view_proto_msgTypes[11].OneofWrappers = []interface{}{
+	file_view_proto_msgTypes[10].OneofWrappers = []interface{}{
 		(*SyncRequest_Views)(nil),
 		(*SyncRequest_Close)(nil),
 	}
-	file_view_proto_msgTypes[14].OneofWrappers = []interface{}{
+	file_view_proto_msgTypes[13].OneofWrappers = []interface{}{
 		(*SyncResponse_Views)(nil),
 		(*SyncResponse_Close)(nil),
 	}
@@ -1662,7 +1571,7 @@ func file_view_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_view_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
