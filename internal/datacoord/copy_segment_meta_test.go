@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -1958,4 +1959,38 @@ func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_RefusesWhilePendingUntracke
 	version, err = s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
 	s.NoError(err)
 	s.EqualValues(1, version)
+}
+
+// TestFinalizeJobPublication_ReleasesSnapshotCache pins the memory contract of
+// the successful-restore completion path. Clone() shares snapshotCache by
+// pointer, and that cache holds the whole SnapshotData (every segment
+// description, MB-scale for a large restore). Completed is terminal, so the
+// cache can never be read again; the sibling terminal path
+// (UpdateJobStateAndReleaseRef) already drops it. Without the same release
+// here, the SnapshotData stays resident on the Completed job until checkGC
+// collects it CopySegmentTaskRetention (3h) later, so back-to-back large
+// restores accumulate in DataCoord.
+func (s *CopySegmentMetaSuite) TestFinalizeJobPublication_ReleasesSnapshotCache() {
+	ctx := context.TODO()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Once()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        707,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		},
+		tr:            timerecord.NewTimeRecorder("test job"),
+		snapshotCache: &copySegmentSnapshotCache{data: &snapshotstorage.SnapshotData{}},
+	}
+	s.NoError(s.copyMeta.AddJob(ctx, job))
+	s.NotNil(s.copyMeta.GetJob(ctx, 707).(*copySegmentJob).snapshotCache)
+
+	applied, err := s.copyMeta.FinalizeJobPublication(ctx, 707, 0, 1)
+	s.NoError(err)
+	s.True(applied)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, s.copyMeta.GetJob(ctx, 707).GetState())
+	s.Nil(s.copyMeta.GetJob(ctx, 707).(*copySegmentJob).snapshotCache,
+		"a completed job must not pin the snapshot cache")
 }
