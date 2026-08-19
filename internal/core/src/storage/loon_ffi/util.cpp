@@ -541,6 +541,21 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         }
     }
 
+    // IOPS limiting is an External Table read policy, not an attribute of the
+    // internal filesystem. Keep it out of fs.* and stamp it only into the
+    // per-collection extfs namespace. These keys are intentionally absent
+    // from kAllowedExtfsSpecKeys, so external_spec cannot override them.
+    const auto iops_config =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetExternalIopsConfig();
+    milvus_storage::api::SetValue(
+        properties,
+        (extfs_prefix + "iops_initial_rate").c_str(),
+        std::to_string(iops_config.initial_rate).c_str());
+    milvus_storage::api::SetValue(properties,
+                                  (extfs_prefix + "iops_max_rate").c_str(),
+                                  std::to_string(iops_config.max_rate).c_str());
+
     // Layer 0b: inherit process-level fs.* tuning. Position relative to the
     // later layers is arbitrary — none of these keys is in
     // kAllowedExtfsSpecKeys nor derived from the URI, so no other layer
@@ -903,14 +918,23 @@ extern "C" LoonFFIResult
 loon_properties_inject_external_spec(LoonProperties* properties,
                                      int64_t collection_id,
                                      const char* external_source,
-                                     const char* external_spec) {
+                                     const char* external_spec,
+                                     uint32_t iops_initial_rate,
+                                     uint32_t iops_max_rate) {
     if (properties == nullptr) {
         RETURN_ERROR(LOON_INVALID_ARGS, "properties is null");
     }
     if (external_source == nullptr || external_source[0] == '\0') {
         RETURN_SUCCESS();  // no-op for internal (non-external) collections
     }
+    if (iops_initial_rate == 0) {
+        RETURN_ERROR(LOON_INVALID_ARGS,
+                     "external IOPS initial rate must be greater than zero");
+    }
     try {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(iops_initial_rate, iops_max_rate);
+
         // Load existing flat LoonProperties into a typed Properties map.
         milvus_storage::api::Properties props;
         for (size_t i = 0; i < properties->count; ++i) {
