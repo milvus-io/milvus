@@ -1549,9 +1549,15 @@ streaming:
     # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
     # but not wait for the persist interval.
     maxDirtyMessage: 100
-    # The graceful close timeout for wal recovery, 3s by default.
-    # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
-    # If that persist operation exceeds this timeout, the wal recovery module will close right now.
+    tail:
+      # Release WAL append pressure after the unpublished recovery tail falls to 4 GiB.
+      lowWatermark: 4g
+      # Request VChannel persistence and slow WAL append after the tail reaches 8 GiB.
+      softWatermark: 8g
+      # Reject new DML append after the tail reaches 16 GiB.
+      highWatermark: 16g
+    # Deprecated no-op retained for compatibility with existing configurations.
+    # RecoveryStorage close no longer persists mutable recovery state.
     gracefulCloseTimeout: 3s
   replication:
     pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.

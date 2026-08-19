@@ -53,7 +53,6 @@ func installRetainingManager(t *testing.T, storage *recoveryStorageImpl, retaine
 		_ *vchannel.PChannelRecoveryManager,
 		_ context.Context,
 		retainedMessage message.RetainedImmutableMessage,
-		_ moduleapi.ObserveMode,
 	) {
 		retained.message = retainedMessage.Message()
 		retained.handle = retainedMessage.Clone()
@@ -65,10 +64,6 @@ func TestDataScannerReleasesOwnerAfterAllModulesObserve(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
 	}
 	scheduler := nodescheduler.New(1)
 	t.Cleanup(scheduler.Close)
@@ -82,7 +77,7 @@ func TestDataScannerReleasesOwnerAfterAllModulesObserve(t *testing.T) {
 	installRetainingManager(t, storage, module)
 	msg := newAckTestTimeTickMessage(t, 20, 2)
 
-	storage.observeDataScannerMessage(context.Background(), msg)
+	storage.observeMessage(context.Background(), msg)
 
 	require.NotNil(t, module.message)
 	require.NotNil(t, module.handle)
@@ -100,10 +95,6 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
@@ -125,7 +116,7 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
 		WithBody(&msgpb.CreateCollectionRequest{}))
 
-	storage.observeDataScannerMessage(context.Background(), msg)
+	storage.observeMessage(context.Background(), msg)
 
 	require.NotNil(t, module.handle)
 	require.Empty(t, scheduler.snapshot())
@@ -147,172 +138,21 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	assert.Equal(t, msg.TimeTick(), completed.TimeTick)
 }
 
-func TestMetaScannerOwnerIsNotTracked(t *testing.T) {
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(1),
-		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
-	}
-	scheduler := nodescheduler.New(1)
-	t.Cleanup(scheduler.Close)
-	storage := newRecoveryStorage(
-		types.PChannelInfo{Name: "test-pchannel"},
-		checkpoint,
-		WithNodeScheduler(scheduler),
-	)
-	t.Cleanup(storage.metrics.Close)
-	module := &retainingRecoveryModule{}
-	installRetainingManager(t, storage, module)
-	msg := newAckTestTimeTickMessage(t, 20, 2)
-
-	storage.observeMetaScannerMessage(context.Background(), msg)
-
-	require.NotNil(t, module.message)
-	require.NotNil(t, module.handle)
-	assert.Equal(t, msg.TimeTick(), module.handle.Message().TimeTick())
-	assert.True(t, msg.LastConfirmedMessageID().EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, msg.TimeTick(), storage.checkpoint.TimeTick)
-	assert.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
-	assert.Zero(t, storage.ackTracker.Pending())
-	module.handle.Release()
-}
-
-func TestDataScannerReplayDoesNotRegressMetaCheckpoint(t *testing.T) {
-	metaMessageID := walimplstest.NewTestMessageID(3)
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: metaMessageID,
-		TimeTick:  30,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
-	}
-	scheduler := nodescheduler.New(1)
-	t.Cleanup(scheduler.Close)
-	storage := newRecoveryStorage(
-		types.PChannelInfo{Name: "test-pchannel"},
-		checkpoint,
-		WithNodeScheduler(scheduler),
-	)
-	t.Cleanup(storage.metrics.Close)
-	installManager(t, storage)
-	msg := newAckTestTimeTickMessage(t, 20, 2)
-
-	storage.observeDataScannerMessage(context.Background(), msg)
-
-	assert.True(t, metaMessageID.EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(30), storage.checkpoint.TimeTick)
-	completed := storage.ackTracker.CompletedPoint()
-	assert.True(t, msg.LastConfirmedMessageID().EQ(completed.MessageID))
-	assert.Equal(t, uint64(20), completed.TimeTick)
-
-	snapshot := storage.consumeDirtySnapshot()
-	require.NotNil(t, snapshot)
-	assert.True(t, metaMessageID.EQ(snapshot.Checkpoint.MessageID))
-	assert.Equal(t, uint64(30), snapshot.Checkpoint.TimeTick)
-	require.NotNil(t, snapshot.Checkpoint.DataCheckpoint)
-	assert.True(t, msg.LastConfirmedMessageID().EQ(snapshot.Checkpoint.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(20), snapshot.Checkpoint.DataCheckpoint.TimeTick)
-}
-
-func TestDataScannerReplayDoesNotRegressDataCheckpoint(t *testing.T) {
-	dataMessageID := walimplstest.NewTestMessageID(3)
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(4),
-		TimeTick:  40,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: dataMessageID,
-			TimeTick:  30,
-		},
-	}
+func TestReplayDoesNotRegressCheckpoint(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(3), TimeTick: 30}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
 
-	storage.observeDataScannerMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 1))
-
+	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
 	completed := storage.ackTracker.CompletedPoint()
-	require.True(t, dataMessageID.EQ(completed.MessageID))
-	assert.Equal(t, uint64(30), completed.TimeTick)
-
-	snapshot := storage.consumeDirtySnapshot()
-	require.NotNil(t, snapshot)
-	require.NotNil(t, snapshot.Checkpoint.DataCheckpoint)
-	require.True(t, dataMessageID.EQ(snapshot.Checkpoint.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(30), snapshot.Checkpoint.DataCheckpoint.TimeTick)
-}
-
-func TestDataScannerAdvancesBothCheckpointsAcrossSameTimeTick(t *testing.T) {
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(1),
-		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
-	}
-	storage := newTestRecoveryStorage(t, checkpoint)
-	t.Cleanup(storage.metrics.Close)
-	first := newAckTestTimeTickMessage(t, 20, 2)
-	second := newAckTestTimeTickMessage(t, 20, 3)
-
-	storage.observeDataScannerMessage(context.Background(), first)
-	storage.observeDataScannerMessage(context.Background(), second)
-
-	require.True(t, second.LastConfirmedMessageID().EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, second.TimeTick(), storage.checkpoint.TimeTick)
-	completed := storage.ackTracker.CompletedPoint()
-	require.True(t, second.LastConfirmedMessageID().EQ(completed.MessageID))
-	assert.Equal(t, second.TimeTick(), completed.TimeTick)
-
-	snapshot := storage.consumeDirtySnapshot()
-	require.NotNil(t, snapshot)
-	require.True(t, second.LastConfirmedMessageID().EQ(snapshot.Checkpoint.MessageID))
-	require.NotNil(t, snapshot.Checkpoint.DataCheckpoint)
-	assert.True(t, second.LastConfirmedMessageID().EQ(snapshot.Checkpoint.DataCheckpoint.MessageID))
-}
-
-func TestDataScannerAdvancesBothCheckpointsAcrossSameLastConfirmedMessageID(t *testing.T) {
-	lastConfirmed := walimplstest.NewTestMessageID(1)
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: lastConfirmed,
-		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: lastConfirmed,
-			TimeTick:  10,
-		},
-	}
-	storage := newTestRecoveryStorage(t, checkpoint)
-	t.Cleanup(storage.metrics.Close)
-	msg := newAckTestTimeTickMessage(t, 20, 1)
-
-	storage.observeDataScannerMessage(context.Background(), msg)
-
-	require.True(t, lastConfirmed.EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, msg.TimeTick(), storage.checkpoint.TimeTick)
-	completed := storage.ackTracker.CompletedPoint()
-	require.True(t, lastConfirmed.EQ(completed.MessageID))
-	assert.Equal(t, msg.TimeTick(), completed.TimeTick)
-
-	snapshot := storage.consumeDirtySnapshot()
-	require.NotNil(t, snapshot)
-	require.True(t, lastConfirmed.EQ(snapshot.Checkpoint.MessageID))
-	assert.Equal(t, msg.TimeTick(), snapshot.Checkpoint.TimeTick)
-	require.NotNil(t, snapshot.Checkpoint.DataCheckpoint)
-	require.True(t, lastConfirmed.EQ(snapshot.Checkpoint.DataCheckpoint.MessageID))
-	assert.Equal(t, msg.TimeTick(), snapshot.Checkpoint.DataCheckpoint.TimeTick)
+	assert.True(t, checkpoint.MessageID.EQ(completed.MessageID))
+	assert.Equal(t, checkpoint.TimeTick, completed.TimeTick)
 }
 
 func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
 	}
 	scheduler := nodescheduler.New(1)
 	t.Cleanup(scheduler.Close)
@@ -325,8 +165,10 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	storage.SetLogger(mlog.With())
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	msg := newAckTestTimeTickMessage(t, 20, 2)
-	storage.observeDataScannerMessage(context.Background(), msg)
+	first := newAckTestTimeTickMessage(t, 20, 2)
+	storage.observeMessage(context.Background(), first)
+	module.handle.Release()
+	assert.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
 
 	var attempts []*streamingpb.WALCheckpoint
 	persistErr := errors.New("checkpoint persistence failed")
@@ -346,33 +188,35 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	err := storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel)
 	require.ErrorIs(t, err, persistErr)
 	require.NotNil(t, storage.pendingPersistSnapshot)
-	require.NotNil(t, storage.pendingPersistSnapshot.Checkpoint.DataCheckpoint)
-	assert.Equal(t, uint64(10), storage.pendingPersistSnapshot.Checkpoint.DataCheckpoint.TimeTick)
+	assert.Equal(t, uint64(20), storage.pendingPersistSnapshot.Checkpoint.TimeTick)
+	firstEndOffset := uint64(first.EstimateSize())
+	assert.Equal(t, firstEndOffset, storage.pendingPersistSnapshot.LogicalEndOffset)
 
+	second := newAckTestTimeTickMessage(t, 30, 3)
+	storage.observeMessage(context.Background(), second)
 	module.handle.Release()
-	assert.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
+	assert.Equal(t, uint64(30), storage.ackTracker.CompletedPoint().TimeTick)
 
 	require.NoError(t, storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
 	require.Len(t, attempts, 2)
 	assert.True(t, proto.Equal(attempts[0], attempts[1]))
 	assert.Nil(t, storage.pendingPersistSnapshot)
+	metrics := storage.Metrics()
+	assert.Equal(t, uint64(second.EstimateSize()), metrics.RecoveryTailBytes)
+	assert.Zero(t, metrics.BlockingBytes)
+	assert.Equal(t, uint64(second.EstimateSize()), metrics.PublishLagBytes)
 
 	followUp := storage.consumeDirtySnapshot()
 	require.NotNil(t, followUp)
-	assert.Equal(t, uint64(20), followUp.Checkpoint.TimeTick)
-	require.NotNil(t, followUp.Checkpoint.DataCheckpoint)
-	assert.Equal(t, uint64(20), followUp.Checkpoint.DataCheckpoint.TimeTick)
-	assert.True(t, msg.LastConfirmedMessageID().EQ(followUp.Checkpoint.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(30), followUp.Checkpoint.TimeTick)
+	assert.True(t, second.LastConfirmedMessageID().EQ(followUp.Checkpoint.MessageID))
+	assert.Equal(t, firstEndOffset+uint64(second.EstimateSize()), followUp.LogicalEndOffset)
 }
 
 func TestPersistBatchMarksModuleSnapshotsAfterCompoundCommit(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
@@ -412,10 +256,6 @@ func TestBuildRecoverySnapshotBatchesModuleMutations(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
@@ -453,10 +293,6 @@ func TestPersistDirtySnapshotRejectsInvalidPayloadBeforeSave(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  10,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
@@ -539,14 +375,6 @@ func (s *orderedDirtySnapshot) Payload() proto.Message {
 	return s.payload
 }
 
-func (*orderedDirtySnapshot) MetaTimeTick() uint64 {
-	return 10
-}
-
-func (*orderedDirtySnapshot) DataTimeTick() uint64 {
-	return 10
-}
-
 func (s *orderedDirtySnapshot) MarkPersisted() {
 	s.markPersisted()
 }
@@ -557,10 +385,6 @@ func assertCheckpointPointEqual(t *testing.T, expected, actual *WALCheckpoint) {
 	require.NotNil(t, actual)
 	assert.Equal(t, expected.TimeTick, actual.TimeTick)
 	assert.True(t, expected.MessageID.EQ(actual.MessageID))
-	require.NotNil(t, expected.DataCheckpoint)
-	require.NotNil(t, actual.DataCheckpoint)
-	assert.Equal(t, expected.DataCheckpoint.TimeTick, actual.DataCheckpoint.TimeTick)
-	assert.True(t, expected.DataCheckpoint.MessageID.EQ(actual.DataCheckpoint.MessageID))
 }
 
 func newAckTestTimeTickMessage(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {

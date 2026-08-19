@@ -36,7 +36,7 @@ func TestTrackerDerivesCheckpointFromMessage(t *testing.T) {
 	lastConfirmed := walimplstest.NewTestMessageID(100)
 	raw := message.CreateTestTimeTickSyncMessage(t, 1, 200, lastConfirmed).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(101))
-	tracker := NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, nil)
 
 	owner := tracker.Track(raw)
 	owner.Release()
@@ -48,12 +48,12 @@ func TestTrackerDerivesCheckpointFromMessage(t *testing.T) {
 }
 
 func TestTrackerAdvancesOnlyContinuousCompletedPrefix(t *testing.T) {
-	initial := utility.WALConsumeCheckpoint{
+	initial := utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
 	}
-	advanced := make([]utility.WALConsumeCheckpoint, 0, 2)
-	tracker := NewTracker(initial, func(point utility.WALConsumeCheckpoint) {
+	advanced := make([]utility.WALCheckpoint, 0, 2)
+	tracker := NewTracker(initial, func(point utility.WALCheckpoint) {
 		advanced = append(advanced, point)
 	}, nil)
 
@@ -86,8 +86,35 @@ func TestTrackerAdvancesOnlyContinuousCompletedPrefix(t *testing.T) {
 	assert.Zero(t, tracker.Pending())
 }
 
+func TestTrackerMaintainsLogicalByteFrontiers(t *testing.T) {
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, nil)
+	firstMessage := testMessage(t, 2, 20)
+	secondMessage := testMessage(t, 3, 30)
+	first := tracker.Track(firstMessage)
+	second := tracker.Track(secondMessage)
+	firstHandle := first.Clone()
+	secondHandle := second.Clone()
+	first.Release()
+	second.Release()
+
+	expectedObserved := uint64(firstMessage.EstimateSize() + secondMessage.EstimateSize())
+	observed, completed := tracker.LogicalOffsets()
+	assert.Equal(t, expectedObserved, observed)
+	assert.Zero(t, completed)
+
+	secondHandle.Release()
+	observed, completed = tracker.LogicalOffsets()
+	assert.Equal(t, expectedObserved, observed)
+	assert.Zero(t, completed)
+
+	firstHandle.Release()
+	point, completed := tracker.Completed()
+	assert.Equal(t, uint64(30), point.TimeTick)
+	assert.Equal(t, expectedObserved, completed)
+}
+
 func TestTrackerTreatsBroadcastAsOrdinaryTrackedMessage(t *testing.T) {
-	tracker := NewTracker(utility.WALConsumeCheckpoint{}, nil, nil)
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, nil)
 	raw := testBroadcastMessage(t, 2, 20)
 	owner := tracker.Track(raw)
 
@@ -97,7 +124,7 @@ func TestTrackerTreatsBroadcastAsOrdinaryTrackedMessage(t *testing.T) {
 }
 
 func TestTrackerCompletedPointReturnsCopy(t *testing.T) {
-	tracker := NewTracker(utility.WALConsumeCheckpoint{TimeTick: 10}, nil, nil)
+	tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10}, nil, nil)
 
 	point := tracker.CompletedPoint()
 	point.TimeTick = 100
@@ -106,12 +133,12 @@ func TestTrackerCompletedPointReturnsCopy(t *testing.T) {
 }
 
 func TestTrackerCompletedPointDoesNotRegressOnReplay(t *testing.T) {
-	initial := utility.WALConsumeCheckpoint{
+	initial := utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(3),
 		TimeTick:  30,
 	}
 	advanceCount := 0
-	tracker := NewTracker(initial, func(utility.WALConsumeCheckpoint) {
+	tracker := NewTracker(initial, func(utility.WALCheckpoint) {
 		advanceCount++
 	}, nil)
 
@@ -123,11 +150,14 @@ func TestTrackerCompletedPointDoesNotRegressOnReplay(t *testing.T) {
 	assert.Equal(t, initial.TimeTick, completed.TimeTick)
 	assert.Zero(t, advanceCount)
 	assert.Zero(t, tracker.Pending())
+	observed, completedOffset := tracker.LogicalOffsets()
+	assert.Zero(t, observed)
+	assert.Zero(t, completedOffset)
 }
 
 func TestTrackerRequestsPersistencePerStalledVChannel(t *testing.T) {
 	persister := &recordingDataPersister{}
-	tracker := NewTracker(utility.WALConsumeCheckpoint{}, nil, persister)
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, persister)
 	v1First := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 2, 20))
 	v1Second := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 3, 30))
 	v1Third := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 5, 50))
@@ -172,7 +202,7 @@ func TestTrackerRequestsPersistencePerStalledVChannel(t *testing.T) {
 
 func TestTrackerRemovesCompletedVChannelFromStallDetection(t *testing.T) {
 	persister := &recordingDataPersister{}
-	tracker := NewTracker(utility.WALConsumeCheckpoint{}, nil, persister)
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, persister)
 	v1 := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 2, 20))
 	v2Owner := tracker.Track(testVChannelMessage(t, "v2", 3, 30))
 	v2Owner.Release()
@@ -189,12 +219,29 @@ func TestTrackerRemovesCompletedVChannelFromStallDetection(t *testing.T) {
 	v1.Release()
 }
 
+func TestTrackerRequestsPendingVChannelsUnderBytePressure(t *testing.T) {
+	persister := &recordingDataPersister{}
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, persister)
+	v1First := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 2, 20))
+	v1Second := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 3, 30))
+	v2 := retainTrackedMessage(tracker, testVChannelMessage(t, "v2", 4, 40))
+
+	tracker.triggerVChannels(time.Now(), time.Hour, true)
+	assert.Equal(t, []persistRequest{
+		{vchannel: "v1", targetTimeTick: 20},
+	}, persister.snapshot())
+
+	v1First.Release()
+	v1Second.Release()
+	v2.Release()
+}
+
 func TestTrackerRunStopsWithContext(t *testing.T) {
-	tracker := NewTracker(utility.WALConsumeCheckpoint{}, nil, &recordingDataPersister{})
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, &recordingDataPersister{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		tracker.Run(ctx, time.Hour)
+		tracker.Run(ctx, time.Hour, nil)
 		close(done)
 	}()
 	cancel()

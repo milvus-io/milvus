@@ -86,6 +86,7 @@ func initResourceForTest(t *testing.T) {
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetPChannelRecoveryControlMeta(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListTransformLogMeta(mock.Anything, mock.Anything).Return(nil, nil)

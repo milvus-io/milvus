@@ -7,13 +7,11 @@ import (
 )
 
 type dirtySnapshot struct {
-	moduleName   moduleapi.ModuleName
-	key          moduleapi.SnapshotKey
-	op           moduleapi.SnapshotOp
-	payload      proto.Message
-	metaTimeTick uint64
-	dataTimeTick uint64
-	mark         func()
+	moduleName moduleapi.ModuleName
+	key        moduleapi.SnapshotKey
+	op         moduleapi.SnapshotOp
+	payload    proto.Message
+	mark       func()
 }
 
 func newDirtySnapshot(
@@ -21,18 +19,14 @@ func newDirtySnapshot(
 	key moduleapi.SnapshotKey,
 	op moduleapi.SnapshotOp,
 	payload proto.Message,
-	metaTimeTick uint64,
-	dataTimeTick uint64,
 	mark func(),
 ) *dirtySnapshot {
 	return &dirtySnapshot{
-		moduleName:   moduleName,
-		key:          key,
-		op:           op,
-		payload:      payload,
-		metaTimeTick: metaTimeTick,
-		dataTimeTick: dataTimeTick,
-		mark:         mark,
+		moduleName: moduleName,
+		key:        key,
+		op:         op,
+		payload:    payload,
+		mark:       mark,
 	}
 }
 
@@ -50,14 +44,6 @@ func (s *dirtySnapshot) Op() moduleapi.SnapshotOp {
 
 func (s *dirtySnapshot) Payload() proto.Message {
 	return s.payload
-}
-
-func (s *dirtySnapshot) MetaTimeTick() uint64 {
-	return s.metaTimeTick
-}
-
-func (s *dirtySnapshot) DataTimeTick() uint64 {
-	return s.dataTimeTick
 }
 
 func (s *dirtySnapshot) MarkPersisted() {

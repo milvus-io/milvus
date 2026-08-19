@@ -3,6 +3,9 @@ package recovery
 import (
 	"context"
 	"math"
+	"sort"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -17,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // recoverRecoveryInfoFromMeta retrieves the recovery info for the given channel.
@@ -80,10 +84,33 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return struct{}{}, nil
 	})
 
-	if err := conc.BlockOnAll(fVChannel, fSegment, fTransformLog); err != nil {
+	var pchannelControl *streamingpb.PChannelRecoveryControlMeta
+	fControl := conc.Go(func() (struct{}, error) {
+		control, err := catalog.GetPChannelRecoveryControlMeta(ctx, channelInfo.Name)
+		if err != nil {
+			return struct{}{}, merr.Wrap(err, "failed to get pchannel recovery control from catalog")
+		}
+		pchannelControl = control
+		return struct{}{}, nil
+	})
+
+	if err := conc.BlockOnAll(fVChannel, fSegment, fTransformLog, fControl); err != nil {
 		return err
 	}
-	if _, err := r.migrateLegacyRecoveryInfo(ctx, vchannelMetas, segmentMetas); err != nil {
+	if pchannelControl != nil {
+		r.installPChannelControl(pchannelControl)
+	} else if r.pchannelControl == nil {
+		r.installPChannelControl(nil)
+	}
+	if state := r.pchannelControl.GetAlterWalState(); state.GetStage() != streamingpb.AlterWALStage_NONE {
+		r.alterWALInfo = &AlterWALInfo{
+			FoundAlterWALMsg: true,
+			TargetWALName:    state.GetTargetWalName(),
+			AlterWALConfig:   state.GetConfigs(),
+			AlterWALTs:       state.GetTimeTick(),
+		}
+	}
+	if _, err := r.migrateLegacyRecoveryInfo(ctx, vchannelMetas, segmentMetas, transformLogMetas); err != nil {
 		return err
 	}
 	if err := validateRecoveredViewMeta(
@@ -123,19 +150,17 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 	ctx context.Context,
 	vchannels map[string]*streamingpb.VChannelMeta,
 	segments map[int64]*streamingpb.SegmentAssignmentMeta,
+	transformLogs map[string]*streamingpb.VChannelTransformLogMeta,
 ) (bool, error) {
 	if r.checkpoint == nil {
 		return false, merr.WrapErrDataIntegrityMsg("missing recovery checkpoint")
 	}
-	if r.checkpoint.DataCheckpoint != nil {
-		if r.checkpoint.DataCheckpoint.MessageID == nil {
-			return false, merr.WrapErrDataIntegrityMsg("recovery data checkpoint missing message id")
-		}
+	if r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2 {
 		return false, nil
 	}
 	if r.checkpoint.Magic != utility.RecoveryMagicStreamingInitialized {
 		return false, merr.WrapErrDataIntegrityMsg(
-			"recovery checkpoint missing data checkpoint at magic %d",
+			"unsupported recovery checkpoint magic %d",
 			r.checkpoint.Magic,
 		)
 	}
@@ -145,46 +170,272 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 		return false, err
 	}
 
-	dataCheckpoint := &utility.WALConsumeCheckpoint{
+	checkpoint := &utility.WALCheckpoint{
 		MessageID: r.checkpoint.MessageID,
 		TimeTick:  r.checkpoint.TimeTick,
 	}
+	vchannelCheckpoints := make(map[string]*utility.WALCheckpoint, len(vchannels))
 	for vchannelName, vchannel := range vchannels {
 		if vchannel.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 			continue
 		}
-		vchannelCheckpoint, err := r.getLegacyVChannelDataCheckpoint(ctx, vchannelName)
+		vchannelCheckpoint, err := r.getLegacyVChannelCheckpoint(ctx, vchannelName)
 		if err != nil {
-			return false, merr.Wrapf(err, "get legacy data checkpoint for vchannel %s", vchannelName)
+			return false, merr.Wrapf(err, "get legacy checkpoint for vchannel %s", vchannelName)
 		}
-		if vchannelCheckpoint.MessageID.WALName() != dataCheckpoint.MessageID.WALName() {
+		if vchannelCheckpoint.MessageID.WALName() != checkpoint.MessageID.WALName() {
 			return false, merr.WrapErrDataIntegrityMsg(
-				"legacy data checkpoint WAL mismatch for vchannel %s: expected %s, got %s",
+				"legacy checkpoint WAL mismatch for vchannel %s: expected %s, got %s",
 				vchannelName,
-				dataCheckpoint.MessageID.WALName(),
+				checkpoint.MessageID.WALName(),
 				vchannelCheckpoint.MessageID.WALName(),
 			)
 		}
-		if vchannelCheckpoint.MessageID.LT(dataCheckpoint.MessageID) {
-			dataCheckpoint = vchannelCheckpoint
+		if vchannelCheckpoint.MessageID.LT(checkpoint.MessageID) {
+			checkpoint = vchannelCheckpoint
 		}
+		vchannelCheckpoints[vchannelName] = vchannelCheckpoint
 	}
 
-	migratedCheckpoint := r.checkpoint.Clone()
+	normalizedSegments, removedSegmentIDs, err := r.rebuildLegacySegmentSnapshots(ctx, segments)
+	if err != nil {
+		return false, err
+	}
+	replaceSegmentSnapshots(segments, normalizedSegments)
+	normalizedTransformLogs, removedTransformLogs := rebuildLegacyTransformLogSnapshots(transformLogs, vchannelCheckpoints)
+	replaceTransformLogSnapshots(transformLogs, normalizedTransformLogs)
+
+	migratedCheckpoint := checkpoint.Clone()
 	migratedCheckpoint.Magic = utility.RecoveryMagicRecoveryStorageV2
-	migratedCheckpoint.DataCheckpoint = dataCheckpoint.Clone()
-	if err := r.persistLegacyRecoveryMigration(ctx, vchannels, migratedCheckpoint); err != nil {
+	if err := r.persistLegacyRecoveryMigration(ctx, &legacyRecoveryMigration{
+		vchannels:            vchannels,
+		segments:             normalizedSegments,
+		removedSegmentIDs:    removedSegmentIDs,
+		transformLogs:        normalizedTransformLogs,
+		removedTransformLogs: removedTransformLogs,
+		checkpoint:           migratedCheckpoint,
+	}); err != nil {
 		return false, merr.Wrap(err, "persist legacy recovery migration")
 	}
 
 	r.installCheckpoint(migratedCheckpoint)
-	r.persistedCheckpoint = migratedCheckpoint.Clone()
-	r.checkpointDirty = false
 	r.Logger().Info(ctx, "legacy recovery metadata migrated",
-		mlog.String("dataCheckpoint", dataCheckpoint.MessageID.String()),
-		mlog.Uint64("dataCheckpointTimeTick", dataCheckpoint.TimeTick),
+		mlog.String("checkpoint", checkpoint.MessageID.String()),
+		mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
 	)
 	return true, nil
+}
+
+type legacyRecoveryMigration struct {
+	vchannels            map[string]*streamingpb.VChannelMeta
+	segments             map[int64]*streamingpb.SegmentAssignmentMeta
+	removedSegmentIDs    []int64
+	transformLogs        map[string]*streamingpb.VChannelTransformLogMeta
+	removedTransformLogs []string
+	checkpoint           *utility.WALCheckpoint
+}
+
+func (r *recoveryStorageImpl) rebuildLegacySegmentSnapshots(
+	ctx context.Context,
+	legacy map[int64]*streamingpb.SegmentAssignmentMeta,
+) (map[int64]*streamingpb.SegmentAssignmentMeta, []int64, error) {
+	if len(legacy) == 0 {
+		return nil, nil, nil
+	}
+	segmentIDs := make([]int64, 0, len(legacy))
+	for segmentID := range legacy {
+		segmentIDs = append(segmentIDs, segmentID)
+	}
+	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
+
+	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp, err := coord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       segmentIDs,
+		IncludeUnHealthy: true,
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		return nil, nil, err
+	}
+	durable := make(map[int64]*datapb.SegmentInfo, len(resp.GetInfos()))
+	for _, info := range resp.GetInfos() {
+		if _, ok := durable[info.GetID()]; ok {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("duplicate DataCoord segment %d during recovery migration", info.GetID())
+		}
+		durable[info.GetID()] = info
+	}
+
+	normalized := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(legacy))
+	removed := make([]int64, 0)
+	for _, segmentID := range segmentIDs {
+		info, ok := durable[segmentID]
+		if !ok {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("legacy recovery segment %d is missing from DataCoord", segmentID)
+		}
+		snapshot, keep, err := rebuildLegacySegmentSnapshot(legacy[segmentID], info)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !keep {
+			removed = append(removed, segmentID)
+			continue
+		}
+		normalized[segmentID] = snapshot
+	}
+	return normalized, removed, nil
+}
+
+func rebuildLegacySegmentSnapshot(
+	legacy *streamingpb.SegmentAssignmentMeta,
+	durable *datapb.SegmentInfo,
+) (*streamingpb.SegmentAssignmentMeta, bool, error) {
+	if legacy.GetSegmentId() != durable.GetID() ||
+		legacy.GetCollectionId() != durable.GetCollectionID() ||
+		legacy.GetPartitionId() != durable.GetPartitionID() ||
+		legacy.GetVchannel() != durable.GetInsertChannel() {
+		return nil, false, merr.WrapErrDataIntegrityMsg(
+			"legacy recovery segment %d ownership mismatches DataCoord",
+			legacy.GetSegmentId(),
+		)
+	}
+	switch durable.GetState() {
+	case commonpb.SegmentState_Flushed, commonpb.SegmentState_Dropped:
+		return nil, false, nil
+	case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing:
+	default:
+		return nil, false, merr.WrapErrDataIntegrityMsg(
+			"legacy recovery segment %d has unsupported DataCoord state %s",
+			legacy.GetSegmentId(),
+			durable.GetState().String(),
+		)
+	}
+	if durable.GetNumOfRows() < 0 {
+		return nil, false, merr.WrapErrDataIntegrityMsg("legacy recovery segment %d has negative row count", legacy.GetSegmentId())
+	}
+
+	createTimeTick := legacy.GetStat().GetCreateSegmentTimeTick()
+	checkpointTimeTick := createTimeTick
+	if dmlTimeTick := durable.GetDmlPosition().GetTimestamp(); dmlTimeTick > checkpointTimeTick {
+		checkpointTimeTick = dmlTimeTick
+	}
+	if checkpointTimeTick == 0 {
+		return nil, false, merr.WrapErrDataIntegrityMsg("legacy recovery segment %d has no durable checkpoint", legacy.GetSegmentId())
+	}
+	if durable.GetNumOfRows() > 0 && durable.GetDmlPosition().GetTimestamp() == 0 {
+		return nil, false, merr.WrapErrDataIntegrityMsg("legacy recovery segment %d has rows without a DML position", legacy.GetSegmentId())
+	}
+
+	stat := proto.Clone(legacy.GetStat()).(*streamingpb.SegmentAssignmentStat)
+	stat.ModifiedRows = uint64(durable.GetNumOfRows())
+	stat.ModifiedBinarySize = legacyDurableBinarySize(durable)
+	stat.LastModifiedTimestamp = tsoutil.PhysicalTime(checkpointTimeTick).Unix()
+	if durable.GetLevel() != datapb.SegmentLevel_Legacy {
+		stat.Level = durable.GetLevel()
+	}
+	storageVersion := durable.GetStorageVersion()
+	if storageVersion == 0 {
+		storageVersion = legacy.GetStorageVersion()
+	}
+	return &streamingpb.SegmentAssignmentMeta{
+		CollectionId:       legacy.GetCollectionId(),
+		PartitionId:        legacy.GetPartitionId(),
+		SegmentId:          legacy.GetSegmentId(),
+		Vchannel:           legacy.GetVchannel(),
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		Stat:               stat,
+		StorageVersion:     storageVersion,
+		CheckpointTimeTick: checkpointTimeTick,
+		PersistedStorage:   legacyPersistedStorage(durable, createTimeTick, checkpointTimeTick),
+	}, true, nil
+}
+
+func legacyPersistedStorage(info *datapb.SegmentInfo, fromTimeTick, toTimeTick uint64) *streamingpb.L1SegmentPersistedStorage {
+	storage := &streamingpb.L1SegmentPersistedStorage{
+		ManifestPath: info.GetManifestPath(),
+		Statistics:   cloneStatistics(info.GetStats()),
+		DeltaBinlog:  cloneFieldBinlogs(info.GetDeltalogs()),
+	}
+	if len(info.GetBinlogs()) > 0 || len(info.GetStatslogs()) > 0 || len(info.GetBm25Statslogs()) > 0 {
+		storage.Binlogs = []*streamingpb.L1SegmentBinLogs{{
+			FieldBinlog:  cloneFieldBinlogs(info.GetBinlogs()),
+			StatsBinlog:  cloneFieldBinlogs(info.GetStatslogs()),
+			Bm25Binlog:   cloneFieldBinlogs(info.GetBm25Statslogs()),
+			FromTimeTick: fromTimeTick,
+			ToTimeTick:   toTimeTick,
+		}}
+	}
+	return storage
+}
+
+func cloneFieldBinlogs(values []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make([]*datapb.FieldBinlog, 0, len(values))
+	for _, value := range values {
+		cloned = append(cloned, proto.Clone(value).(*datapb.FieldBinlog))
+	}
+	return cloned
+}
+
+func cloneStatistics(value *datapb.Statistics) *datapb.Statistics {
+	if value == nil {
+		return nil
+	}
+	return proto.Clone(value).(*datapb.Statistics)
+}
+
+func legacyDurableBinarySize(info *datapb.SegmentInfo) uint64 {
+	if size := info.GetStats().GetInsertBinlogSize(); size > 0 {
+		return uint64(size)
+	}
+	var size uint64
+	for _, field := range info.GetBinlogs() {
+		for _, binlog := range field.GetBinlogs() {
+			if binlog.GetMemorySize() > 0 {
+				size += uint64(binlog.GetMemorySize())
+			}
+		}
+	}
+	return size
+}
+
+func rebuildLegacyTransformLogSnapshots(
+	legacy map[string]*streamingpb.VChannelTransformLogMeta,
+	vchannelCheckpoints map[string]*utility.WALCheckpoint,
+) (map[string]*streamingpb.VChannelTransformLogMeta, []string) {
+	normalized := make(map[string]*streamingpb.VChannelTransformLogMeta, len(vchannelCheckpoints))
+	for vchannel, checkpoint := range vchannelCheckpoints {
+		normalized[vchannel] = &streamingpb.VChannelTransformLogMeta{
+			CheckpointTimeTick:   checkpoint.TimeTick,
+			TruncateTimeTick:     checkpoint.TimeTick,
+			MaterializedTimeTick: checkpoint.TimeTick,
+		}
+	}
+	removed := make([]string, 0)
+	for vchannel := range legacy {
+		if _, ok := normalized[vchannel]; !ok {
+			removed = append(removed, vchannel)
+		}
+	}
+	sort.Strings(removed)
+	return normalized, removed
+}
+
+func replaceSegmentSnapshots(target, source map[int64]*streamingpb.SegmentAssignmentMeta) {
+	clear(target)
+	for segmentID, snapshot := range source {
+		target[segmentID] = snapshot
+	}
+}
+
+func replaceTransformLogSnapshots(target, source map[string]*streamingpb.VChannelTransformLogMeta) {
+	clear(target)
+	for vchannel, snapshot := range source {
+		target[vchannel] = snapshot
+	}
 }
 
 func normalizeLegacyRecoveredViewMeta(
@@ -204,10 +455,10 @@ func normalizeLegacyRecoveredViewMeta(
 	}
 }
 
-func (r *recoveryStorageImpl) getLegacyVChannelDataCheckpoint(
+func (r *recoveryStorageImpl) getLegacyVChannelCheckpoint(
 	ctx context.Context,
 	vchannel string,
-) (*utility.WALConsumeCheckpoint, error) {
+) (*utility.WALCheckpoint, error) {
 	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
 		return nil, err
@@ -216,14 +467,14 @@ func (r *recoveryStorageImpl) getLegacyVChannelDataCheckpoint(
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
-	return legacyDataCheckpointFromPosition(vchannel, resp.GetInfo().GetSeekPosition(), r.checkpoint.MessageID.WALName())
+	return legacyCheckpointFromPosition(vchannel, resp.GetInfo().GetSeekPosition(), r.checkpoint.MessageID.WALName())
 }
 
-func legacyDataCheckpointFromPosition(
+func legacyCheckpointFromPosition(
 	vchannel string,
 	position *msgpb.MsgPosition,
 	walName message.WALName,
-) (*utility.WALConsumeCheckpoint, error) {
+) (*utility.WALCheckpoint, error) {
 	if position == nil {
 		return nil, merr.WrapErrDataIntegrityMsg("legacy vchannel %s missing seek position", vchannel)
 	}
@@ -250,7 +501,7 @@ func legacyDataCheckpointFromPosition(
 	if messageID == nil {
 		return nil, merr.WrapErrDataIntegrityMsg("legacy vchannel %s seek position has unsupported message id", vchannel)
 	}
-	return &utility.WALConsumeCheckpoint{
+	return &utility.WALCheckpoint{
 		MessageID: messageID,
 		TimeTick:  position.GetTimestamp(),
 	}, nil
@@ -258,12 +509,16 @@ func legacyDataCheckpointFromPosition(
 
 func (r *recoveryStorageImpl) persistLegacyRecoveryMigration(
 	ctx context.Context,
-	vchannels map[string]*streamingpb.VChannelMeta,
-	checkpoint *utility.WALCheckpoint,
+	migration *legacyRecoveryMigration,
 ) error {
 	return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
-		VChannels:         vchannels,
-		ConsumeCheckpoint: checkpoint.IntoProto(),
+		PChannelControlMeta:  clonePChannelControl(r.pchannelControl),
+		VChannels:            migration.vchannels,
+		SegmentAssignments:   migration.segments,
+		RemovedSegmentIDs:    migration.removedSegmentIDs,
+		TransformLogMetas:    migration.transformLogs,
+		RemovedTransformLogs: migration.removedTransformLogs,
+		ConsumeCheckpoint:    migration.checkpoint.IntoProto(),
 	})
 }
 
@@ -372,9 +627,6 @@ func validateRecoveredViewMeta(
 			}
 			if segment.GetCheckpointTimeTick() < segment.GetTombstoneTimeTick() {
 				return merr.WrapErrDataIntegrityMsg("tombstoned segment checkpoint before tombstone timetick in recovery meta: %d", segmentID)
-			}
-			if segment.GetDataCheckpointTimeTick() < segment.GetTombstoneTimeTick() {
-				return merr.WrapErrDataIntegrityMsg("tombstoned segment data checkpoint before tombstone timetick in recovery meta: %d", segmentID)
 			}
 		}
 		createTimeTick := segment.GetStat().GetCreateSegmentTimeTick()

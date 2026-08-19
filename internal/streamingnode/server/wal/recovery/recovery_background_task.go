@@ -78,10 +78,18 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
 		dirtySnapshot.MarkPersisted()
 	}
+	if snapshot.ControlDirty {
+		rs.mu.Lock()
+		rs.persistedControl = clonePChannelControl(snapshot.PChannelControl)
+		rs.mu.Unlock()
+	}
 	if snapshot.CheckpointDirty {
 		rs.mu.Lock()
-		rs.persistedCheckpoint = snapshot.Checkpoint.Clone()
+		rs.checkpoint = snapshot.Checkpoint.Clone()
 		rs.mu.Unlock()
+		if rs.tailController != nil {
+			rs.tailController.Publish(snapshot.LogicalEndOffset)
+		}
 		rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
 		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
 	}
@@ -209,6 +217,9 @@ func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnaps
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
 	}
+	if snapshot.ControlDirty {
+		recoverySnapshot.PChannelControlMeta = clonePChannelControl(snapshot.PChannelControl)
+	}
 	if snapshot.CheckpointDirty {
 		recoverySnapshot.ConsumeCheckpoint = snapshot.Checkpoint.IntoProto()
 	}
@@ -222,10 +233,10 @@ func (rs *recoveryStorageImpl) saveRecoverySnapshot(ctx context.Context, snapsho
 }
 
 func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, checkpoint *WALCheckpoint) {
-	if rs.truncator == nil || checkpoint.DataCheckpoint == nil || checkpoint.DataCheckpoint.MessageID == nil {
+	if rs.truncator == nil || checkpoint == nil || checkpoint.MessageID == nil {
 		return
 	}
-	_ = rs.truncator.Truncate(ctx, checkpoint.DataCheckpoint.MessageID)
+	_ = rs.truncator.Truncate(ctx, checkpoint.MessageID)
 }
 
 func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {

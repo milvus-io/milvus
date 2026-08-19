@@ -8177,6 +8177,9 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 	WALRecoveryTaskConcurrency           ParamItem `refreshable:"true"`
+	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
+	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
+	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -8608,6 +8611,33 @@ This no-op setting is retained so existing configurations remain loadable.`,
 		Export:       true,
 	}
 	p.WALRecoveryTaskConcurrency.Init(base.mgr)
+
+	p.WALRecoveryTailLowWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.lowWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.",
+		DefaultValue: "4g",
+		Export:       true,
+	}
+	p.WALRecoveryTailLowWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailSoftWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.softWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "8g",
+		Export:       true,
+	}
+	p.WALRecoveryTailSoftWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailHighWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.highWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "16g",
+		Export:       true,
+	}
+	p.WALRecoveryTailHighWatermark.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",

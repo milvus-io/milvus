@@ -191,7 +191,7 @@ func TestRecoveryBarrierConfirmsBufferedMessages(t *testing.T) {
 	assert.Equal(t, barrier, scanner.pendingQueue.Next())
 }
 
-func TestTimeTickConfirmsBufferedMessagesWithoutEnteringPendingQueue(t *testing.T) {
+func TestTimeTickPreservesLegacyDeliverySemantics(t *testing.T) {
 	scanner := &scannerAdaptorImpl{
 		logger: mlog.With(),
 		readOption: wal.ReadOption{
@@ -213,10 +213,16 @@ func TestTimeTickConfirmsBufferedMessagesWithoutEnteringPendingQueue(t *testing.
 	scanner.handleUpstream(timeTick)
 
 	assert.Equal(t, 0, scanner.reorderBuffer.Len())
-	assert.Equal(t, 1, scanner.pendingQueue.Len())
+	assert.Equal(t, 2, scanner.pendingQueue.Len())
 	assert.Equal(t, msg, scanner.pendingQueue.Next())
 	scanner.pendingQueue.UnsafeAdvance()
-	assert.Equal(t, 0, scanner.pendingQueue.Len())
+	assert.Equal(t, timeTick, scanner.pendingQueue.Next())
+
+	scanner.pendingQueue.UnsafeAdvance()
+	nonPersistedTimeTick := newScannerTestMessage(t, 30, "", message.MessageTypeTimeTick, false)
+	scanner.handleUpstream(nonPersistedTimeTick)
+	assert.Equal(t, 1, scanner.pendingQueue.Len())
+	assert.Equal(t, nonPersistedTimeTick, scanner.pendingQueue.Next())
 }
 
 func newScannerTestMessage(

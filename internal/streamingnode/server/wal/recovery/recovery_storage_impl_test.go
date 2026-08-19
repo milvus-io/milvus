@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	messageadaptor "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -61,13 +62,8 @@ func TestConsumeDirtySnapshotUsesLastPersistedPhysicalCheckpointsForCleanup(t *t
 	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(10),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(9),
-			TimeTick:  9,
-		},
+		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	})
-	storage.checkpoint.TimeTick = 100
-	storage.checkpoint.DataCheckpoint.TimeTick = 90
 	var cleanup moduleapi.CleanupContext
 	mock := mockey.Mock((*vchannel.PChannelRecoveryManager).ConsumeCleanupSnapshots).To(func(
 		_ *vchannel.PChannelRecoveryManager,
@@ -79,18 +75,13 @@ func TestConsumeDirtySnapshotUsesLastPersistedPhysicalCheckpointsForCleanup(t *t
 	defer mock.UnPatch()
 
 	assert.Nil(t, storage.consumeDirtySnapshot())
-	assert.Equal(t, uint64(10), cleanup.MetaPhysicalTimeTick)
-	assert.Equal(t, uint64(9), cleanup.DataPhysicalTimeTick)
+	assert.Equal(t, uint64(10), cleanup.PhysicalTimeTick)
 }
 
 func TestRecoveryStorageCloseDoesNotPersist(t *testing.T) {
 	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(10),
 		TimeTick:  10,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(9),
-			TimeTick:  9,
-		},
 	})
 	storage.cfg.persistInterval = time.Hour
 	storage.mu.Lock()
@@ -112,6 +103,23 @@ func TestRecoveryStorageCloseDoesNotPersist(t *testing.T) {
 	storage.Close()
 
 	assert.Zero(t, persisted)
+}
+
+func TestGetCheckpointReturnsPublishedPoint(t *testing.T) {
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(10),
+		TimeTick:  10,
+		Magic:     utility.RecoveryMagicRecoveryStorageV2,
+	})
+	msg := newAckTestTimeTickMessage(t, 20, 20)
+	owner := storage.ackTracker.Track(msg)
+	owner.Release()
+	require.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
+
+	checkpoint := storage.GetCheckpoint(context.Background())
+	require.NotNil(t, checkpoint)
+	assert.Equal(t, uint64(10), checkpoint.TimeTick)
+	assert.True(t, walimplstest.NewTestMessageID(10).EQ(checkpoint.MessageID))
 }
 
 func (b *recordingRecoveryStreamBuilder) WALName() message.WALName {
@@ -178,14 +186,10 @@ func (s *blockingRecoveryStream) Close() error {
 	return nil
 }
 
-func TestRecoveryStorageCloseWaitsForDataLiveScanner(t *testing.T) {
+func TestRecoveryStorageCloseWaitsForLiveScanner(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(2),
-			TimeTick:  2,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	storage.cfg.persistInterval = time.Hour
@@ -193,7 +197,7 @@ func TestRecoveryStorageCloseWaitsForDataLiveScanner(t *testing.T) {
 		ch:     make(chan message.ImmutableMessage),
 		closed: make(chan struct{}),
 	}
-	storage.startDataLiveScanner(
+	storage.startLiveScanner(
 		&recordingRecoveryStreamBuilder{stream: stream},
 		newAckTestTimeTickMessage(t, 3, 3),
 	)
@@ -204,7 +208,7 @@ func TestRecoveryStorageCloseWaitsForDataLiveScanner(t *testing.T) {
 	select {
 	case <-stream.closed:
 	default:
-		t.Fatal("data live scanner is still running after recovery storage close")
+		t.Fatal("live scanner is still running after recovery storage close")
 	}
 }
 
@@ -238,10 +242,6 @@ func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(2),
-			TimeTick:  2,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
@@ -249,23 +249,19 @@ func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 
 	builder := &recordingRecoveryStreamBuilder{}
 	recoveryBarrier := newAckTestTimeTickMessage(t, 3, 3)
-	storage.startDataLiveScanner(builder, recoveryBarrier)
-	storage.dataScannerWG.Wait()
+	storage.startLiveScanner(builder, recoveryBarrier)
+	storage.scannerWG.Wait()
 
 	assert.True(t, builder.param.UseWriteAheadBuffer)
-	assert.True(t, checkpoint.DataCheckpoint.MessageID.EQ(builder.param.StartCheckpoint))
+	assert.True(t, recoveryBarrier.MessageID().EQ(builder.param.StartCheckpoint))
+	assert.True(t, builder.param.StartAfter)
 	assert.Equal(t, uint64(0), builder.param.EndTimeTick)
-	assert.Equal(t, recoveryBarrier.TimeTick(), storage.dataRecoveryBarrierTimeTick)
 }
 
 func TestRecoveryStorageCompletesMessageWithoutConsumerRefs(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  1,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
@@ -280,10 +276,8 @@ func TestRecoveryStorageCompletesMessageWithoutConsumerRefs(t *testing.T) {
 	msg := mutableMsg.WithTimeTick(2).WithLastConfirmed(lastConfirmed).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(3))
 
-	storage.observeDataScannerMessage(context.Background(), msg)
+	storage.observeMessage(context.Background(), msg)
 
-	assert.True(t, lastConfirmed.EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(2), storage.checkpoint.TimeTick)
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, lastConfirmed.EQ(completed.MessageID))
 	assert.Equal(t, uint64(2), completed.TimeTick)
@@ -293,10 +287,6 @@ func TestRecoveryStorageExposesVChannelRecoveryManager(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  1,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
@@ -338,7 +328,7 @@ func TestRecoveryStorageStartsVChannelDataRecovery(t *testing.T) {
 	require.NoError(t, err)
 	storage.vchannelManager = manager
 
-	snapshot := storage.startDataRecovery()
+	snapshot := storage.buildInitialRecoverySnapshot()
 
 	require.NotNil(t, snapshot.WritePathRecovery)
 	assert.Contains(t, snapshot.WritePathRecovery.VChannels, "v1")
@@ -347,90 +337,10 @@ func TestRecoveryStorageStartsVChannelDataRecovery(t *testing.T) {
 	assert.Contains(t, snapshot.WritePathRecovery.GrowingSegments, int64(2))
 }
 
-func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T) {
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(1),
-		TimeTick:  1,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  1,
-		},
-	}
-	storage := newTestRecoveryStorage(t, checkpoint)
-	defer storage.metrics.Close()
-	defer storage.taskScheduler.Close()
-	lastConfirmed := walimplstest.NewTestMessageID(2)
-	mutableMsg, err := message.NewTimeTickMessageBuilderV1().
-		WithHeader(&message.TimeTickMessageHeader{}).
-		WithVChannel("test-vchannel").
-		WithBody(&msgpb.TimeTickMsg{}).
-		BuildMutable()
-	require.NoError(t, err)
-	msg := mutableMsg.WithTimeTick(2).WithLastConfirmed(lastConfirmed).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(3))
-
-	storage.observeMetaScannerMessage(context.Background(), msg)
-
-	assert.True(t, lastConfirmed.EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(2), storage.checkpoint.TimeTick)
-	completed := storage.ackTracker.CompletedPoint()
-	assert.True(t, walimplstest.NewTestMessageID(1).EQ(completed.MessageID))
-	assert.Equal(t, uint64(1), completed.TimeTick)
-}
-
-func TestRecoveryStorageSelectsObserveModeByRecoveryBarrierTimeTick(t *testing.T) {
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(1),
-		TimeTick:  1,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:  1,
-		},
-	}
-	storage := newTestRecoveryStorage(t, checkpoint)
-	storage.dataRecoveryBarrierTimeTick = 20
-	var modes []moduleapi.ObserveMode
-	mock := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(
-		_ *vchannel.PChannelRecoveryManager,
-		_ context.Context,
-		_ message.RetainedImmutableMessage,
-		mode moduleapi.ObserveMode,
-	) {
-		modes = append(modes, mode)
-	}).Build()
-	defer mock.UnPatch()
-
-	storage.observeDataScannerMessage(context.Background(), newRecoveryTestBarrier(10))
-	storage.observeDataScannerMessage(context.Background(), newRecoveryTestBarrier(20))
-	storage.observeDataScannerMessage(context.Background(), newRecoveryTestBarrier(30))
-
-	require.Equal(t, []moduleapi.ObserveMode{
-		moduleapi.ObserveModeDataOnly,
-		moduleapi.ObserveModeDataOnly,
-		moduleapi.ObserveModeMetaAndData,
-	}, modes)
-}
-
-func newRecoveryTestBarrier(timetick uint64) message.ImmutableMessage {
-	messageID := int64(timetick)
-	return message.NewRecoveryBarrierMessageBuilderV2().
-		WithHeader(&message.RecoveryBarrierMessageHeader{}).
-		WithBody(&message.RecoveryBarrierMessageBody{}).
-		WithAllVChannel().
-		MustBuildMutable().
-		WithTimeTick(timetick).
-		WithLastConfirmed(walimplstest.NewTestMessageID(messageID - 1)).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(messageID))
-}
-
 func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(10),
 		TimeTick:  100,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(10),
-			TimeTick:  100,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
@@ -457,9 +367,6 @@ func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModule
 			return false
 		}
 	}, time.Second, 10*time.Millisecond)
-	storage.mu.Lock()
-	assert.True(t, storage.moduleDirty)
-	storage.mu.Unlock()
 }
 
 func newRecoveryTestVChannelMeta(vchannel string, collectionID int64) *streamingpb.VChannelMeta {
@@ -571,7 +478,7 @@ func TestValidateRecoveredViewMetaAllowsOnlyMigratedLegacySchemaBaseline(t *test
 	require.Error(t, err)
 }
 
-func TestMigrateLegacyRecoveryInfoUsesSafeDataCheckpoint(t *testing.T) {
+func TestMigrateLegacyRecoveryInfoUsesSafeCheckpoint(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(100),
 		TimeTick:  100,
@@ -590,15 +497,15 @@ func TestMigrateLegacyRecoveryInfoUsesSafeDataCheckpoint(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(legacyPartitionBytes, vchannels["v1"].CollectionInfo.Partitions[0]))
 	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_UNKNOWN, vchannels["v1"].CollectionInfo.Partitions[0].GetState())
 
-	checkpoints := map[string]*utility.WALConsumeCheckpoint{
+	checkpoints := map[string]*utility.WALCheckpoint{
 		"v1": {MessageID: walimplstest.NewTestMessageID(80), TimeTick: 80},
 		"v2": {MessageID: walimplstest.NewTestMessageID(20), TimeTick: 20},
 	}
-	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelDataCheckpoint).To(func(
+	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).To(func(
 		_ *recoveryStorageImpl,
 		_ context.Context,
 		vchannel string,
-	) (*utility.WALConsumeCheckpoint, error) {
+	) (*utility.WALCheckpoint, error) {
 		return checkpoints[vchannel].Clone(), nil
 	}).Build()
 	defer getCheckpointMock.UnPatch()
@@ -606,37 +513,155 @@ func TestMigrateLegacyRecoveryInfoUsesSafeDataCheckpoint(t *testing.T) {
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).To(func(
 		_ *recoveryStorageImpl,
 		_ context.Context,
-		_ map[string]*streamingpb.VChannelMeta,
-		checkpoint *utility.WALCheckpoint,
+		migration *legacyRecoveryMigration,
 	) error {
-		persisted = checkpoint.Clone()
+		persisted = migration.checkpoint.Clone()
 		return nil
 	}).Build()
 	defer persistMock.UnPatch()
 
-	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil)
+	transformLogs := make(map[string]*streamingpb.VChannelTransformLogMeta)
+	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil, transformLogs)
 
 	require.NoError(t, err)
 	require.True(t, migrated)
 	require.NotNil(t, persisted)
 	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, persisted.Magic)
-	require.NotNil(t, persisted.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(20).EQ(persisted.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(20), persisted.DataCheckpoint.TimeTick)
-	require.NotNil(t, storage.checkpoint.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.DataCheckpoint.MessageID))
+	assert.True(t, walimplstest.NewTestMessageID(20).EQ(persisted.MessageID))
+	assert.Equal(t, uint64(20), persisted.TimeTick)
+	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.MessageID))
 	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, storage.checkpoint.Magic)
-	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.persistedCheckpoint.DataCheckpoint.MessageID))
+	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.MessageID))
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(completed.MessageID))
 	assert.Equal(t, uint64(20), completed.TimeTick)
-	assert.False(t, storage.checkpointDirty)
 	assert.Equal(t, uint64(100), vchannels["v1"].GetCheckpointTimeTick())
 	assert.Equal(t, streamingpb.PartitionState_PARTITION_STATE_NORMAL, vchannels["v1"].CollectionInfo.Partitions[0].GetState())
 	assert.Equal(t, uint64(0), vchannels["v1"].CollectionInfo.Schemas[0].GetCheckpointTimeTick())
+	assert.Equal(t, uint64(80), transformLogs["v1"].GetCheckpointTimeTick())
+	assert.Equal(t, uint64(20), transformLogs["v2"].GetCheckpointTimeTick())
 }
 
-func TestMigrateLegacyRecoveryInfoCapsDataCheckpointAtMetadataCheckpoint(t *testing.T) {
+func TestRebuildLegacySegmentSnapshotUsesDataCoordDurableState(t *testing.T) {
+	legacy := &streamingpb.SegmentAssignmentMeta{
+		CollectionId:       1,
+		PartitionId:        2,
+		SegmentId:          3,
+		Vchannel:           "v1",
+		StorageVersion:     1,
+		CheckpointTimeTick: 100,
+		Stat: &streamingpb.SegmentAssignmentStat{
+			MaxBinarySize:         1024,
+			MaxRows:               1000,
+			ModifiedRows:          100,
+			ModifiedBinarySize:    200,
+			BinlogCounter:         7,
+			CreateSegmentTimeTick: 10,
+		},
+	}
+	insertBinlog := &datapb.FieldBinlog{
+		FieldID: 100,
+		Binlogs: []*datapb.Binlog{{
+			LogID:      11,
+			MemorySize: 400,
+		}},
+	}
+	statsBinlog := &datapb.FieldBinlog{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 12}}}
+	bm25Binlog := &datapb.FieldBinlog{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 13}}}
+	deltaBinlog := &datapb.FieldBinlog{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 14}}}
+	statistics := &datapb.Statistics{InsertBinlogSize: 456, InsertBinlogCount: 1}
+	durable := &datapb.SegmentInfo{
+		ID:             3,
+		CollectionID:   1,
+		PartitionID:    2,
+		InsertChannel:  "v1",
+		NumOfRows:      40,
+		State:          commonpb.SegmentState_Sealed,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: 2,
+		DmlPosition:    &msgpb.MsgPosition{Timestamp: 50},
+		Binlogs:        []*datapb.FieldBinlog{insertBinlog},
+		Statslogs:      []*datapb.FieldBinlog{statsBinlog},
+		Bm25Statslogs:  []*datapb.FieldBinlog{bm25Binlog},
+		Deltalogs:      []*datapb.FieldBinlog{deltaBinlog},
+		Stats:          statistics,
+		ManifestPath:   "manifest-path",
+	}
+
+	snapshot, keep, err := rebuildLegacySegmentSnapshot(legacy, durable)
+
+	require.NoError(t, err)
+	require.True(t, keep)
+	require.NotNil(t, snapshot)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, snapshot.GetState())
+	assert.Equal(t, uint64(50), snapshot.GetCheckpointTimeTick())
+	assert.Equal(t, uint64(40), snapshot.GetStat().GetModifiedRows())
+	assert.Equal(t, uint64(456), snapshot.GetStat().GetModifiedBinarySize())
+	assert.Equal(t, uint64(7), snapshot.GetStat().GetBinlogCounter())
+	assert.Equal(t, uint64(1024), snapshot.GetStat().GetMaxBinarySize())
+	assert.Equal(t, uint64(1000), snapshot.GetStat().GetMaxRows())
+	assert.Equal(t, datapb.SegmentLevel_L1, snapshot.GetStat().GetLevel())
+	assert.Equal(t, int64(2), snapshot.GetStorageVersion())
+	storage := snapshot.GetPersistedStorage()
+	require.Len(t, storage.GetBinlogs(), 1)
+	assert.Equal(t, uint64(10), storage.GetBinlogs()[0].GetFromTimeTick())
+	assert.Equal(t, uint64(50), storage.GetBinlogs()[0].GetToTimeTick())
+	assert.True(t, proto.Equal(insertBinlog, storage.GetBinlogs()[0].GetFieldBinlog()[0]))
+	assert.True(t, proto.Equal(statsBinlog, storage.GetBinlogs()[0].GetStatsBinlog()[0]))
+	assert.True(t, proto.Equal(bm25Binlog, storage.GetBinlogs()[0].GetBm25Binlog()[0]))
+	assert.True(t, proto.Equal(deltaBinlog, storage.GetDeltaBinlog()[0]))
+	assert.True(t, proto.Equal(statistics, storage.GetStatistics()))
+	assert.Equal(t, "manifest-path", storage.GetManifestPath())
+
+	insertBinlog.Binlogs[0].LogID = 99
+	deltaBinlog.Binlogs[0].LogID = 99
+	statistics.InsertBinlogSize = 999
+	assert.Equal(t, int64(11), storage.GetBinlogs()[0].GetFieldBinlog()[0].GetBinlogs()[0].GetLogID())
+	assert.Equal(t, int64(14), storage.GetDeltaBinlog()[0].GetBinlogs()[0].GetLogID())
+	assert.Equal(t, int64(456), storage.GetStatistics().GetInsertBinlogSize())
+}
+
+func TestRebuildLegacySegmentSnapshotRemovesDurableTerminalSegment(t *testing.T) {
+	legacy := &streamingpb.SegmentAssignmentMeta{
+		CollectionId: 1,
+		PartitionId:  2,
+		SegmentId:    3,
+		Vchannel:     "v1",
+	}
+	for _, state := range []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Dropped} {
+		snapshot, keep, err := rebuildLegacySegmentSnapshot(legacy, &datapb.SegmentInfo{
+			ID:            3,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "v1",
+			State:         state,
+		})
+		require.NoError(t, err)
+		assert.False(t, keep)
+		assert.Nil(t, snapshot)
+	}
+}
+
+func TestRebuildLegacySegmentSnapshotRejectsOwnershipMismatch(t *testing.T) {
+	legacy := &streamingpb.SegmentAssignmentMeta{
+		CollectionId: 1,
+		PartitionId:  2,
+		SegmentId:    3,
+		Vchannel:     "v1",
+	}
+	snapshot, keep, err := rebuildLegacySegmentSnapshot(legacy, &datapb.SegmentInfo{
+		ID:            3,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "other-vchannel",
+		State:         commonpb.SegmentState_Growing,
+	})
+	require.Error(t, err)
+	assert.False(t, keep)
+	assert.Nil(t, snapshot)
+}
+
+func TestMigrateLegacyRecoveryInfoCapsGlobalCheckpointAtVChannelCheckpoint(t *testing.T) {
 	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(100),
 		TimeTick:  100,
@@ -648,12 +673,12 @@ func TestMigrateLegacyRecoveryInfoCapsDataCheckpointAtMetadataCheckpoint(t *test
 	vchannels := map[string]*streamingpb.VChannelMeta{
 		"v1": newLegacyRecoveryTestVChannel("v1", 1, 10),
 	}
-	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelDataCheckpoint).To(func(
+	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).To(func(
 		*recoveryStorageImpl,
 		context.Context,
 		string,
-	) (*utility.WALConsumeCheckpoint, error) {
-		return &utility.WALConsumeCheckpoint{
+	) (*utility.WALCheckpoint, error) {
+		return &utility.WALCheckpoint{
 			MessageID: walimplstest.NewTestMessageID(120),
 			TimeTick:  120,
 		}, nil
@@ -662,12 +687,12 @@ func TestMigrateLegacyRecoveryInfoCapsDataCheckpointAtMetadataCheckpoint(t *test
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).Return(nil).Build()
 	defer persistMock.UnPatch()
 
-	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil)
+	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil, make(map[string]*streamingpb.VChannelTransformLogMeta))
 
 	require.NoError(t, err)
 	require.True(t, migrated)
-	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(100), storage.checkpoint.DataCheckpoint.TimeTick)
+	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
+	assert.Equal(t, uint64(100), storage.checkpoint.TimeTick)
 }
 
 func TestMigrateLegacyRecoveryInfoFailsClosed(t *testing.T) {
@@ -681,7 +706,7 @@ func TestMigrateLegacyRecoveryInfoFailsClosed(t *testing.T) {
 	vchannels := map[string]*streamingpb.VChannelMeta{
 		"v1": newLegacyRecoveryTestVChannel("v1", 1, 10),
 	}
-	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelDataCheckpoint).Return(
+	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).Return(
 		nil,
 		merr.ErrServiceNotReady,
 	).Build()
@@ -690,20 +715,19 @@ func TestMigrateLegacyRecoveryInfoFailsClosed(t *testing.T) {
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).To(func(
 		*recoveryStorageImpl,
 		context.Context,
-		map[string]*streamingpb.VChannelMeta,
-		*utility.WALCheckpoint,
+		*legacyRecoveryMigration,
 	) error {
 		persisted = true
 		return nil
 	}).Build()
 	defer persistMock.UnPatch()
 
-	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil)
+	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil, make(map[string]*streamingpb.VChannelTransformLogMeta))
 
 	require.Error(t, err)
 	assert.False(t, migrated)
 	assert.False(t, persisted)
-	assert.Nil(t, storage.checkpoint.DataCheckpoint)
+	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
 	assert.Equal(t, utility.RecoveryMagicStreamingInitialized, storage.checkpoint.Magic)
 }
 
@@ -718,8 +742,8 @@ func TestMigrateLegacyRecoveryInfoInstallsCheckpointOnlyAfterPersist(t *testing.
 	vchannels := map[string]*streamingpb.VChannelMeta{
 		"v1": newLegacyRecoveryTestVChannel("v1", 1, 10),
 	}
-	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelDataCheckpoint).Return(
-		&utility.WALConsumeCheckpoint{
+	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).Return(
+		&utility.WALCheckpoint{
 			MessageID: walimplstest.NewTestMessageID(20),
 			TimeTick:  20,
 		},
@@ -729,11 +753,11 @@ func TestMigrateLegacyRecoveryInfoInstallsCheckpointOnlyAfterPersist(t *testing.
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).Return(merr.ErrServiceNotReady).Build()
 	defer persistMock.UnPatch()
 
-	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil)
+	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), vchannels, nil, make(map[string]*streamingpb.VChannelTransformLogMeta))
 
 	require.Error(t, err)
 	assert.False(t, migrated)
-	assert.Nil(t, storage.checkpoint.DataCheckpoint)
+	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
 	assert.Equal(t, utility.RecoveryMagicStreamingInitialized, storage.checkpoint.Magic)
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, walimplstest.NewTestMessageID(100).EQ(completed.MessageID))
@@ -745,25 +769,21 @@ func TestMigrateLegacyRecoveryInfoSkipsCompletedMigration(t *testing.T) {
 		MessageID: walimplstest.NewTestMessageID(100),
 		TimeTick:  100,
 		Magic:     utility.RecoveryMagicRecoveryStorageV2,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(80),
-			TimeTick:  80,
-		},
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
-	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelDataCheckpoint).To(func(
+	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).To(func(
 		*recoveryStorageImpl,
 		context.Context,
 		string,
-	) (*utility.WALConsumeCheckpoint, error) {
+	) (*utility.WALCheckpoint, error) {
 		t.Fatal("completed migration must not query DataCoord")
 		return nil, nil
 	}).Build()
 	defer getCheckpointMock.UnPatch()
 
-	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), nil, nil)
+	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.False(t, migrated)
@@ -781,11 +801,11 @@ func TestMigrateLegacyRecoveryInfoWithoutActiveVChannels(t *testing.T) {
 	vchannel := newLegacyRecoveryTestVChannel("v1", 1, 10)
 	vchannel.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 	vchannel.CheckpointTimeTick = 100
-	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelDataCheckpoint).To(func(
+	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).To(func(
 		*recoveryStorageImpl,
 		context.Context,
 		string,
-	) (*utility.WALConsumeCheckpoint, error) {
+	) (*utility.WALCheckpoint, error) {
 		t.Fatal("dropped legacy vchannel must not query DataCoord")
 		return nil, nil
 	}).Build()
@@ -795,19 +815,18 @@ func TestMigrateLegacyRecoveryInfoWithoutActiveVChannels(t *testing.T) {
 
 	migrated, err := storage.migrateLegacyRecoveryInfo(context.Background(), map[string]*streamingpb.VChannelMeta{
 		"v1": vchannel,
-	}, nil)
+	}, nil, make(map[string]*streamingpb.VChannelTransformLogMeta))
 
 	require.NoError(t, err)
 	require.True(t, migrated)
-	require.NotNil(t, storage.checkpoint.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(100), storage.checkpoint.DataCheckpoint.TimeTick)
+	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
+	assert.Equal(t, uint64(100), storage.checkpoint.TimeTick)
 }
 
-func TestLegacyDataCheckpointFromPosition(t *testing.T) {
+func TestLegacyCheckpointFromPosition(t *testing.T) {
 	messageID := rmq.NewRmqID(42)
 	mqMessageID := messageadaptor.MustGetMQWrapperIDFromMessage(messageID)
-	checkpoint, err := legacyDataCheckpointFromPosition("v1", &msgpb.MsgPosition{
+	checkpoint, err := legacyCheckpointFromPosition("v1", &msgpb.MsgPosition{
 		MsgID:     mqMessageID.Serialize(),
 		Timestamp: 100,
 		WALName:   commonpb.WALName_RocksMQ,
@@ -817,14 +836,14 @@ func TestLegacyDataCheckpointFromPosition(t *testing.T) {
 	assert.True(t, messageID.EQ(checkpoint.MessageID))
 	assert.Equal(t, uint64(100), checkpoint.TimeTick)
 
-	_, err = legacyDataCheckpointFromPosition("v1", &msgpb.MsgPosition{
+	_, err = legacyCheckpointFromPosition("v1", &msgpb.MsgPosition{
 		MsgID:     mqMessageID.Serialize(),
 		Timestamp: 100,
 		WALName:   commonpb.WALName_Kafka,
 	}, message.WALNameRocksmq)
 	require.Error(t, err)
 
-	_, err = legacyDataCheckpointFromPosition("v1", &msgpb.MsgPosition{}, message.WALNameRocksmq)
+	_, err = legacyCheckpointFromPosition("v1", &msgpb.MsgPosition{}, message.WALNameRocksmq)
 	require.Error(t, err)
 }
 
@@ -863,9 +882,7 @@ func TestInitialCheckpointFromLastTimeTickMessage(t *testing.T) {
 	require.NotNil(t, checkpoint)
 	assert.True(t, lastConfirmed.EQ(checkpoint.MessageID))
 	assert.Equal(t, uint64(200), checkpoint.TimeTick)
-	require.NotNil(t, checkpoint.DataCheckpoint)
-	assert.True(t, lastConfirmed.EQ(checkpoint.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(200), checkpoint.DataCheckpoint.TimeTick)
+	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, checkpoint.Magic)
 }
 
 type recordingAckTaskScheduler struct {

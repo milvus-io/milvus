@@ -59,6 +59,7 @@ type growingBulkWriteResult struct {
 	statsBinlogs  map[int64]*datapb.FieldBinlog
 	bm25Binlogs   map[int64]*datapb.FieldBinlog
 	manifestPath  string
+	statistics    *datapb.Statistics
 }
 
 func NewBulkPackWriter(
@@ -122,6 +123,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 	return &flushResult{
 		PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
 			ManifestPath: writeResult.manifestPath,
+			Statistics:   writeResult.statistics,
 			Binlogs: []*streamingpb.L1SegmentBinLogs{
 				{
 					FieldBinlog:  storage.SortFieldBinlogs(writeResult.insertBinlogs),
@@ -192,8 +194,8 @@ func writeGrowingBulkPack(ctx context.Context, req *growingBulkWriteRequest) (*g
 			req.currentSplit,
 			req.writeRetryOpts...,
 		)
-		inserts, _, stats, bm25Stats, manifest, _, _, err := writer.Write(ctx, req.syncPack)
-		return &growingBulkWriteResult{insertBinlogs: inserts, statsBinlogs: stats, bm25Binlogs: bm25Stats, manifestPath: manifest}, err
+		inserts, _, stats, bm25Stats, manifest, _, statistics, err := writer.Write(ctx, req.syncPack)
+		return &growingBulkWriteResult{insertBinlogs: inserts, statsBinlogs: stats, bm25Binlogs: bm25Stats, manifestPath: manifest, statistics: statistics}, err
 	case storage.StorageV3:
 		writer := syncmgr.NewBulkPackWriterV3(
 			req.metaCache,
@@ -207,8 +209,8 @@ func writeGrowingBulkPack(ctx context.Context, req *growingBulkWriteRequest) (*g
 			req.manifestPath,
 			req.writeRetryOpts...,
 		)
-		inserts, _, stats, bm25Stats, manifest, _, _, err := writer.Write(ctx, req.syncPack)
-		return &growingBulkWriteResult{insertBinlogs: inserts, statsBinlogs: stats, bm25Binlogs: bm25Stats, manifestPath: manifest}, err
+		inserts, _, stats, bm25Stats, manifest, _, statistics, err := writer.Write(ctx, req.syncPack)
+		return &growingBulkWriteResult{insertBinlogs: inserts, statsBinlogs: stats, bm25Binlogs: bm25Stats, manifestPath: manifest, statistics: statistics}, err
 	default:
 		writer, err := syncmgr.NewBulkPackWriter(req.metaCache, req.schema, req.chunkManager, req.allocator, req.writeRetryOpts...)
 		if err != nil {
@@ -248,9 +250,11 @@ func newGrowingSegmentInfo(meta *streamingpb.SegmentAssignmentMeta) *datapb.Segm
 		Binlogs:        persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetFieldBinlog() }),
 		Statslogs:      persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetStatsBinlog() }),
 		Bm25Statslogs:  persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetBm25Binlog() }),
+		Deltalogs:      persistedStorage.GetDeltaBinlog(),
+		Stats:          persistedStorage.GetStatistics(),
 		ManifestPath:   manifestPathForGrowingPack(meta),
 		StartPosition:  &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetStat().GetCreateSegmentTimeTick()},
-		DmlPosition:    &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetDataCheckpointTimeTick()},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetCheckpointTimeTick()},
 	}
 }
 

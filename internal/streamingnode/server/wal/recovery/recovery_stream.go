@@ -13,10 +13,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// runBoundedMetaScannerAndStartDataRecovery recovers fast module metadata from
-// a bounded WAL scan, starts safe recovered data tasks, and returns the write
-// path snapshot.
-func (r *recoveryStorageImpl) runBoundedMetaScannerAndStartDataRecovery(
+// runBoundedRecovery replays the persisted checkpoint through the recovery
+// barrier with complete message semantics and returns the recovered write path.
+func (r *recoveryStorageImpl) runBoundedRecovery(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
@@ -54,13 +53,13 @@ L:
 				// The recovery stream is reach the end, we can stop the recovery.
 				break L
 			}
-			r.observeMetaScannerMessage(ctx, msg)
+			r.observeMessage(ctx, msg)
 		}
 	}
 	if rs.Error() != nil {
 		return nil, errors.Wrap(rs.Error(), "failed to read the recovery info from wal")
 	}
-	snapshot = r.startDataRecovery()
+	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	vchannelCount := len(snapshot.VChannels)
 	segmentCount := len(snapshot.SegmentAssignments)
@@ -85,12 +84,13 @@ L:
 	return snapshot, nil
 }
 
-func (r *recoveryStorageImpl) startDataRecovery() *RecoverySnapshot {
+func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
-		Checkpoint: r.checkpoint.Clone(),
+		Checkpoint:      r.getCompletedCheckpoint(),
+		PChannelControl: clonePChannelControl(r.pchannelControl),
 	}
 	if r.vchannelManager != nil {
-		moduleSnapshot := r.vchannelManager.StartDataRecovery()
+		moduleSnapshot := r.vchannelManager.RecoverySnapshot()
 		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
 			switch typed := s.(type) {
 			case *moduleapi.WritePathRecoveryModuleSnapshot:

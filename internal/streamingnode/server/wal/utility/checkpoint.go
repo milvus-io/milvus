@@ -10,7 +10,7 @@ import (
 
 const (
 	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
-	RecoveryMagicRecoveryStorageV2    int64 = 2 // legacy recovery metadata has a safe data checkpoint.
+	RecoveryMagicRecoveryStorageV2    int64 = 2 // recovery metadata uses one published global checkpoint.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
@@ -19,25 +19,17 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		return nil
 	}
 	return &WALCheckpoint{
-		MessageID:           message.MustUnmarshalMessageID(cp.MessageId),
-		TimeTick:            cp.TimeTick,
-		Magic:               cp.RecoveryMagic,
-		ReplicateConfig:     cp.ReplicateConfig,
-		ReplicateCheckpoint: NewReplicateCheckpointFromProto(cp.ReplicateCheckpoint),
-		AlterWalState:       cp.AlterWalState,
-		DataCheckpoint:      NewWALConsumeCheckpointFromProto(cp.DataCheckpoint),
+		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
+		TimeTick:  cp.TimeTick,
+		Magic:     cp.RecoveryMagic,
 	}
 }
 
 // WALCheckpoint represents a consume checkpoint in the Write-Ahead Log (WAL).
 type WALCheckpoint struct {
-	MessageID           message.MessageID // should always be not nil.
-	TimeTick            uint64
-	Magic               int64
-	ReplicateCheckpoint *ReplicateCheckpoint
-	ReplicateConfig     *commonpb.ReplicateConfiguration
-	AlterWalState       *streamingpb.AlterWALState
-	DataCheckpoint      *WALConsumeCheckpoint
+	MessageID message.MessageID // should always be not nil.
+	TimeTick  uint64
+	Magic     int64
 }
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
@@ -46,74 +38,41 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		return nil
 	}
 	return &streamingpb.WALCheckpoint{
-		MessageId:           message.MustMarshalMessageID(c.MessageID),
-		TimeTick:            c.TimeTick,
-		RecoveryMagic:       c.Magic,
-		ReplicateConfig:     c.ReplicateConfig,
-		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
-		AlterWalState:       c.AlterWalState,
-		DataCheckpoint:      c.DataCheckpoint.IntoProto(),
+		MessageId:     message.MustMarshalMessageID(c.MessageID),
+		TimeTick:      c.TimeTick,
+		RecoveryMagic: c.Magic,
 	}
 }
 
 // Clone creates a new WALCheckpoint with the same values as the original.
 func (c *WALCheckpoint) Clone() *WALCheckpoint {
-	var replicateConfig *commonpb.ReplicateConfiguration
-	if c.ReplicateConfig != nil {
-		replicateConfig = proto.Clone(c.ReplicateConfig).(*commonpb.ReplicateConfiguration)
-	}
-	var alterWalState *streamingpb.AlterWALState
-	if c.AlterWalState != nil {
-		alterWalState = proto.Clone(c.AlterWalState).(*streamingpb.AlterWALState)
-	}
 	return &WALCheckpoint{
-		MessageID:           c.MessageID,
-		TimeTick:            c.TimeTick,
-		Magic:               c.Magic,
-		ReplicateConfig:     replicateConfig,
-		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
-		AlterWalState:       alterWalState,
-		DataCheckpoint:      c.DataCheckpoint.Clone(),
+		MessageID: c.MessageID,
+		TimeTick:  c.TimeTick,
+		Magic:     c.Magic,
 	}
 }
 
-// NewWALConsumeCheckpointFromProto creates a new WALConsumeCheckpoint from a protobuf message.
-func NewWALConsumeCheckpointFromProto(cp *streamingpb.WALConsumeCheckpoint) *WALConsumeCheckpoint {
+// PChannelRecoveryControlMetaFromLegacyCheckpoint converts the control fields
+// embedded in the legacy WAL checkpoint into the standalone recovery-control
+// component used by RecoveryStorage V2.
+func PChannelRecoveryControlMetaFromLegacyCheckpoint(cp *streamingpb.WALCheckpoint) *streamingpb.PChannelRecoveryControlMeta {
 	if cp == nil {
 		return nil
 	}
-	return &WALConsumeCheckpoint{
-		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
-		TimeTick:  cp.TimeTick,
+	control := &streamingpb.PChannelRecoveryControlMeta{
+		CheckpointTimeTick: cp.GetTimeTick(),
 	}
-}
-
-// WALConsumeCheckpoint represents a physical consume point in the WAL.
-type WALConsumeCheckpoint struct {
-	MessageID message.MessageID
-	TimeTick  uint64
-}
-
-// IntoProto converts the WALConsumeCheckpoint to a protobuf message.
-func (c *WALConsumeCheckpoint) IntoProto() *streamingpb.WALConsumeCheckpoint {
-	if c == nil {
-		return nil
+	if cp.GetReplicateConfig() != nil {
+		control.ReplicateConfig = proto.Clone(cp.GetReplicateConfig()).(*commonpb.ReplicateConfiguration)
 	}
-	return &streamingpb.WALConsumeCheckpoint{
-		MessageId: message.MustMarshalMessageID(c.MessageID),
-		TimeTick:  c.TimeTick,
+	if cp.GetReplicateCheckpoint() != nil {
+		control.ReplicateCheckpoint = proto.Clone(cp.GetReplicateCheckpoint()).(*commonpb.ReplicateCheckpoint)
 	}
-}
-
-// Clone creates a new WALConsumeCheckpoint with the same values as the original.
-func (c *WALConsumeCheckpoint) Clone() *WALConsumeCheckpoint {
-	if c == nil {
-		return nil
+	if cp.GetAlterWalState() != nil {
+		control.AlterWalState = proto.Clone(cp.GetAlterWalState()).(*streamingpb.AlterWALState)
 	}
-	return &WALConsumeCheckpoint{
-		MessageID: c.MessageID,
-		TimeTick:  c.TimeTick,
-	}
+	return control
 }
 
 // NewReplicateCheckpointFromProto creates a new ReplicateCheckpoint from a protobuf message.

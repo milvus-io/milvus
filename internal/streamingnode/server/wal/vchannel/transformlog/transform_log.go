@@ -81,26 +81,26 @@ type streamNotifier interface {
 var errTransformLogStartPointTruncated = errors.New("transform log start point is truncated")
 
 type TransformLog struct {
-	flushMu               sync.Mutex
-	materializeMu         sync.Mutex
-	mu                    sync.Mutex
-	vchannel              string
-	meta                  *streamingpb.VChannelTransformLogMeta
-	persistedDataTimeTick uint64
-	persistedMaterialized uint64
-	syncUpTimeTick        uint64
-	dirty                 bool
-	pendingDirtySnapshot  *streamingpb.VChannelTransformLogMeta
-	buffer                buffer
-	store                 Store
-	materializer          Materializer
-	materializeMaxRows    uint64
-	materializeMaxBytes   uint64
-	runtime               moduleapi.Runtime
-	flushTasks            []*transformFlushTask
-	materializeTasks      []*transformMaterializeTask
-	pendingMessages       []pendingMessage
-	streamNotifier        streamNotifier
+	flushMu                     sync.Mutex
+	materializeMu               sync.Mutex
+	mu                          sync.Mutex
+	vchannel                    string
+	meta                        *streamingpb.VChannelTransformLogMeta
+	persistedCheckpointTimeTick uint64
+	persistedMaterialized       uint64
+	syncUpTimeTick              uint64
+	dirty                       bool
+	pendingDirtySnapshot        *streamingpb.VChannelTransformLogMeta
+	buffer                      buffer
+	store                       Store
+	materializer                Materializer
+	materializeMaxRows          uint64
+	materializeMaxBytes         uint64
+	runtime                     moduleapi.Runtime
+	flushTasks                  []*transformFlushTask
+	materializeTasks            []*transformMaterializeTask
+	pendingMessages             []pendingMessage
+	streamNotifier              streamNotifier
 
 	chunks []*chunkDescriptor
 }
@@ -108,18 +108,18 @@ type TransformLog struct {
 func New(config Config) *TransformLog {
 	meta := cloneMetaOrNew(config.Meta)
 	return &TransformLog{
-		vchannel:              config.VChannel,
-		meta:                  meta,
-		persistedDataTimeTick: meta.GetCheckpointTimeTick(),
-		persistedMaterialized: meta.GetMaterializedTimeTick(),
-		syncUpTimeTick:        meta.GetCheckpointTimeTick(),
-		buffer:                newBuffer(config.MaxRows),
-		store:                 config.Store,
-		materializer:          config.Materializer,
-		materializeMaxRows:    config.MaterializeMaxRows,
-		materializeMaxBytes:   config.MaterializeMaxBytes,
-		runtime:               config.Runtime,
-		chunks:                newColdChunkDescriptorsFromMeta(meta),
+		vchannel:                    config.VChannel,
+		meta:                        meta,
+		persistedCheckpointTimeTick: meta.GetCheckpointTimeTick(),
+		persistedMaterialized:       meta.GetMaterializedTimeTick(),
+		syncUpTimeTick:              meta.GetCheckpointTimeTick(),
+		buffer:                      newBuffer(config.MaxRows),
+		store:                       config.Store,
+		materializer:                config.Materializer,
+		materializeMaxRows:          config.MaterializeMaxRows,
+		materializeMaxBytes:         config.MaterializeMaxBytes,
+		runtime:                     config.Runtime,
+		chunks:                      newColdChunkDescriptorsFromMeta(meta),
 	}
 }
 
@@ -360,7 +360,7 @@ func (t *TransformLog) latestTimeTick() uint64 {
 	return t.latestTimeTickLocked()
 }
 
-func (t *TransformLog) dataCheckpointTimeTick() uint64 {
+func (t *TransformLog) checkpointTimeTick() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.meta.GetCheckpointTimeTick()
@@ -396,8 +396,8 @@ func (t *TransformLog) ConsumeDirtyAndGetSnapshot() *streamingpb.VChannelTransfo
 func (t *TransformLog) MarkSnapshotPersisted(snapshot *streamingpb.VChannelTransformLogMeta) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if snapshot.GetCheckpointTimeTick() > t.persistedDataTimeTick {
-		t.persistedDataTimeTick = snapshot.GetCheckpointTimeTick()
+	if snapshot.GetCheckpointTimeTick() > t.persistedCheckpointTimeTick {
+		t.persistedCheckpointTimeTick = snapshot.GetCheckpointTimeTick()
 	}
 	if snapshot.GetMaterializedTimeTick() > t.persistedMaterialized {
 		t.persistedMaterialized = snapshot.GetMaterializedTimeTick()
@@ -413,7 +413,7 @@ func (t *TransformLog) HasPendingWork() bool {
 	defer t.mu.Unlock()
 	return !t.buffer.IsEmpty() ||
 		t.buffer.IsFlushing() ||
-		t.buffer.FlushTargetTimeTick() > t.persistedDataTimeTick
+		t.buffer.FlushTargetTimeTick() > t.persistedCheckpointTimeTick
 }
 
 // RequestPersistThrough schedules persistence when the current buffer contains

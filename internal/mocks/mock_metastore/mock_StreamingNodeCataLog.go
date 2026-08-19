@@ -83,6 +83,65 @@ func (_c *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetPChannelRecoveryControlMeta provides a mock function with given fields: ctx, pChannelName
+func (_m *MockStreamingNodeCataLog) GetPChannelRecoveryControlMeta(ctx context.Context, pChannelName string) (*streamingpb.PChannelRecoveryControlMeta, error) {
+	ret := _m.Called(ctx, pChannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPChannelRecoveryControlMeta")
+	}
+
+	var r0 *streamingpb.PChannelRecoveryControlMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*streamingpb.PChannelRecoveryControlMeta, error)); ok {
+		return rf(ctx, pChannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *streamingpb.PChannelRecoveryControlMeta); ok {
+		r0 = rf(ctx, pChannelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.PChannelRecoveryControlMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pChannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPChannelRecoveryControlMeta'
+type MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call struct {
+	*mock.Call
+}
+
+// GetPChannelRecoveryControlMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pChannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) GetPChannelRecoveryControlMeta(ctx interface{}, pChannelName interface{}) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	return &MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call{Call: _e.mock.On("GetPChannelRecoveryControlMeta", ctx, pChannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call) Run(run func(ctx context.Context, pChannelName string)) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call) Return(_a0 *streamingpb.PChannelRecoveryControlMeta, _a1 error) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call) RunAndReturn(run func(context.Context, string) (*streamingpb.PChannelRecoveryControlMeta, error)) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, pChannelName
 func (_m *MockStreamingNodeCataLog) GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, pChannelName)

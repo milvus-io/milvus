@@ -32,6 +32,7 @@ func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamPara
 	scanner := newRecoveryScannerAdaptor(
 		b.roWALImpls,
 		param.StartCheckpoint,
+		param.StartAfter,
 		b.scanMetrics.NewScannerMetrics(),
 		param.UseWriteAheadBuffer,
 	)

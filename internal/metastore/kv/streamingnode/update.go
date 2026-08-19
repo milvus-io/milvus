@@ -35,16 +35,22 @@ import (
 // buildSegmentAssignmentKey, getRemovalAndSaveForVChannel,
 // buildSalvageCheckpointPath, buildConsumeCheckpointKey) and applied via
 // txn.Commit: atomically in a single guarded txn when the whole op set fits
-// the store's txn op limit, otherwise via the ordered chunked fallback. Either way the consume checkpoint is staged
-// with CommitSave, so it is the last write to become visible; a crash before
-// it lands leaves the whole snapshot invisible and the next retry
-// re-persists everything (every part is an idempotent put on a deterministic
-// key).
+// the store's txn op limit, otherwise via the ordered chunked fallback. Either
+// way the consume checkpoint is staged with CommitSave, so it is the last
+// write to become visible. On the fallback path, component deltas written
+// before a crash remain replay-safe through their own checkpoint_time_tick.
 func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *metastore.WALRecoverySnapshot) error {
 	if snapshot == nil {
 		return nil
 	}
 	b := txn.New()
+	if snapshot.PChannelControlMeta != nil {
+		data, err := proto.Marshal(snapshot.PChannelControlMeta)
+		if err != nil {
+			return merr.WrapErrSerializationFailed(err, "marshal recovery control meta at pchannel %s", pChannelName)
+		}
+		b.Save(buildRecoveryControlKey(pChannelName), string(data))
+	}
 	// Aggregate every module mutation before adding the checkpoint commit
 	// marker. Closed and tombstoned recovery metadata remains persisted until
 	// the growing-module cleanup task explicitly includes its removal here.

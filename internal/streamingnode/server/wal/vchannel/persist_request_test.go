@@ -99,7 +99,7 @@ func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchanne
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
 	owner := message.NewOwnedImmutableMessage(raw, nil)
 	retained := owner.Clone()
-	require.True(t, module.ObserveMessage(context.Background(), retained, moduleapi.ObserveModeMetaAndData))
+	require.True(t, module.ObserveMessage(context.Background(), retained))
 	retained.Release()
 	owner.Release()
 }

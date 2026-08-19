@@ -76,6 +76,8 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 		Field2BinlogPaths:   binlogs,
 		Field2StatslogPaths: statslogs,
 		Field2Bm25LogPaths:  bm25logs,
+		Deltalogs:           storage.GetDeltaBinlog(),
+		Stats:               storage.GetStatistics(),
 		CheckPoints: []*datapb.CheckPoint{
 			{
 				SegmentID: meta.GetSegmentId(),

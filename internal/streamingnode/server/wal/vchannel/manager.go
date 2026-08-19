@@ -18,9 +18,6 @@ import (
 
 type PChannelManagerConfig struct {
 	PChannel string
-	// DataCheckpointTimeTick is the persisted data-observed frontier used to
-	// initialize WAL views before live data replay resumes.
-	DataCheckpointTimeTick uint64
 
 	VChannelMetas     map[string]*streamingpb.VChannelMeta
 	Segments          map[int64]*streamingpb.SegmentAssignmentMeta
@@ -119,7 +116,6 @@ func (m *PChannelRecoveryManager) releaseInitialState() {
 func (m *PChannelRecoveryManager) ObserveMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-	mode moduleapi.ObserveMode,
 ) {
 	if m == nil {
 		return
@@ -129,15 +125,15 @@ func (m *PChannelRecoveryManager) ObserveMessage(
 		return
 	}
 	if m.shouldBroadcast(msg) {
-		m.observeBroadcastMessage(ctx, retained, mode)
+		m.observeBroadcastMessage(ctx, retained)
 		return
 	}
 	for {
-		module := m.moduleForMessage(msg, mode)
+		module := m.moduleForMessage(msg)
 		if module == nil {
 			return
 		}
-		if !module.ObserveMessage(ctx, retained, mode) {
+		if !module.ObserveMessage(ctx, retained) {
 			continue
 		}
 		m.markModuleUpdated(module)
@@ -145,13 +141,13 @@ func (m *PChannelRecoveryManager) ObserveMessage(
 	}
 }
 
-func (m *PChannelRecoveryManager) StartDataRecovery() moduleapi.ModuleSnapshot {
+func (m *PChannelRecoveryManager) RecoverySnapshot() moduleapi.ModuleSnapshot {
 	if m == nil {
 		return nil
 	}
 	snapshots := make([]moduleapi.ModuleSnapshot, 0, m.modules.Len()*3)
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
-		snapshots = append(snapshots, moduleapi.FlattenModuleSnapshot(module.StartDataRecovery())...)
+		snapshots = append(snapshots, moduleapi.FlattenModuleSnapshot(module.RecoverySnapshot())...)
 		return true
 	})
 	return aggregateModuleSnapshots(snapshots)
@@ -286,11 +282,10 @@ func (m *PChannelRecoveryManager) shouldBroadcast(msg message.ImmutableMessage) 
 func (m *PChannelRecoveryManager) observeBroadcastMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-	mode moduleapi.ObserveMode,
 ) {
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
 		dispatch := retained.Clone()
-		observed := module.ObserveMessage(ctx, dispatch, mode)
+		observed := module.ObserveMessage(ctx, dispatch)
 		dispatch.Release()
 		if observed {
 			m.markModuleUpdated(module)
@@ -301,14 +296,13 @@ func (m *PChannelRecoveryManager) observeBroadcastMessage(
 
 func (m *PChannelRecoveryManager) moduleForMessage(
 	msg message.ImmutableMessage,
-	mode moduleapi.ObserveMode,
 ) *VChannelRecoveryModule {
 	vchannel := msg.VChannel()
 	if vchannel == "" {
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection || !mode.ApplyMeta() {
+	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
 		return module
 	}
 	module, err := m.newModule(vchannel)
@@ -343,7 +337,6 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		TransformLogMaxBytes:      m.config.TransformLogMaxBytes,
 		TransformLogMaterialRows:  m.config.TransformLogMaterialRows,
 		TransformLogMaterialBytes: m.config.TransformLogMaterialBytes,
-		DataObservedTimeTick:      m.config.DataCheckpointTimeTick,
 		OnCleanup:                 m.removeModule,
 	})
 	if err != nil {

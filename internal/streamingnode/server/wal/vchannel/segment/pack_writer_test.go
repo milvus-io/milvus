@@ -194,10 +194,12 @@ func TestFlushInsertBufferBuildsStorageV2ColumnGroups(t *testing.T) {
 				require.NotEmpty(t, columnGroup.Fields)
 				require.NotEmpty(t, columnGroup.Format)
 			}
-			return &growingBulkWriteResult{}, nil
+			return &growingBulkWriteResult{
+				statistics: &datapb.Statistics{InsertBinlogSize: 123},
+			}, nil
 		},
 	}
-	_, err = writer.FlushInsertBuffer(context.Background(), &flushPack{
+	result, err := writer.FlushInsertBuffer(context.Background(), &flushPack{
 		Meta: &streamingpb.SegmentAssignmentMeta{
 			CollectionId:     collectionID,
 			PartitionId:      partitionID,
@@ -217,6 +219,8 @@ func TestFlushInsertBufferBuildsStorageV2ColumnGroups(t *testing.T) {
 		Inserts:      []message.ImmutableMessage{insert},
 	})
 	require.NoError(t, err)
+	require.NotNil(t, result.PersistedStorage.GetStatistics())
+	assert.Equal(t, int64(123), result.PersistedStorage.GetStatistics().GetInsertBinlogSize())
 }
 
 func newTestLongFieldData(fieldID int64, values ...int64) *schemapb.FieldData {

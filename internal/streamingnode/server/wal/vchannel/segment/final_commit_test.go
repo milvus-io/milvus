@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -33,12 +35,10 @@ func TestFinalCommitPersistsStorageOwnedCompletionMarker(t *testing.T) {
 	lifecycle := &testSegmentLifecycle{}
 	view := NewSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
-			SegmentId:              1,
-			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick:     10,
-			DataCheckpointTimeTick: 10,
+			SegmentId:          1,
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick: 10,
 		},
-		10,
 		10,
 		false,
 		writeOnlyInsertBuffer{},
@@ -63,12 +63,10 @@ func TestFinalCommitFailureKeepsMessageDurabilityPending(t *testing.T) {
 	lifecycle := &testSegmentLifecycle{err: errors.New("commit failed")}
 	view := NewSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
-			SegmentId:              1,
-			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick:     10,
-			DataCheckpointTimeTick: 10,
+			SegmentId:          1,
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick: 10,
 		},
-		10,
 		10,
 		false,
 		writeOnlyInsertBuffer{},
@@ -83,4 +81,27 @@ func TestFinalCommitFailureKeepsMessageDurabilityPending(t *testing.T) {
 	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
 	require.False(t, view.AssignmentMeta().GetL1CommitDone())
 	require.False(t, view.finalCommitDone)
+}
+
+func TestBuildCommitL1SegmentRequestPreservesDurableStorageState(t *testing.T) {
+	meta := &streamingpb.SegmentAssignmentMeta{
+		CollectionId: 1,
+		PartitionId:  2,
+		SegmentId:    3,
+		Vchannel:     "v1",
+		Stat:         &streamingpb.SegmentAssignmentStat{ModifiedRows: 10},
+		PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
+			DeltaBinlog: []*datapb.FieldBinlog{{FieldID: 100}},
+			Statistics:  &datapb.Statistics{InsertBinlogSize: 123, DeltaBinlogSize: 45},
+		},
+	}
+
+	req := buildCommitL1SegmentRequest(10, meta)
+
+	require.Len(t, req.GetDeltalogs(), 1)
+	assert.Equal(t, int64(100), req.GetDeltalogs()[0].GetFieldID())
+	require.NotNil(t, req.GetStats())
+	assert.Equal(t, int64(123), req.GetStats().GetInsertBinlogSize())
+	assert.Equal(t, int64(45), req.GetStats().GetDeltaBinlogSize())
+	assert.True(t, req.GetWithFullBinlogs())
 }

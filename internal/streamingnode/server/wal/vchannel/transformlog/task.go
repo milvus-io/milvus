@@ -61,7 +61,7 @@ func (t *transformFlushTask) Execute(ctx context.Context) error {
 			t.log.submitFlushTask(result.NextTargetTimeTick)
 		}
 		if t.log.shouldMaterialize(ctx) && !t.log.HasPendingMaterializeTask() {
-			t.log.submitMaterializeTask(t.log.dataCheckpointTimeTick())
+			t.log.submitMaterializeTask(t.log.checkpointTimeTick())
 		}
 		t.log.notifyUpdated()
 		releaseMessages(result.CompletedMessages)

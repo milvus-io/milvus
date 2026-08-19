@@ -4,6 +4,9 @@ import (
 	"context"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -50,7 +53,7 @@ func RecoverRecoveryStorage(
 		rs.Logger().Warn(context.TODO(), "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	snapshot, err := rs.runBoundedMetaScannerAndStartDataRecovery(ctx, recoveryStreamBuilder, lastTimeTickMessage)
+	snapshot, err := rs.runBoundedRecovery(ctx, recoveryStreamBuilder, lastTimeTickMessage)
 	if err != nil {
 		rs.Logger().Warn(context.TODO(), "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
@@ -65,7 +68,7 @@ func RecoverRecoveryStorage(
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
 	rs.startAckTracker()
-	rs.startDataLiveScanner(recoveryStreamBuilder, lastTimeTickMessage)
+	rs.startLiveScanner(recoveryStreamBuilder, lastTimeTickMessage)
 	return rs, snapshot, nil
 }
 
@@ -77,21 +80,32 @@ func WithNodeScheduler(scheduler nodescheduler.Scheduler) RecoveryStorageOption 
 	}
 }
 
+func WithRecoveryTailRateLimiter(rateLimiter RecoveryTailRateLimiter) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) {
+		r.recoveryTailRateLimiter = rateLimiter
+	}
+}
+
+// WithInitialPChannelControl seeds control state decoded from a legacy
+// WALCheckpoint. A standalone catalog snapshot, when present, supersedes it.
+func WithInitialPChannelControl(control *streamingpb.PChannelRecoveryControlMeta) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) {
+		r.installPChannelControl(control)
+	}
+}
+
 func initialCheckpointFromLastTimeTickMessage(lastTimeTickMessage message.ImmutableMessage) *utility.WALCheckpoint {
-	point := utility.WALConsumeCheckpoint{
+	return &utility.WALCheckpoint{
 		MessageID: lastTimeTickMessage.LastConfirmedMessageID(),
 		TimeTick:  lastTimeTickMessage.TimeTick(),
-	}
-	return &utility.WALCheckpoint{
-		MessageID:      point.MessageID,
-		TimeTick:       point.TimeTick,
-		DataCheckpoint: point.Clone(),
+		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
 }
 
 // newRecoveryStorage creates a new recovery storage.
 func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, opts ...RecoveryStorageOption) *recoveryStorageImpl {
 	cfg := newConfig()
+	metrics := newRecoveryStorageMetrics(channel)
 	rs := &recoveryStorageImpl{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		cfg:                    cfg,
@@ -100,7 +114,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 		channel:                channel,
 		dirtyCounter:           0,
 		persistNotifier:        make(chan struct{}, 1),
-		metrics:                newRecoveryStorageMetrics(channel),
+		metrics:                metrics,
 	}
 	if cp != nil {
 		rs.installCheckpoint(cp)
@@ -108,6 +122,8 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 	for _, opt := range opts {
 		opt(rs)
 	}
+	rs.tailController = newRecoveryTailController(cfg, rs.recoveryTailRateLimiter, metrics)
+	rs.refreshRecoveryTail()
 	if rs.nodeScheduler == nil {
 		rs.nodeScheduler = nodescheduler.Get()
 	}
@@ -123,29 +139,29 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type recoveryStorageImpl struct {
 	mlog.Binder
-	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
-	cfg                    *config
-	mu                     sync.Mutex
-	currentClusterID       string
-	channel                types.PChannelInfo
-	checkpoint             *WALCheckpoint
-	persistedCheckpoint    *WALCheckpoint
-	ackTracker             *messageack.Tracker
-	broadcastAck           *broadcastAckModule
-	checkpointDirty        bool
-	vchannelManager        *vchannel.PChannelRecoveryManager
-	nodeScheduler          nodescheduler.Scheduler
-	taskScheduler          *scopedTaskScheduler
-	dirtyCounter           int // records the message count since last persist snapshot.
-	moduleDirty            bool
+	backgroundTaskNotifier  *syncutil.AsyncTaskNotifier[struct{}]
+	cfg                     *config
+	mu                      sync.Mutex
+	currentClusterID        string
+	channel                 types.PChannelInfo
+	checkpoint              *WALCheckpoint
+	pchannelControl         *streamingpb.PChannelRecoveryControlMeta
+	persistedControl        *streamingpb.PChannelRecoveryControlMeta
+	ackTracker              *messageack.Tracker
+	tailController          *recoveryTailController
+	recoveryTailRateLimiter RecoveryTailRateLimiter
+	broadcastAck            *broadcastAckModule
+	vchannelManager         *vchannel.PChannelRecoveryManager
+	nodeScheduler           nodescheduler.Scheduler
+	taskScheduler           *scopedTaskScheduler
+	dirtyCounter            int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
-	persistNotifier             chan struct{}
-	truncator                   walimpls.WALImpls
-	metrics                     *recoveryMetrics
-	pendingPersistSnapshot      *dirtyPersistSnapshot
-	dataScannerWG               sync.WaitGroup
-	ackTrackerWG                sync.WaitGroup
-	dataRecoveryBarrierTimeTick uint64
+	persistNotifier        chan struct{}
+	truncator              walimpls.WALImpls
+	metrics                *recoveryMetrics
+	pendingPersistSnapshot *dirtyPersistSnapshot
+	scannerWG              sync.WaitGroup
+	ackTrackerWG           sync.WaitGroup
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -158,19 +174,37 @@ func (r *recoveryStorageImpl) installCheckpoint(checkpoint *WALCheckpoint) {
 		checkpoint = &WALCheckpoint{}
 	}
 	r.checkpoint = checkpoint.Clone()
-	if r.persistedCheckpoint == nil && checkpoint != nil {
-		r.persistedCheckpoint = checkpoint.Clone()
+	if r.metrics != nil {
+		r.metrics.ObserveObservedTimeTick(checkpoint.TimeTick)
+		r.metrics.ObServeInMemMetrics(checkpoint.TimeTick)
+		r.metrics.ObServePersistedMetrics(checkpoint.TimeTick)
 	}
-	dataPoint := utility.WALConsumeCheckpoint{
+	point := utility.WALCheckpoint{
 		MessageID: checkpoint.MessageID,
 		TimeTick:  checkpoint.TimeTick,
+		Magic:     checkpoint.Magic,
 	}
-	if checkpoint.DataCheckpoint != nil {
-		dataPoint = *checkpoint.DataCheckpoint.Clone()
-	}
-	r.ackTracker = messageack.NewTracker(dataPoint, func(utility.WALConsumeCheckpoint) {
+	var tracker *messageack.Tracker
+	tracker = messageack.NewTracker(point, func(utility.WALCheckpoint) {
+		observed, completed := tracker.LogicalOffsets()
+		if r.tailController != nil {
+			r.tailController.UpdateTrackerFrontiers(observed, completed)
+		}
 		r.notifyPersist()
 	}, r.vchannelManager)
+	r.ackTracker = tracker
+	if r.tailController != nil {
+		r.tailController.Reset()
+	}
+	r.refreshRecoveryTail()
+}
+
+func (r *recoveryStorageImpl) installPChannelControl(control *streamingpb.PChannelRecoveryControlMeta) {
+	if control == nil {
+		control = &streamingpb.PChannelRecoveryControlMeta{}
+	}
+	r.pchannelControl = proto.Clone(control).(*streamingpb.PChannelRecoveryControlMeta)
+	r.persistedControl = proto.Clone(control).(*streamingpb.PChannelRecoveryControlMeta)
 }
 
 func (r *recoveryStorageImpl) initRecoveryModules(
@@ -197,14 +231,13 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID()),
 	)
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
-		PChannel:               r.channel.Name,
-		DataCheckpointTimeTick: r.checkpoint.DataCheckpoint.TimeTick,
-		VChannelMetas:          vchannels,
-		Segments:               segments,
-		TransformLogMetas:      transformLogMetas,
-		Runtime:                moduleRuntime,
-		Logger:                 r.Logger(),
-		SegmentLifecycle:       segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
+		PChannel:          r.channel.Name,
+		VChannelMetas:     vchannels,
+		Segments:          segments,
+		TransformLogMetas: transformLogMetas,
+		Runtime:           moduleRuntime,
+		Logger:            r.Logger(),
+		SegmentLifecycle:  segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
 		SegmentPackWriter: segment.NewBulkPackWriter(
 			resource.Resource().ChunkManager(),
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
@@ -225,9 +258,6 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 }
 
 func (r *recoveryStorageImpl) NotifyModuleUpdated(moduleapi.ModuleName) {
-	r.mu.Lock()
-	r.moduleDirty = true
-	r.mu.Unlock()
 	r.notifyPersist()
 }
 
@@ -235,9 +265,20 @@ func (r *recoveryStorageImpl) NotifyModuleUpdated(moduleapi.ModuleName) {
 func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
+	checkpoint := r.checkpoint
+	if r.ackTracker != nil {
+		completed := r.ackTracker.CompletedPoint()
+		checkpoint = &completed
+	}
+	tail := recoveryTailSnapshot{}
+	if r.tailController != nil {
+		tail = r.tailController.Snapshot()
+	}
 	return RecoveryMetrics{
-		RecoveryTimeTick: r.checkpoint.TimeTick,
+		RecoveryTimeTick:  checkpoint.TimeTick,
+		RecoveryTailBytes: tail.RecoveryTail,
+		BlockingBytes:     tail.Blocking,
+		PublishLagBytes:   tail.PublishLag,
 	}
 }
 
@@ -249,7 +290,7 @@ func (r *recoveryStorageImpl) VChannelManager() *vchannel.PChannelRecoveryManage
 func (r *recoveryStorageImpl) Close() {
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
-	r.dataScannerWG.Wait()
+	r.scannerWG.Wait()
 	r.ackTrackerWG.Wait()
 	if r.broadcastAck != nil {
 		r.broadcastAck.Close()
@@ -267,7 +308,11 @@ func (r *recoveryStorageImpl) startAckTracker() {
 	r.ackTrackerWG.Add(1)
 	go func() {
 		defer r.ackTrackerWG.Done()
-		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout)
+		var underPressure func() bool
+		if r.tailController != nil {
+			underPressure = r.tailController.UnderSoftPressure
+		}
+		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout, underPressure)
 	}()
 }
 
@@ -286,65 +331,65 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	if r.checkpoint == nil {
 		r.installCheckpoint(nil)
 	}
-	var persistedCheckpoint *WALCheckpoint
-	if r.persistedCheckpoint != nil {
-		persistedCheckpoint = r.persistedCheckpoint.Clone()
+	if r.pchannelControl == nil {
+		r.installPChannelControl(nil)
 	}
-	frozenCheckpoint := r.checkpoint.Clone()
-	completedPoint := r.ackTracker.CompletedPoint()
-	metaPoint := utility.WALConsumeCheckpoint{
-		MessageID: frozenCheckpoint.MessageID,
-		TimeTick:  frozenCheckpoint.TimeTick,
+	var checkpoint *WALCheckpoint
+	if r.checkpoint != nil {
+		checkpoint = r.checkpoint.Clone()
 	}
-	if !consumePointReached(metaPoint, completedPoint) {
-		completedPoint = utility.WALConsumeCheckpoint{
-			MessageID: frozenCheckpoint.MessageID,
-			TimeTick:  frozenCheckpoint.TimeTick,
+	completedPoint, completedLogicalOffset := r.ackTracker.Completed()
+	if checkpoint != nil && !shouldAdvanceConsumePoint(*checkpoint, completedPoint) {
+		completedPoint = *checkpoint.Clone()
+		if r.tailController != nil {
+			completedLogicalOffset = r.tailController.Snapshot().PublishedOffset
 		}
 	}
-	if persistedCheckpoint != nil && persistedCheckpoint.DataCheckpoint != nil &&
-		!shouldAdvanceConsumePoint(*persistedCheckpoint.DataCheckpoint, completedPoint) {
-		completedPoint = *persistedCheckpoint.DataCheckpoint.Clone()
+	frozenCheckpoint := &WALCheckpoint{
+		MessageID: completedPoint.MessageID,
+		TimeTick:  completedPoint.TimeTick,
+		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
-	frozenCheckpoint.DataCheckpoint = completedPoint.Clone()
-	checkpointDirty := r.checkpointDirty || r.dirtyCounter > 0 ||
-		persistedCheckpoint == nil ||
-		!consumeCheckpointEqual(persistedCheckpoint.DataCheckpoint, frozenCheckpoint.DataCheckpoint)
+	checkpointDirty := checkpoint == nil ||
+		!consumeCheckpointEqual(checkpoint, frozenCheckpoint)
+	control := proto.Clone(r.pchannelControl).(*streamingpb.PChannelRecoveryControlMeta)
+	controlDirty := r.persistedControl == nil || !proto.Equal(r.persistedControl, control)
 	salvageCP := r.pendingSalvageCheckpoint
 	r.pendingSalvageCheckpoint = nil
 	r.dirtyCounter = 0
-	r.moduleDirty = false
-	r.checkpointDirty = false
 	r.mu.Unlock()
 
 	cleanup := moduleapi.CleanupContext{}
-	if persistedCheckpoint != nil {
-		cleanup.MetaPhysicalTimeTick = persistedCheckpoint.TimeTick
-		if persistedCheckpoint.DataCheckpoint != nil {
-			cleanup.DataPhysicalTimeTick = persistedCheckpoint.DataCheckpoint.TimeTick
-		}
+	if checkpoint != nil {
+		cleanup.PhysicalTimeTick = checkpoint.TimeTick
 	}
 	moduleSnapshots := make([]moduleapi.DirtySnapshot, 0)
 	if r.vchannelManager != nil {
 		moduleSnapshots = append(moduleSnapshots, r.vchannelManager.ConsumeCleanupSnapshots(cleanup)...)
 		moduleSnapshots = append(moduleSnapshots, r.vchannelManager.ConsumeDirtySnapshots()...)
 	}
-	if !checkpointDirty && salvageCP == nil && len(moduleSnapshots) == 0 {
+	if !checkpointDirty && !controlDirty && salvageCP == nil && len(moduleSnapshots) == 0 {
 		return nil
 	}
 	return &dirtyPersistSnapshot{
 		Checkpoint:        frozenCheckpoint,
+		LogicalEndOffset:  completedLogicalOffset,
 		CheckpointDirty:   checkpointDirty,
+		PChannelControl:   control,
+		ControlDirty:      controlDirty,
 		SalvageCheckpoint: salvageCP,
 		ModuleDirtySnaps:  moduleSnapshots,
 	}
 }
 
-func consumeCheckpointEqual(left, right *utility.WALConsumeCheckpoint) bool {
+func consumeCheckpointEqual(left, right *utility.WALCheckpoint) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
 	if left.TimeTick != right.TimeTick {
+		return false
+	}
+	if left.Magic != right.Magic {
 		return false
 	}
 	if left.MessageID == nil || right.MessageID == nil {
@@ -353,7 +398,7 @@ func consumeCheckpointEqual(left, right *utility.WALConsumeCheckpoint) bool {
 	return left.MessageID.EQ(right.MessageID)
 }
 
-func shouldAdvanceConsumePoint(current, next utility.WALConsumeCheckpoint) bool {
+func shouldAdvanceConsumePoint(current, next utility.WALCheckpoint) bool {
 	if next.TimeTick != current.TimeTick {
 		return next.TimeTick > current.TimeTick
 	}
@@ -363,29 +408,20 @@ func shouldAdvanceConsumePoint(current, next utility.WALConsumeCheckpoint) bool 
 	return next.MessageID != nil && current.MessageID.LT(next.MessageID)
 }
 
-func consumePointReached(current, point utility.WALConsumeCheckpoint) bool {
-	if current.TimeTick != point.TimeTick {
-		return current.TimeTick > point.TimeTick
-	}
-	if point.MessageID == nil {
-		return true
-	}
-	return current.MessageID != nil && point.MessageID.LTE(current.MessageID)
-}
-
 // observeMessage observes a message and update the recovery storage.
-func (r *recoveryStorageImpl) observeMessage(
-	ctx context.Context,
-	msg message.ImmutableMessage,
-	mode moduleapi.ObserveMode,
-) {
+func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	owner := r.ackTracker.Track(msg)
+	r.refreshRecoveryTail()
+	r.metrics.ObserveObservedTimeTick(msg.TimeTick())
 	dispatch := owner.Clone()
-	r.observeModulesMessage(ctx, dispatch, mode)
+	r.observeModulesMessage(ctx, dispatch)
 	dispatch.Release()
-	r.updateCheckpoint(msg)
+	r.updatePChannelControl(msg)
 	r.broadcastAck.Accept(owner)
-	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
+	completed := r.ackTracker.CompletedPoint()
+	r.metrics.ObServeInMemMetrics(completed.TimeTick)
 
 	r.dirtyCounter++
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
@@ -393,78 +429,46 @@ func (r *recoveryStorageImpl) observeMessage(
 	}
 }
 
-func (r *recoveryStorageImpl) observeMetaOnlyMessage(ctx context.Context, msg message.ImmutableMessage) {
-	owner := message.NewOwnedImmutableMessage(msg, nil)
-	dispatch := owner.Clone()
-	r.observeModulesMessage(ctx, dispatch, moduleapi.ObserveModeMetaOnly)
-	dispatch.Release()
-	owner.Release()
-	r.updateCheckpoint(msg)
-	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
-
-	r.dirtyCounter++
-	if r.dirtyCounter > r.cfg.maxDirtyMessages {
-		r.notifyPersist()
+func (r *recoveryStorageImpl) refreshRecoveryTail() {
+	if r.ackTracker == nil || r.tailController == nil {
+		return
 	}
-}
-
-func (r *recoveryStorageImpl) observeMetaScannerMessage(ctx context.Context, msg message.ImmutableMessage) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.observeMetaOnlyMessage(ctx, msg)
-}
-
-func (r *recoveryStorageImpl) observeDataScannerMessage(ctx context.Context, msg message.ImmutableMessage) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	mode := moduleapi.ObserveModeMetaAndData
-	if msg.TimeTick() <= r.dataRecoveryBarrierTimeTick {
-		mode = moduleapi.ObserveModeDataOnly
-	}
-	r.observeMessage(ctx, msg, mode)
+	observed, completed := r.ackTracker.LogicalOffsets()
+	r.tailController.UpdateTrackerFrontiers(observed, completed)
 }
 
 func (r *recoveryStorageImpl) observeModulesMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-	mode moduleapi.ObserveMode,
 ) {
 	if r.vchannelManager == nil {
 		panic("recovery modules are not initialized")
 	}
-	r.vchannelManager.ObserveMessage(ctx, retained, mode)
+	r.vchannelManager.ObserveMessage(ctx, retained)
 }
 
-func consumePointFromMessage(msg message.ImmutableMessage) utility.WALConsumeCheckpoint {
-	return utility.WALConsumeCheckpoint{
-		MessageID: msg.LastConfirmedMessageID(),
-		TimeTick:  msg.TimeTick(),
-	}
-}
-
-func (r *recoveryStorageImpl) startDataLiveScanner(
+func (r *recoveryStorageImpl) startLiveScanner(
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	recoveryBarrier message.ImmutableMessage,
 ) {
-	checkpoint := r.checkpoint.DataCheckpoint
-	if checkpoint == nil || checkpoint.MessageID == nil {
-		r.Logger().Warn(context.TODO(), "skip data scanner because wal data checkpoint is nil")
+	if recoveryBarrier == nil || recoveryBarrier.MessageID() == nil {
+		r.Logger().Warn(context.TODO(), "skip live scanner because recovery barrier is nil")
 		return
 	}
-	r.dataRecoveryBarrierTimeTick = recoveryBarrier.TimeTick()
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
-		StartCheckpoint:     checkpoint.MessageID,
+		StartCheckpoint:     recoveryBarrier.MessageID(),
+		StartAfter:          true,
 		EndTimeTick:         0,
 		UseWriteAheadBuffer: true,
 	})
-	r.dataScannerWG.Add(1)
+	r.scannerWG.Add(1)
 	go func() {
-		defer r.dataScannerWG.Done()
-		r.runDataLiveScanner(rs)
+		defer r.scannerWG.Done()
+		r.runLiveScanner(rs)
 	}()
 }
 
-func (r *recoveryStorageImpl) runDataLiveScanner(rs RecoveryStream) {
+func (r *recoveryStorageImpl) runLiveScanner(rs RecoveryStream) {
 	defer rs.Close()
 	ctx := r.backgroundTaskNotifier.Context()
 	for {
@@ -477,29 +481,25 @@ func (r *recoveryStorageImpl) runDataLiveScanner(rs RecoveryStream) {
 		case msg, ok := <-rs.Chan():
 			if !ok {
 				if err := rs.Error(); err != nil {
-					r.Logger().Warn(context.TODO(), "wal recovery data scanner stopped with error", mlog.Err(err))
+					r.Logger().Warn(context.TODO(), "wal recovery live scanner stopped with error", mlog.Err(err))
 				}
 				return
 			}
-			r.observeDataScannerMessage(ctx, msg)
+			r.observeMessage(ctx, msg)
 		}
 	}
 }
 
-// updateCheckpoint updates the checkpoint of the recovery storage.
-func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
-	if r.checkpoint == nil {
-		r.installCheckpoint(nil)
+// updatePChannelControl applies pchannel-scoped recovery control effects. The
+// global WAL checkpoint is advanced exclusively by AckTracker completion.
+func (r *recoveryStorageImpl) updatePChannelControl(msg message.ImmutableMessage) {
+	if r.pchannelControl == nil {
+		r.installPChannelControl(nil)
 	}
-	point := consumePointFromMessage(msg)
-	currentPoint := utility.WALConsumeCheckpoint{
-		MessageID: r.checkpoint.MessageID,
-		TimeTick:  r.checkpoint.TimeTick,
-	}
-	if !shouldAdvanceConsumePoint(currentPoint, point) {
+	if msg.TimeTick() <= r.pchannelControl.GetCheckpointTimeTick() {
 		return
 	}
-	checkpointDirty := false
+	changed := false
 	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 		cfg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
 		header := cfg.Header()
@@ -510,43 +510,41 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 			r.Logger().Info(context.TODO(), "AlterReplicateConfig message has ignore flag set, skipping checkpoint update",
 				mlog.Bool("forcePromote", header.ForcePromote))
 		} else {
-			r.checkpoint.ReplicateConfig = header.ReplicateConfiguration
-			checkpointDirty = true
+			r.pchannelControl.ReplicateConfig = proto.Clone(header.ReplicateConfiguration).(*commonpb.ReplicateConfiguration)
+			changed = true
 			clusterRole := replicateutil.MustNewConfigHelper(r.currentClusterID, header.ReplicateConfiguration).GetCurrentCluster()
 			switch clusterRole.Role() {
 			case replicateutil.RolePrimary:
-				if header.GetForcePromote() && r.checkpoint.ReplicateCheckpoint != nil {
+				if header.GetForcePromote() && r.pchannelControl.ReplicateCheckpoint != nil {
 					// Store for background task to persist; never call etcd while holding r.mu.
-					r.pendingSalvageCheckpoint = r.checkpoint.ReplicateCheckpoint
+					r.pendingSalvageCheckpoint = utility.NewReplicateCheckpointFromProto(r.pchannelControl.ReplicateCheckpoint)
 					r.notifyPersist()
 				}
-				r.checkpoint.ReplicateCheckpoint = nil
+				r.pchannelControl.ReplicateCheckpoint = nil
 			case replicateutil.RoleSecondary:
 				// Update the replicate checkpoint if the cluster role is secondary.
 				sourceClusterID := clusterRole.SourceCluster().GetClusterId()
 				sourcePChannel := clusterRole.MustGetSourceChannel(r.channel.Name)
-				if r.checkpoint.ReplicateCheckpoint == nil || r.checkpoint.ReplicateCheckpoint.ClusterID != sourceClusterID {
-					r.checkpoint.ReplicateCheckpoint = &utility.ReplicateCheckpoint{
+				if r.pchannelControl.ReplicateCheckpoint == nil || r.pchannelControl.ReplicateCheckpoint.GetClusterId() != sourceClusterID {
+					r.pchannelControl.ReplicateCheckpoint = (&utility.ReplicateCheckpoint{
 						ClusterID: sourceClusterID,
 						PChannel:  sourcePChannel,
 						MessageID: nil,
 						TimeTick:  0,
-					}
-					checkpointDirty = true
+					}).IntoProto()
+					changed = true
 				}
 			}
 		}
 	}
-	r.checkpoint.MessageID = point.MessageID
-	r.checkpoint.TimeTick = point.TimeTick
-	if r.alterWALInfo != nil && r.alterWALInfo.FoundAlterWALMsg && (r.checkpoint.AlterWalState == nil || r.checkpoint.AlterWalState.Stage == streamingpb.AlterWALStage_NONE) {
-		r.checkpoint.AlterWalState = &streamingpb.AlterWALState{
+	if r.alterWALInfo != nil && r.alterWALInfo.FoundAlterWALMsg && (r.pchannelControl.AlterWalState == nil || r.pchannelControl.AlterWalState.Stage == streamingpb.AlterWALStage_NONE) {
+		r.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
 			TargetWalName: r.alterWALInfo.TargetWALName,
 			TimeTick:      r.alterWALInfo.AlterWALTs,
 			Configs:       r.alterWALInfo.AlterWALConfig,
 			Stage:         streamingpb.AlterWALStage_FLUSHING,
 		}
-		checkpointDirty = true
+		changed = true
 	}
 	if msg.MessageType() == message.MessageTypeAlterWAL {
 		alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
@@ -557,50 +555,46 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 			AlterWALConfig:   header.Config,
 			AlterWALTs:       msg.TimeTick(),
 		}
-		if r.checkpoint.AlterWalState == nil || r.checkpoint.AlterWalState.Stage == streamingpb.AlterWALStage_NONE {
-			r.checkpoint.AlterWalState = &streamingpb.AlterWALState{
+		if r.pchannelControl.AlterWalState == nil || r.pchannelControl.AlterWalState.Stage == streamingpb.AlterWALStage_NONE {
+			r.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
 				TargetWalName: header.TargetWalName,
 				TimeTick:      msg.TimeTick(),
 				Configs:       header.Config,
 				Stage:         streamingpb.AlterWALStage_FLUSHING,
 			}
-			checkpointDirty = true
+			changed = true
 		}
 	}
-	if checkpointDirty {
-		r.checkpointDirty = true
-	}
-
 	// update the replicate checkpoint.
 	replicateHeader := msg.ReplicateHeader()
-	if replicateHeader == nil {
-		return
-	}
-	if r.checkpoint.ReplicateCheckpoint == nil {
+	if replicateHeader != nil && r.pchannelControl.ReplicateCheckpoint == nil {
 		r.Logger().Warn(context.TODO(), "replicate checkpoint is nil when incoming replicate message", mlog.FieldMessage(msg))
-		return
-	}
-	if replicateHeader.ClusterID != r.checkpoint.ReplicateCheckpoint.ClusterID {
+	} else if replicateHeader != nil && replicateHeader.ClusterID != r.pchannelControl.ReplicateCheckpoint.GetClusterId() {
 		r.Logger().Warn(context.TODO(), "replicate header cluster id mismatch",
 			mlog.FieldMessage(msg),
-			mlog.String("expected", r.checkpoint.ReplicateCheckpoint.ClusterID),
+			mlog.String("expected", r.pchannelControl.ReplicateCheckpoint.GetClusterId()),
 			mlog.String("actual", replicateHeader.ClusterID))
-		return
+	} else if replicateHeader != nil {
+		r.pchannelControl.ReplicateCheckpoint.MessageId = message.MustMarshalMessageID(replicateHeader.LastConfirmedMessageID)
+		r.pchannelControl.ReplicateCheckpoint.TimeTick = replicateHeader.TimeTick
+		changed = true
 	}
-	r.checkpoint.ReplicateCheckpoint.MessageID = replicateHeader.LastConfirmedMessageID
-	r.checkpoint.ReplicateCheckpoint.TimeTick = replicateHeader.TimeTick
-	r.checkpointDirty = true
+	if changed {
+		r.pchannelControl.CheckpointTimeTick = msg.TimeTick()
+	}
 }
 
-// GetDataCheckpoint returns the recovery-owned data checkpoint.
-func (r *recoveryStorageImpl) GetDataCheckpoint(ctx context.Context) *WALCheckpoint {
+// GetCheckpoint returns the latest catalog-published recovery checkpoint.
+func (r *recoveryStorageImpl) GetCheckpoint(_ context.Context) *WALCheckpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	return r.getDataCheckpointLocked()
+	if r.checkpoint == nil {
+		return nil
+	}
+	return r.checkpoint.Clone()
 }
 
-func (r *recoveryStorageImpl) getDataCheckpointLocked() *WALCheckpoint {
+func (r *recoveryStorageImpl) getCompletedCheckpoint() *WALCheckpoint {
 	if r.ackTracker == nil {
 		return nil
 	}
@@ -611,5 +605,6 @@ func (r *recoveryStorageImpl) getDataCheckpointLocked() *WALCheckpoint {
 	return &WALCheckpoint{
 		MessageID: point.MessageID,
 		TimeTick:  point.TimeTick,
+		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
 }

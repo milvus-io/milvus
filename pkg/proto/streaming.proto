@@ -753,11 +753,12 @@ message SegmentAssignmentMeta {
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
     int64 storage_version        = 7; // only available if level is L1 or Legacy.
-    uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 checkpoint_time_tick  = 8; // Complete durable effects of segment-relevant messages through this timetick.
     L1SegmentPersistedStorage persisted_storage = 9;
     reserved 10;
     reserved "sealed_at_data_version";
-    uint64 data_checkpoint_time_tick = 11; // Segment data is durable through this timetick.
+    reserved 11;
+    reserved "data_checkpoint_time_tick";
     uint64 tombstone_time_tick = 12; // This retained segment meta starts filtering replay.
     bool l1_commit_done = 13; // DataCoord accepted the final L1 binlog commit.
 }
@@ -766,6 +767,8 @@ message L1SegmentPersistedStorage {
     string manifest_path = 1;
     repeated L1SegmentBinLogs binlogs = 2;
     data.FieldBinlog merged_stats_binlog = 3;
+    data.Statistics statistics = 4;
+    repeated data.FieldBinlog delta_binlog = 5;
 }
 
 message L1SegmentBinLogs {
@@ -796,27 +799,27 @@ message SegmentAssignmentStat {
     uint64 max_rows                           = 9; // The max rows of the segment.
 }
 
-// The WALCheckpoint that is used to recovery the wal scanner.
+// WALCheckpoint is the published global recovery point. Component snapshots
+// required by this point are persisted before this record becomes visible.
 message WALCheckpoint {
-    common.MessageID message_id = 1; // From here to recover all uncommited info.
-    // e.g., primary key index, segment assignment info, vchannel info...
-    // because current data path flush is slow, and managed by the coordinator, current current is not apply to it.
-    //
-    // because the data path flush is slow, so we add a new checkpoint here to promise fast recover the wal state from log.
+    common.MessageID message_id = 1; // Safe WAL scanner restart position.
     uint64 time_tick = 2; // The timetick of checkpoint, keep consistecy with message_id.
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
-    // The wal name of the checkpoint.
-    common.ReplicateConfiguration replicate_config = 4; // if the wal join a replicated clusters, the replicate config is not null,
-    common.ReplicateCheckpoint replicate_checkpoint = 5; // if the wal is replicated from remote cluster, the checkpoint is not null,
-    // Used for Alter WAL operations to track WAL modification states
+    // Legacy embedded control fields are read only for migration. New writers
+    // persist them in PChannelRecoveryControlMeta.
+    common.ReplicateConfiguration replicate_config = 4;
+    common.ReplicateCheckpoint replicate_checkpoint = 5;
     AlterWALState alter_wal_state = 6;
-    WALConsumeCheckpoint data_checkpoint = 7;
+    reserved 7;
+    reserved "data_checkpoint";
 }
 
-message WALConsumeCheckpoint {
-    common.MessageID message_id = 1;
-    uint64 time_tick = 2;
+message PChannelRecoveryControlMeta {
+    uint64 checkpoint_time_tick = 1; // Complete applied control effects through this timetick.
+    common.ReplicateConfiguration replicate_config = 2;
+    common.ReplicateCheckpoint replicate_checkpoint = 3;
+    AlterWALState alter_wal_state = 4;
 }
 
 enum AlterWALStage{

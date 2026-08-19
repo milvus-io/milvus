@@ -55,7 +55,46 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 	checkpoint, err = catalog.GetConsumeCheckpoint(ctx, "p1")
 	assert.Nil(t, checkpoint)
 	assert.Nil(t, err)
+}
 
+func TestCatalogPChannelRecoveryControlMeta(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("round_trip", func(t *testing.T) {
+		catalog := newTestEtcdCatalog(t, "testCatalogRecoveryControl")
+		control, err := catalog.GetPChannelRecoveryControlMeta(ctx, "p1")
+		require.NoError(t, err)
+		require.Nil(t, control)
+
+		expected := &streamingpb.PChannelRecoveryControlMeta{
+			CheckpointTimeTick: 42,
+			ReplicateConfig:    &commonpb.ReplicateConfiguration{Clusters: []*commonpb.MilvusCluster{{ClusterId: "cluster-a"}}},
+			AlterWalState:      &streamingpb.AlterWALState{Stage: streamingpb.AlterWALStage_FLUSHING},
+		}
+		require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+			PChannelControlMeta: expected,
+		}))
+
+		control, err = catalog.GetPChannelRecoveryControlMeta(ctx, "p1")
+		require.NoError(t, err)
+		require.True(t, proto.Equal(expected, control))
+	})
+
+	t.Run("load_error", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", errors.New("load failed"))
+		control, err := NewCataLog(kv).GetPChannelRecoveryControlMeta(ctx, "p1")
+		require.Error(t, err)
+		require.Nil(t, control)
+	})
+
+	t.Run("invalid_payload", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		kv.EXPECT().Load(mock.Anything, mock.Anything).Return("invalid", nil)
+		control, err := NewCataLog(kv).GetPChannelRecoveryControlMeta(ctx, "p1")
+		require.Error(t, err)
+		require.Nil(t, control)
+	})
 }
 
 // TestCatalogSegmentAssignments round-trips segment assignments through the
@@ -310,13 +349,12 @@ func TestCatalogRetainsClosedRecoveryMeta(t *testing.T) {
 
 	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
 		300: {
-			CollectionId:           100,
-			PartitionId:            200,
-			SegmentId:              300,
-			Vchannel:               "vchannel-1",
-			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick:     120,
-			DataCheckpointTimeTick: 80,
+			CollectionId:       100,
+			PartitionId:        200,
+			SegmentId:          300,
+			Vchannel:           "vchannel-1",
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick: 120,
 		},
 	}
 	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{SegmentAssignments: segments}))
@@ -326,7 +364,6 @@ func TestCatalogRetainsClosedRecoveryMeta(t *testing.T) {
 	require.Len(t, loadedSegments, 1)
 	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, loadedSegments[0].GetState())
 	assert.Equal(t, uint64(120), loadedSegments[0].GetCheckpointTimeTick())
-	assert.Equal(t, uint64(80), loadedSegments[0].GetDataCheckpointTimeTick())
 }
 
 func TestCatalogListVChannelRejectsMissingSchema(t *testing.T) {
@@ -427,14 +464,13 @@ func TestCatalogRetainsTombstonedRecoveryMeta(t *testing.T) {
 
 	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
 		300: {
-			CollectionId:           100,
-			PartitionId:            200,
-			SegmentId:              300,
-			Vchannel:               "vchannel-1",
-			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
-			CheckpointTimeTick:     120,
-			DataCheckpointTimeTick: 120,
-			TombstoneTimeTick:      120,
+			CollectionId:       100,
+			PartitionId:        200,
+			SegmentId:          300,
+			Vchannel:           "vchannel-1",
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+			CheckpointTimeTick: 120,
+			TombstoneTimeTick:  120,
 		},
 	}
 	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{SegmentAssignments: segments}))
@@ -494,12 +530,11 @@ func TestCatalogDropsTombstonedRecoveryMeta(t *testing.T) {
 
 	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
 		300: {
-			SegmentId:              300,
-			Vchannel:               "vchannel-1",
-			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
-			CheckpointTimeTick:     120,
-			DataCheckpointTimeTick: 120,
-			TombstoneTimeTick:      120,
+			SegmentId:          300,
+			Vchannel:           "vchannel-1",
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+			CheckpointTimeTick: 120,
+			TombstoneTimeTick:  120,
 		},
 		301: {
 			SegmentId: 301,
@@ -764,6 +799,7 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 	pchannel := "p1"
 
 	err := catalog.SaveRecoverySnapshot(ctx, pchannel, &metastore.WALRecoverySnapshot{
+		PChannelControlMeta: &streamingpb.PChannelRecoveryControlMeta{CheckpointTimeTick: 41},
 		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
 			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
 		},
@@ -808,6 +844,11 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, checkpoint)
 	assert.Equal(t, uint64(42), checkpoint.GetTimeTick())
+
+	control, err := catalog.GetPChannelRecoveryControlMeta(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.NotNil(t, control)
+	assert.Equal(t, uint64(41), control.GetCheckpointTimeTick())
 }
 
 func TestBuildPrefixAndKey(t *testing.T) {
@@ -835,6 +876,8 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/consume-checkpoint", buildConsumeCheckpointKey("p1"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/consume-checkpoint", buildConsumeCheckpointKey("p2"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/recovery-control", buildRecoveryControlKey("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/recovery-control", buildRecoveryControlKey("p2"))
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))

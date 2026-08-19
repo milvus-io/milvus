@@ -105,6 +105,11 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 		handles := segment.markPendingDataDurableLocked(t.timetick)
 		segment.finalCommitDone = true
 		segment.meta.L1CommitDone = true
+		segment.durableMeta.State = segment.meta.State
+		segment.durableMeta.L1CommitDone = true
+		if segment.meta.GetStat() != nil {
+			segment.durableMeta.Stat.LastModifiedTimestamp = segment.meta.GetStat().GetLastModifiedTimestamp()
+		}
 		segment.dirty = true
 		segment.mu.Unlock()
 		segment.NotifyDataUpdated()

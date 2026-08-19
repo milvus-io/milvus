@@ -51,6 +51,7 @@ var (
 // newRecoveryScannerAdaptor creates a new recovery scanner adaptor.
 func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 	startMessageID message.MessageID,
+	startAfter bool,
 	scanMetrics *metricsutil.ScannerMetrics,
 	useWriteAheadBuffer bool,
 ) *scannerAdaptorImpl {
@@ -61,8 +62,12 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		mlog.String("channel", l.Channel().String()),
 		mlog.String("startMessageID", startMessageID.String()),
 	)
+	deliverPolicy := options.DeliverPolicyStartFrom(startMessageID)
+	if startAfter {
+		deliverPolicy = options.DeliverPolicyStartAfter(startMessageID)
+	}
 	readOption := wal.ReadOption{
-		DeliverPolicy:          options.DeliverPolicyStartFrom(startMessageID),
+		DeliverPolicy:          deliverPolicy,
 		MesasgeHandler:         adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
 		IgnorePauseConsumption: true,
 	}
@@ -388,9 +393,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			}
 			s.pendingQueue.Add(msgs)
 		}
-		// TimeTick only advances the confirmation frontier and is not delivered to consumers.
-		// Other confirmation barriers keep their existing delivery behavior.
-		if msg.MessageType() != message.MessageTypeTimeTick {
+		if msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || s.pendingQueue.Len() == 0 {
+			// Keep the legacy scanner contract for TimeTick messages: persisted
+			// TimeTicks and otherwise-empty batches must reach consumers so the
+			// legacy query pipeline can advance tsafe. Other confirmation barriers
+			// are always delivered.
 			s.pendingQueue.Add([]message.ImmutableMessage{msg})
 		}
 		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())

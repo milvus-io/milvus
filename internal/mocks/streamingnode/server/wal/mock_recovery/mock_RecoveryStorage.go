@@ -6,7 +6,6 @@ import (
 	context "context"
 
 	recovery "github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
-	utility "github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	vchannel "github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -56,50 +55,50 @@ func (_c *MockRecoveryStorage_Close_Call) RunAndReturn(run func()) *MockRecovery
 	return _c
 }
 
-// GetDataCheckpoint provides a mock function with given fields: ctx
-func (_m *MockRecoveryStorage) GetDataCheckpoint(ctx context.Context) *utility.WALCheckpoint {
+// GetCheckpoint provides a mock function with given fields: ctx
+func (_m *MockRecoveryStorage) GetCheckpoint(ctx context.Context) *recovery.WALCheckpoint {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetDataCheckpoint")
+		panic("no return value specified for GetCheckpoint")
 	}
 
-	var r0 *utility.WALCheckpoint
-	if rf, ok := ret.Get(0).(func(context.Context) *utility.WALCheckpoint); ok {
+	var r0 *recovery.WALCheckpoint
+	if rf, ok := ret.Get(0).(func(context.Context) *recovery.WALCheckpoint); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*utility.WALCheckpoint)
+			r0 = ret.Get(0).(*recovery.WALCheckpoint)
 		}
 	}
 
 	return r0
 }
 
-// MockRecoveryStorage_GetDataCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataCheckpoint'
-type MockRecoveryStorage_GetDataCheckpoint_Call struct {
+// MockRecoveryStorage_GetCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCheckpoint'
+type MockRecoveryStorage_GetCheckpoint_Call struct {
 	*mock.Call
 }
 
-// GetDataCheckpoint is a helper method to define mock.On call
+// GetCheckpoint is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockRecoveryStorage_Expecter) GetDataCheckpoint(ctx interface{}) *MockRecoveryStorage_GetDataCheckpoint_Call {
-	return &MockRecoveryStorage_GetDataCheckpoint_Call{Call: _e.mock.On("GetDataCheckpoint", ctx)}
+func (_e *MockRecoveryStorage_Expecter) GetCheckpoint(ctx interface{}) *MockRecoveryStorage_GetCheckpoint_Call {
+	return &MockRecoveryStorage_GetCheckpoint_Call{Call: _e.mock.On("GetCheckpoint", ctx)}
 }
 
-func (_c *MockRecoveryStorage_GetDataCheckpoint_Call) Run(run func(ctx context.Context)) *MockRecoveryStorage_GetDataCheckpoint_Call {
+func (_c *MockRecoveryStorage_GetCheckpoint_Call) Run(run func(ctx context.Context)) *MockRecoveryStorage_GetCheckpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *MockRecoveryStorage_GetDataCheckpoint_Call) Return(_a0 *utility.WALCheckpoint) *MockRecoveryStorage_GetDataCheckpoint_Call {
+func (_c *MockRecoveryStorage_GetCheckpoint_Call) Return(_a0 *recovery.WALCheckpoint) *MockRecoveryStorage_GetCheckpoint_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockRecoveryStorage_GetDataCheckpoint_Call) RunAndReturn(run func(context.Context) *utility.WALCheckpoint) *MockRecoveryStorage_GetDataCheckpoint_Call {
+func (_c *MockRecoveryStorage_GetCheckpoint_Call) RunAndReturn(run func(context.Context) *recovery.WALCheckpoint) *MockRecoveryStorage_GetCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

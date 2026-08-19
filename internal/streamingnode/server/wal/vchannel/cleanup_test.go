@@ -13,7 +13,7 @@ import (
 
 func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
 	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, nil)
-	equalCheckpoint := moduleapi.CleanupContext{MetaPhysicalTimeTick: 10, DataPhysicalTimeTick: 10}
+	equalCheckpoint := moduleapi.CleanupContext{PhysicalTimeTick: 10}
 
 	require.Empty(t, manager.ConsumeCleanupSnapshots(equalCheckpoint))
 
@@ -30,7 +30,7 @@ func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
 
 	require.Empty(t, manager.ConsumeCleanupSnapshots(equalCheckpoint))
 
-	pastTombstone := moduleapi.CleanupContext{MetaPhysicalTimeTick: 11, DataPhysicalTimeTick: 11}
+	pastTombstone := moduleapi.CleanupContext{PhysicalTimeTick: 11}
 	deleteSnapshots := manager.ConsumeCleanupSnapshots(pastTombstone)
 	require.Len(t, deleteSnapshots, 2)
 	assert.Equal(t, moduleapi.ModuleNameTransformLog, deleteSnapshots[0].ModuleName())
@@ -45,18 +45,17 @@ func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
 
 func TestPChannelRecoveryManagerDeletesSegmentsBeforeVChannel(t *testing.T) {
 	segmentMeta := &streamingpb.SegmentAssignmentMeta{
-		CollectionId:           1,
-		PartitionId:            10,
-		SegmentId:              100,
-		Vchannel:               "v1",
-		State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
-		CheckpointTimeTick:     10,
-		DataCheckpointTimeTick: 10,
-		TombstoneTimeTick:      10,
+		CollectionId:       1,
+		PartitionId:        10,
+		SegmentId:          100,
+		Vchannel:           "v1",
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+		CheckpointTimeTick: 10,
+		TombstoneTimeTick:  10,
 	}
 	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
 		map[int64]*streamingpb.SegmentAssignmentMeta{100: segmentMeta})
-	cleanup := moduleapi.CleanupContext{MetaPhysicalTimeTick: 11, DataPhysicalTimeTick: 11}
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11}
 
 	segmentDeletes := manager.ConsumeCleanupSnapshots(cleanup)
 	require.Len(t, segmentDeletes, 1)
@@ -91,8 +90,7 @@ func TestPChannelRecoveryManagerKeepsChangesAfterSnapshotFrozen(t *testing.T) {
 	require.NotNil(t, module)
 
 	require.Empty(t, manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
-		MetaPhysicalTimeTick: 10,
-		DataPhysicalTimeTick: 10,
+		PhysicalTimeTick: 10,
 	}))
 	first := manager.ConsumeDirtySnapshots()
 	require.Len(t, first, 1)

@@ -46,7 +46,6 @@ func TestSegmentViewRequestPersistThrough(t *testing.T) {
 	view := NewSegmentView(
 		&streamingpb.SegmentAssignmentMeta{SegmentId: 1, Vchannel: "v1"},
 		0,
-		0,
 		false,
 		pending,
 		nil,

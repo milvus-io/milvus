@@ -24,6 +24,10 @@ type StreamingNodeCataLog interface {
 	// Return nil, nil if the checkpoint is not exist.
 	GetConsumeCheckpoint(ctx context.Context, pChannelName string) (*streamingpb.WALCheckpoint, error)
 
+	// GetPChannelRecoveryControlMeta gets the pchannel-scoped recovery control
+	// state. Return nil, nil if the state does not exist.
+	GetPChannelRecoveryControlMeta(ctx context.Context, pChannelName string) (*streamingpb.PChannelRecoveryControlMeta, error)
+
 	// GetSalvageCheckpoint gets all salvage checkpoints for a channel.
 	// Returns an empty slice if none exist. One checkpoint per source cluster.
 	GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error)
@@ -41,11 +45,10 @@ type StreamingNodeCataLog interface {
 	// write via the shared txn.Builder/txn.Commit primitive - atomically when
 	// the op count fits the etcd txn limit, else via an ordered chunked
 	// fallback - with the consume checkpoint always the last/commit-marker op.
-	// On the atomic path a crash before the checkpoint lands makes the whole
-	// delta invisible and the next retry re-persists everything (every part is
-	// an idempotent put on a deterministic key). On the fallback path the
-	// non-commit parts are visible immediately; the checkpoint-last ordering
-	// still holds, but the whole-delta invisibility guarantee does not. A CAS
+	// On the atomic path the whole delta becomes visible together. On the
+	// fallback path non-commit parts may become visible before the checkpoint;
+	// their component checkpoints make replay from the old global checkpoint
+	// idempotent. A CAS
 	// single-point commit (see the recovery background-task TODO) is the
 	// durable fix.
 	SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *WALRecoverySnapshot) error
@@ -56,6 +59,8 @@ type StreamingNodeCataLog interface {
 // snapshot: absent sections mean "unchanged", and deletion is carried by
 // explicit Removed* sections, not by omission. See SaveRecoverySnapshot.
 type WALRecoverySnapshot struct {
+	// PChannelControlMeta is the pchannel-scoped control state to save; skipped if nil.
+	PChannelControlMeta *streamingpb.PChannelRecoveryControlMeta
 	// SegmentAssignments are the segment assignments to save; skipped if empty.
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	// RemovedSegmentIDs are the segment assignments to remove; skipped if empty.

@@ -219,6 +219,22 @@ func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string)
 	return val, nil
 }
 
+// GetPChannelRecoveryControlMeta gets the pchannel-scoped recovery control state.
+func (c *catalog) GetPChannelRecoveryControlMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelRecoveryControlMeta, error) {
+	value, err := c.metaKV.Load(ctx, buildRecoveryControlKey(pchannelName))
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	meta := &streamingpb.PChannelRecoveryControlMeta{}
+	if err := proto.Unmarshal([]byte(value), meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
 // GetSalvageCheckpoint gets all salvage checkpoints for a channel (one per source cluster).
 func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
 	prefix := buildSalvageCheckpointPrefix(pchannelName)
@@ -258,8 +274,6 @@ func buildSegmentAssignmentPrefix(pChannelName string) string {
 func buildTransformLogPrefix(pChannelName string) string {
 	return buildWALPrefix(pChannelName) + DirectoryTransformLog + "/"
 }
-
-// Key functions: return exact keys for individual records.
 
 // Key functions: return exact keys for individual records.
 
@@ -318,6 +332,10 @@ func parseCompactVChannelKey(key string, prefix string, pchannelName string) (st
 // buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.
 func buildConsumeCheckpointKey(pchannelName string) string {
 	return buildWALPrefix(pchannelName) + KeyConsumeCheckpoint
+}
+
+func buildRecoveryControlKey(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + KeyRecoveryControl
 }
 
 // removePrefix removes the prefix from the keys.
