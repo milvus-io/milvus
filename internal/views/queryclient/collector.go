@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -21,11 +20,11 @@ type queryResultCollector interface {
 
 type legacySearchCollector struct {
 	mu      sync.Mutex
-	results map[string][]*internalpb.SearchResults
+	results map[string][]LegacySearchResultEntry
 }
 
 func newLegacySearchCollector() *legacySearchCollector {
-	return &legacySearchCollector{results: make(map[string][]*internalpb.SearchResults)}
+	return &legacySearchCollector{results: make(map[string][]LegacySearchResultEntry)}
 }
 
 func (c *legacySearchCollector) Add(shardID qviews.ShardID, response *viewpb.SearchOnViewResponse) error {
@@ -38,7 +37,10 @@ func (c *legacySearchCollector) Add(shardID qviews.ShardID, response *viewpb.Sea
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.results[shardID.String()] = append(c.results[shardID.String()], result)
+	c.results[shardID.String()] = append(c.results[shardID.String()], LegacySearchResultEntry{
+		ShardID: shardID,
+		Result:  result,
+	})
 	return nil
 }
 
@@ -48,10 +50,10 @@ func (c *legacySearchCollector) ResetShard(shardID qviews.ShardID) {
 	delete(c.results, shardID.String())
 }
 
-func (c *legacySearchCollector) Results() []*internalpb.SearchResults {
+func (c *legacySearchCollector) Results() []LegacySearchResultEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	results := make([]*internalpb.SearchResults, 0)
+	results := make([]LegacySearchResultEntry, 0)
 	for _, shardResults := range c.results {
 		results = append(results, shardResults...)
 	}
@@ -60,11 +62,11 @@ func (c *legacySearchCollector) Results() []*internalpb.SearchResults {
 
 type legacyQueryCollector struct {
 	mu      sync.Mutex
-	results map[string][]*internalpb.RetrieveResults
+	results map[string][]LegacyQueryResultEntry
 }
 
 func newLegacyQueryCollector() *legacyQueryCollector {
-	return &legacyQueryCollector{results: make(map[string][]*internalpb.RetrieveResults)}
+	return &legacyQueryCollector{results: make(map[string][]LegacyQueryResultEntry)}
 }
 
 func (c *legacyQueryCollector) Add(shardID qviews.ShardID, response *viewpb.QueryOnViewResponse) error {
@@ -77,7 +79,10 @@ func (c *legacyQueryCollector) Add(shardID qviews.ShardID, response *viewpb.Quer
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.results[shardID.String()] = append(c.results[shardID.String()], result)
+	c.results[shardID.String()] = append(c.results[shardID.String()], LegacyQueryResultEntry{
+		ShardID: shardID,
+		Result:  result,
+	})
 	return nil
 }
 
@@ -87,10 +92,10 @@ func (c *legacyQueryCollector) ResetShard(shardID qviews.ShardID) {
 	delete(c.results, shardID.String())
 }
 
-func (c *legacyQueryCollector) Results() []*internalpb.RetrieveResults {
+func (c *legacyQueryCollector) Results() []LegacyQueryResultEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	results := make([]*internalpb.RetrieveResults, 0)
+	results := make([]LegacyQueryResultEntry, 0)
 	for _, shardResults := range c.results {
 		results = append(results, shardResults...)
 	}

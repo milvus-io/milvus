@@ -81,3 +81,11 @@ func (s *ViewClientStatus) Error() string {
 	}
 	return fmt.Sprintf("%s: %s", s.method, s.Err())
 }
+
+// Unwrap exposes the underlying gRPC status error to standard error traversal.
+func (s *ViewClientStatus) Unwrap() error {
+	if s == nil || s.Status == nil {
+		return nil
+	}
+	return s.Err()
+}

@@ -13,7 +13,9 @@ type ReplicaPicker interface {
 	Pick(ctx context.Context, replicas *resolver.ShardReplicas) (qviews.ShardID, error)
 }
 
-// NewPrimaryReplicaPicker returns the only picker supported by the initial milestone.
+// NewPrimaryReplicaPicker returns the only picker supported by the initial
+// milestone. Primary-only is intentional: secondary replica selection and its
+// freshness policy are deferred until a later QueryView client phase.
 func NewPrimaryReplicaPicker() ReplicaPicker {
 	return primaryReplicaPicker{}
 }

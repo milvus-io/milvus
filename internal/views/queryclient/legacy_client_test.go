@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -49,9 +50,7 @@ func TestLegacySearchAcrossPrimaryShards(t *testing.T) {
 						streamingWorkNode("p-" + shard.VChannel),
 						queryWorkNode(10),
 					},
-					Request: &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{
-						CollectionID: 100,
-					}},
+					PlanDelta: &viewpb.QueryPlan_LegacySearchPlan{LegacySearchPlan: &viewpb.LegacySearchPlan{}},
 				}}, nil
 			}).Build()
 		mockey.Mock((*mockViewQueryServiceClient).SearchOnView).To(
@@ -73,7 +72,7 @@ func TestLegacySearchAcrossPrimaryShards(t *testing.T) {
 			}).Build()
 
 		client := NewLegacyViewQueryClient(
-			ViewQueryClientConfig{MaxRetries: 1},
+			ViewQueryClientConfig{MaxAttempts: 1},
 			&mockQueryPlanClient{},
 			&mockViewQueryServiceClient{},
 			&mockShardResolver{},
@@ -95,11 +94,15 @@ func TestLegacySearchAcrossPrimaryShards(t *testing.T) {
 			require.Equal(t, []int64{7}, request.GetPartitionIds())
 			require.NotNil(t, request.GetLegacySearchRequest())
 		}
+		for _, entry := range result.Results {
+			require.Contains(t, vchannels, entry.ShardID.VChannel)
+			require.NotNil(t, entry.Result)
+		}
 	})
 }
 
-func TestLegacyQuerySkipsEmptyResults(t *testing.T) {
-	mockey.PatchConvey("returns a plan but skips an empty successful node response", t, func() {
+func TestLegacyQueryRetainsEmptyResults(t *testing.T) {
+	mockey.PatchConvey("retains an empty successful node response and its shard", t, func() {
 		shard := testShard("v0")
 		var planRequest *viewpb.GetQueryPlanRequest
 		mockey.Mock((*mockShardResolver).ResolveVChannels).Return([]string{shard.VChannel}, nil).Build()
@@ -113,9 +116,7 @@ func TestLegacyQuerySkipsEmptyResults(t *testing.T) {
 					Version:   &viewpb.QueryViewVersion{QueryVersion: 1},
 					Mvcc:      &viewpb.QueryPlanMVCC{TransformingTimetick: 80},
 					WorkNodes: []*viewpb.QueryPlanWorkNode{queryWorkNode(10)},
-					Request: &viewpb.QueryPlan_LegacyRetrieveRequest{
-						LegacyRetrieveRequest: &internalpb.RetrieveRequest{},
-					},
+					PlanDelta: &viewpb.QueryPlan_LegacyRetrievePlan{LegacyRetrievePlan: &viewpb.LegacyRetrievePlan{}},
 				}}, nil
 			}).Build()
 		mockey.Mock((*mockViewQueryServiceClient).QueryOnView).To(
@@ -128,14 +129,16 @@ func TestLegacyQuerySkipsEmptyResults(t *testing.T) {
 				}}, nil
 			}).Build()
 
-		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1}, &mockQueryPlanClient{},
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxAttempts: 1}, &mockQueryPlanClient{},
 			&mockViewQueryServiceClient{}, &mockShardResolver{}, NewPrimaryReplicaPicker())
 		result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{
 			CollectionID:     100,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 		}})
 		require.NoError(t, err)
-		require.Empty(t, result.Results)
+		require.Len(t, result.Results, 1)
+		require.Equal(t, shard, result.Results[0].ShardID)
+		require.NotNil(t, result.Results[0].Result)
 		require.Len(t, result.Plans, 1)
 		require.Equal(t, commonpb.ConsistencyLevel_Bounded, planRequest.GetConsistencyLevel())
 		require.NotNil(t, planRequest.GetLegacyRetrieveRequest())
@@ -151,10 +154,9 @@ func TestLegacyQueryReturnsRawResult(t *testing.T) {
 		mockey.Mock((*mockQueryPlanClient).GetQueryPlan).Return(&viewpb.GetQueryPlanResponse{Plan: &viewpb.QueryPlan{
 			ShardId:   shard.IntoProto(),
 			Version:   &viewpb.QueryViewVersion{QueryVersion: 1},
+			Mvcc:      &viewpb.QueryPlanMVCC{TransformingTimetick: 80},
 			WorkNodes: []*viewpb.QueryPlanWorkNode{queryWorkNode(10)},
-			Request: &viewpb.QueryPlan_LegacyRetrieveRequest{
-				LegacyRetrieveRequest: &internalpb.RetrieveRequest{},
-			},
+			PlanDelta: &viewpb.QueryPlan_LegacyRetrievePlan{LegacyRetrievePlan: &viewpb.LegacyRetrievePlan{}},
 		}}, nil).Build()
 		mockey.Mock((*mockViewQueryServiceClient).QueryOnView).Return(&viewpb.QueryOnViewResponse{
 			LegacyResults: &internalpb.RetrieveResults{
@@ -165,13 +167,42 @@ func TestLegacyQueryReturnsRawResult(t *testing.T) {
 			},
 		}, nil).Build()
 
-		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1}, &mockQueryPlanClient{},
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxAttempts: 1}, &mockQueryPlanClient{},
 			&mockViewQueryServiceClient{}, &mockShardResolver{}, NewPrimaryReplicaPicker())
 		result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
 			Req: &internalpb.RetrieveRequest{CollectionID: 100},
 		})
 		require.NoError(t, err)
 		require.Len(t, result.Results, 1)
+		require.Equal(t, shard, result.Results[0].ShardID)
+		require.Equal(t, []int64{1}, result.Results[0].Result.GetIds().GetIntId().GetData())
+	})
+}
+
+func TestLegacySearchExplicitSkip(t *testing.T) {
+	mockey.PatchConvey("accepts an explicit Phase 1 skip without dispatching Phase 2", t, func() {
+		shard := testShard("v0")
+		mockey.Mock((*mockShardResolver).ResolveVChannels).Return([]string{shard.VChannel}, nil).Build()
+		mockey.Mock((*mockShardResolver).ResolveShard).Return(
+			&resolver.ShardReplicas{VChannel: shard.VChannel, PrimaryShardID: shard}, nil).Build()
+		mockey.Mock((*mockQueryPlanClient).GetQueryPlan).Return(&viewpb.GetQueryPlanResponse{Plan: &viewpb.QueryPlan{
+			ShardId:       shard.IntoProto(),
+			Version:       &viewpb.QueryViewVersion{QueryVersion: 1},
+			Mvcc:          &viewpb.QueryPlanMVCC{},
+			SkipExecution: true,
+			PlanDelta:     &viewpb.QueryPlan_LegacySearchPlan{LegacySearchPlan: &viewpb.LegacySearchPlan{}},
+		}}, nil).Build()
+
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxAttempts: 1}, &mockQueryPlanClient{},
+			&mockViewQueryServiceClient{}, &mockShardResolver{}, NewPrimaryReplicaPicker())
+		result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
+			Req: &internalpb.SearchRequest{CollectionID: 100},
+		})
+		require.NoError(t, err)
+		require.Empty(t, result.Results)
+		require.Len(t, result.Plans, 1)
+		require.True(t, result.Plans[0].SkipExecution)
+		require.Empty(t, result.Plans[0].WorkNodes)
 	})
 }
 
@@ -190,6 +221,15 @@ func TestLegacyClientInputAndBoundaryErrors(t *testing.T) {
 		})
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Contains(t, err.Error(), "discovery failed")
+	})
+
+	mockey.PatchConvey("rejects an empty resolved vchannel set", t, func() {
+		mockey.Mock((*mockShardResolver).ResolveVChannels).Return([]string{}, nil).Build()
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, nil, nil, &mockShardResolver{}, nil)
+		_, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
+			Req: &internalpb.SearchRequest{CollectionID: 100},
+		})
+		require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	})
 
 	mockey.PatchConvey("preserves context cancellation", t, func() {
@@ -218,7 +258,7 @@ func TestLegacyClientInputAndBoundaryErrors(t *testing.T) {
 		mockey.Mock((*mockShardResolver).ResolveShard).Return(
 			&resolver.ShardReplicas{VChannel: shard.VChannel, PrimaryShardID: shard}, nil).Build()
 		mockey.Mock((*mockQueryPlanClient).GetQueryPlan).Return(nil, errors.New("transport failed")).Build()
-		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1}, &mockQueryPlanClient{},
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxAttempts: 1}, &mockQueryPlanClient{},
 			&mockViewQueryServiceClient{}, &mockShardResolver{}, nil)
 		_, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
 			Req: &internalpb.RetrieveRequest{CollectionID: 100},
@@ -251,10 +291,9 @@ func TestLegacySearchRetriesAndResetsShardResults(t *testing.T) {
 				return &viewpb.GetQueryPlanResponse{Plan: &viewpb.QueryPlan{
 					ShardId:   shard.IntoProto(),
 					Version:   &viewpb.QueryViewVersion{QueryVersion: int64(attempt)},
+					Mvcc:      &viewpb.QueryPlanMVCC{TransformingTimetick: 80},
 					WorkNodes: nodes,
-					Request: &viewpb.QueryPlan_LegacySearchRequest{
-						LegacySearchRequest: &internalpb.SearchRequest{},
-					},
+					PlanDelta: &viewpb.QueryPlan_LegacySearchPlan{LegacySearchPlan: &viewpb.LegacySearchPlan{}},
 				}}, nil
 			}).Build()
 		mockey.Mock((*mockViewQueryServiceClient).SearchOnView).To(
@@ -272,7 +311,11 @@ func TestLegacySearchRetriesAndResetsShardResults(t *testing.T) {
 				}}, nil
 			}).Build()
 
-		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 2}, &mockQueryPlanClient{},
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{
+			MaxAttempts:         2,
+			RetryInitialBackoff: time.Nanosecond,
+			RetryMaxBackoff:     time.Nanosecond,
+		}, &mockQueryPlanClient{},
 			&mockViewQueryServiceClient{}, &mockShardResolver{}, NewPrimaryReplicaPicker())
 		result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
 			Req: &internalpb.SearchRequest{CollectionID: 100},
@@ -281,7 +324,8 @@ func TestLegacySearchRetriesAndResetsShardResults(t *testing.T) {
 		require.Equal(t, int32(2), planCalls.Load())
 		require.Equal(t, int32(2), resolveCalls.Load())
 		require.Len(t, result.Results, 1)
-		require.Equal(t, int64(2), result.Results[0].GetBase().GetSourceID())
+		require.Equal(t, shard, result.Results[0].ShardID)
+		require.Equal(t, int64(2), result.Results[0].Result.GetBase().GetSourceID())
 	})
 }
 
@@ -298,7 +342,11 @@ func TestLegacySearchRetryExhaustion(t *testing.T) {
 				return nil, viewerror.NewNotPrimaryError("primary changed")
 			}).Build()
 
-		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 2}, &mockQueryPlanClient{},
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{
+			MaxAttempts:         2,
+			RetryInitialBackoff: time.Nanosecond,
+			RetryMaxBackoff:     time.Nanosecond,
+		}, &mockQueryPlanClient{},
 			&mockViewQueryServiceClient{}, &mockShardResolver{}, NewPrimaryReplicaPicker())
 		_, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
 			Req: &internalpb.SearchRequest{CollectionID: 100},
@@ -318,7 +366,7 @@ func TestLegacySearchRejectsNonPrimaryPickerResult(t *testing.T) {
 			&resolver.ShardReplicas{VChannel: primary.VChannel, PrimaryShardID: primary}, nil).Build()
 		mockey.Mock((*mockReplicaPicker).Pick).Return(secondary, nil).Build()
 
-		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1}, &mockQueryPlanClient{},
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxAttempts: 1}, &mockQueryPlanClient{},
 			&mockViewQueryServiceClient{}, &mockShardResolver{}, &mockReplicaPicker{})
 		_, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
 			Req: &internalpb.SearchRequest{CollectionID: 100},

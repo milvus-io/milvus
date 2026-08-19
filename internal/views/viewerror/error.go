@@ -13,6 +13,9 @@ import (
 type ViewError viewpb.ViewError
 
 func (e *ViewError) Error() string {
+	if e == nil {
+		return "query view error is nil"
+	}
 	return fmt.Sprintf("query view error: code=%s, cause=%s", e.Code.String(), e.Cause)
 }
 

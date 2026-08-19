@@ -22,6 +22,10 @@ func (c *legacyClient) Search(ctx context.Context, request *LegacySearchRequest)
 	if err != nil {
 		return nil, normalizeBoundaryError(err, "resolve query view vchannels")
 	}
+	if len(vchannels) == 0 {
+		return nil, merr.WrapErrServiceNotReadyMsg(
+			"query view has no resolved vchannels for collection %d", request.Req.GetCollectionID())
+	}
 	collector := newLegacySearchCollector()
 	plans := make([]ShardPlan, len(vchannels))
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -49,6 +53,10 @@ func (c *legacyClient) Query(ctx context.Context, request *LegacyQueryRequest) (
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, request.Req.GetCollectionID())
 	if err != nil {
 		return nil, normalizeBoundaryError(err, "resolve query view vchannels")
+	}
+	if len(vchannels) == 0 {
+		return nil, merr.WrapErrServiceNotReadyMsg(
+			"query view has no resolved vchannels for collection %d", request.Req.GetCollectionID())
 	}
 	collector := newLegacyQueryCollector()
 	plans := make([]ShardPlan, len(vchannels))

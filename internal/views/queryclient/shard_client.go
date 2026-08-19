@@ -2,9 +2,12 @@ package queryclient
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -14,30 +17,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type shardViewQueryClient struct {
-	maxRetries         int
-	queryPlanClient    QueryPlanClient
-	queryServiceClient ViewQueryServiceClient
-	shardResolver      resolver.ShardResolver
-	replicaPicker      ReplicaPicker
+	maxAttempts         int
+	retryInitialBackoff time.Duration
+	retryMaxBackoff     time.Duration
+	queryPlanClient     QueryPlanClient
+	queryServiceClient  ViewQueryServiceClient
+	shardResolver       resolver.ShardResolver
+	replicaPicker       ReplicaPicker
 }
 
 func newShardViewQueryClient(
-	maxRetries int,
+	maxAttempts int,
+	retryInitialBackoff time.Duration,
+	retryMaxBackoff time.Duration,
 	queryPlanClient QueryPlanClient,
 	queryServiceClient ViewQueryServiceClient,
 	shardResolver resolver.ShardResolver,
 	replicaPicker ReplicaPicker,
 ) *shardViewQueryClient {
 	return &shardViewQueryClient{
-		maxRetries:         maxRetries,
-		queryPlanClient:    queryPlanClient,
-		queryServiceClient: queryServiceClient,
-		shardResolver:      shardResolver,
-		replicaPicker:      replicaPicker,
+		maxAttempts:         maxAttempts,
+		retryInitialBackoff: retryInitialBackoff,
+		retryMaxBackoff:     retryMaxBackoff,
+		queryPlanClient:     queryPlanClient,
+		queryServiceClient:  queryServiceClient,
+		shardResolver:       shardResolver,
+		replicaPicker:       replicaPicker,
 	}
 }
 
@@ -61,8 +69,9 @@ func (c *shardViewQueryClient) Search(
 				},
 			}
 		},
+		validatePlan: validateLegacySearchPlan,
 		dispatch: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
-			nodeRequest, err := legacySearchRequestForNode(plan, node)
+			nodeRequest, err := legacySearchRequestForNode(request, plan, node)
 			if err != nil {
 				return err
 			}
@@ -101,8 +110,9 @@ func (c *shardViewQueryClient) Query(
 				},
 			}
 		},
+		validatePlan: validateLegacyRetrievePlan,
 		dispatch: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
-			nodeRequest, err := legacyRetrieveRequestForNode(plan, node)
+			nodeRequest, err := legacyRetrieveRequestForNode(request, plan, node)
 			if err != nil {
 				return err
 			}
@@ -115,9 +125,6 @@ func (c *shardViewQueryClient) Query(
 			if err != nil {
 				return err
 			}
-			if isEmptySuccessfulQueryResponse(response) {
-				return nil
-			}
 			return collector.Add(shardID, response)
 		},
 		reset: collector.ResetShard,
@@ -126,6 +133,7 @@ func (c *shardViewQueryClient) Query(
 
 type shardExecution struct {
 	buildPlanRequest func(qviews.ShardID) *viewpb.GetQueryPlanRequest
+	validatePlan     func(*viewpb.QueryPlan) error
 	dispatch         func(context.Context, qviews.WorkNode, *viewpb.QueryPlan, qviews.ShardID) error
 	reset            func(qviews.ShardID)
 }
@@ -137,7 +145,7 @@ func (c *shardViewQueryClient) execute(
 	execution *shardExecution,
 ) (*ShardPlan, error) {
 	var lastErr error
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
+	for attempt := 0; attempt < c.maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -158,6 +166,9 @@ func (c *shardViewQueryClient) execute(
 		if err != nil {
 			if isRetryableViewError(err) {
 				lastErr = err
+				if err := c.waitBeforeRetry(ctx, attempt); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, err
@@ -166,23 +177,59 @@ func (c *shardViewQueryClient) execute(
 		if err != nil {
 			return nil, err
 		}
+		if err := execution.validatePlan(plan); err != nil {
+			return nil, err
+		}
+		if plan.GetSkipExecution() {
+			return newShardPlan(shardID, plan, nodes), nil
+		}
 		if err := fanOut(ctx, nodes, plan, shardID, execution.dispatch); err != nil {
 			if isRetryableViewError(err) {
 				lastErr = err
 				execution.reset(shardID)
+				if err := c.waitBeforeRetry(ctx, attempt); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, err
 		}
-		return &ShardPlan{
-			ShardID:   shardID,
-			Version:   plan.GetVersion(),
-			Mvcc:      plan.GetMvcc(),
-			WorkNodes: nodes,
-		}, nil
+		return newShardPlan(shardID, plan, nodes), nil
 	}
 	return nil, merr.WrapErrServiceUnavailableErr(lastErr,
-		"query view shard %q remained unavailable after %d attempts", vchannel, c.maxRetries)
+		"query view shard %q remained unavailable after %d attempts", vchannel, c.maxAttempts)
+}
+
+func newShardPlan(shardID qviews.ShardID, plan *viewpb.QueryPlan, nodes []qviews.WorkNode) *ShardPlan {
+	return &ShardPlan{
+		ShardID:       shardID,
+		Version:       plan.GetVersion(),
+		Mvcc:          plan.GetMvcc(),
+		WorkNodes:     nodes,
+		SkipExecution: plan.GetSkipExecution(),
+	}
+}
+
+func (c *shardViewQueryClient) waitBeforeRetry(ctx context.Context, attempt int) error {
+	if attempt+1 >= c.maxAttempts {
+		return nil
+	}
+	delay := c.retryInitialBackoff
+	for current := 0; current < attempt && delay < c.retryMaxBackoff; current++ {
+		if delay > c.retryMaxBackoff/2 {
+			delay = c.retryMaxBackoff
+			break
+		}
+		delay *= 2
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func validateQueryPlan(response *viewpb.GetQueryPlanResponse, expected qviews.ShardID) (*viewpb.QueryPlan, []qviews.WorkNode, error) {
@@ -201,6 +248,9 @@ func validateQueryPlan(response *viewpb.GetQueryPlanResponse, expected qviews.Sh
 	if plan.GetVersion() == nil {
 		return nil, nil, merr.WrapErrServiceInternalMsg("query plan has no version for shard %s", expected)
 	}
+	if plan.GetMvcc() == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("query plan has no MVCC for shard %s", expected)
+	}
 	nodes := make([]qviews.WorkNode, 0, len(plan.GetWorkNodes()))
 	seen := make(map[qviews.WorkNodeKey]struct{}, len(plan.GetWorkNodes()))
 	for _, wireNode := range plan.GetWorkNodes() {
@@ -215,7 +265,58 @@ func validateQueryPlan(response *viewpb.GetQueryPlanResponse, expected qviews.Sh
 		seen[node.Key()] = struct{}{}
 		nodes = append(nodes, node)
 	}
+	if len(nodes) == 0 && !plan.GetSkipExecution() {
+		return nil, nil, merr.WrapErrServiceInternalMsg(
+			"query plan has no work nodes and did not explicitly skip shard %s", expected)
+	}
+	if len(nodes) > 0 && plan.GetSkipExecution() {
+		return nil, nil, merr.WrapErrServiceInternalMsg(
+			"query plan both skips execution and contains work nodes for shard %s", expected)
+	}
+	for _, node := range nodes {
+		switch node.NodeType() {
+		case qviews.NodeTypeStreamingNode:
+			if plan.GetMvcc().GetGrowingTimetick() == 0 {
+				return nil, nil, merr.WrapErrServiceInternalMsg(
+					"query plan has no growing MVCC for streaming node %s on shard %s", node, expected)
+			}
+		case qviews.NodeTypeQueryNode:
+			if plan.GetMvcc().GetTransformingTimetick() == 0 {
+				return nil, nil, merr.WrapErrServiceInternalMsg(
+					"query plan has no transforming MVCC for query node %s on shard %s", node, expected)
+			}
+		default:
+			return nil, nil, merr.WrapErrServiceInternalMsg(
+				"query plan contains work node %s with unknown type for shard %s", node, expected)
+		}
+	}
 	return plan, nodes, nil
+}
+
+func validateLegacySearchPlan(plan *viewpb.QueryPlan) error {
+	hasDelta := plan.GetLegacySearchPlan() != nil
+	hasDeprecatedRequest := plan.GetLegacySearchRequest() != nil
+	if hasDelta == hasDeprecatedRequest {
+		return merr.WrapErrServiceInternalMsg(
+			"query plan must contain exactly one legacy search plan delta or deprecated request")
+	}
+	if plan.GetLegacyRetrievePlan() != nil || plan.GetLegacyRetrieveRequest() != nil {
+		return merr.WrapErrServiceInternalMsg("legacy search query plan contains retrieve payload")
+	}
+	return nil
+}
+
+func validateLegacyRetrievePlan(plan *viewpb.QueryPlan) error {
+	hasDelta := plan.GetLegacyRetrievePlan() != nil
+	hasDeprecatedRequest := plan.GetLegacyRetrieveRequest() != nil
+	if hasDelta == hasDeprecatedRequest {
+		return merr.WrapErrServiceInternalMsg(
+			"query plan must contain exactly one legacy retrieve plan delta or deprecated request")
+	}
+	if plan.GetLegacySearchPlan() != nil || plan.GetLegacySearchRequest() != nil {
+		return merr.WrapErrServiceInternalMsg("legacy retrieve query plan contains search payload")
+	}
+	return nil
 }
 
 func workNodeFromProto(wireNode *viewpb.QueryPlanWorkNode) (qviews.WorkNode, error) {
@@ -246,31 +347,87 @@ func fanOut(
 	dispatch func(context.Context, qviews.WorkNode, *viewpb.QueryPlan, qviews.ShardID) error,
 ) error {
 	group, groupCtx := errgroup.WithContext(ctx)
-	for _, node := range nodes {
-		node := node
+	errs := make([]error, len(nodes))
+	for index, node := range nodes {
+		index, node := index, node
 		group.Go(func() error {
-			return dispatch(groupCtx, node, plan, shardID)
+			err := dispatch(groupCtx, node, plan, shardID)
+			errs[index] = err
+			return err
 		})
 	}
-	return group.Wait()
+	_ = group.Wait()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return selectFanOutError(errs)
 }
 
-func legacySearchRequestForNode(plan *viewpb.QueryPlan, node qviews.WorkNode) (*internalpb.SearchRequest, error) {
-	request := plan.GetLegacySearchRequest()
-	if request == nil {
-		return nil, merr.WrapErrServiceInternalMsg("query plan is missing legacy search request")
+func selectFanOutError(errs []error) error {
+	var firstCanceled error
+	var firstRetryable error
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, context.Canceled) {
+			if firstCanceled == nil {
+				firstCanceled = err
+			}
+			continue
+		}
+		if !isRetryableViewError(err) {
+			return err
+		}
+		if firstRetryable == nil {
+			firstRetryable = err
+		}
 	}
-	cloned := proto.Clone(request).(*internalpb.SearchRequest)
+	if firstRetryable != nil {
+		return firstRetryable
+	}
+	return firstCanceled
+}
+
+func legacySearchRequestForNode(
+	original *internalpb.SearchRequest,
+	plan *viewpb.QueryPlan,
+	node qviews.WorkNode,
+) (*internalpb.SearchRequest, error) {
+	var cloned *internalpb.SearchRequest
+	switch {
+	case plan.GetLegacySearchPlan() != nil:
+		cloned = proto.Clone(original).(*internalpb.SearchRequest)
+		delta := plan.GetLegacySearchPlan()
+		if delta.SerializedExprPlan != nil {
+			cloned.SerializedExprPlan = append([]byte(nil), delta.GetSerializedExprPlan()...)
+		}
+		if delta.PlaceholderGroup != nil {
+			cloned.PlaceholderGroup = append([]byte(nil), delta.GetPlaceholderGroup()...)
+		}
+	case plan.GetLegacySearchRequest() != nil:
+		cloned = proto.Clone(plan.GetLegacySearchRequest()).(*internalpb.SearchRequest)
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("query plan is missing legacy search plan")
+	}
 	cloned.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
 	return cloned, nil
 }
 
-func legacyRetrieveRequestForNode(plan *viewpb.QueryPlan, node qviews.WorkNode) (*internalpb.RetrieveRequest, error) {
-	request := plan.GetLegacyRetrieveRequest()
-	if request == nil {
-		return nil, merr.WrapErrServiceInternalMsg("query plan is missing legacy retrieve request")
+func legacyRetrieveRequestForNode(
+	original *internalpb.RetrieveRequest,
+	plan *viewpb.QueryPlan,
+	node qviews.WorkNode,
+) (*internalpb.RetrieveRequest, error) {
+	var cloned *internalpb.RetrieveRequest
+	switch {
+	case plan.GetLegacyRetrievePlan() != nil:
+		cloned = proto.Clone(original).(*internalpb.RetrieveRequest)
+	case plan.GetLegacyRetrieveRequest() != nil:
+		cloned = proto.Clone(plan.GetLegacyRetrieveRequest()).(*internalpb.RetrieveRequest)
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("query plan is missing legacy retrieve plan")
 	}
-	cloned := proto.Clone(request).(*internalpb.RetrieveRequest)
 	cloned.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
 	return cloned, nil
 }
@@ -292,16 +449,6 @@ func primaryPlanConsistencyLevel(level commonpb.ConsistencyLevel) commonpb.Consi
 	return level
 }
 
-func isEmptySuccessfulQueryResponse(response *viewpb.QueryOnViewResponse) bool {
-	result := response.GetLegacyResults()
-	if result == nil || !merr.Ok(result.GetStatus()) {
-		return false
-	}
-	return result.GetAllRetrieveCount() == 0 &&
-		typeutil.GetSizeOfIDs(result.GetIds()) == 0 &&
-		len(result.GetFieldsData()) == 0
-}
-
 func isRetryableViewError(err error) bool {
 	viewErr := viewerror.TryAsViewError(err)
 	return viewErr != nil && viewErr.IsRetryable()
@@ -312,7 +459,15 @@ func normalizeBoundaryError(err error, operation string) error {
 		return err
 	}
 	if viewErr := viewerror.TryAsViewError(err); viewErr != nil {
-		return merr.WrapErrServiceUnavailableErr(err, "%s", operation)
+		if viewErr.IsRetryable() {
+			return merr.WrapErrServiceUnavailableErr(err, "%s", operation)
+		}
+		return merr.WrapErrServiceInternalErr(err, "%s", operation)
 	}
-	return merr.WrapErrServiceInternalErr(err, "%s", operation)
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return merr.WrapErrServiceUnavailableErr(err, "%s", operation)
+	default:
+		return merr.WrapErrServiceInternalErr(err, "%s", operation)
+	}
 }

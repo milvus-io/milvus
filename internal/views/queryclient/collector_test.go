@@ -21,7 +21,10 @@ func TestLegacyCollectors(t *testing.T) {
 	require.NoError(t, searchCollector.Add(shard, &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{
 		Status: merr.Success(),
 	}}))
-	require.Len(t, searchCollector.Results(), 1)
+	searchResults := searchCollector.Results()
+	require.Len(t, searchResults, 1)
+	require.Equal(t, shard, searchResults[0].ShardID)
+	require.NotNil(t, searchResults[0].Result)
 	searchCollector.ResetShard(shard)
 	require.Empty(t, searchCollector.Results())
 
@@ -33,7 +36,10 @@ func TestLegacyCollectors(t *testing.T) {
 	require.NoError(t, queryCollector.Add(shard, &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{
 		Status: merr.Success(),
 	}}))
-	require.Len(t, queryCollector.Results(), 1)
+	queryResults := queryCollector.Results()
+	require.Len(t, queryResults, 1)
+	require.Equal(t, shard, queryResults[0].ShardID)
+	require.NotNil(t, queryResults[0].Result)
 	queryCollector.ResetShard(shard)
 	require.Empty(t, queryCollector.Results())
 }
@@ -62,5 +68,7 @@ func TestLegacySearchCollectorConcurrentAddAndReset(t *testing.T) {
 		require.NoError(t, err)
 	}
 	collector.ResetShard(shard)
-	require.Len(t, collector.Results(), 1)
+	results := collector.Results()
+	require.Len(t, results, 1)
+	require.Equal(t, other, results[0].ShardID)
 }

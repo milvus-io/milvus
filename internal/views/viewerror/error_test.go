@@ -36,6 +36,7 @@ func TestErrorClassification(t *testing.T) {
 	require.Nil(t, AsViewError(nil))
 	var nilError *ViewError
 	require.False(t, nilError.IsRetryable())
+	require.Equal(t, "query view error is nil", nilError.Error())
 }
 
 func TestGRPCStatusRoundTrip(t *testing.T) {
@@ -68,9 +69,11 @@ func TestConvertPreservesLocalErrors(t *testing.T) {
 	require.True(t, ok)
 	require.Nil(t, clientStatus.TryIntoViewError())
 	require.Contains(t, clientStatus.Error(), "offline")
+	require.Equal(t, codes.Unavailable, status.Code(errors.Unwrap(clientStatus)))
 
 	var nilStatus *ViewClientStatus
 	require.Nil(t, nilStatus.TryIntoViewError())
 	require.Nil(t, nilStatus.GRPCStatus())
+	require.NoError(t, nilStatus.Unwrap())
 	require.Equal(t, "query view RPC status is nil", nilStatus.Error())
 }
