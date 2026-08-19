@@ -789,6 +789,18 @@ func jsonNumberLiteral(field string, raw string) (json.Number, error) {
 //
 // proxy.http.compatibilityMode restores the previous String() rendering for
 // every kind, including the object case.
+// A string cell has to be valid UTF-8 before it becomes a proto3 string, or the
+// insert encoder -- which does not rescan them -- writes bytes the consumer
+// cannot unmarshal. gjson reads string values straight out of the request body
+// and keeps whatever the caller sent, so those bytes stay visible all the way to
+// checkInputUtf8Compatiable at the common Proxy Insert/Upsert ingress, which is
+// where they are refused. Checking them here as well would scan the same bytes
+// twice; on multibyte text that second pass costs more than the encoding step it
+// was meant to make cheaper.
+//
+// The sonic paths are the exception and do check here: sonic substitutes U+FFFD
+// for an invalid byte while decoding, so the Proxy only ever sees a well-formed
+// string and the evidence is gone by then.
 func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) (string, error) {
 	if compatibilityMode {
 		return value.String(), nil
@@ -1965,6 +1977,8 @@ func parseScalarArrayElements(elementType schemapb.DataType, vals []gjson.Result
 			if v.Type != gjson.String {
 				return nil, elementErr(idx, v, "expect string")
 			}
+			// gjson keeps the caller's bytes, so the Proxy ingress still sees
+			// them and is the single place that scans; see stringFieldValue.
 			arr = append(arr, v.String())
 		}
 		return &schemapb.ScalarField{

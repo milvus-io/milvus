@@ -33,6 +33,37 @@ func (b *mutableMesasgeBuilder[H, B]) AddPartialUpdateCAS(meta *messagespb.Parti
 	return nil
 }
 
+// EncodePartialUpdateCASIntoInsertTemplate validates meta and stores it into
+// the template InsertRequest a body encoder serializes from, so the encoded
+// body carries the same Base.Properties entry AddPartialUpdateCAS writes into
+// a materialized body. The template must be prepared before the encoder plans
+// its sizes; pair it with MarkPartialUpdateCASForBodyEncoder on each builder
+// producing a message from that template.
+func EncodePartialUpdateCASIntoInsertTemplate(meta *messagespb.PartialUpdateCAS, template *InsertRequest) error {
+	encoded, err := encodePartialUpdateCAS(meta)
+	if err != nil {
+		return err
+	}
+	if template == nil {
+		return merr.WrapErrServiceInternalMsg("partial update CAS metadata requires an insert template")
+	}
+	setPartialUpdateCASInsertBody(template, encoded)
+	return nil
+}
+
+// MarkPartialUpdateCASForBodyEncoder marks a builder whose encoder-produced
+// body already carries CAS metadata written by
+// EncodePartialUpdateCASIntoInsertTemplate -- the counterpart of the marking
+// half of AddPartialUpdateCAS for the WithBodyEncoder path, where no
+// materialized body exists to store the metadata into.
+func (b *mutableMesasgeBuilder[H, B]) MarkPartialUpdateCASForBodyEncoder() error {
+	if isNilBodyEncoder(b.bodyEncoder) {
+		return merr.WrapErrServiceInternalMsg("partial update CAS marker requires a body encoder")
+	}
+	b.properties.Set(messagePartialUpdateCAS, "")
+	return nil
+}
+
 // MarkPartialUpdateCASCommit marks a locally-created CommitTxn so the WAL can
 // serialize its CAS admission without exposing the proof metadata in headers.
 func MarkPartialUpdateCASCommit(msg MutableMessage) error {

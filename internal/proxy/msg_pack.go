@@ -17,120 +17,275 @@
 package proxy
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func getActiveWALName() message.WALName {
 	return streamingutil.MustSelectWALName()
 }
 
-func getMaxSingleRowSize(walName message.WALName) (int, bool) {
+// activeWALMessageSize reports the message-size limit the split budget should
+// be computed against for walName. Pulsar, Kafka, and Woodpecker each have
+// their own hard cap on one message; paramtable owns the name-to-limit
+// mapping so every consumer budgets against the same value. RocksMQ has no
+// per-entry limit of its own and budgets against the Pulsar-shaped default,
+// same as before any backend had its own hard limit checked.
+func activeWALMessageSize(walName message.WALName) int {
+	return Params.WALMaxMessageSize(walName.String())
+}
+
+// messageBodyLimit budgets a plaintext message body inside the active WAL
+// backend's broker-facing message limit -- not always Pulsar's, so a message
+// packed for Kafka stays under Kafka's own limit instead of Pulsar's. Before
+// this, every backend budgeted against pulsar.maxMessageSize regardless of
+// which one was actually sending the message: on a deployment where
+// kafka.message.max.bytes was set below Pulsar's default, several small rows
+// could still be packed past what Kafka would accept, and the broker would
+// reject the message on every send (#52413's failure mode, reached from a
+// packed message instead of a single oversized row).
+//
+// GetMessageSizeLimitsFor normalizes mixed-generation refreshable config as a
+// pair; keep the final guard for invalid test-only overrides. Insert and
+// Delete preserve their existing single-oversized-row behavior.
+func messageBodyLimit(walName message.WALName) int {
+	maxMessageSize, reserve := Params.PulsarCfg.GetMessageSizeLimitsFor(activeWALMessageSize(walName))
+	if maxMessageSize <= 0 || reserve < 0 || reserve >= maxMessageSize {
+		return 1
+	}
+	return maxMessageSize - reserve
+}
+
+// walHasSingleMessageLimit reports whether the active WAL backend enforces a
+// hard limit on one message at all. Pulsar, Kafka, and Woodpecker each do;
+// RocksMQ's page size is not a per-entry limit, so it reports false.
+func walHasSingleMessageLimit(walName message.WALName) bool {
 	switch walName {
-	case message.WALNamePulsar:
-		limit := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-		return limit, limit > 0
-	case message.WALNameKafka:
-		limit := Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
-		return limit, limit > 0
-	case message.WALNameRocksmq, message.WALNameWoodpecker:
-		// RocksMQ page size and Woodpecker batch size are not hard limits
-		// on an individual WAL entry.
-		return 0, false
+	case message.WALNamePulsar, message.WALNameKafka, message.WALNameWoodpecker:
+		return activeWALMessageSize(walName) > 0
 	default:
-		return 0, false
+		return false
 	}
 }
 
-func genInsertMsgsByPartition(ctx context.Context,
+// visitInsertRowsByMessageSize partitions a monotonically increasing row
+// selection by the exact plaintext InsertRequest protobuf size and
+// synchronously visits each per-message encoder. Both the rows slice and the
+// encoder borrow reusable cursor scratch and are valid only until visit
+// returns.
+//
+// A message the active WAL cannot carry is refused here rather than handed to
+// the broker. The size compared against that limit is the exact encoded body,
+// but that body is still only the plaintext InsertRequest this Proxy builds --
+// not the final WAL record StreamingNode later wraps it into with a header,
+// properties, and (if enabled) cipher overhead, all of which land on top of
+// this measurement after this check runs. bodyLimit, not the backend's raw
+// message-size config, is what is compared against here: it already reserves
+// pulsar.messageReserveSize bytes off the broker limit for exactly that
+// envelope, and that reservation has to apply the same way whether the bytes
+// it protects belong to several packed rows or to one row alone -- the
+// envelope is added once per message either way, not once per row. A row
+// measured just under the raw broker limit but over bodyLimit can still come
+// out of StreamingNode's wrapping over that raw limit and be rejected by the
+// broker on every send, permanently stalling the DML channel (#52413's
+// failure mode) -- reusing bodyLimit here instead of the raw limit is what
+// closes that gap.
+func visitInsertRowsByMessageSize(
+	template *msgpb.InsertRequest,
+	insertMsg *msgstream.InsertMsg,
+	rowOffsets []int,
+	walName message.WALName,
+	visit func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error,
+) error {
+	if len(rowOffsets) == 0 {
+		return nil
+	}
+
+	bodyLimit := messageBodyLimit(walName)
+	checkSingleMessageLimit := walHasSingleMessageLimit(walName)
+	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
+	if err != nil {
+		return err
+	}
+	start := 0
+	for start < len(rowOffsets) {
+		encoder, consumed, err := viewCursor.NextEncoder(template, rowOffsets[start:], bodyLimit)
+		if err != nil {
+			return err
+		}
+		rows := rowOffsets[start : start+consumed]
+		// Only a message carrying a single row is refused, matching the rule
+		// #52420 established: that row cannot be split any further, so there is
+		// nothing left to try. A message holding several rows does not need the
+		// same check -- bodyLimit is already computed against this walName's own
+		// backend limit, so a packed message's body cannot reach it in the first
+		// place; only a single row too large to split can still get there.
+		if checkSingleMessageLimit && len(rows) == 1 {
+			size, err := encoder.EncodedSize()
+			if err != nil {
+				return err
+			}
+			if size >= bodyLimit {
+				return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+					"single row at offset %d is too large to fit in one WAL message: encoded size=%d bytes, limit=%d bytes",
+					rows[0], size, bodyLimit))
+			}
+		}
+		if err := visit(rows, encoder); err != nil {
+			return err
+		}
+		start += consumed
+	}
+	return nil
+}
+
+// splitInsertRowsByMessageSize exposes the borrowed row views for focused
+// message-boundary tests. Production encoding uses the synchronous visitor
+// above so it does not allocate an outer selection slice.
+func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []int, walName message.WALName) ([][]int, error) {
+	template := &msgpb.InsertRequest{
+		Base:           insertMsg.GetBase(),
+		ShardName:      insertMsg.GetShardName(),
+		DbName:         insertMsg.GetDbName(),
+		CollectionName: insertMsg.GetCollectionName(),
+		PartitionName:  insertMsg.GetPartitionName(),
+		DbID:           insertMsg.GetDbID(),
+		CollectionID:   insertMsg.GetCollectionID(),
+		PartitionID:    insertMsg.GetPartitionID(),
+		SegmentID:      insertMsg.GetSegmentID(),
+		Version:        insertMsg.GetVersion(),
+		Namespace:      insertMsg.Namespace,
+	}
+	var selections [][]int
+	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, walName, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
+		selections = append(selections, rows)
+		size, err := encoder.EncodedSize()
+		if err != nil {
+			return err
+		}
+		_, err = encoder.MarshalTo(make([]byte, size))
+		return err
+	})
+	if err != nil {
+		// Same contract as genInsertMessagesByPartition: a rejected batch
+		// produces no selections, not a partial prefix.
+		return nil, err
+	}
+	return selections, nil
+}
+
+// genInsertMessagesByPartition builds V1 WAL insert messages directly from
+// borrowed row selections. The selected rows are encoded into the final
+// protobuf payload without first materializing a second InsertRequest.
+//
+// partialUpdateCAS, when non-nil, is attached to every produced message. Its
+// metadata rides in the message properties, outside the plaintext body the
+// packing budget measures, and can be large enough to push a fully built
+// message past the WAL limit on its own -- so, matching the semantics #52374
+// introduced, each built message carrying CAS is re-validated against the
+// backend's raw limit and its rows are split in half and repacked when the
+// final envelope crosses it. A single row that still cannot fit is rejected.
+func genInsertMessagesByPartition(
 	segmentID UniqueID,
 	partitionID UniqueID,
 	partitionName string,
 	rowOffsets []int,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
+	ez *message.CipherConfig,
+	schemaVersion int32,
+	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	walName message.WALName,
-) ([]msgstream.TsMsg, error) {
-	// Keep the existing cross-WAL packing threshold separate from the
-	// backend-specific hard limit for a row that cannot be split further.
-	splitThreshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	singleRowLimit, hasSingleRowLimit := getMaxSingleRowSize(walName)
-
-	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
-		insertReq := &msgpb.InsertRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-				commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp), // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
-				commonpbutil.WithSourceID(insertMsg.Base.SourceID),
-			),
-			CollectionID:   insertMsg.CollectionID,
-			PartitionID:    partitionID,
-			DbName:         insertMsg.DbName,
-			CollectionName: insertMsg.CollectionName,
-			PartitionName:  partitionName,
-			SegmentID:      segmentID,
-			ShardName:      channelName,
-			Version:        msgpb.InsertDataVersion_ColumnBased,
-			FieldsData:     make([]*schemapb.FieldData, len(insertMsg.GetFieldsData())),
-		}
-		msg := &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				Ctx: ctx,
-			},
-			InsertRequest: insertReq,
-		}
-
-		return msg
+) ([]message.MutableMessage, error) {
+	template := &msgpb.InsertRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
+			commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp),
+			commonpbutil.WithSourceID(insertMsg.Base.SourceID),
+		),
+		CollectionID:   insertMsg.CollectionID,
+		PartitionID:    partitionID,
+		DbName:         insertMsg.DbName,
+		CollectionName: insertMsg.CollectionName,
+		PartitionName:  partitionName,
+		SegmentID:      segmentID,
+		ShardName:      channelName,
+		Version:        msgpb.InsertDataVersion_ColumnBased,
 	}
-
-	fieldsData := insertMsg.GetFieldsData()
-	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
-
-	repackedMsgs := make([]msgstream.TsMsg, 0)
-	requestSize := 0
-	msg := createInsertMsg(segmentID, channelName)
-	for _, offset := range rowOffsets {
-		fieldIdxs := idxComputer.Compute(int64(offset))
-		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
+	if partialUpdateCAS != nil {
+		// Written into the template before the encoder plans any sizes: the
+		// CAS metadata rides in Base.Properties inside the encoded body, the
+		// same place AddPartialUpdateCAS stores it in a materialized body.
+		if err := message.EncodePartialUpdateCASIntoInsertTemplate(partialUpdateCAS, template); err != nil {
+			return nil, err
+		}
+	}
+	maxMessageSize := activeWALMessageSize(walName)
+	messages := make([]message.MutableMessage, 0, 1)
+	// Row selections whose built message came out over the limit once CAS
+	// metadata was attached; copied out of the borrowed selection and repacked
+	// in halves after the visit completes.
+	var casOversized [][]int
+	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, walName, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
+		// BuildMutable consumes the borrowed encoder synchronously. Once it
+		// returns, the message owns only the final payload and the splitter may
+		// safely reuse the cursor scratch for the next view.
+		builder := message.NewInsertMessageBuilderV1().
+			WithVChannel(channelName).
+			WithHeader(&message.InsertMessageHeader{
+				CollectionId: insertMsg.CollectionID,
+				Partitions: []*message.PartitionSegmentAssignment{
+					{
+						PartitionId: partitionID,
+						Rows:        uint64(len(rows)),
+						BinarySize:  0, // StreamingNode uses the encoded message size when absent.
+					},
+				},
+				SchemaVersion: &schemaVersion,
+			}).
+			WithBodyEncoder(encoder)
+		if partialUpdateCAS != nil {
+			if err := builder.MarkPartialUpdateCASForBodyEncoder(); err != nil {
+				return err
+			}
+		}
+		newMsg, err := builder.
+			WithCipher(ez).
+			BuildMutable()
+		if err != nil {
+			return err
+		}
+		if partialUpdateCAS != nil && newMsg.EstimateSize() > maxMessageSize {
+			if len(rows) == 1 {
+				return merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
+			}
+			middle := len(rows) / 2
+			casOversized = append(casOversized,
+				append([]int(nil), rows[:middle]...),
+				append([]int(nil), rows[middle:]...))
+			return nil
+		}
+		messages = append(messages, newMsg)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, half := range casOversized {
+		msgs, err := genInsertMessagesByPartition(segmentID, partitionID, partitionName, half, channelName, insertMsg, ez, schemaVersion, partialUpdateCAS, walName)
 		if err != nil {
 			return nil, err
 		}
-		if hasSingleRowLimit && curRowMessageSize >= singleRowLimit {
-			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"single row at offset %d is too large to fit in one WAL message: estimated size=%d bytes, limit=%d bytes",
-				offset, curRowMessageSize, singleRowLimit,
-			))
-		}
-
-		// If the insert message size exceeds the threshold, flush the current
-		// message first.
-		if msg.NumRows > 0 && requestSize+curRowMessageSize >= splitThreshold {
-			repackedMsgs = append(repackedMsgs, msg)
-			msg = createInsertMsg(segmentID, channelName)
-			requestSize = 0
-		}
-
-		typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
-		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
-		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
-		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
-		msg.NumRows++
-		requestSize += curRowMessageSize
+		messages = append(messages, msgs...)
 	}
-	if msg.NumRows > 0 {
-		repackedMsgs = append(repackedMsgs, msg)
-	}
-
-	return repackedMsgs, nil
+	return messages, nil
 }

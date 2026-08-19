@@ -1229,7 +1229,7 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 }
 
-func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t *testing.T) {
+func TestGenInsertMessagesByPartitionPropagatesPackingError(t *testing.T) {
 	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
 	task.upsertMsg.InsertMsg.FieldsData = []*schemapb.FieldData{
 		{
@@ -1244,8 +1244,8 @@ func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t 
 		},
 	}
 
-	_, err := repackInsertDataByPartitionForStreamingService(
-		context.Background(),
+	_, err := genInsertMessagesByPartition(
+		0,
 		200,
 		"_default",
 		[]int{0},
@@ -1256,10 +1256,15 @@ func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t 
 		nil,
 		streamingmessage.WALNamePulsar,
 	)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	// A row selection pointing past the column data is proxy-internal
+	// misalignment -- client input was already validated in PreExecute -- so
+	// the row-view encoder reports it as ErrServiceInternal, its contract for
+	// every broken internal invariant (the materializing path used to surface
+	// this shape as ErrParameterInvalid).
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
-func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrder(t *testing.T) {
+func TestGenInsertMessagesByPartitionPreservesEntityPackingOrder(t *testing.T) {
 	pks := []int64{10, 20}
 	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
 	task.upsertMsg.InsertMsg.HashValues = []uint32{0, 0}
@@ -1284,8 +1289,8 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 		ObservedPchannelTerm: 1,
 	}
 
-	baseline, err := repackInsertDataByPartitionForStreamingService(
-		context.Background(),
+	baseline, err := genInsertMessagesByPartition(
+		0,
 		200,
 		"_default",
 		[]int{0},
@@ -1301,22 +1306,20 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 	maxMessageSize := baseline[0].EstimateSize()
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+	// The synthetic limit is exactly one full message, so the default 4 KiB
+	// envelope reserve would collapse the plaintext body budget to almost
+	// nothing and reject each 4 KiB row outright. This test is about packing
+	// order, not envelope headroom; zero the reserve so the budget matches
+	// the synthetic limit.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "0"))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MessageReserveSize.Key) })
 
-	entityPacked, err := genInsertMsgsByPartition(
-		context.Background(),
-		0,
-		200,
-		"_default",
-		[]int{0, 1},
-		partialUpdateCASTestVChannels[0],
-		task.upsertMsg.InsertMsg,
-		streamingmessage.WALNamePulsar,
-	)
+	entityPacked, err := splitInsertRowsByMessageSize(task.upsertMsg.InsertMsg, []int{0, 1}, streamingmessage.WALNamePulsar)
 	require.NoError(t, err)
 	require.Len(t, entityPacked, 2)
 
-	msgs, err := repackInsertDataByPartitionForStreamingService(
-		context.Background(),
+	msgs, err := genInsertMessagesByPartition(
+		0,
 		200,
 		"_default",
 		[]int{0, 1},

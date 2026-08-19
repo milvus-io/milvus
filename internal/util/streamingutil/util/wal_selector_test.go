@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -102,4 +103,41 @@ func TestInitAndSelectWALNameDoesNotWriteRuntimeOverlay(t *testing.T) {
 	source, _, err := paramtable.GetBaseTable().Manager().GetConfig(mqTypeKey)
 	assert.NoError(t, err)
 	assert.NotEqual(t, config.RuntimeSource, source)
+}
+
+// The review counterexample for the reserve check: with mq.type "default" the
+// selector picks Pulsar (enabled and highest priority in cluster mode), and a
+// deployment that raised Pulsar's limit to fit a 16 MiB reserve is perfectly
+// valid -- even though that reserve exceeds the untouched 10 MiB defaults of
+// kafka.producer.message.max.bytes and woodpecker.maxMessageSize, both of
+// which look "enabled" purely because kafka.brokerList and
+// woodpecker.meta.prefix have non-empty defaults. Only the backend actually
+// selected may be validated; an unused backend's limit must never fail a
+// startup. The flip side: when the selected backend's own bound really is
+// violated, the once-per-process startup entry fails fast.
+func TestInitAndSelectWALNameValidatesOnlySelectedBackend(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	defer params.Reset(params.PulsarCfg.MaxMessageSize.Key)
+	defer params.Reset(params.PulsarCfg.MessageReserveSize.Key)
+
+	require.NoError(t, params.Save(params.PulsarCfg.MaxMessageSize.Key, "33554432"))
+	require.NoError(t, params.Save(params.PulsarCfg.MessageReserveSize.Key, "16777216"))
+
+	var walName message.WALName
+	assert.NotPanics(t, func() { walName = InitAndSelectWALName() })
+	assert.Equal(t, message.WALNamePulsar, walName)
+
+	// Same reserve with Pulsar's limit back at its 2 MiB default: now the
+	// selected backend's own bound is violated and startup must fail fast.
+	require.NoError(t, params.Save(params.PulsarCfg.MaxMessageSize.Key, "2097152"))
+	assert.Panics(t, func() { InitAndSelectWALName() })
+
+	// MustSelectWALName is also the per-request WAL name lookup (the proxy
+	// resolves it on every Insert/Upsert/Delete), so the same bad combination
+	// must NOT panic there: after startup it can only be reached through a
+	// live config update, and the write path falls back through
+	// normalizePulsarMessageReserve's runtime normalization instead.
+	assert.NotPanics(t, func() { walName = MustSelectWALName() })
+	assert.Equal(t, message.WALNamePulsar, walName)
 }

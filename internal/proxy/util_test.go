@@ -3940,65 +3940,155 @@ func TestComputeRecall(t *testing.T) {
 }
 
 func TestCheckVarcharFormat(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				DataType: schemapb.DataType_VarChar,
-				FieldID:  100,
-				TypeParams: []*commonpb.KeyValuePair{{
-					Key:   common.EnableAnalyzerKey,
-					Value: "true",
+	newMessage := func(dataType schemapb.DataType, value string) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{{
+					FieldId: 100,
+					Type:    dataType,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{value}}},
+					}},
 				}},
 			},
-			// skip field
-			{
-				DataType: schemapb.DataType_Int64,
+		}
+	}
+	invalidUTF8 := string([]byte{0xC0, 0xAF})
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_String} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			fields := []*schemapb.FieldSchema{{FieldID: 100, DataType: dataType}}
+			require.NoError(t, checkInputUtf8Compatiable(fields, newMessage(dataType, "合法字符串")))
+			err := checkInputUtf8Compatiable(fields, newMessage(dataType, invalidUTF8))
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
+	}
+
+	t.Run("text analyzer compatibility", func(t *testing.T) {
+		textField := &schemapb.FieldSchema{
+			FieldID: 100, DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}},
+		}
+		err := checkInputUtf8Compatiable([]*schemapb.FieldSchema{textField}, newMessage(schemapb.DataType_Text, invalidUTF8))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	// TEXT is StringData on the wire whether or not the analyzer is enabled --
+	// the analyzer only affects indexing -- so a plain, nullable TEXT field must
+	// be checked too. Nothing else catches this one: gjson does not sanitize on
+	// the way in, so this ingress is the only place that can.
+	t.Run("text without analyzer", func(t *testing.T) {
+		textField := &schemapb.FieldSchema{
+			FieldID: 100, DataType: schemapb.DataType_Text, Nullable: true,
+		}
+		require.NoError(t, checkInputUtf8Compatiable([]*schemapb.FieldSchema{textField}, newMessage(schemapb.DataType_Text, "合法字符串")))
+		err := checkInputUtf8Compatiable([]*schemapb.FieldSchema{textField}, newMessage(schemapb.DataType_Text, invalidUTF8))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	// A struct array's string sub-field reaches this check flattened into a
+	// top-level Array FieldData, which is the shape the REST handler builds and
+	// the one the encoder writes without rescanning UTF-8.
+	newArrayMessage := func(elementType schemapb.DataType, rows ...[]string) *msgstream.InsertMsg {
+		cells := make([]*schemapb.ScalarField, 0, len(rows))
+		for _, row := range rows {
+			cells = append(cells, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: row}},
+			})
+		}
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{{
+					FieldId:   100,
+					FieldName: "tokens",
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: elementType,
+							Data:        cells,
+						}},
+					}},
+				}},
 			},
-		},
+		}
+	}
+	for _, elementType := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_String} {
+		t.Run("array of "+elementType.String(), func(t *testing.T) {
+			fields := []*schemapb.FieldSchema{{
+				FieldID: 100, Name: "tokens",
+				DataType: schemapb.DataType_Array, ElementType: elementType,
+			}}
+			require.NoError(t, checkInputUtf8Compatiable(fields, newArrayMessage(elementType,
+				[]string{"合法字符串", "ok"}, []string{"still ok"})))
+
+			err := checkInputUtf8Compatiable(fields, newArrayMessage(elementType,
+				[]string{"ok"}, []string{"ok", invalidUTF8}))
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			// The position is reported, the bytes are not.
+			assert.Contains(t, err.Error(), "row 1 element 1")
+			assert.NotContains(t, err.Error(), invalidUTF8)
+		})
 	}
 
-	data := &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			FieldsData: []*schemapb.FieldData{{
-				FieldId: 100,
-				Type:    schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"valid string"},
-							},
-						},
-					},
-				},
+	t.Run("array of int is not scanned", func(t *testing.T) {
+		fields := []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "tokens",
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		}}
+		require.NoError(t, checkInputUtf8Compatiable(fields, newArrayMessage(schemapb.DataType_Int64,
+			[]string{invalidUTF8})))
+	})
+
+	// The reachable source of invalid UTF-8 is a REST struct array: its string
+	// sub-field is parsed with gjson, which keeps the caller's bytes, and it
+	// arrives here nested in StructArrays. Drive the flatten step the insert task
+	// runs first, so the check is exercised on the shape REST actually produces
+	// (TestAnyToColumnsStructArrayKeepsRawInvalidUTF8 in the httpserver package
+	// pins the other half: that the raw byte survives the HTTP body parse).
+	t.Run("struct array string sub-field after flatten", func(t *testing.T) {
+		subField := &schemapb.FieldSchema{
+			FieldID: 103, Name: "sub_str",
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+		}
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 102, Name: "my_struct", Fields: []*schemapb.FieldSchema{subField},
 			}},
-		},
-	}
-
-	err := checkInputUtf8Compatiable(schema.Fields, data)
-	assert.NoError(t, err)
-
-	// invalid data
-	invalidUTF8 := []byte{0xC0, 0xAF}
-	data = &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			FieldsData: []*schemapb.FieldData{{
-				FieldId: 100,
-				Type:    schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{string(invalidUTF8)},
-							},
-						},
-					},
-				},
+		}
+		cell := func(values ...string) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}},
+			}
+		}
+		structData := &schemapb.FieldData{
+			Type: schemapb.DataType_ArrayOfStruct, FieldName: "my_struct", FieldId: 102,
+			Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+				Fields: []*schemapb.FieldData{{
+					Type: schemapb.DataType_Array, FieldName: "sub_str", FieldId: 103,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_VarChar,
+							Data:        []*schemapb.ScalarField{cell("ok"), cell("ok", invalidUTF8)},
+						}},
+					}},
+				}},
 			}},
-		},
-	}
-	err = checkInputUtf8Compatiable(schema.Fields, data)
-	assert.Error(t, err)
+		}
+		insertMsg := &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{structData},
+		}}
+		require.NoError(t, checkAndFlattenStructFieldData(schema, insertMsg))
+
+		err := checkInputUtf8Compatiable(typeutil.GetAllFieldSchemas(schema), insertMsg)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "row 1 element 1")
+		assert.NotContains(t, err.Error(), invalidUTF8)
+	})
 }
 
 func BenchmarkCheckVarcharFormat(b *testing.B) {

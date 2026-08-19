@@ -19,12 +19,15 @@ package paramtable
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -34,8 +37,15 @@ import (
 )
 
 const (
-	defaultEtcdLogLevel       = "info"
-	defaultEtcdLogPath        = "stdout"
+	defaultEtcdLogLevel = "info"
+	defaultEtcdLogPath  = "stdout"
+
+	defaultPulsarMaxMessageSize = "2097152"
+	// defaultPulsarMessageReserveSize is the headroom kept outside the plaintext
+	// message body for the streaming message header, cipher metadata/expansion,
+	// properties added before WAL append, and Pulsar message metadata.
+	defaultPulsarMessageReserveSize = 4 * 1024
+
 	KafkaProducerConfigPrefix = "kafka.producer."
 	KafkaConsumerConfigPrefix = "kafka.consumer."
 
@@ -69,6 +79,68 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
 	p.ProfileCfg.Init(bt)
+}
+
+// WALMaxMessageSize reports the hard cap the named WAL backend enforces on
+// one message: pulsar.maxMessageSize for Pulsar,
+// kafka.producer.message.max.bytes for Kafka, and woodpecker.maxMessageSize
+// for Woodpecker. RocksMQ has no per-entry cap of its own, so it (and any
+// unrecognized name) budgets against the Pulsar-shaped limit, same as before
+// any backend had its own. This is the single place a WAL name maps to its
+// size limit; the producer's packing budget and the startup reserve check
+// below both go through it.
+func (p *ServiceParam) WALMaxMessageSize(walName string) int {
+	switch walName {
+	case "kafka":
+		return p.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+	case "woodpecker":
+		return p.WoodpeckerCfg.MaxMessageSize.GetAsInt()
+	default:
+		return p.PulsarCfg.MaxMessageSize.GetAsInt()
+	}
+}
+
+// walMessageSizeLimitKey names the config item WALMaxMessageSize reads for
+// walName, for error messages that point the operator at the right knob.
+func walMessageSizeLimitKey(walName string) string {
+	switch walName {
+	case "kafka":
+		return "kafka.producer.message.max.bytes"
+	case "woodpecker":
+		return "woodpecker.maxMessageSize"
+	default:
+		return "pulsar.maxMessageSize"
+	}
+}
+
+// ValidateWALMessageSizeReserve guarantees pulsar.messageReserveSize fits
+// under walName's message-size limit, panicking otherwise. It is called from
+// InitAndSelectWALName -- the once-per-process startup entry -- with the
+// backend the selector actually picked, so a nonsensical combination fails
+// fast at boot. It must NOT be called from the per-request WAL name lookup:
+// a bad combination reached through a live config update after startup has
+// to fall back through normalizePulsarMessageReserve's runtime normalization
+// instead of panicking the write path.
+//
+// Only the selected backend is ever validated. Enable flags cannot stand in
+// for selection here: kafka.brokerList and woodpecker.meta.prefix have
+// non-empty defaults, so "enabled" is nearly always true for backends the
+// selector will never pick, and validating those would fail startups over
+// config that is never used. RocksMQ budgets against the Pulsar-shaped
+// limit, so it validates the same bound Pulsar does.
+//
+// These config items are refreshable, so this cannot promise the invariant
+// forever: an operator can still push a bad value through a live config
+// change after startup. normalizePulsarMessageReserve keeps its own runtime
+// fallback for exactly that case; this check only removes the same mistake
+// from ever being reachable through a fresh startup.
+func (p *ServiceParam) ValidateWALMessageSizeReserve(walName string) {
+	reserve := p.PulsarCfg.MessageReserveSize.GetAsInt()
+	if limit := p.WALMaxMessageSize(walName); reserve >= limit {
+		panic(fmt.Sprintf(
+			"pulsar.messageReserveSize (%d) must be smaller than %s (%d)",
+			reserve, walMessageSizeLimitKey(walName), limit))
+	}
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -726,6 +798,11 @@ type WoodpeckerConfig struct {
 	MetaType   ParamItem `refreshable:"false"`
 	MetaPrefix ParamItem `refreshable:"false"`
 
+	// MaxMessageSize is the hard cap on one WAL record, the same role
+	// pulsar.maxMessageSize plays for Pulsar and kafka.producer.message.max.bytes
+	// plays for Kafka (#52474).
+	MaxMessageSize ParamItem `refreshable:"true"`
+
 	// client
 	AppendQueueSize           ParamItem `refreshable:"true"`
 	AppendMaxRetries          ParamItem `refreshable:"true"`
@@ -793,6 +870,27 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MetaPrefix.Init(base.mgr)
+
+	p.MaxMessageSize = ParamItem{
+		Key:          "woodpecker.maxMessageSize",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Doc: `The maximum size of each WAL record in Woodpecker. Unit: Byte.
+The same hard cap on one message that pulsar.maxMessageSize is for Pulsar and kafka.producer.message.max.bytes is for Kafka; the producer splits inserted data into multiple records to stay under it, and a single row that cannot fit is rejected up front instead of stalling the DML channel.
+Must be a positive 32-bit integer larger than pulsar.messageReserveSize when Woodpecker is the active WAL -- Milvus refuses to start otherwise. Invalid or out-of-range values fall back to the default 10 MiB limit.`,
+		Export: true,
+		Formatter: func(value string) string {
+			maxMessageSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || maxMessageSize <= 0 {
+				mlog.Warn(context.TODO(), "woodpecker.maxMessageSize must be a positive 32-bit integer, using default",
+					mlog.String("configured", value),
+					mlog.Int("default", 10*1024*1024))
+				return strconv.Itoa(10 * 1024 * 1024)
+			}
+			return value
+		},
+	}
+	p.MaxMessageSize.Init(base.mgr)
 
 	p.AppendQueueSize = ParamItem{
 		Key:          "woodpecker.client.segmentAppend.queueSize",
@@ -1144,11 +1242,12 @@ Valid values: [auto, enable, disable]`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
-	Address        ParamItem `refreshable:"false"`
-	Port           ParamItem `refreshable:"false"`
-	WebAddress     ParamItem `refreshable:"false"`
-	WebPort        ParamItem `refreshable:"false"`
-	MaxMessageSize ParamItem `refreshable:"true"`
+	Address            ParamItem `refreshable:"false"`
+	Port               ParamItem `refreshable:"false"`
+	WebAddress         ParamItem `refreshable:"false"`
+	WebPort            ParamItem `refreshable:"false"`
+	MaxMessageSize     ParamItem `refreshable:"true"`
+	MessageReserveSize ParamItem `refreshable:"true"`
 
 	// support auth
 	AuthPlugin ParamItem `refreshable:"false"`
@@ -1165,6 +1264,48 @@ type PulsarConfig struct {
 	EnableClientMetrics ParamItem `refreshable:"false"`
 
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
+}
+
+// GetMessageSizeLimits returns a self-consistent broker limit and plaintext
+// reserve. The individual ParamItems are refreshable and may be observed across
+// two config generations, so the cross-parameter constraint is applied only at
+// this point of use rather than inside either independently cached formatter.
+func (p *PulsarConfig) GetMessageSizeLimits() (maxMessageSize, messageReserveSize int) {
+	return p.GetMessageSizeLimitsFor(p.MaxMessageSize.GetAsInt())
+}
+
+// GetMessageSizeLimitsFor is GetMessageSizeLimits generalized to an arbitrary
+// WAL backend's broker limit -- not necessarily Pulsar's own. The reserve
+// amount (streaming message header, properties added before WAL append,
+// cipher metadata/expansion, and broker message metadata) covers the same
+// envelope regardless of which backend produced maxMessageSize, so it is
+// still read from pulsar.messageReserveSize; that config item is not
+// Pulsar-specific in what it represents, only in where it is set.
+func (p *PulsarConfig) GetMessageSizeLimitsFor(maxMessageSize int) (int, int) {
+	return maxMessageSize, normalizePulsarMessageReserve(maxMessageSize, p.MessageReserveSize.GetAsInt())
+}
+
+func normalizePulsarMessageReserve(maxMessageSize, messageReserveSize int) int {
+	if maxMessageSize <= 0 {
+		return 0
+	}
+	if messageReserveSize >= 0 && messageReserveSize < maxMessageSize {
+		return messageReserveSize
+	}
+	// A combination that would have failed startup validation, reached
+	// through a live config update after startup. This runs on every packed
+	// message, so the warning is rate limited; the fallback keeps writes
+	// flowing at a sane budget instead of panicking the request path.
+	fallback := 0
+	if defaultPulsarMessageReserveSize < maxMessageSize {
+		fallback = defaultPulsarMessageReserveSize
+	}
+	mlog.RatedWarn(context.TODO(), rate.Limit(0.1),
+		"pulsar.messageReserveSize does not fit under the active WAL message size limit, falling back",
+		mlog.Int("configuredReserve", messageReserveSize),
+		mlog.Int("maxMessageSize", maxMessageSize),
+		mlog.Int("effectiveReserve", fallback))
+	return fallback
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -1228,13 +1369,45 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 	p.MaxMessageSize = ParamItem{
 		Key:          "pulsar.maxMessageSize",
 		Version:      "2.0.0",
-		DefaultValue: "2097152",
+		DefaultValue: defaultPulsarMaxMessageSize,
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
-By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
-If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.`,
+By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
+If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
+Must be a positive 32-bit integer larger than pulsar.messageReserveSize when Pulsar (or RocksMQ) is the active WAL -- Milvus refuses to start otherwise. Invalid or out-of-range values fall back to the default 2 MiB limit.`,
 		Export: true,
+		Formatter: func(value string) string {
+			maxMessageSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || maxMessageSize <= 0 {
+				mlog.Warn(context.TODO(), "pulsar.maxMessageSize must be a positive 32-bit integer, using default",
+					mlog.String("configured", value),
+					mlog.String("default", defaultPulsarMaxMessageSize))
+				return defaultPulsarMaxMessageSize
+			}
+			return value
+		},
 	}
 	p.MaxMessageSize.Init(base.mgr)
+
+	p.MessageReserveSize = ParamItem{
+		Key:          "pulsar.messageReserveSize",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(defaultPulsarMessageReserveSize),
+		Doc: `The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
+A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+Must be a non-negative 32-bit integer smaller than the active WAL backend's message-size limit -- Milvus refuses to start otherwise. Invalid or out-of-range values use 4 KiB.`,
+		Export: true,
+		Formatter: func(value string) string {
+			reserveSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || reserveSize < 0 {
+				mlog.Warn(context.TODO(), "pulsar.messageReserveSize must be a non-negative 32-bit integer, using default",
+					mlog.String("configured", value),
+					mlog.Int("default", defaultPulsarMessageReserveSize))
+				return strconv.Itoa(defaultPulsarMessageReserveSize)
+			}
+			return value
+		},
+	}
+	p.MessageReserveSize.Init(base.mgr)
 
 	p.Tenant = ParamItem{
 		Key:          "pulsar.tenant",
@@ -1421,7 +1594,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          KafkaProducerConfigPrefix + "message.max.bytes",
 		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
 		Version:      "3.0.0",
-		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.",
+		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect. Must be larger than pulsar.messageReserveSize when Kafka is the active WAL -- Milvus refuses to start otherwise.",
 		Export:       true,
 		Immutable:    true,
 	}

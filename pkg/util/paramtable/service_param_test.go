@@ -283,6 +283,142 @@ func TestServiceParam(t *testing.T) {
 		}
 	})
 
+	t.Run("test pulsar max message size formatter", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			value    string
+			expected int
+		}{
+			{name: "valid", value: "3145728", expected: 3145728},
+			{name: "max int32", value: "2147483647", expected: 2147483647},
+			{name: "small positive", value: "1", expected: 1},
+			{name: "equal to default reserve", value: "4096", expected: 4096},
+			{name: "above int32", value: "2147483648", expected: 2097152},
+			{name: "invalid", value: "not-a-number", expected: 2097152},
+			{name: "zero", value: "0", expected: 2097152},
+			{name: "negative", value: "-1", expected: 2097152},
+			{name: "overflow", value: "9223372036854775808", expected: 2097152},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				base := NewBaseTable(SkipRemote(true))
+				assert.NoError(t, base.Save("pulsar.maxMessageSize", test.value))
+
+				var pulsarConfig PulsarConfig
+				pulsarConfig.Init(base)
+				assert.Equal(t, test.expected, pulsarConfig.MaxMessageSize.GetAsInt())
+			})
+		}
+	})
+
+	t.Run("test pulsar message reserve size formatter", func(t *testing.T) {
+		tests := []struct {
+			name              string
+			value             string
+			maxMessage        string
+			expectedRaw       int
+			expectedEffective int
+		}{
+			{name: "default", value: "", expectedRaw: 4096, expectedEffective: 4096},
+			{name: "valid", value: "8192", expectedRaw: 8192, expectedEffective: 8192},
+			{name: "zero", value: "0", expectedRaw: 0, expectedEffective: 0},
+			{name: "max int32 exceeds default max", value: "2147483647", expectedRaw: 2147483647, expectedEffective: 4096},
+			{name: "above int32", value: "2147483648", expectedRaw: 4096, expectedEffective: 4096},
+			{name: "invalid", value: "not-a-number", expectedRaw: 4096, expectedEffective: 4096},
+			{name: "negative", value: "-1", expectedRaw: 4096, expectedEffective: 4096},
+			{name: "overflow", value: "9223372036854775808", expectedRaw: 4096, expectedEffective: 4096},
+			{name: "equal to max", value: "8192", maxMessage: "8192", expectedRaw: 8192, expectedEffective: 4096},
+			{name: "greater than max", value: "8193", maxMessage: "8192", expectedRaw: 8193, expectedEffective: 4096},
+			{name: "max int32 minus one fits", value: "2147483646", maxMessage: "2147483647", expectedRaw: 2147483646, expectedEffective: 2147483646},
+			{name: "max int32 cannot equal reserve", value: "2147483647", maxMessage: "2147483647", expectedRaw: 2147483647, expectedEffective: 4096},
+			{name: "default does not fit tiny max", value: "4096", maxMessage: "4096", expectedRaw: 4096, expectedEffective: 0},
+			{name: "default does not fit one byte max", value: "", maxMessage: "1", expectedRaw: 4096, expectedEffective: 0},
+			{name: "custom reserve fits tiny max", value: "512", maxMessage: "1024", expectedRaw: 512, expectedEffective: 512},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				base := NewBaseTable(SkipRemote(true))
+				if test.maxMessage != "" {
+					assert.NoError(t, base.Save("pulsar.maxMessageSize", test.maxMessage))
+				}
+				if test.value != "" {
+					assert.NoError(t, base.Save("pulsar.messageReserveSize", test.value))
+				}
+
+				var pulsarConfig PulsarConfig
+				pulsarConfig.Init(base)
+				assert.Equal(t, test.expectedRaw, pulsarConfig.MessageReserveSize.GetAsInt())
+				maxMessageSize, reserveSize := pulsarConfig.GetMessageSizeLimits()
+				assert.Equal(t, test.expectedEffective, reserveSize)
+				assert.Greater(t, maxMessageSize, reserveSize)
+				assert.GreaterOrEqual(t, reserveSize, 0)
+			})
+		}
+	})
+
+	t.Run("test pulsar message size limits remain valid after refresh", func(t *testing.T) {
+		base := NewBaseTable(SkipRemote(true))
+		var pulsarConfig PulsarConfig
+		pulsarConfig.Init(base)
+
+		assertLimits := func(expectedMax, expectedReserve int) {
+			maxMessageSize, reserveSize := pulsarConfig.GetMessageSizeLimits()
+			assert.Equal(t, expectedMax, maxMessageSize)
+			assert.Equal(t, expectedReserve, reserveSize)
+			assert.Greater(t, maxMessageSize, reserveSize)
+			assert.GreaterOrEqual(t, reserveSize, 0)
+		}
+
+		assertLimits(2097152, 4096)
+		assert.NoError(t, base.Save(pulsarConfig.MessageReserveSize.Key, "2147483647"))
+		assertLimits(2097152, 4096)
+		assert.NoError(t, base.Save(pulsarConfig.MaxMessageSize.Key, "1024"))
+		assertLimits(1024, 0)
+		assert.NoError(t, base.Save(pulsarConfig.MessageReserveSize.Key, "512"))
+		assertLimits(1024, 512)
+		assert.NoError(t, base.Save(pulsarConfig.MaxMessageSize.Key, "256"))
+		assertLimits(256, 0)
+		assert.NoError(t, base.Save(pulsarConfig.MaxMessageSize.Key, "1024"))
+		assertLimits(1024, 512)
+
+		oldMax := pulsarConfig.MaxMessageSize.SwapTempValue("1024")
+		oldReserve := pulsarConfig.MessageReserveSize.SwapTempValue("4096")
+		assertLimits(1024, 0)
+		pulsarConfig.MaxMessageSize.SwapTempValue(oldMax)
+		pulsarConfig.MessageReserveSize.SwapTempValue(oldReserve)
+	})
+
+	t.Run("test message size limits for an arbitrary WAL backend", func(t *testing.T) {
+		base := NewBaseTable(SkipRemote(true))
+		var pulsarConfig PulsarConfig
+		pulsarConfig.Init(base)
+
+		// GetMessageSizeLimits is GetMessageSizeLimitsFor pinned to Pulsar's own
+		// max; the reserve normalization is identical either way, driven by the
+		// same pulsar.messageReserveSize regardless of whose max is passed in.
+		pulsarMax, pulsarReserve := pulsarConfig.GetMessageSizeLimits()
+		otherMax, otherReserve := pulsarConfig.GetMessageSizeLimitsFor(pulsarMax)
+		assert.Equal(t, pulsarMax, otherMax)
+		assert.Equal(t, pulsarReserve, otherReserve)
+
+		// A smaller backend limit gets the same reserve subtracted from it, not
+		// Pulsar's.
+		maxMessageSize, reserveSize := pulsarConfig.GetMessageSizeLimitsFor(512 * 1024)
+		assert.Equal(t, 512*1024, maxMessageSize)
+		assert.Equal(t, 4096, reserveSize)
+
+		// The oversized-reserve and non-positive-max edge cases hold for any
+		// backend's max, not just Pulsar's.
+		maxMessageSize, reserveSize = pulsarConfig.GetMessageSizeLimitsFor(256)
+		assert.Equal(t, 256, maxMessageSize)
+		assert.Equal(t, 0, reserveSize)
+		maxMessageSize, reserveSize = pulsarConfig.GetMessageSizeLimitsFor(0)
+		assert.Equal(t, 0, maxMessageSize)
+		assert.Equal(t, 0, reserveSize)
+	})
+
 	t.Run("test pulsar web config", func(t *testing.T) {
 		assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
 
@@ -413,6 +549,86 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, "/var/lib/milvus/data/pprof", params.PprofPath.GetValue())
 		bt.Save(params.PprofPath.Key, "/tmp/pprof")
 		assert.Equal(t, "/tmp/pprof", params.PprofPath.GetValue())
+	})
+}
+
+// ValidateWALMessageSizeReserve fails startup fast on a nonsensical
+// combination instead of letting normalizePulsarMessageReserve silently
+// degrade the reserve to 0 the first time a WAL message is packed -- but only
+// for the WAL backend the selector actually picked (it is called with that
+// name, from MustSelectWALName): an unused backend's limit must never fail a
+// startup, because kafka.brokerList and woodpecker.meta.prefix have non-empty
+// defaults that make "enabled" nearly always true. Each subtest builds its
+// own isolated BaseTable/ServiceParam so a config it deliberately makes
+// invalid cannot leak into any other test's global paramtable state.
+func TestServiceParamValidateMessageSizeReserve(t *testing.T) {
+	newParams := func(t *testing.T, overrides map[string]string) *ServiceParam {
+		t.Helper()
+		bt := NewBaseTable(SkipRemote(true))
+		for key, value := range overrides {
+			assert.NoError(t, bt.Save(key, value))
+		}
+		var SParams ServiceParam
+		SParams.init(bt)
+		return &SParams
+	}
+
+	t.Run("pulsar: reserve at or above pulsar.maxMessageSize panics", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.maxMessageSize":     "1000",
+			"pulsar.messageReserveSize": "1000",
+		})
+		assert.PanicsWithValue(t,
+			"pulsar.messageReserveSize (1000) must be smaller than pulsar.maxMessageSize (1000)",
+			func() { p.ValidateWALMessageSizeReserve("pulsar") })
+	})
+
+	t.Run("kafka: reserve at or above kafka.producer.message.max.bytes panics", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.messageReserveSize": "10485760",
+		})
+		assert.PanicsWithValue(t,
+			"pulsar.messageReserveSize (10485760) must be smaller than kafka.producer.message.max.bytes (10485760)",
+			func() { p.ValidateWALMessageSizeReserve("kafka") })
+	})
+
+	t.Run("woodpecker: reserve at or above woodpecker.maxMessageSize panics", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.messageReserveSize": "10485760",
+		})
+		assert.PanicsWithValue(t,
+			"pulsar.messageReserveSize (10485760) must be smaller than woodpecker.maxMessageSize (10485760)",
+			func() { p.ValidateWALMessageSizeReserve("woodpecker") })
+	})
+
+	t.Run("rocksmq validates the pulsar-shaped bound", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.maxMessageSize":     "1000",
+			"pulsar.messageReserveSize": "1000",
+		})
+		assert.PanicsWithValue(t,
+			"pulsar.messageReserveSize (1000) must be smaller than pulsar.maxMessageSize (1000)",
+			func() { p.ValidateWALMessageSizeReserve("rocksmq") })
+	})
+
+	t.Run("unselected backend's limit is not checked", func(t *testing.T) {
+		// The review counterexample: Pulsar selected with a raised limit and
+		// a 16 MiB reserve. That reserve violates Kafka's and Woodpecker's
+		// untouched 10 MiB defaults, but neither was selected, so validating
+		// the selected backend must succeed -- a config for a WAL this
+		// deployment never uses cannot fail its startup.
+		p := newParams(t, map[string]string{
+			"pulsar.maxMessageSize":     "33554432",
+			"pulsar.messageReserveSize": "16777216",
+		})
+		assert.NotPanics(t, func() { p.ValidateWALMessageSizeReserve("pulsar") })
+	})
+
+	t.Run("default configuration passes for every backend", func(t *testing.T) {
+		p := newParams(t, nil)
+		for _, walName := range []string{"pulsar", "kafka", "woodpecker", "rocksmq"} {
+			assert.NotPanics(t, func() { p.ValidateWALMessageSizeReserve(walName) })
+		}
 	})
 }
 

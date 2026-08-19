@@ -117,18 +117,7 @@ func repackInsertDataForStreamingService(
 		}
 
 		// segment id is assigned at streaming node.
-		msgs, err := repackInsertDataByPartitionForStreamingService(
-			ctx,
-			partitionID,
-			partitionName,
-			rowOffsets,
-			channel,
-			insertMsg,
-			ez,
-			schemaVersion,
-			partialUpdateCAS,
-			walName,
-		)
+		msgs, err := genInsertMessagesByPartition(0, partitionID, partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, partialUpdateCAS, walName)
 		if err != nil {
 			return nil, err
 		}
@@ -207,18 +196,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := repackInsertDataByPartitionForStreamingService(
-				ctx,
-				partitionIDs[partitionName],
-				partitionName,
-				rowOffsets,
-				channel,
-				insertMsg,
-				ez,
-				schemaVersion,
-				partialUpdateCAS,
-				walName,
-			)
+			msgs, err := genInsertMessagesByPartition(0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, partialUpdateCAS, walName)
 			if err != nil {
 				return nil, err
 			}
@@ -243,124 +221,4 @@ func getPartialUpdateCASForStreamingService(
 		return nil, merr.WrapErrServiceInternalMsg("partial update insert has nil CAS metadata for vchannel %s", channel)
 	}
 	return meta, nil
-}
-
-func repackInsertDataByPartitionForStreamingService(
-	ctx context.Context,
-	partitionID int64,
-	partitionName string,
-	rowOffsets []int,
-	channel string,
-	insertMsg *msgstream.InsertMsg,
-	ez *message.CipherConfig,
-	schemaVersion int32,
-	partialUpdateCAS *messagespb.PartialUpdateCAS,
-	walName message.WALName,
-) ([]message.MutableMessage, error) {
-	type pendingInsertPack struct {
-		rowOffsets []int
-		insertMsg  *msgstream.InsertMsg
-	}
-
-	maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	messages := make([]message.MutableMessage, 0)
-	pending := []pendingInsertPack{{rowOffsets: rowOffsets}}
-	for len(pending) > 0 {
-		pack := pending[0]
-		pending = pending[1:]
-		if pack.insertMsg == nil {
-			packedMsgs, err := genInsertMsgsByPartition(
-				ctx,
-				0,
-				partitionID,
-				partitionName,
-				pack.rowOffsets,
-				channel,
-				insertMsg,
-				walName,
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			generated := make([]pendingInsertPack, 0, len(packedMsgs))
-			rowOffsetCursor := 0
-			for _, packedMsg := range packedMsgs {
-				packedInsertMsg := packedMsg.(*msgstream.InsertMsg)
-				nextRowOffsetCursor := rowOffsetCursor + int(packedInsertMsg.GetNumRows())
-				generated = append(generated, pendingInsertPack{
-					rowOffsets: pack.rowOffsets[rowOffsetCursor:nextRowOffsetCursor],
-					insertMsg:  packedInsertMsg,
-				})
-				rowOffsetCursor = nextRowOffsetCursor
-			}
-			pending = append(generated, pending...)
-			continue
-		}
-
-		msg, err := buildInsertMessageForStreamingService(
-			pack.insertMsg.InsertRequest,
-			insertMsg.CollectionID,
-			partitionID,
-			channel,
-			schemaVersion,
-			ez,
-			partialUpdateCAS,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		// Entity-size packing does not include the streaming header or CAS
-		// metadata. Validate the fully built message and split the original row
-		// offsets again when that final envelope crosses the transport limit.
-		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
-			messages = append(messages, msg)
-			continue
-		}
-		if len(pack.rowOffsets) == 1 {
-			return nil, merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
-		}
-
-		middle := len(pack.rowOffsets) / 2
-		split := []pendingInsertPack{
-			{rowOffsets: pack.rowOffsets[:middle]},
-			{rowOffsets: pack.rowOffsets[middle:]},
-		}
-		pending = append(split, pending...)
-	}
-	return messages, nil
-}
-
-func buildInsertMessageForStreamingService(
-	insertRequest *message.InsertRequest,
-	collectionID int64,
-	partitionID int64,
-	channel string,
-	schemaVersion int32,
-	ez *message.CipherConfig,
-	partialUpdateCAS *messagespb.PartialUpdateCAS,
-) (message.MutableMessage, error) {
-	builder := message.NewInsertMessageBuilderV1().
-		WithVChannel(channel).
-		WithHeader(&message.InsertMessageHeader{
-			CollectionId: collectionID,
-			Partitions: []*message.PartitionSegmentAssignment{
-				{
-					PartitionId: partitionID,
-					Rows:        insertRequest.GetNumRows(),
-					BinarySize:  0, // TODO: current not used, message estimate size is used.
-				},
-			},
-			SchemaVersion: &schemaVersion,
-		}).
-		WithBody(insertRequest)
-	if partialUpdateCAS != nil {
-		if err := builder.AddPartialUpdateCAS(partialUpdateCAS); err != nil {
-			return nil, err
-		}
-	}
-	return builder.
-		WithCipher(ez).
-		BuildMutable()
 }

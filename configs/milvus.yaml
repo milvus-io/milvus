@@ -190,6 +190,10 @@ woodpecker:
   meta:
     type: etcd # The Type of the metadata provider. currently only support etcd.
     prefix: woodpecker # The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.
+  # The maximum size of each WAL record in Woodpecker. Unit: Byte.
+  # The same hard cap on one message that pulsar.maxMessageSize is for Pulsar and kafka.producer.message.max.bytes is for Kafka; the producer splits inserted data into multiple records to stay under it, and a single row that cannot fit is rejected up front instead of stalling the DML channel.
+  # Must be a positive 32-bit integer larger than pulsar.messageReserveSize when Woodpecker is the active WAL -- Milvus refuses to start otherwise. Invalid or out-of-range values fall back to the default 10 MiB limit.
+  maxMessageSize: 10485760
   client:
     segmentAppend:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
@@ -281,9 +285,14 @@ pulsar:
   port: 6650 # Port of Pulsar service.
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
-  # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
+  # By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
+  # Must be a positive 32-bit integer larger than pulsar.messageReserveSize when Pulsar (or RocksMQ) is the active WAL -- Milvus refuses to start otherwise. Invalid or out-of-range values fall back to the default 2 MiB limit.
   maxMessageSize: 2097152
+  # The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
+  # A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+  # Must be a non-negative 32-bit integer smaller than the active WAL backend's message-size limit -- Milvus refuses to start otherwise. Invalid or out-of-range values use 4 KiB.
+  messageReserveSize: 4096
   # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
   # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
   tenant: public
@@ -316,7 +325,7 @@ pulsar:
 #   producer:
 #     message:
 #       max:
-#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect. Must be larger than pulsar.messageReserveSize when Kafka is the active WAL -- Milvus refuses to start otherwise.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 

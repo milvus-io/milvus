@@ -1191,7 +1191,6 @@ func TestCheckAndSetData(t *testing.T) {
 			})
 		}
 	})
-
 	t.Run("invalid field name with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
@@ -5272,6 +5271,294 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
 }
 
+// A string cell has to be valid UTF-8 before it becomes a proto3 string, and
+// which layer notices depends on the parser. The sonic paths have to refuse the
+// bytes here, because sonic substitutes U+FFFD while decoding and the Proxy
+// would only ever see a well-formed string. The gjson paths deliberately do not
+// check: the bytes stay intact all the way to checkInputUtf8Compatiable, and a
+// second scan here would cost more than it saves.
+func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
+	// A raw 0xff, not an escape: this is a byte a client can put on the wire.
+	const invalidUTF8 = "bad\xffbyte"
+
+	varcharSchema := &schemapb.CollectionSchema{
+		Name: "c_utf8",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+			},
+		},
+	}
+	arraySchema := &schemapb.CollectionSchema{
+		Name: "c_utf8_array",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "tokens",
+				DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "10"},
+					{Key: common.MaxLengthKey, Value: "64"},
+				},
+			},
+		},
+	}
+	textSchema := &schemapb.CollectionSchema{
+		Name: "c_utf8_text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			// No enable_analyzer: TEXT is StringData on the wire either way, and
+			// the analyzer only affects indexing, not this check.
+			{FieldID: 101, Name: "body", DataType: schemapb.DataType_Text, Nullable: true},
+		},
+	}
+
+	// gjson hands the bytes over untouched, which is what lets the Proxy ingress
+	// be the single scanner. If this ever starts sanitizing, the bytes stop being
+	// visible downstream and the check has to move back here.
+	t.Run("varchar scalar reaches the proxy intact", func(t *testing.T) {
+		body := []byte(`{"data": [{"id": 1, "text": "` + invalidUTF8 + `"}]}`)
+		rows, _, err := checkAndSetData(body, varcharSchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, invalidUTF8, rows[0]["text"])
+	})
+
+	// Decoded by json.Unmarshal into []string: unlike the scalar VarChar
+	// path, a top-level Array<VarChar> field does not keep the caller's raw
+	// bytes here -- json.Unmarshal substitutes invalid UTF-8 with U+FFFD
+	// while unquoting, same as the pre-existing compatibilityMode behavior.
+	t.Run("array of varchar substitutes invalid UTF-8", func(t *testing.T) {
+		body := []byte(`{"data": [{"id": 1, "tokens": ["ok", "` + invalidUTF8 + `"]}]}`)
+		rows, _, err := checkAndSetData(body, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		require.Len(t, tokens.GetStringData().GetData(), 2)
+		assert.Equal(t, "ok", tokens.GetStringData().GetData()[0])
+		assert.NotEqual(t, invalidUTF8, tokens.GetStringData().GetData()[1])
+	})
+
+	// TEXT is StringData on the wire whether or not the analyzer is enabled, so
+	// it has to reach the ingress the same way VarChar does.
+	t.Run("text scalar reaches the proxy intact", func(t *testing.T) {
+		body := []byte(`{"data": [{"id": 1, "body": "` + invalidUTF8 + `"}]}`)
+		rows, _, err := checkAndSetData(body, textSchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, invalidUTF8, rows[0]["body"])
+	})
+
+	// The gjson element walk still rejects a malformed array the same way
+	// json.Unmarshal used to: a non-array token, or a non-string element.
+	t.Run("array of varchar still rejects the wrong shape", func(t *testing.T) {
+		notArray := []byte(`{"data": [{"id": 1, "tokens": "not-an-array"}]}`)
+		_, _, err := checkAndSetData(notArray, arraySchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		wrongElement := []byte(`{"data": [{"id": 1, "tokens": ["ok", 1]}]}`)
+		_, _, err = checkAndSetData(wrongElement, arraySchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "element 1")
+	})
+
+	// checkAndSetData is called directly here, bypassing the outer gin
+	// binder that would normally reject a syntactically invalid request
+	// body before this function ever runs. unmarshalScalarArray's strict
+	// json.Unmarshal rejects both malformed bodies, but the lenient
+	// gjson-based fallback -- the same one the string-wrapped case below
+	// relies on -- does not require a comma between array elements or
+	// notice trailing garbage, so it parses them anyway instead of
+	// propagating the error.
+	t.Run("array of varchar accepts malformed JSON syntax via lenient fallback", func(t *testing.T) {
+		missingComma := []byte(`{"data": [{"id": 1, "tokens": ["a" "b"]}]}`)
+		rows, _, err := checkAndSetData(missingComma, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a", "b"}, tokens.GetStringData().GetData())
+
+		trailingComma := []byte(`{"data": [{"id": 1, "tokens": ["a",]}]}`)
+		rows, _, err = checkAndSetData(trailingComma, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok = rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a"}, tokens.GetStringData().GetData())
+	})
+
+	// The outer body here really is valid JSON on its own: "tokens" is just a
+	// JSON string, and ["a" "b"] is its unescaped text content, never
+	// re-parsed as JSON by the gin binder. json.Unmarshal (unmarshalScalarArray)
+	// rejects the missing comma, but the lenient gjson-based fallback parses
+	// it anyway -- gjson does not require a comma between array elements --
+	// so this now succeeds instead of being rejected.
+	t.Run("array of varchar accepts malformed JSON inside a string-wrapped array via lenient fallback", func(t *testing.T) {
+		stringWrapped := []byte(`{"data": [{"id": 1, "tokens": "[\"a\" \"b\"]"}]}`)
+		rows, _, err := checkAndSetData(stringWrapped, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a", "b"}, tokens.GetStringData().GetData())
+	})
+
+	// Also gjson: the sub-field cell keeps the byte, and the Array FieldData it
+	// becomes is the shape checkInputUtf8Compatiable scans after flattening.
+	t.Run("struct array string sub-field reaches the proxy intact", func(t *testing.T) {
+		schema := buildStructArrayTestSchema()
+		structSchema := schema.GetStructArrayFields()[0]
+		subStr := &schemapb.FieldSchema{
+			FieldID: 105, Name: "sub_str",
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "10"},
+				{Key: common.MaxLengthKey, Value: "64"},
+			},
+		}
+		structSchema.Fields = append(structSchema.Fields, subStr)
+		body := []byte(`{
+			"data": [{
+				"id": 1,
+				"vec": [0.1, 0.2, 0.3, 0.4],
+				"my_struct": [
+					{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "sub_str": "ok"},
+					{"sub_int": 11, "sub_vec": [2.1, 2.2, 2.3, 2.4], "sub_str": "` + invalidUTF8 + `"}
+				]
+			}]
+		}`)
+		rows, validData, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+
+		fds, err := anyToColumns(rows, validData, schema, true, false)
+		require.NoError(t, err)
+		var strSub *schemapb.FieldData
+		for _, fd := range fds {
+			if fd.GetType() != schemapb.DataType_ArrayOfStruct {
+				continue
+			}
+			for _, sub := range fd.GetStructArrays().GetFields() {
+				if sub.GetFieldName() == "sub_str" {
+					strSub = sub
+				}
+			}
+		}
+		require.NotNil(t, strSub)
+		assert.Equal(t, subStr.GetFieldID(), strSub.GetFieldId())
+		assert.Equal(t, schemapb.DataType_VarChar, strSub.GetScalars().GetArrayData().GetElementType())
+		cells := strSub.GetScalars().GetArrayData().GetData()
+		require.Len(t, cells, 1)
+		assert.Equal(t, []string{"ok", invalidUTF8}, cells[0].GetStringData().GetData())
+	})
+
+	// The low-level /api/v1 column form decodes with sonic as well.
+	t.Run("v1 varchar column", func(t *testing.T) {
+		field := &FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "text",
+			Field:     []byte(`["ok", "` + invalidUTF8 + `"]`),
+		}
+		_, err := field.AsSchemapb()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "text")
+
+		good := &FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "text",
+			Field:     []byte(`["ok", "fine"]`),
+		}
+		_, err = good.AsSchemapb()
+		require.NoError(t, err)
+	})
+}
+
+// A struct array's string sub-field becomes an Array FieldData with a string
+// element type -- the shape checkAndFlattenStructFieldData lifts to the top
+// level and checkInputUtf8Compatiable then scans. This pins that shape, field ID
+// included, on the well-formed input that has to keep working, alongside a null
+// row: TestCheckAndSetDataRejectsInvalidUTF8 covers the bytes that get refused,
+// and TestCheckVarcharFormat in internal/proxy covers the ingress that repeats
+// the check for everything that does not come in over HTTP.
+func TestAnyToColumnsStructArrayStringSubField(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	structSchema := schema.GetStructArrayFields()[0]
+	structSchema.Nullable = true
+	subStr := &schemapb.FieldSchema{
+		FieldID:     105,
+		Name:        "sub_str",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxCapacityKey, Value: "10"},
+			{Key: common.MaxLengthKey, Value: "64"},
+		},
+	}
+	structSchema.Fields = append(structSchema.Fields, subStr)
+
+	body := []byte(`{
+		"data": [
+			{
+				"id": 1,
+				"vec": [0.1, 0.2, 0.3, 0.4],
+				"my_struct": [
+					{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "sub_str": "ok"},
+					{"sub_int": 11, "sub_vec": [2.1, 2.2, 2.3, 2.4], "sub_str": "還可以"}
+				]
+			},
+			{
+				"id": 2,
+				"vec": [0.5, 0.6, 0.7, 0.8],
+				"my_struct": null
+			},
+			{
+				"id": 3,
+				"vec": [0.9, 1.0, 1.1, 1.2],
+				"my_struct": [{"sub_int": 30, "sub_vec": [3.1, 3.2, 3.3, 3.4], "sub_str": "fine"}]
+			}
+		]
+	}`)
+
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	require.Equal(t, []bool{true, false, true}, validData["my_struct"])
+
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+			break
+		}
+	}
+	require.NotNil(t, structFD)
+
+	var strSub *schemapb.FieldData
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		if sub.GetFieldName() == "sub_str" {
+			strSub = sub
+			break
+		}
+	}
+	require.NotNil(t, strSub)
+	// The field ID has to survive too: it is what the ingress check matches on.
+	assert.Equal(t, subStr.GetFieldID(), strSub.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, strSub.GetType())
+	assert.Equal(t, schemapb.DataType_VarChar, strSub.GetScalars().GetArrayData().GetElementType())
+
+	cells := strSub.GetScalars().GetArrayData().GetData()
+	require.Len(t, cells, 2, "the null row carries no payload cell")
+	assert.Equal(t, []string{"ok", "還可以"}, cells[0].GetStringData().GetData())
+	assert.Equal(t, []string{"fine"}, cells[1].GetStringData().GetData())
+}
+
 func TestAnyToColumnsStructArray(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	body := []byte(`{
@@ -7178,6 +7465,18 @@ func TestCheckAndSetDataStringFieldCompatibilityMode(t *testing.T) {
 		})
 	}
 }
+
+// proxy.http.compatibilityMode restores the previous decoder for an
+// Array<VarChar> element too: json.Unmarshal silently substitutes an invalid
+// UTF-8 byte with U+FFFD while unquoting, instead of preserving it raw for
+// checkInputUtf8Compatiable to reject the way the default (gjson) path does.
+// A client that enabled the switch specifically to keep that lenient
+// substitution should still get it here, not a hard rejection further down
+// the pipeline for a byte the old decoder used to quietly paper over.
+// Array<VarChar> decodes the same way regardless of compatibilityMode --
+// unmarshalScalarArray's json.Unmarshal substitutes invalid UTF-8 with
+// U+FFFD in both modes; see TestCheckAndSetDataInvalidUTF8's
+// "array of varchar substitutes invalid UTF-8" case.
 
 // Dimensions a JSON test suite is expected to cover (compare the PostgreSQL
 // json/jsonb regression tests): escapes, non-ASCII, duplicate keys, key order,
