@@ -141,11 +141,31 @@ struct UUID {
         return data == other.data;
     }
 
+    bool
+    operator!=(const UUID& other) const {
+        return !(*this == other);
+    }
+
     // Byte-wise big-endian lexicographic order so UUID ordering matches
     // RFC-4122 textual ordering.
     bool
     operator<(const UUID& other) const {
         return data < other.data;
+    }
+
+    bool
+    operator>(const UUID& other) const {
+        return other < *this;
+    }
+
+    bool
+    operator<=(const UUID& other) const {
+        return !(other < *this);
+    }
+
+    bool
+    operator>=(const UUID& other) const {
+        return !(*this < other);
     }
 };
 

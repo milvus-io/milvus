@@ -9386,7 +9386,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto obj = data_array->mutable_scalars()->mutable_bytes_data();
             for (int64_t i = 0; i < size; i++) {
                 auto val = typed->GetValue(result_mapping[i]);
-                obj->add_data(val.data(), val.size());
+                obj->add_data(reinterpret_cast<const char*>(val), 16);
             }
             break;
         }
