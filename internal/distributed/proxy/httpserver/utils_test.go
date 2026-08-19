@@ -5367,18 +5367,30 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 		assert.Contains(t, err.Error(), "element 1")
 	})
 
-	// A natively-embedded array is caught by the outer gin binder
-	// (deep-parsing the whole request body into []map[string]interface{}
-	// requires valid JSON syntax everywhere), independent of how the array
-	// field itself is decoded below.
-	t.Run("array of varchar still rejects malformed JSON syntax", func(t *testing.T) {
+	// checkAndSetData is called directly here, bypassing the outer gin
+	// binder that would normally reject a syntactically invalid request
+	// body before this function ever runs. unmarshalScalarArray's strict
+	// json.Unmarshal rejects both malformed bodies, but the lenient
+	// gjson-based fallback -- the same one the string-wrapped case below
+	// relies on -- does not require a comma between array elements or
+	// notice trailing garbage, so it parses them anyway instead of
+	// propagating the error.
+	t.Run("array of varchar accepts malformed JSON syntax via lenient fallback", func(t *testing.T) {
 		missingComma := []byte(`{"data": [{"id": 1, "tokens": ["a" "b"]}]}`)
-		_, _, err := checkAndSetData(missingComma, arraySchema, false)
-		require.Error(t, err)
+		rows, _, err := checkAndSetData(missingComma, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a", "b"}, tokens.GetStringData().GetData())
 
 		trailingComma := []byte(`{"data": [{"id": 1, "tokens": ["a",]}]}`)
-		_, _, err = checkAndSetData(trailingComma, arraySchema, false)
-		require.Error(t, err)
+		rows, _, err = checkAndSetData(trailingComma, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok = rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a"}, tokens.GetStringData().GetData())
 	})
 
 	// The outer body here really is valid JSON on its own: "tokens" is just a
