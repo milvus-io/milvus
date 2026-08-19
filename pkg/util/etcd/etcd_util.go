@@ -90,8 +90,21 @@ func IsRetriableEtcdRequestErr(err error) bool {
 		return true
 	}
 
+	// etcd server errors are rpctypes.EtcdError values. They expose Code(),
+	// but do not implement gRPC's GRPCStatus interface, so status.Code below
+	// reports Unknown for them even when their code is retriable.
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		switch etcdErr.Code() {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+			return true
+		default:
+			return false
+		}
+	}
+
 	switch status.Code(err) {
-	case codes.Unavailable, codes.DeadlineExceeded:
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
 		return true
 	default:
 		return false

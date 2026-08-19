@@ -374,6 +374,42 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Equal(t, 2, calls)
 	})
 
+	t.Run("watcher stop during rewatch does not panic", func(t *testing.T) {
+		watchCtx, cancel := context.WithCancel(s.ctx)
+		w := getWatcher(s, nil)
+		w.ctx = watchCtx
+		w.cancel = cancel
+
+		attemptStarted := make(chan struct{})
+		releaseAttempt := make(chan struct{})
+		patch := mockey.Mock((*sessionWatcher).handleReWatch).
+			To(func(*sessionWatcher) error {
+				close(attemptStarted)
+				<-releaseAttempt
+				return v3rpc.ErrTimeout
+			}).Build()
+		defer patch.UnPatch()
+
+		panicCh := make(chan any, 1)
+		go func() {
+			defer func() {
+				panicCh <- recover()
+			}()
+			w.handleWatchResponse(clientv3.WatchResponse{CompactRevision: 1})
+		}()
+
+		<-attemptStarted
+		w.Stop()
+		close(releaseAttempt)
+
+		select {
+		case recovered := <-panicCh:
+			assert.Nil(t, recovered)
+		case <-time.After(time.Second):
+			t.Fatal("watch response handler did not stop after watcher cancellation")
+		}
+	})
+
 	t.Run("rewatch starts after snapshot revision", func(t *testing.T) {
 		prefix := "revision-test"
 		key := path.Join(metaRoot, DefaultServiceRoot, prefix, "node-1")

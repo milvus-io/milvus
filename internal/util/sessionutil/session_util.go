@@ -886,11 +886,11 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 	if wresp.Err() != nil {
 		err := w.handleWatchErr(wresp.Err())
 		if err != nil {
-			// On graceful shutdown s.ctx is canceled, the etcd watch delivers a
+			// On graceful watcher or session shutdown, the etcd watch delivers a
 			// final response carrying context.Canceled, and re-watching fails for
 			// the same reason. That is normal teardown, not a fault: exit quietly
 			// instead of crashing the process.
-			if w.s.ctx.Err() != nil {
+			if w.watchContext().Err() != nil || w.s.ctx.Err() != nil {
 				mlog.Warn(w.s.ctx, "stop watching session service due to context done", mlog.Err(err))
 				return
 			}
