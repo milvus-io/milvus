@@ -106,14 +106,12 @@ func GetAllDefaultValueFieldType() []entity.FieldType {
 
 func GetInvalidPkFieldType() []entity.FieldType {
 	nonPkFieldTypes := []entity.FieldType{
-		entity.FieldTypeNone,
 		entity.FieldTypeBool,
 		entity.FieldTypeInt8,
 		entity.FieldTypeInt16,
 		entity.FieldTypeInt32,
 		entity.FieldTypeFloat,
 		entity.FieldTypeDouble,
-		entity.FieldTypeString,
 		entity.FieldTypeJSON,
 		entity.FieldTypeGeometry,
 		entity.FieldTypeArray,
