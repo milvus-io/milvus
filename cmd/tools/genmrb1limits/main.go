@@ -60,7 +60,7 @@ import (
 const outputPath = "internal/core/src/common/MRB1Limits.generated.h"
 
 // rootSentinel proves the C++ tree is in the checkout. It must be something no
-// reorganisation of an individual source would remove.
+// reorganization of an individual source would remove.
 const rootSentinel = "internal/core/CMakeLists.txt"
 
 // constant is one MRB1 value, rendered as a C++ declaration.
@@ -68,7 +68,7 @@ const rootSentinel = "internal/core/CMakeLists.txt"
 // cppType is what segcore declared before it took these from here, so every
 // comparison in RoaringMembership.cpp keeps the width it already had.
 //
-// It is rendered brace-initialised, `uint16_t kX{1}`, rather than `= 1`,
+// It is rendered brace-initialized, `uint16_t kX{1}`, rather than `= 1`,
 // because a type too narrow for its value is then a compile error rather than a
 // silent truncation. Measured, not assumed: clang accepts
 // `constexpr uint16_t kX = 262144` without a word and gives kX the value 0,
@@ -221,7 +221,13 @@ func main() {
 		os.Exit(1)
 	}
 	path := filepath.Join(root, outputPath)
-	if err := os.WriteFile(path, header(), 0o644); err != nil {
+	// 0644 rather than the 0600 gosec asks for, and #nosec rather than a
+	// suppression-free rewrite: this writes a source file that every build reads
+	// and that is committed to the tree, so 0600 would leave the regenerating
+	// developer with a file no other user on the machine can read, and unlike
+	// every other source next to it. pkg/streaming/util/message/codegen does
+	// the same for the same reason.
+	if err := os.WriteFile(path, header(), 0o644); err != nil { // #nosec G306
 		fmt.Fprintln(os.Stderr, "genmrb1limits:", err)
 		os.Exit(1)
 	}
