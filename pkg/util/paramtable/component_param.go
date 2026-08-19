@@ -5790,8 +5790,6 @@ type dataCoordConfig struct {
 	ResourceIndexDecodeWindow       ParamItem `refreshable:"true"`
 	ResourceTextIndexFactor         ParamItem `refreshable:"true"`
 	ResourceJSONKeyIndexFactor      ParamItem `refreshable:"true"`
-	ResourceAnalyzeFactor           ParamItem `refreshable:"true"`
-	ResourceAnalyzeMaxMemory        ParamItem `refreshable:"true"`
 
 	ResourceCopySegmentMemory     ParamItem `refreshable:"true"`
 	ResourceRefreshExternalMemory ParamItem `refreshable:"true"`
@@ -7622,24 +7620,6 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Export:       true,
 	}
 	p.ResourceJSONKeyIndexFactor.Init(base.mgr)
-
-	p.ResourceAnalyzeFactor = ParamItem{
-		Key:          "dataCoord.resource.analyzeMemoryFactor",
-		Version:      "3.0.0",
-		DefaultValue: "1.0",
-		Doc:          "memory per byte of input granted to the analyze (kmeans training) task",
-		Export:       true,
-	}
-	p.ResourceAnalyzeFactor.Init(base.mgr)
-
-	p.ResourceAnalyzeMaxMemory = ParamItem{
-		Key:          "dataCoord.resource.analyzeMaxMemory",
-		Version:      "3.0.0",
-		DefaultValue: "4294967296",
-		Doc:          "upper bound in bytes of the analyze task memory grant",
-		Export:       true,
-	}
-	p.ResourceAnalyzeMaxMemory.Init(base.mgr)
 
 	p.ResourceCopySegmentMemory = ParamItem{
 		Key:          "dataCoord.resource.copySegmentMemory",
