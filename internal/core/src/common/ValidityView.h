@@ -66,6 +66,8 @@ class ValidityView {
         return result;
     }
 
+    // Returns a pointer to the first expanded validity entry in this view.
+    // Any Subview offset is already applied to the returned pointer.
     const bool*
     expanded_data() const {
         if (encoding_ != Encoding::Expanded) {
@@ -74,6 +76,8 @@ class ValidityView {
         return static_cast<const bool*>(data_) + offset_;
     }
 
+    // Returns the base address of the packed bitmap. A Subview offset may not
+    // be byte-aligned, so it is exposed separately through bit_offset().
     const uint8_t*
     packed_data() const {
         if (encoding_ != Encoding::Packed) {
@@ -82,6 +86,8 @@ class ValidityView {
         return static_cast<const uint8_t*>(data_);
     }
 
+    // For a packed view, returns the bit offset of the first entry relative to
+    // packed_data().
     int64_t
     bit_offset() const {
         return offset_;
