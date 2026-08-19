@@ -27,9 +27,9 @@ completed but unpublished message is replayed after a crash.
 
 ## 2. Byte Accounting
 
-Each tracked WAL point records the message's logical encoded bytes and a
-monotonic cumulative end offset. The offset is runtime bookkeeping, not part of
-the durable checkpoint format.
+Each tracked WAL point records the message's estimated logical encoded bytes
+and a monotonic cumulative end offset. The offset is runtime bookkeeping, not
+part of the durable checkpoint format.
 
 After restart, replay begins with offset zero at the persisted checkpoint and
 reconstructs the relative tail size while scanning. Thresholds include headroom
@@ -89,9 +89,17 @@ Components implement idempotency:
 
 Soft pressure starts persistence requests before the target is exceeded.
 
+The initial defaults are:
+
+```text
+streaming.walRecovery.tail.lowWatermark  = 4 GiB
+streaming.walRecovery.tail.softWatermark = 8 GiB
+streaming.walRecovery.tail.highWatermark = 16 GiB
+```
+
 ```text
 recoveryTailBytes >= softWatermark
-  -> request progress for stalled VChannels
+  -> request progress for the VChannel owning the oldest incomplete prefix
   -> increase publisher frequency while completed progress is unpublished
 ```
 
@@ -99,10 +107,10 @@ A strict bound needs append admission control:
 
 ```text
 recoveryTailBytes >= highWatermark
-  -> apply PChannel write backpressure
+  -> reject new DML append on this PChannel
 
 recoveryTailBytes <= lowWatermark
-  -> release backpressure
+  -> enter the existing adaptive-rate-limit recovery path
 ```
 
 Without append backpressure, object storage, catalog, or Coordinator Ack failure
@@ -122,10 +130,14 @@ object-store writes, catalog publication, and retry overhead.
 
 ## 7. Metrics
 
-Required PChannel metrics include:
+The initial controller exports these PChannel metrics:
 
 - published, completed, and observed TimeTicks;
 - recovery-tail, blocking, and publish-lag bytes;
+- the existing WAL adaptive-rate-limit state.
+
+Follow-up diagnostic metrics should add:
+
 - oldest incomplete message age;
 - stalled VChannel count;
 - requested and completed RequestPersistThrough targets;
