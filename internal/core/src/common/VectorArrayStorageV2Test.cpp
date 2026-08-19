@@ -597,8 +597,10 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         create_index_info.field_type = DataType::VECTOR_ARRAY;
         create_index_info.metric_type = knowhere::metric::MAX_SIM_COSINE;
         create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+        // Encoded embedding-list strategies use the strategy-aware metadata
+        // format, which is only available in newer index versions.
         create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber();
+            knowhere::Version::GetMaximumVersion().VersionNumber();
 
         auto emb_list_hnsw_index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
