@@ -523,6 +523,10 @@ message Statistics {
   // the effective (non-null) row count for vector index build decisions
   // on nullable vector fields.
   map<int64, int64> null_counts = 13;
+  // Unique set of column-group storage formats observed across the
+  // segment's insert binlogs (e.g. ["parquet"], ["lance"], or
+  // ["parquet","lance"] for mixed).
+  repeated string formats = 15;
 }
 
 message SegmentStartPosition {
