@@ -936,12 +936,12 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	if partitionID != common.AllPartitionsID {
 		prefix = buildPartitionPrefix(collectionID, partitionID)
 	}
-	keys, values, err := kc.MetaKv.LoadWithPrefix(ctx, prefix)
+	exists, err := kc.MetaKv.HasPrefix(ctx, prefix)
 	if err != nil {
 		// error case can be regarded as not finished.
 		return false
 	}
-	return len(keys) == 0 && len(values) == 0
+	return !exists
 }
 
 func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {

@@ -3336,11 +3336,13 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
 
         if (vec_index != nullptr && vec_index->HasValidData()) {
             result.valid_data = std::make_unique<bool[]>(count);
-            vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
-                seg_offsets,
-                count,
-                result.valid_data.get(),
-                result.valid_offsets);
+            result.valid_offsets.reserve(count);
+            for (int64_t i = 0; i < count; ++i) {
+                result.valid_data[i] = vec_index->IsRowValid(seg_offsets[i]);
+                if (result.valid_data[i]) {
+                    result.valid_offsets.push_back(seg_offsets[i]);
+                }
+            }
             result.valid_count = result.valid_offsets.size();
         }
     } else {
@@ -3367,6 +3369,11 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                     result.valid_offsets.reserve(count);
                     valid_data_ptr->bulk_is_valid(
                         seg_offsets, count, result.valid_data.get());
+                    for (int64_t i = 0; i < count; ++i) {
+                        if (result.valid_data[i]) {
+                            result.valid_offsets.push_back(seg_offsets[i]);
+                        }
+                    }
                 }
                 result.valid_count = result.valid_offsets.size();
             }
