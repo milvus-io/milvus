@@ -129,8 +129,8 @@ VChannel lock so messages appear either in the captured state or in the live
 event queue, never in neither.
 
 QueryRuntime readiness may wait for component-specific conditions such as a
-flushed Segment without `SealedAtDataVersion`. It does not create or wait for a
-second global recovery checkpoint.
+flushed Segment whose `l1_commit_done` marker is absent. It does not create or
+wait for a second global recovery checkpoint.
 
 ## 8. Cleanup
 

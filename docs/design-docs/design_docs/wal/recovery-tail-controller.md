@@ -68,7 +68,7 @@ AckTracker calls the VChannel-scoped trigger directly:
 
 ```go
 type VChannelPersistRequester interface {
-    PersistThrough(ctx context.Context, vchannel string, timeTick uint64)
+    RequestPersistThrough(vchannel string, targetTimeTick uint64)
 }
 ```
 
@@ -128,14 +128,14 @@ Required PChannel metrics include:
 - recovery-tail, blocking, and publish-lag bytes;
 - oldest incomplete message age;
 - stalled VChannel count;
-- requested and completed PersistThrough targets;
+- requested and completed RequestPersistThrough targets;
 - blocker category: Segment data, TransformLog, lifecycle RPC, BroadcastAck,
   object storage, or catalog;
 - append-backpressure duration.
 
 ## 8. Defrag Boundary
 
-PersistThrough may generate small objects in high-cardinality Partition Key
+RequestPersistThrough may generate small objects in high-cardinality Partition Key
 workloads. RecoveryStorage accepts that tradeoff to meet the recovery-tail
 target. Future log Defrag owns object coalescing, reference replacement, and old
 object reclamation. Defrag must not move the global WAL checkpoint or alter

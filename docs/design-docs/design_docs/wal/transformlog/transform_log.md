@@ -93,7 +93,7 @@ it is not an additional persisted field.
 ## 5. Chunk Persistence
 
 The open buffer flushes on size pressure, an explicit sync-up requirement, or a
-VChannel `PersistThrough` request.
+VChannel `RequestPersistThrough` call.
 
 ```text
 select open entries through target T
@@ -116,10 +116,10 @@ Handle release does not wait for catalog IO. Stable metadata is installed and
 marked dirty first; RecoveryStorage writes that snapshot before publishing a
 global checkpoint that covers the message.
 
-## 6. PersistThrough
+## 6. RequestPersistThrough
 
 ```go
-PersistThrough(ctx context.Context, targetTimeTick uint64)
+RequestPersistThrough(targetTimeTick uint64)
 ```
 
 The request flushes pending transform payload necessary to cover the target and

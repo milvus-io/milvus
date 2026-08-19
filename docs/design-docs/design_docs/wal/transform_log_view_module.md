@@ -10,7 +10,7 @@ The design is split across:
 - [WAL Message Ack Design](message_ack.md): retained-message completion and
   global checkpoint gating;
 - [Recovery Tail Controller](recovery-tail-controller.md): VChannel-scoped
-  `PersistThrough` requests;
+  `RequestPersistThrough` calls;
 - [Broadcast Ack Module](broadcast_ack_module.md): Coordinator Ack ownership;
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md):
   QueryRuntime preparation from VChannel state.

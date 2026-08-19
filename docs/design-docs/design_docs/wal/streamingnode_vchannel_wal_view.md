@@ -18,7 +18,7 @@ The VChannel module already owns the inputs needed for a no-gap view:
 
 - VChannel and schema history;
 - growing Segment stable and pending state;
-- Segment DataVersion summaries;
+- Segment lifecycle and durable commit state;
 - TransformLog state and stream;
 - the live message observation path.
 
@@ -62,29 +62,27 @@ The single recovery scanner reaches RecoveryBarrier before the startup
 write-path snapshot is published. QueryRuntime preparation may additionally
 wait for actual component conditions, including:
 
-- every retained flushed Segment has `SealedAtDataVersion`;
+- every retained flushed Segment has `l1_commit_done`;
 - required TransformLog subscription start points remain readable;
 - captured schema and segment state form a consistent VChannel snapshot.
 
 It does not wait for a metadata scanner, data scanner, Observe-mode transition,
 or second checkpoint.
 
-## 5. DataVersion Selection
+## 5. Segment Lifecycle Selection
 
-Each segment is classified independently against the target QueryView
-DataVersion:
+Each segment is classified independently from its durable lifecycle state:
 
 ```text
 GROWING
     -> growing Segment snapshot
-FLUSHED && SealedAtDataVersion > target
-    -> retained growing-visible snapshot
-FLUSHED && SealedAtDataVersion <= target
-    -> flushed Segment set
+FLUSHED && !l1_commit_done
+    -> retry or wait for the idempotent DataCoord final commit
+FLUSHED && l1_commit_done
+    -> DataCoord already owns the final full-binlog state
 ```
 
-There is no VChannel-level aggregate DataVersion fence. DataVersion may advance
-because another VChannel flushed independently.
+There is no second recovery checkpoint tied to this lifecycle classification.
 
 ## 6. Invariants
 

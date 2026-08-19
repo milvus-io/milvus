@@ -148,7 +148,7 @@ VChannel-scoped requester:
 
 ```go
 type VChannelPersistRequester interface {
-    PersistThrough(ctx context.Context, vchannel string, timeTick uint64)
+    RequestPersistThrough(vchannel string, targetTimeTick uint64)
 }
 ```
 
@@ -184,5 +184,5 @@ reconstructed by replay from the global checkpoint.
 5. Tracker checkpoint progress is continuous and monotonic.
 6. Component dirty state is installed before the corresponding handle release.
 7. Broadcast Ack success is part of broadcast-message completion.
-8. PersistThrough requests are VChannel-scoped and TimeTick-based.
+8. RequestPersistThrough calls are VChannel-scoped and TimeTick-based.
 9. Txn messages complete as one whole outer message.

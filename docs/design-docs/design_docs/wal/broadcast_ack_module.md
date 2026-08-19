@@ -56,7 +56,7 @@ replay and repeat it.
 A stalled BroadcastAck holds the global continuous prefix but cannot be fixed
 by Segment or TransformLog persistence. Tracker reports it as an Ack blocker;
 the tail controller records the category and relies on Ack retry rather than
-issuing `PersistThrough`.
+issuing `RequestPersistThrough`.
 
 ## 6. Close
 

@@ -90,8 +90,9 @@ Flush closes the segment at the message TimeTick. It joins pending Insert
 writes and final lifecycle commit. Stable state advances through the Flush only
 after all preceding segment work and the idempotent commit succeed.
 
-The final commit stores the exact first DataView version containing the sealed
-segment as `SealedAtDataVersion`.
+After DataCoord accepts the idempotent final binlog commit, SegmentView stores
+`l1_commit_done` in its durable snapshot. Recovery retries a flushed segment
+whose marker is absent.
 
 ### 3.5 Flush-Style Messages
 
@@ -99,10 +100,10 @@ DropCollection, DropPartition, TruncateCollection, ManualFlush, FlushAll,
 schema-changing AlterCollection, and AlterWAL may flush several SegmentViews.
 Every affected view owns its own handle and completion condition.
 
-## 4. PersistThrough
+## 4. RequestPersistThrough
 
 ```go
-PersistThrough(ctx context.Context, targetTimeTick uint64)
+RequestPersistThrough(targetTimeTick uint64)
 ```
 
 The request is idempotent:
@@ -124,6 +125,7 @@ A Segment snapshot contains stable state only:
 - identity and assignment;
 - historical schema reference;
 - object chunk references;
+- cumulative writer `Statistics` and pre-existing delta-binlog references;
 - stable row/byte statistics;
 - lifecycle and tombstone state;
 - `checkpoint_time_tick`;
@@ -140,7 +142,7 @@ advances only through the exact captured stable snapshot.
 4. skip this segment's effects at or before its frontier;
 5. rebuild pending work for later messages with fresh handles;
 6. schedule or reuse final commit for every recovered flushed segment missing
-   `SealedAtDataVersion`.
+   `l1_commit_done`.
 
 Recovery is logically idempotent but not physically exactly once. A crash after
 an object write and before snapshot publication may leave an unreferenced
