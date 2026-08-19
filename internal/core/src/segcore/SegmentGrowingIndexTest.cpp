@@ -189,6 +189,76 @@ INSTANTIATE_TEST_SUITE_P(
                         knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
                         "FLOAT16")));
 
+TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
+    constexpr int64_t dim = kTestSparseDim;
+    constexpr int64_t row_count = 100;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField("embeddings",
+                                     DataType::VECTOR_SPARSE_U32_F32,
+                                     dim,
+                                     knowhere::metric::IP);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
+        {"metric_type", knowhere::metric::IP},
+        {knowhere::indexparam::INVERTED_INDEX_ALGO, "SINDI"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+    auto index_meta =
+        std::make_shared<CollectionIndexMeta>(row_count, std::move(field_map));
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.target_index_version =
+        knowhere::Version::GetMaximumVersion().VersionNumber();
+    interim_config.chunk_rows = 16;
+    interim_config.nlist = 1;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto dataset = DataGen(schema, row_count);
+    auto offset = segment->PreInsert(row_count);
+    segment->Insert(offset,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    ASSERT_TRUE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto* vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(
+        milvus::proto::plan::VectorType::SparseFloatVector);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(vec.get());
+    auto* query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(5);
+    query_info->set_metric_type(knowhere::metric::IP);
+    query_info->set_search_params(R"({"drop_ratio_search": 0})");
+
+    auto plan_str = plan_node.SerializeAsString();
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_str.data(), plan_str.size());
+    auto ph_group_raw = CreateSparseFloatPlaceholderGroup(1);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto result = segment->Search(plan.get(), ph_group.get(), 1000000);
+    EXPECT_EQ(result->total_nq_, 1);
+    EXPECT_EQ(result->unity_topK_, 5);
+    EXPECT_EQ(result->distances_.size(), 5);
+    EXPECT_EQ(result->seg_offsets_.size(), 5);
+}
+
 TEST_P(GrowingIndexTest, Correctness) {
     auto dim = 4;
     auto schema = std::make_shared<Schema>();

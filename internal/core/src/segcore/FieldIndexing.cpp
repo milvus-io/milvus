@@ -41,7 +41,6 @@
 #include "knowhere/expected.h"
 #include "knowhere/object.h"
 #include "knowhere/sparse_utils.h"
-#include "knowhere/version.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
@@ -178,12 +177,13 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 void
 VectorFieldIndexing::recreate_index(DataType data_type,
                                     const VectorBase* field_raw_data) {
+    const auto index_version = segcore_config_.get_interim_index_version();
     if (IsSparseFloatVectorDataType(data_type)) {
         index_ = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+            index_version);
     } else if (data_type == DataType::VECTOR_FLOAT) {
         auto concurrent_fp32_vec =
             reinterpret_cast<const ConcurrentVector<FloatVector>*>(
@@ -199,7 +199,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     } else if (data_type == DataType::VECTOR_FLOAT16) {
         auto concurrent_fp16_vec =
@@ -216,7 +216,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
         auto concurrent_bf16_vec =
@@ -233,7 +233,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     }
 }
