@@ -53,7 +53,7 @@ func resolveCollectionNames(ctx context.Context, collectionID int64) (string, st
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return "", ""
 	}
-	return collInfo.dbName, collInfo.schema.Name
+	return collInfo.DBName, collInfo.Schema.Name
 }
 
 type createSnapshotTask struct {
@@ -440,7 +440,7 @@ func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		lst.dbID = dbInfo.dbID
+		lst.dbID = dbInfo.DBID
 	}
 
 	if lst.req.GetCollectionName() == "" {
@@ -768,7 +768,7 @@ func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		lrst.dbID = dbInfo.dbID
+		lrst.dbID = dbInfo.DBID
 	}
 
 	if lrst.req.GetCollectionName() != "" {
