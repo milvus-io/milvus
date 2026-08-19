@@ -153,7 +153,7 @@ func TestNewBaseTableFromYamlOnly(t *testing.T) {
 }
 
 // The primary configuration file is replaceable per deployment form; the rest
-// of the list keeps its meaning, and a table initialised after the call reads
+// of the list keeps its meaning, and a table initialized after the call reads
 // the new name in milvus.yaml's position.
 func TestUsePrimaryConfigName(t *testing.T) {
 	old := PrimaryConfigName()

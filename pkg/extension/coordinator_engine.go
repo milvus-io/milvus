@@ -140,7 +140,7 @@ type CoordinatorEngine interface {
 	// running without the control plane it depends on, which is worse than
 	// not coming up at all.
 	// ctx is the coordinator server's lifetime context. It is NOT the stop
-	// signal: it is cancelled only after Stop has already returned, so an
+	// signal: it is canceled only after Stop has already returned, so an
 	// implementation shuts down on Stop and may use ctx merely as the parent
 	// for the background work it starts.
 	Start(ctx context.Context, coord MixCoord) error
