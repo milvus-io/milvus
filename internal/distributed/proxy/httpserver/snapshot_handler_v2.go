@@ -38,7 +38,7 @@ func (h *HandlersV2) createSnapshot(ctx context.Context, c *gin.Context, anyReq 
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateSnapshot(reqCtx, req.(*milvuspb.CreateSnapshotRequest))
 	})
 	if err == nil {
@@ -56,7 +56,7 @@ func (h *HandlersV2) dropSnapshot(ctx context.Context, c *gin.Context, anyReq an
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropSnapshot(reqCtx, req.(*milvuspb.DropSnapshotRequest))
 	})
 	if err == nil {
@@ -73,7 +73,7 @@ func (h *HandlersV2) listSnapshots(ctx context.Context, c *gin.Context, anyReq a
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListSnapshots", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListSnapshots", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListSnapshots(reqCtx, req.(*milvuspb.ListSnapshotsRequest))
 	})
 	if err == nil {
@@ -91,7 +91,7 @@ func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyRe
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DescribeSnapshot(reqCtx, req.(*milvuspb.DescribeSnapshotRequest))
 	})
 	if err == nil {
@@ -130,7 +130,7 @@ func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RestoreSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RestoreSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.RestoreSnapshot(reqCtx, req.(*milvuspb.RestoreSnapshotRequest))
 	})
 	if err == nil {
@@ -155,7 +155,7 @@ func (h *HandlersV2) pinSnapshotData(ctx context.Context, c *gin.Context, anyReq
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/PinSnapshotData", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/PinSnapshotData", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.PinSnapshotData(reqCtx, req.(*milvuspb.PinSnapshotDataRequest))
 	})
 	if err == nil {
@@ -183,7 +183,7 @@ func (h *HandlersV2) unpinSnapshotData(ctx context.Context, c *gin.Context, anyR
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UnpinSnapshotData", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UnpinSnapshotData", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.UnpinSnapshotData(reqCtx, req.(*milvuspb.UnpinSnapshotDataRequest))
 	})
 	if err == nil {
