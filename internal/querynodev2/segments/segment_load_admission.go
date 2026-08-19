@@ -46,7 +46,7 @@ func newSegmentLoadAdmission(capacity uint64) *segmentLoadAdmission {
 }
 
 func newSegmentLoadAdmissionFromConfig() *segmentLoadAdmission {
-	params := paramtable.Get().QueryNodeCfg
+	params := &paramtable.Get().QueryNodeCfg
 	if !params.TieredEvictionEnabled.GetAsBool() {
 		return nil
 	}

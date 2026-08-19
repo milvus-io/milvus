@@ -1675,7 +1675,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 }
 
 func loadingResourceEstimateFactorFromConfig() resourceEstimateFactor {
-	params := paramtable.Get().QueryNodeCfg
+	params := &paramtable.Get().QueryNodeCfg
 	return resourceEstimateFactor{
 		memoryUsageFactor:           params.LoadMemoryUsageFactor.GetAsFloat(),
 		memoryIndexUsageFactor:      params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
