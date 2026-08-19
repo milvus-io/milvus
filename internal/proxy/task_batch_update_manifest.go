@@ -89,7 +89,7 @@ func (bt *batchUpdateManifestTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("items is empty")
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := bt.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}

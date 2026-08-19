@@ -62,14 +62,15 @@ const (
 	// placeholders and the rest of the internal request retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
-	MaxClusterIDBits                = 3
+	DefaultMaxDegree                     = 56
+	DefaultSearchListSize                = 100
+	DefaultPQCodeBudgetGBRatio           = 0.125
+	DefaultBuildNumThreadsRatio          = 1.0
+	DefaultSearchCacheBudgetGBRatio      = 0.10
+	DefaultLoadNumThreadRatio            = 8.0
+	DefaultBeamWidthRatio                = 4.0
+	MaxClusterIDBits                     = 3
+	defaultTakeForOutputResultCountLimit = "10000"
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -3313,9 +3314,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "60000",
+		DefaultValue: "120000",
 		PanicIfEmpty: true,
-		Doc:          "1 minute",
+		Doc:          "2 minutes",
 		Export:       true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
@@ -3323,9 +3324,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "120000",
+		DefaultValue: "300000",
 		PanicIfEmpty: true,
-		Doc:          "2 minute",
+		Doc:          "5 minutes",
 		Export:       true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
@@ -3755,24 +3756,25 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereFetchThreadPoolSize   ParamItem `refreshable:"true"`
-	KnowhereThreadPoolSize        ParamItem `refreshable:"true"`
-	ChunkRows                     ParamItem `refreshable:"false"`
-	FmindexCostRatio              ParamItem `refreshable:"false"`
-	EnableInterminSegmentIndex    ParamItem `refreshable:"false"`
-	InterimIndexNlist             ParamItem `refreshable:"false"`
-	InterimIndexNProbe            ParamItem `refreshable:"false"`
-	InterimIndexSubDim            ParamItem `refreshable:"false"`
-	InterimIndexRefineRatio       ParamItem `refreshable:"false"`
-	InterimIndexBuildRatio        ParamItem `refreshable:"false"`
-	InterimIndexRefineQuantType   ParamItem `refreshable:"false"`
-	InterimIndexRefineWithQuant   ParamItem `refreshable:"false"`
-	DenseVectorInterminIndexType  ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
-	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
-	EnableGeometryCache           ParamItem `refreshable:"false"`
-	EnableGISSplitFusion          ParamItem `refreshable:"false"`
+	KnowhereFetchThreadPoolSize    ParamItem `refreshable:"true"`
+	KnowhereThreadPoolSize         ParamItem `refreshable:"true"`
+	ChunkRows                      ParamItem `refreshable:"false"`
+	FmindexCostRatio               ParamItem `refreshable:"false"`
+	EnableInterminSegmentIndex     ParamItem `refreshable:"false"`
+	InterimIndexNlist              ParamItem `refreshable:"false"`
+	InterimIndexNProbe             ParamItem `refreshable:"false"`
+	InterimIndexSubDim             ParamItem `refreshable:"false"`
+	InterimIndexRefineRatio        ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio         ParamItem `refreshable:"false"`
+	InterimIndexRefineQuantType    ParamItem `refreshable:"false"`
+	InterimIndexRefineWithQuant    ParamItem `refreshable:"false"`
+	DenseVectorInterminIndexType   ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate      ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate  ParamItem `refreshable:"false"`
+	InterimIndexTargetIndexVersion ParamItem `refreshable:"false"`
+	MultipleChunkedEnable          ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache            ParamItem `refreshable:"false"`
+	EnableGISSplitFusion           ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -3946,6 +3948,7 @@ type queryNodeConfig struct {
 	// output fields take
 	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	TakeForOutputResultCountLimit      ParamItem `refreshable:"true"`
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
@@ -4485,6 +4488,16 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
+
+	p.InterimIndexTargetIndexVersion = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.targetIndexVersion",
+		Version:      "2.6.23",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc:          "Target index version for growing and sealed interim indexes. -1 uses Knowhere's current index version. At startup, Milvus rejects a version unsupported by the local Knowhere build.",
+		Export:       false,
+	}
+	p.InterimIndexTargetIndexVersion.Init(base.mgr)
 
 	p.MultipleChunkedEnable = ParamItem{
 		Key:          "queryNode.segcore.multipleChunkedEnable",
@@ -5394,6 +5407,25 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.TakeForOutputResultCountLimit = ParamItem{
+		Key:          "queryNode.takeForOutput.resultCountLimit",
+		Version:      "3.0.0",
+		DefaultValue: defaultTakeForOutputResultCountLimit,
+		Doc:          `Maximum search topK, unique search offset count, or retrieve result row count that can use take() for output fields. Set to 0 to disable the limit`,
+		Export:       false,
+		Formatter: func(v string) string {
+			limit, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || limit < 0 {
+				mlog.Warn(context.TODO(), "queryNode.takeForOutput.resultCountLimit must be non-negative, using default",
+					mlog.String("configured", v),
+					mlog.String("default", defaultTakeForOutputResultCountLimit))
+				return defaultTakeForOutputResultCountLimit
+			}
+			return v
+		},
+	}
+	p.TakeForOutputResultCountLimit.Init(base.mgr)
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",

@@ -167,9 +167,6 @@ func TestRepackInsertData(t *testing.T) {
 	mix := NewMixCoordMock()
 	defer mix.Close()
 
-	cache := NewMockCache(t)
-	globalMetaCache = cache
-
 	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
@@ -239,7 +236,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 
 	mix := NewMixCoordMock()
 
-	err := InitMetaCache(ctx, mix)
+	_, err := initMetaCache(ctx, mix)
 	assert.NoError(t, err)
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())

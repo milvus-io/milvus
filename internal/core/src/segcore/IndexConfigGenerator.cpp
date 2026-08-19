@@ -59,20 +59,15 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     if (is_sparse) {
         const auto& index_params = index_meta_.GetIndexParams();
 
-        if (auto algo_it =
-                index_params.find(knowhere::indexparam::INVERTED_INDEX_ALGO);
-            algo_it != index_params.end()) {
-            build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] =
-                algo_it->second;
-        }
-
-        if (metric_type_ == knowhere::metric::BM25) {
-            build_params_[knowhere::meta::BM25_K1] =
-                index_params.at(knowhere::meta::BM25_K1);
-            build_params_[knowhere::meta::BM25_B] =
-                index_params.at(knowhere::meta::BM25_B);
-            build_params_[knowhere::meta::BM25_AVGDL] =
-                index_params.at(knowhere::meta::BM25_AVGDL);
+        static const std::unordered_set<std::string>
+            sparse_growing_exclude_params = {
+                knowhere::meta::INDEX_TYPE,
+                knowhere::meta::METRIC_TYPE,
+                knowhere::indexparam::DROP_RATIO_BUILD};
+        for (const auto& [key, value] : index_params) {
+            if (sparse_growing_exclude_params.count(key) == 0) {
+                build_params_[key] = value;
+            }
         }
     }
 

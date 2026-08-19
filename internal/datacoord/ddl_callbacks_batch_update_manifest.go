@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -46,28 +44,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			operators = append(operators, UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
 			v2Count++
 		case hasV3:
-			segment := c.meta.GetSegment(ctx, segID)
-			if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
-				mlog.Warn(ctx, "batch update manifest V3 item has no published StorageV3 segment; skipping", mlog.FieldSegmentID(segID))
-				continue
-			}
-			basePath, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
-			if err != nil {
-				return err
-			}
-			if item.GetManifestVersion() <= currentVersion {
-				continue
-			}
-			if err := c.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-				SegmentID:        segID,
-				ExpectedManifest: segment.GetManifestPath(),
-				Mutation: ManifestMutation{
-					Type:         ManifestMutationNoop,
-					ManifestPath: packed.MarshalManifestPath(basePath, item.GetManifestVersion()),
-				},
-			}); err != nil {
-				return err
-			}
+			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:
 			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",

@@ -34,7 +34,7 @@ func (h *HandlersV2) addFileResource(ctx context.Context, c *gin.Context, anyReq
 		Path: httpReq.Path,
 	}
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddFileResource", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddFileResource", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AddFileResource(reqCtx, req.(*milvuspb.AddFileResourceRequest))
 	})
 	if err == nil {
@@ -49,7 +49,7 @@ func (h *HandlersV2) removeFileResource(ctx context.Context, c *gin.Context, any
 		Name: httpReq.Name,
 	}
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RemoveFileResource", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RemoveFileResource", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.RemoveFileResource(reqCtx, req.(*milvuspb.RemoveFileResourceRequest))
 	})
 	if err == nil {
@@ -61,7 +61,7 @@ func (h *HandlersV2) removeFileResource(ctx context.Context, c *gin.Context, any
 func (h *HandlersV2) listFileResources(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	req := &milvuspb.ListFileResourcesRequest{}
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListFileResources", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListFileResources", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListFileResources(reqCtx, req.(*milvuspb.ListFileResourcesRequest))
 	})
 	if err == nil {
