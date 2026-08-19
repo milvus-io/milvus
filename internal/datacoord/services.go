@@ -2338,6 +2338,24 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			}
 		}
 
+		// The capture always waits for every vchannel's checkpoint to reach the
+		// boundary, opt-in or not. A vchannel DataCoord has no checkpoint for at
+		// all never satisfies that, and the wait has no way to give up -- so
+		// refuse here rather than wedge the collection's DDL on a retry that
+		// cannot succeed. A checkpoint that is merely behind is fine and is not
+		// what this rejects; the caller can simply retry a channel that has not
+		// reported yet.
+		for _, vchannel := range coll.VChannelNames {
+			if s.meta.GetChannelCheckpoint(vchannel) == nil {
+				broadcaster.Close()
+				mlog.Warn(context.TODO(), "CreateSnapshot rejected: vchannel has no checkpoint yet",
+					mlog.String("vchannel", vchannel))
+				return merr.Status(merr.WrapErrServiceUnavailableMsg(
+					"vchannel %s has no checkpoint, so a snapshot boundary on it can never be reached; retry once the channel reports one",
+					vchannel)), nil
+			}
+		}
+
 		// Broadcast CreateSnapshot message via DDL framework.
 		// Snapshot ID is allocated in the callback.
 		//

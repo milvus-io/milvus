@@ -2148,18 +2148,25 @@ func (sm *snapshotManager) createRestoreJob(
 	externalSpec string,
 	snapshotFingerprint string,
 ) error {
-	// Validate which segments exist in local meta for same-cluster restore.
-	// External restore reads source metadata from object storage; source
-	// segments do not exist in the target cluster's DataCoord meta.
+	// Validate that every segment the snapshot references still exists in local
+	// meta. External restore reads source metadata from object storage, so its
+	// source segments are legitimately absent here and are not checked.
+	//
+	// A missing segment is fatal, not skippable. The snapshot is a point-in-time
+	// copy, so restoring it minus one segment silently produces a collection
+	// with rows missing and reports success -- the caller has no way to notice.
+	// Snapshot pins are supposed to keep these alive, so reaching this means
+	// that protection failed and the restore cannot deliver what it promises.
 	validSegments := make([]*datapb.SegmentDescription, 0, len(snapshotData.Segments))
 	for _, segDesc := range snapshotData.Segments {
 		sourceSegmentID := segDesc.GetSegmentId()
 		if !external {
-			segInfo := sm.meta.GetSegment(ctx, sourceSegmentID)
-			if segInfo == nil {
-				mlog.Warn(ctx, "source segment not found in meta, skipping",
+			if segInfo := sm.meta.GetSegment(ctx, sourceSegmentID); segInfo == nil {
+				mlog.Error(ctx, "restore aborted: a segment this snapshot references is gone from meta",
 					mlog.Int64("sourceSegmentID", sourceSegmentID))
-				continue
+				return merr.WrapErrDataIntegrityMsg(
+					"snapshot references segment %d, which no longer exists; restoring would silently drop its rows",
+					sourceSegmentID)
 			}
 		}
 		validSegments = append(validSegments, segDesc)

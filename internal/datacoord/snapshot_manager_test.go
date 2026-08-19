@@ -2076,6 +2076,40 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
 }
 
+// A snapshot is a point-in-time copy, so restoring it minus a segment produces
+// a collection with rows missing and still reports success -- the caller has no
+// way to notice. Snapshot pins are supposed to keep those segments alive, so a
+// missing one means that protection failed and the restore cannot deliver what
+// it promises. It used to log a warning and skip.
+func TestCreateRestoreJob_MissingSourceSegmentIsFatal(t *testing.T) {
+	ctx := context.Background()
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 4242, NumOfRows: 100},
+		},
+	}
+
+	addJobCalled := false
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+			addJobCalled = true
+			return nil
+		}).Build()
+	defer mAddJob.UnPatch()
+
+	// meta holds no such segment.
+	sm := &snapshotManager{
+		meta:            &meta{ctx: ctx, segments: NewSegmentsInfo()},
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "", "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "4242")
+	assert.False(t, addJobCalled, "must not start a restore that would silently drop rows")
+}
+
 // TestRestoreSnapshot_StartBroadcasterFailureUnpinsAndRollsBack verifies
 // failure at the startBroadcaster step (Phase 4) still triggers defer-unpin
 // and rollback of the target collection.
