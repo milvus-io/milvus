@@ -146,7 +146,7 @@ func EstimateStats(in StatsInput) Requirement {
 //
 // It is deliberately a bound rather than a model: analyze is close to absent
 // from production today -- 24h across both large index pools (2026-08-18)
-// shows no Analyze tasks at all -- so it does not earn the modelling effort the
+// shows no Analyze tasks at all -- so it does not earn the modeling effort the
 // compaction and index estimators get. What it earns is a charge that cannot
 // under-count, because when it does run it is the single largest memory
 // consumer of any DataNode task.
