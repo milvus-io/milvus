@@ -141,25 +141,6 @@ func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) ([]uint32, 
 		hashValues, err = locateRoutingIndexes(pks, len(shardNames), int64RoutingHasher{})
 	case *schemapb.IDs_StrId:
 		pks := primaryKeys.GetStrId().Data
-		// Check if first element is a UUID to use canonical 16-byte hashing
-		if len(pks) > 0 {
-			if u, errParse := ParseUUID(pks[0]); errParse == nil {
-				uuidKeys := make([][16]byte, 0, len(pks))
-				uuidKeys = append(uuidKeys, u)
-				allUUID := true
-				for i := 1; i < len(pks); i++ {
-					if uNext, errNext := ParseUUID(pks[i]); errNext == nil {
-						uuidKeys = append(uuidKeys, uNext)
-					} else {
-						allUUID = false
-						break
-					}
-				}
-				if allUUID {
-					return locateRoutingIndexes(uuidKeys, len(shardNames), bytesRoutingHasher{})
-				}
-			}
-		}
 		hashValues, err = locateRoutingIndexes(pks, len(shardNames), stringRoutingHasher{})
 	case *schemapb.IDs_UuidId:
 		uuidKeys := make([][16]byte, 0, len(primaryKeys.GetUuidId().Data))
@@ -188,25 +169,19 @@ func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]ui
 			longKeys := scalarField.GetLongData().Data
 			return locateRoutingIndexes(longKeys, len(partitionNames), int64RoutingHasher{})
 		case *schemapb.ScalarField_StringData:
-			stringKeys := scalarField.GetStringData().Data
-			if len(stringKeys) > 0 {
-				if u, errParse := ParseUUID(stringKeys[0]); errParse == nil {
-					uuidKeys := make([][16]byte, 0, len(stringKeys))
+			if keys.GetType() == schemapb.DataType_UUID {
+				stringKeys := scalarField.GetStringData().Data
+				uuidKeys := make([][16]byte, 0, len(stringKeys))
+				for _, s := range stringKeys {
+					u, err := ParseUUID(s)
+					if err != nil {
+						return nil, err
+					}
 					uuidKeys = append(uuidKeys, u)
-					allUUID := true
-					for i := 1; i < len(stringKeys); i++ {
-						if uNext, errNext := ParseUUID(stringKeys[i]); errNext == nil {
-							uuidKeys = append(uuidKeys, uNext)
-						} else {
-							allUUID = false
-							break
-						}
-					}
-					if allUUID {
-						return locateRoutingIndexes(uuidKeys, len(partitionNames), bytesRoutingHasher{})
-					}
 				}
+				return locateRoutingIndexes(uuidKeys, len(partitionNames), bytesRoutingHasher{})
 			}
+			stringKeys := scalarField.GetStringData().Data
 			return locateRoutingIndexes(stringKeys, len(partitionNames), stringRoutingHasher{})
 		case *schemapb.ScalarField_BytesData:
 			uuidKeys := make([][16]byte, 0, len(scalarField.GetBytesData().Data))

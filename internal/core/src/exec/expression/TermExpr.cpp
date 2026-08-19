@@ -105,7 +105,6 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR:
-        case DataType::UUID:
         case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
@@ -115,6 +114,10 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             } else {
                 result = ExecVisitorImpl<std::string_view>(context);
             }
+            break;
+        }
+        case DataType::UUID: {
+            result = ExecVisitorImpl<UUID>(context);
             break;
         }
         case DataType::JSON: {
@@ -219,14 +222,26 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             }
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::UUID: {
+        case DataType::VARCHAR: {
             if (CanSkipSegment<std::string>()) {
                 return;
             }
             auto dst_ids = id_array->mutable_str_id();
             for (const auto& id : expr_->vals_) {
                 dst_ids->add_data(GetValueFromProto<std::string>(id));
+            }
+            break;
+        }
+        case DataType::UUID: {
+            if (CanSkipSegment<UUID>()) {
+                return;
+            }
+            auto dst_ids = id_array->mutable_uuid_id();
+            for (const auto& id : expr_->vals_) {
+                auto s = GetValueFromProto<std::string>(id);
+                auto uuid = UUID::FromString(s);
+                dst_ids->add_data()->assign(
+                    reinterpret_cast<const char*>(uuid.data.data()), 16);
             }
             break;
         }

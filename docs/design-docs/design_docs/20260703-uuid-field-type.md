@@ -2,7 +2,7 @@
 
 - **Created:** 2026-07-03
 - **Author(s):** @BlackPool25
-- **Status:** Implemented (Native 16-Byte Binary Storage & Primary Key)
+- **Status:** Implemented (Native 16-Byte Binary Storage & Primary Key) — Phase 1: V2-only (V1 rejected via `ValidateStorageV1InsertWritableSchema`); Memory note: growing segment currently one heap allocation per UUID (16B > SSO 15) vs string 36B, disk win real
 - **Component:** Proxy / Client SDK / Type System / Storage / Core Engine
 - **Related Issues:** [#50957](https://github.com/milvus-io/milvus/issues/50957)
 
@@ -73,7 +73,7 @@ id > "550e8400-e29b-41d4-a716-446655440000"
 ```
 
 Range semantics:
-- Single-sided ranges (`<`, `<=`, `>`, `>=`), `BETWEEN`, `ORDER BY`, `MIN`, and `MAX` are fully supported because standard big-endian 16-byte binary ordering matches the lexicographical order of canonical lowercase hyphenated UUID strings.
+- Single-sided ranges (`<`, `<=`, `>`, `>=`), `ORDER BY`, `MIN`, and `MAX` are supported because standard big-endian 16-byte binary ordering matches the lexicographical order of canonical lowercase hyphenated UUID strings. `BETWEEN` is rejected by `parser_visitor` (range not supported for UUID).
 
 ## Architecture & Implementation Details
 
@@ -102,12 +102,13 @@ Range semantics:
 | TRIE       | ❌      | String-specific prefix tree rejected at validation |
 
 ### 5. C++ Segcore Engine
-- `DataType::UUID = 31` is classified as a First-Class Fixed-Width Scalar (`GetDataTypeSize = 16`, `IsStringDataType = false`, `IsPrimitiveType = true`).
+- `DataType::UUID = 31` is classified as Fixed-Width Scalar (`GetDataTypeSize = 16`, `GetArrowDataType = fixed_size_binary(16)`, `IsStringDataType = false`, `IsPrimitiveType = true`, `IsFixedSizeType = true` via `TypeTraits<UUID>::IsFixedWidth`).
 - `GetArrowDataType(DataType::UUID)` returns `arrow::fixed_size_binary(16)`.
-- `FieldData` parses Arrow `FixedSizeBinaryArray` into Segcore memory buffers.
+- `ConcurrentVector<UUID>`, `ChunkedColumn<UUID>` (`FixedWidthChunk 16`), `InsertRecord` store UUID as `milvus::UUID` (16B) in both growing and sealed segments — no `std::string` heap per value (inline 16B).
+- `FieldData` accepts `FIXED_SIZE_BINARY(16)` primary and `STRING` fallback (canonical parse) for rolling upgrade; `ChunkWriter` routes UUID to `FixedWidthChunk`.
 
 ## Compatibility & Rolling Upgrade
 - **Wire Compatibility**: Proxy accepts `IDs.uuid_id` (field 3) from updated clients while accepting `IDs.str_id` (field 2) from legacy clients as a fallback. FastPB decodes `IDs_UuidId` in-pass.
-- **Memory & Storage Footprint**: In-memory representations use contiguous `[16]byte` structures (`UUIDPrimaryKey`, `UUIDPrimaryKeys`, `UUIDFieldData`), avoiding string heap allocations.
+- **Memory & Storage Footprint**: On-disk Parquet uses 16B fixed binary (vs 36B string) — disk win real. In-memory `UUIDFieldData`/`UUIDPrimaryKeys` and C++ `ConcurrentVector<UUID>`/`ChunkedColumn<UUID>` use contiguous 16B inline storage (no per-value heap; `FixedWidthChunk` 16). Sealed and growing share the same 16B representation — `insert→flush→load→filter` returns identical results.
 - **Safe Version Gating**: Creation of UUID collections is validated at RootCoord and Proxy to prevent mixed-cluster deserialization errors before all nodes are upgraded.
 - **CVE Compliance**: Preserves all Go module constraints matching security policies (CVE-2026-39822).

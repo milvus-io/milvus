@@ -202,6 +202,77 @@ func TestUUIDIndexLoad(t *testing.T) {
 	require.Equal(t, 2, queryRes.ResultCount)
 }
 
+// TestUUIDFlushLoadFilter verifies representation convergence: insert → query before flush (growing) and after flush+load (sealed) must return same rows for both PK and non-PK UUID fields
+func TestUUIDFlushLoadFilter(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString(prefix, 6)
+	// PK id uuid + non-PK device_uuid + vector
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeUUID).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("device_uuid").WithDataType(entity.FieldTypeUUID)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName)) })
+
+	nb := 20
+	ids, vectors := uuidColumnData(nb)
+	deviceUUIDs := make([]string, nb)
+	for i := 0; i < nb; i++ {
+		deviceUUIDs[i] = genUUID(i + 1000)
+	}
+	// insert PK + non-PK uuid
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName,
+		column.NewColumnUUID("id", ids),
+		column.NewColumnUUID("device_uuid", deviceUUIDs),
+		column.NewColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, vectors)))
+	common.CheckErr(t, err, true)
+
+	// query BEFORE flush (growing segment) — must find 1 row
+	qBefore, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("id == \"%s\"", genUUID(5))).WithOutputFields("id", "device_uuid").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, qBefore.ResultCount, "growing segment filter must match")
+
+	// flush + load to sealed
+	task, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	require.NoError(t, task.Await(ctx))
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.NoError(t, loadTask.Await(ctx))
+
+	// same PK predicate after flush must still match (sealed) — would be 0 before convergence fix
+	qAfter, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("id == \"%s\"", genUUID(5))).WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, qAfter.ResultCount, "sealed segment filter must match growing")
+
+	// also test non-PK uuid field after flush
+	qNonPK, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("device_uuid == \"%s\"", genUUID(1005))).WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, qNonPK.ResultCount, "non-PK UUID filter after flush must match")
+
+	// IN predicate after index
+	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "device_uuid", index.NewInvertedIndex()))
+	common.CheckErr(t, err, true)
+	loadTask2, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.NoError(t, loadTask2.Await(ctx))
+
+	qIn, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("id in [\"%s\", \"%s\"]", genUUID(0), genUUID(1))).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 2, qIn.ResultCount, "IN filter after index must match")
+}
+
 // TestUUIDSDKPaths tests row based insert, search by ids and query iterator with uuid pk
 func TestUUIDSDKPaths(t *testing.T) {
 	t.Parallel()

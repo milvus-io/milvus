@@ -223,10 +223,8 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			int64Ts = append(int64Ts, tz)
 		}
 		data = int64Ts
-		c.readPosition += int(readCount)
 	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		data, err = c.ReadString(readCount)
-		c.readPosition += int(readCount)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -245,7 +243,6 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			byteArr = append(byteArr, wkbValue)
 		}
 		data = byteArr
-		c.readPosition += int(readCount)
 	case schemapb.DataType_JSON:
 		var strs []string
 		strs, err = c.ReadString(readCount)
@@ -272,7 +269,6 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			byteArr = append(byteArr, []byte(str))
 		}
 		data = byteArr
-		c.readPosition += int(readCount)
 	case schemapb.DataType_BinaryVector:
 		data, err = ReadN[uint8](c.reader, c.order, readCount)
 		if err != nil {

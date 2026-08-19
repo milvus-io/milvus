@@ -339,23 +339,35 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(string_array);
         }
         case DataType::UUID: {
+            // Tolerant read during transition: sealed files may hold either
+            // FixedSizeBinary(16) (canonical) or String (36-char) chunks.
             AssertInfo(
                 array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY ||
                     array->type()->id() == arrow::Type::type::STRING,
                 "inconsistent data type for UUID");
-            FixedVector<std::string> values(element_count);
+            FixedVector<milvus::UUID> values(element_count);
             if (array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY) {
                 auto fsb_array =
                     std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
                         array);
+                AssertInfo(fsb_array->byte_width() ==
+                               static_cast<int32_t>(sizeof(milvus::UUID)),
+                           "unexpected UUID byte width {}",
+                           fsb_array->byte_width());
                 for (size_t index = 0; index < element_count; ++index) {
-                    values[index] = fsb_array->GetString(index);
+                    milvus::fastmem::FastMemcpy(values[index].data.data(),
+                                                fsb_array->GetValue(index),
+                                                sizeof(milvus::UUID));
                 }
             } else {
                 auto string_array =
                     std::dynamic_pointer_cast<arrow::StringArray>(array);
                 for (size_t index = 0; index < element_count; ++index) {
-                    values[index] = string_array->GetString(index);
+                    if (string_array->IsNull(index)) {
+                        continue;
+                    }
+                    values[index] = milvus::UUID::FromString(
+                        string_array->GetString(index));
                 }
             }
             if (nullable_) {
@@ -708,12 +720,22 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
         case DataType::STRING:
-        case DataType::VARCHAR:
-        case DataType::UUID: {
+        case DataType::VARCHAR: {
             FixedVector<std::string> values(element_count);
             if (default_value.has_value()) {
                 std::fill(
                     values.begin(), values.end(), default_value->string_data());
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
+        case DataType::UUID: {
+            FixedVector<milvus::UUID> values(element_count);
+            if (default_value.has_value()) {
+                auto uuid =
+                    milvus::UUID::FromString(default_value->string_data());
+                std::fill(values.begin(), values.end(), uuid);
                 return FillFieldData(values.data(), nullptr, element_count, 0);
             }
             return FillFieldData(
@@ -762,6 +784,7 @@ template class FieldDataImpl<int64_t, true>;
 template class FieldDataImpl<float, true>;
 template class FieldDataImpl<double, true>;
 template class FieldDataImpl<std::string, true>;
+template class FieldDataImpl<milvus::UUID, true>;
 template class FieldDataImpl<Json, true>;
 template class FieldDataImpl<Geometry, true>;
 template class FieldDataImpl<Array, true>;
@@ -914,8 +937,10 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
-        case DataType::UUID:
             return std::make_shared<FieldData<std::string>>(
+                type, nullable, cap_rows);
+        case DataType::UUID:
+            return std::make_shared<FieldData<milvus::UUID>>(
                 type, nullable, cap_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
@@ -950,9 +975,11 @@ InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
-        case DataType::UUID:
         case DataType::GEOMETRY:
             return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
+        case DataType::UUID:
+            return InitScalarFieldDataWithLengthImpl<milvus::UUID>(type,
+                                                                   length);
         case DataType::JSON:
             return InitScalarFieldDataWithLengthImpl<Json>(type, length);
         default:
@@ -1012,12 +1039,19 @@ ResizeScalarFieldData(const DataType& type,
         }
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT:
-        case DataType::UUID: {
+        case DataType::TEXT: {
             auto inner_field_data =
                 std::dynamic_pointer_cast<FieldData<std::string>>(field_data);
             AssertInfo(inner_field_data != nullptr,
                        "Failed to cast field_data to FieldData<std::string>");
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::UUID: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<milvus::UUID>>(field_data);
+            AssertInfo(inner_field_data != nullptr,
+                       "Failed to cast field_data to FieldData<milvus::UUID>");
             inner_field_data->resize_field_data(new_num_rows);
             return;
         }

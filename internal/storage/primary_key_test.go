@@ -256,8 +256,10 @@ func TestParsePrimaryKeysAndIDs(t *testing.T) {
 	}
 
 	for _, c := range testCases {
-		ids := ParsePrimaryKeys2IDs(c.pks)
-		testPks := ParseIDs2PrimaryKeys(ids)
+		ids, err := ParsePrimaryKeys2IDs(c.pks)
+		assert.NoError(t, err)
+		testPks, err := ParseIDs2PrimaryKeys(ids)
+		assert.NoError(t, err)
 		assert.ElementsMatch(t, c.pks, testPks)
 	}
 }
@@ -306,4 +308,28 @@ func TestParsePrimaryKeysBatch2IDs(t *testing.T) {
 		_, err := ParsePrimaryKeysBatch2IDs(&badPks{PrimaryKeys: intPks})
 		assert.Error(t, err)
 	})
+}
+
+func TestParseIDs2PrimaryKeys_LengthPreservation(t *testing.T) {
+	validU, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	ids := &schemapb.IDs{
+		IdField: &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: [][]byte{validU[:], []byte{0x01, 0x02}, validU[:]},
+			},
+		},
+	}
+	pks, err := ParseIDs2PrimaryKeys(ids)
+	assert.Error(t, err)
+	assert.Nil(t, pks)
+	ids2 := &schemapb.IDs{
+		IdField: &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: [][]byte{validU[:], validU[:]},
+			},
+		},
+	}
+	pks2, err := ParseIDs2PrimaryKeys(ids2)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(pks2))
 }

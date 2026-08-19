@@ -320,9 +320,15 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
 			// todo: add float/double/timestmaptz pruner
-			case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
+			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				targetRange := tRange.ToStrRange()
 				statRange := exprutil.NewStrRange(min.GetValue().(string), max.GetValue().(string), true, true)
+				return exprutil.StrRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_UUID:
+				targetRange := tRange.ToStrRange()
+				minBytes := min.GetValue().([16]byte)
+				maxBytes := max.GetValue().([16]byte)
+				statRange := exprutil.NewStrRange(typeutil.UUIDToString(minBytes), typeutil.UUIDToString(maxBytes), true, true)
 				return exprutil.StrRangeOverlap(targetRange, statRange)
 			}
 		}

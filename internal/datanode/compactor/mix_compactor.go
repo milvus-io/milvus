@@ -355,7 +355,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			case schemapb.DataType_VarChar:
 				pk = pkArray.(*array.String).Value(i)
 			case schemapb.DataType_UUID:
-				pk = pkArray.(*array.String).Value(i)
+				fbArr := pkArray.(*array.FixedSizeBinary)
+				b := fbArr.Value(i)
+				var u [16]byte
+				copy(u[:], b)
+				pk = u
 			default:
 				panic("invalid data type")
 			}

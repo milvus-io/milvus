@@ -814,7 +814,7 @@ func IsTextType(dataType schemapb.DataType) bool {
 
 func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
 	if IsArrayType(dataType) {
-		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {
+		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar || IsUUIDType(elementType) {
 			return true
 		}
 	}
@@ -3296,7 +3296,8 @@ func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 		schemapb.DataType_BFloat16Vector,
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_Int8Vector,
-		schemapb.DataType_ArrayOfVector:
+		schemapb.DataType_ArrayOfVector,
+		schemapb.DataType_UUID:
 		return true
 	default:
 		return false
@@ -4442,6 +4443,16 @@ func appendArrayRow(
 			return nil, newArrayCapacityError(len(merged), maxCapacity)
 		}
 		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: merged}}}, nil
+	case schemapb.DataType_UUID:
+		b := base.GetBytesData().GetData()
+		u := update.GetBytesData().GetData()
+		merged := make([][]byte, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: merged}}}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("ARRAY_APPEND does not support element type: %s", elementType.String())
 	}
@@ -4548,6 +4559,23 @@ func removeArrayRow(
 			}
 		}
 		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: out}}}, nil
+	case schemapb.DataType_UUID:
+		b := base.GetBytesData().GetData()
+		u := update.GetBytesData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[string]struct{}, len(u))
+		for _, v := range u {
+			remove[string(v)] = struct{}{}
+		}
+		out := make([][]byte, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[string(v)]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: out}}}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("ARRAY_REMOVE does not support element type: %s", elementType.String())
 	}

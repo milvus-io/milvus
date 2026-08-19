@@ -253,6 +253,11 @@ func (ds *DataSorter) Swap(i, j int) {
 			data := fd.Data
 			data[i], data[j] = data[j], data[i]
 			swapValidData(fd.ValidData, i, j)
+		case schemapb.DataType_UUID:
+			fd := singleData.(*UUIDFieldData)
+			data := fd.Data
+			data[i], data[j] = data[j], data[i]
+			swapValidData(fd.ValidData, i, j)
 		case schemapb.DataType_BinaryVector:
 			fd := singleData.(*BinaryVectorFieldData)
 			data := fd.Data

@@ -593,6 +593,29 @@ func ReadStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, er
 		if chunk.NullN() > 0 {
 			return nil, WrapNullRowErr(pcr.field)
 		}
+		if pcr.field.GetDataType() == schemapb.DataType_UUID {
+			if binReader, ok := chunk.(*array.FixedSizeBinary); ok {
+				for i := 0; i < dataNums; i++ {
+					b := binReader.Value(i)
+					if len(b) != 16 {
+						return nil, merr.WrapErrImportFailedMsg("invalid UUID length %d, expected 16 at row %d", len(b), pcr.readPosition+int64(len(data)))
+					}
+					var u [16]byte
+					copy(u[:], b)
+					value := typeutil.UUIDToString(u)
+					if isVarcharField {
+						if err = common.CheckValidString(value, maxLength, pcr.field); err != nil {
+							return nil, err
+						}
+					}
+					if value, err = common.ValidateAndNormalizeUUID(pcr.field.GetName(), pcr.readPosition+int64(len(data)), value); err != nil {
+						return nil, err
+					}
+					data = append(data, value)
+				}
+				continue
+			}
+		}
 		stringReader, ok := chunk.(*array.String)
 		if !ok {
 			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
@@ -642,9 +665,36 @@ func readRawStringDataFromParquet(pcr *FieldReader, count int64) ([]string, []bo
 	}
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
+		if pcr.field.GetDataType() == schemapb.DataType_UUID {
+			if binReader, ok := chunk.(*array.FixedSizeBinary); ok {
+				validData = append(validData, bytesToValidData(dataNums, binReader.NullBitmapBytes())...)
+				for i := 0; i < dataNums; i++ {
+					if binReader.IsNull(i) {
+						data = append(data, "")
+						continue
+					}
+					b := binReader.Value(i)
+					if len(b) != 16 {
+						return nil, nil, merr.WrapErrImportFailedMsg("invalid UUID length %d, expected 16 at row %d", len(b), pcr.readPosition+int64(len(data)))
+					}
+					var u [16]byte
+					copy(u[:], b)
+					value := typeutil.UUIDToString(u)
+					if isVarcharField {
+						if err = common.CheckValidString(value, maxLength, pcr.field); err != nil {
+							return nil, nil, err
+						}
+					}
+					if value, err = common.ValidateAndNormalizeUUID(pcr.field.GetName(), pcr.readPosition+int64(len(data)), value); err != nil {
+						return nil, nil, err
+					}
+					data = append(data, value)
+				}
+				continue
+			}
+		}
 		stringReader, ok := chunk.(*array.String)
 		if !ok {
-			// the chunk type may be *array.Null if the data in chunk is all null
 			_, ok := chunk.(*array.Null)
 			if !ok {
 				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())

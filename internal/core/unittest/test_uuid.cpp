@@ -33,10 +33,9 @@ TEST(UuidTest, IsNotStringDataType) {
     ASSERT_FALSE(IsStringDataType(DataType::UUID));
 }
 
-// Verify that UUID has a logical data size of 16 bytes, while its C++ in-memory
-// representation is std::string-backed (IsFixedSizeType is false).
+// Verify that UUID has a logical data size of 16 bytes and is a fixed-width type.
 TEST(UuidTest, DataTypeSize) {
-    ASSERT_FALSE(IsFixedSizeType(DataType::UUID));
+    ASSERT_TRUE(IsFixedSizeType(DataType::UUID));
     ASSERT_EQ(GetDataTypeSize(DataType::UUID), 16);
 }
 

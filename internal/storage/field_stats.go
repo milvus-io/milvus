@@ -121,8 +121,8 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		stats.Min = &VarCharFieldValue{}
 		isScalarField = true
 	case schemapb.DataType_UUID:
-		stats.Max = &VarCharFieldValue{}
-		stats.Min = &VarCharFieldValue{}
+		stats.Max = &UUIDFieldValue{}
+		stats.Min = &UUIDFieldValue{}
 		isScalarField = true
 	case schemapb.DataType_FloatVector:
 		stats.Centroids = []VectorFieldValue{}
@@ -414,8 +414,6 @@ func (stats *FieldStats) Update(pk ScalarFieldValue) {
 		} else if str, ok := pk.GetValue().(string); ok {
 			if u, err := typeutil.ParseUUID(str); err == nil {
 				stats.BF.Add(u[:])
-			} else {
-				stats.BF.AddString(str)
 			}
 		}
 	default:

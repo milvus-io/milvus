@@ -990,7 +990,6 @@ IndexFactory::CreatePrimitiveScalarIndex(
             // create string index
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::UUID:
         case DataType::TEXT: {
             auto& ngram_params = create_index_info.ngram_params;
             if (ngram_params.has_value()) {
@@ -1004,6 +1003,10 @@ IndexFactory::CreatePrimitiveScalarIndex(
             }
             return CreatePrimitiveScalarIndex<std::string>(
                 create_index_info, file_manager_context);
+        }
+        case DataType::UUID: {
+            return CreatePrimitiveScalarIndex<UUID>(create_index_info,
+                                                    file_manager_context);
         }
         default:
             ThrowInfo(

@@ -949,13 +949,26 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 }
 
 func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if bytesArr := field.GetScalars().GetBytesData(); bytesArr != nil {
+		if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() && bytesArr.GetData() == nil {
+			msg := fmt.Sprintf("uuid field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need bytes array", "got nil", msg)
+		}
+		for i, b := range bytesArr.GetData() {
+			if len(b) == 0 {
+				continue
+			}
+			if len(b) != 16 {
+				return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at row %d: expected 16 bytes, got %d", fieldSchema.GetName(), i, len(b))
+			}
+		}
+		return nil
+	}
 	strArr := field.GetScalars().GetStringData().GetData()
 	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("uuid field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
 	}
-
-	// Validate each UUID string format and normalize to lowercase
 	for i, s := range strArr {
 		normalized, err := typeutil.NormalizeUUID(s)
 		if err != nil {
@@ -963,7 +976,6 @@ func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema
 		}
 		strArr[i] = normalized
 	}
-
 	return nil
 }
 
@@ -1181,6 +1193,22 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 					return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
 						field.GetDataType().String(), field.GetName(), rowCnt, i, len(row.GetStringData().GetData()[i]), maxLength,
 					)
+				}
+			}
+		}
+	case schemapb.DataType_UUID:
+		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("uuid array", "nil array", "insert data does not match")
+			}
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_BytesData)(nil)) {
+				return merr.WrapErrParameterInvalid("uuid array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			for idx, b := range row.GetBytesData().GetData() {
+				if len(b) != 16 {
+					return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at array index %d, expected 16 bytes, got %d", field.GetName(), idx, len(b))
 				}
 			}
 		}
@@ -1537,6 +1565,8 @@ func verifyCapacityPerRow(arrayArray []*schemapb.ScalarField, maxCapacity int64,
 			arrayLen = len(array.GetLongData().GetData())
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			arrayLen = len(array.GetStringData().GetData())
+		case schemapb.DataType_UUID:
+			arrayLen = len(array.GetBytesData().GetData())
 		case schemapb.DataType_Float:
 			arrayLen = len(array.GetFloatData().GetData())
 		case schemapb.DataType_Double:

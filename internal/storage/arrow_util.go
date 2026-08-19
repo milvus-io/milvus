@@ -235,9 +235,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 				if len(val) == 0 && defaultValue.GetStringData() != "" {
 					if u, err := typeutil.ParseUUID(defaultValue.GetStringData()); err == nil {
 						val = u[:]
+					} else {
+						return 0, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", field.GetName())
 					}
 				}
-				if len(val) > 0 {
+				if len(val) != 0 && len(val) != 16 {
+					return 0, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(val), field.GetName())
+				}
+				if len(val) == 16 {
 					b.Append(val)
 					return uint64(len(val)), nil
 				}
@@ -246,6 +251,9 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 			return 0, nil
 		} else {
 			val := ba.Value(idx)
+			if len(val) != 16 {
+				return 0, merr.WrapErrParameterInvalidMsg("invalid UUID length %d, expected 16 for field %s", len(val), field.GetName())
+			}
 			b.Append(val)
 			return uint64(len(val)), nil
 		}
@@ -375,15 +383,22 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 		case schemapb.DataType_UUID:
 			bd := builder.(*array.FixedSizeBinaryBuilder)
 			var uuidBytes []byte
-			if len(schema.GetDefaultValue().GetBytesData()) == 16 {
+			if len(schema.GetDefaultValue().GetBytesData()) != 0 {
+				if len(schema.GetDefaultValue().GetBytesData()) != 16 {
+					return nil, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(schema.GetDefaultValue().GetBytesData()), schema.GetName())
+				}
 				uuidBytes = schema.GetDefaultValue().GetBytesData()
 			} else if schema.GetDefaultValue().GetStringData() != "" {
-				if u, err := typeutil.ParseUUID(schema.GetDefaultValue().GetStringData()); err == nil {
-					uuidBytes = u[:]
+				u, err := typeutil.ParseUUID(schema.GetDefaultValue().GetStringData())
+				if err != nil {
+					return nil, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", schema.GetName())
 				}
+				uuidBytes = u[:]
+			} else {
+				uuidBytes = make([]byte, 16)
 			}
 			if len(uuidBytes) != 16 {
-				uuidBytes = make([]byte, 16)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(uuidBytes), schema.GetName())
 			}
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) []byte { return uuidBytes }),

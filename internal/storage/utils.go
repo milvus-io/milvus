@@ -1561,14 +1561,38 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		case *StringFieldData:
+			fieldType := rawData.DataType
+			if fieldType == schemapb.DataType_None {
+				fieldType = schemapb.DataType_VarChar
+			}
 			fieldData = &schemapb.FieldData{
-				Type:    schemapb.DataType_VarChar,
+				Type:    fieldType,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
 								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *UUIDFieldData:
+			bytesData := make([][]byte, len(rawData.Data))
+			for i, u := range rawData.Data {
+				b := make([]byte, 16)
+				copy(b, u[:])
+				bytesData[i] = b
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_UUID,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: bytesData,
 							},
 						},
 					},

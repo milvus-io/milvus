@@ -61,6 +61,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	}
 
 	stats.PkType = int64(schemapb.DataType_Int64)
+	pkTypePresent := false
 	if value, ok := messageMap["pkType"]; ok && value != nil {
 		var typeValue int64
 		err = json.Unmarshal(*value, &typeValue)
@@ -70,6 +71,22 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		// valid pkType
 		if typeValue > 0 {
 			stats.PkType = typeValue
+			pkTypePresent = true
+		}
+	}
+	if !pkTypePresent {
+		// No pkType in persisted stats: try to infer UUID vs VarChar from maxPk string content,
+		// otherwise keep Int64 for legacy compatibility. If inference fails and no legacy int field,
+		// the subsequent switch will return Invalid PK error (fail-loud).
+		if maxPkMsg, ok := messageMap["maxPk"]; ok && maxPkMsg != nil && len(*maxPkMsg) > 0 {
+			var strVal string
+			if err := json.Unmarshal(*maxPkMsg, &strVal); err == nil {
+				if _, err := typeutil.ParseUUID(strVal); err == nil {
+					stats.PkType = int64(schemapb.DataType_UUID)
+				} else if len(strVal) > 0 {
+					stats.PkType = int64(schemapb.DataType_VarChar)
+				}
+			}
 		}
 	}
 
@@ -100,9 +117,8 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
 	case schemapb.DataType_UUID:
-		// UUID PKs are canonical strings, so they deserialize as VarChar.
-		stats.MaxPk = &VarCharPrimaryKey{}
-		stats.MinPk = &VarCharPrimaryKey{}
+		stats.MaxPk = &UUIDPrimaryKey{}
+		stats.MinPk = &UUIDPrimaryKey{}
 	default:
 		return merr.WrapErrServiceInternalMsg("Invalid PK Data Type")
 	}
@@ -207,8 +223,6 @@ func (stats *PrimaryKeyStats) Update(pk PrimaryKey) {
 		} else if str, ok := pk.GetValue().(string); ok {
 			if u, err := typeutil.ParseUUID(str); err == nil {
 				stats.BF.Add(u[:])
-			} else {
-				stats.BF.AddString(str)
 			}
 		} else if b, ok := pk.GetValue().([16]byte); ok {
 			stats.BF.Add(b[:])

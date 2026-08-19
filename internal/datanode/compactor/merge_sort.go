@@ -132,7 +132,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 	case schemapb.DataType_UUID:
 		predicate = func(r storage.Record, ri, i int) bool {
 			segmentTotalRows[ri]++
-			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
+			fbArr := r.Column(pkField.FieldID).(*array.FixedSizeBinary)
+			b := fbArr.Value(i)
+			var u [16]byte
+			copy(u[:], b)
+			pk := u
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {

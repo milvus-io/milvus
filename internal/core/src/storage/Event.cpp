@@ -318,14 +318,26 @@ BaseEventData::Serialize() {
         switch (data_type) {
             case DataType::VARCHAR:
             case DataType::STRING:
-            case DataType::TEXT:
-            case DataType::UUID: {
+            case DataType::TEXT: {
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
                     auto str = static_cast<const std::string*>(
                         field_data->RawValue(offset));
                     auto size = field_data->is_valid(offset) ? str->size() : -1;
                     payload_writer->add_one_string_payload(str->c_str(), size);
+                }
+                break;
+            }
+            case DataType::UUID: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto uuid = static_cast<const milvus::UUID*>(
+                        field_data->RawValue(offset));
+                    auto size = field_data->is_valid(offset)
+                                    ? static_cast<int>(sizeof(milvus::UUID))
+                                    : -1;
+                    payload_writer->add_one_uuid_payload(uuid->data.data(),
+                                                         size);
                 }
                 break;
             }

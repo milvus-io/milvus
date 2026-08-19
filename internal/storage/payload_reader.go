@@ -163,7 +163,7 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Int8Vector:
 		val, dim, validData, _, err := r.GetInt8VectorFromPayload()
 		return val, validData, dim, err
-	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, validData, err := r.GetStringFromPayload()
 		return val, validData, 0, err
 	case schemapb.DataType_Array:
@@ -499,6 +499,40 @@ func (r *PayloadReader) GetStringFromPayload() ([]string, []bool, error) {
 		return nil, nil, err
 	}
 	return value, nil, nil
+}
+
+func (r *PayloadReader) GetUUIDFromPayload() ([][]byte, []bool, error) {
+	if r.colType != schemapb.DataType_UUID {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get uuid from datatype %v", r.colType.String())
+	}
+
+	if r.nullable {
+		values := make([][]byte, r.numRows)
+		validData := make([]bool, r.numRows)
+		valuesRead, err := ReadData[[]byte, *array.FixedSizeBinary](r.reader, values, validData, r.numRows)
+		if err != nil {
+			return nil, nil, err
+		}
+		if valuesRead != r.numRows {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+		}
+		return values, validData, nil
+	}
+
+	values := make([]parquet.FixedLenByteArray, r.numRows)
+	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, nil, err
+	}
+	if valuesRead != r.numRows {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+	}
+
+	ret := make([][]byte, r.numRows)
+	for i := 0; i < int(r.numRows); i++ {
+		ret[i] = append([]byte(nil), values[i]...)
+	}
+	return ret, nil, nil
 }
 
 func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error) {

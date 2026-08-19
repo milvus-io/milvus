@@ -1522,7 +1522,7 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 		for _, value := range values {
 			pks = append(pks, storage.NewInt64PrimaryKey(int64(value)))
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar:
 		if cResult.varchar_primary_key_offsets == nil {
 			return nil, merr.WrapErrDataIntegrityMsg("growing source varchar primary key offsets are nil")
 		}
@@ -1543,6 +1543,32 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 					i, start, end, len(data))
 			}
 			pks = append(pks, storage.NewVarCharPrimaryKey(string(data[start:end])))
+		}
+	case schemapb.DataType_UUID:
+		if cResult.varchar_primary_key_offsets == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key offsets are nil")
+		}
+		offsets := unsafe.Slice(cResult.varchar_primary_key_offsets, int(cResult.num_primary_keys)+1)
+		var data []byte
+		if cResult.varchar_primary_keys_size > 0 {
+			if cResult.varchar_primary_keys == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key data is nil")
+			}
+			data = unsafe.Slice((*byte)(unsafe.Pointer(cResult.varchar_primary_keys)), int(cResult.varchar_primary_keys_size))
+		}
+		for i := 0; i < int(cResult.num_primary_keys); i++ {
+			start := int(offsets[i])
+			end := int(offsets[i+1])
+			if start < 0 || end < start || end > len(data) {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"growing source uuid primary key offset out of range, index=%d start=%d end=%d size=%d",
+					i, start, end, len(data))
+			}
+			pk, err := storage.NewUUIDPrimaryKeyFromString(string(data[start:end]))
+			if err != nil {
+				return nil, err
+			}
+			pks = append(pks, pk)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported growing source primary key data type %s",

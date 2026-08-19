@@ -308,6 +308,43 @@ func TestHashKey2PartitionsMatchesLegacyModulo(t *testing.T) {
 	})
 }
 
+func TestHashPK2Channels_BatchInvariance(t *testing.T) {
+	channels := []string{"ch0", "ch1", "ch2", "ch3"}
+	u, _ := ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	u2, _ := ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	intKeys := []int64{42, 43, 42}
+	strKeys := []string{"hello", "world", "hello"}
+	uuidKeys := [][]byte{u[:], u2[:], u[:]}
+
+	intIDsSingle := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{intKeys[0]}}}}
+	intIDsBatch := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: intKeys}}}
+	strIDsSingle := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{strKeys[0]}}}}
+	strIDsBatch := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: strKeys}}}
+	uuidIDsSingle := &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{uuidKeys[0]}}}}
+	uuidIDsBatch := &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: uuidKeys}}}
+
+	singleIntHash, err := HashPK2Channels(intIDsSingle, channels)
+	assert.NoError(t, err)
+	batchIntHash, err := HashPK2Channels(intIDsBatch, channels)
+	assert.NoError(t, err)
+	assert.Equal(t, singleIntHash[0], batchIntHash[0])
+	assert.Equal(t, batchIntHash[0], batchIntHash[2])
+
+	singleStrHash, err := HashPK2Channels(strIDsSingle, channels)
+	assert.NoError(t, err)
+	batchStrHash, err := HashPK2Channels(strIDsBatch, channels)
+	assert.NoError(t, err)
+	assert.Equal(t, singleStrHash[0], batchStrHash[0])
+	assert.Equal(t, batchStrHash[0], batchStrHash[2])
+
+	singleUUIDHash, err := HashPK2Channels(uuidIDsSingle, channels)
+	assert.NoError(t, err)
+	batchUUIDHash, err := HashPK2Channels(uuidIDsBatch, channels)
+	assert.NoError(t, err)
+	assert.Equal(t, singleUUIDHash[0], batchUUIDHash[0])
+	assert.Equal(t, batchUUIDHash[0], batchUUIDHash[2])
+}
+
 func TestHashKey2Partitions_UUID(t *testing.T) {
 	partitions := []string{"p_0", "p_1", "p_2"}
 	uuidStrs := []string{

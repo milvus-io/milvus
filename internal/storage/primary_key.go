@@ -510,7 +510,7 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 	return ret, nil
 }
 
-func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
+func ParseIDs2PrimaryKeys(ids *schemapb.IDs) ([]PrimaryKey, error) {
 	ret := make([]PrimaryKey, 0)
 	switch ids.IdField.(type) {
 	case *schemapb.IDs_IntId:
@@ -529,15 +529,16 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 		uuidPks := ids.GetUuidId().GetData()
 		for _, v := range uuidPks {
 			pk, err := NewUUIDPrimaryKeyFromBytes(v)
-			if err == nil {
-				ret = append(ret, pk)
+			if err != nil {
+				return nil, err
 			}
+			ret = append(ret, pk)
 		}
 	default:
-		// TODO::
+		return nil, merr.WrapErrParameterInvalidMsg("invalid IDs type %T", ids.IdField)
 	}
 
-	return ret
+	return ret, nil
 }
 
 func ParseIDs2PrimaryKeysBatch(ids *schemapb.IDs) PrimaryKeys {
@@ -598,10 +599,10 @@ func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
 	return ret, nil
 }
 
-func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
+func ParsePrimaryKeys2IDs(pks []PrimaryKey) (*schemapb.IDs, error) {
 	ret := &schemapb.IDs{}
 	if len(pks) == 0 {
-		return ret
+		return ret, nil
 	}
 	switch pks[0].Type() {
 	case schemapb.DataType_Int64:
@@ -627,9 +628,11 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 	case schemapb.DataType_UUID:
 		uuidPks := make([][]byte, 0, len(pks))
 		for _, pk := range pks {
-			if upk, ok := pk.(*UUIDPrimaryKey); ok {
-				uuidPks = append(uuidPks, upk.Value[:])
+			upk, ok := pk.(*UUIDPrimaryKey)
+			if !ok {
+				return nil, merr.WrapErrServiceInternalMsg("expected UUIDPrimaryKey, got %T", pk)
 			}
+			uuidPks = append(uuidPks, upk.Value[:])
 		}
 		ret.IdField = &schemapb.IDs_UuidId{
 			UuidId: &schemapb.UUIDArray{
@@ -637,10 +640,10 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 			},
 		}
 	default:
-		// TODO::
+		return nil, merr.WrapErrParameterInvalidMsg("invalid primary key type %v", pks[0].Type())
 	}
 
-	return ret
+	return ret, nil
 }
 
 func ParseInt64s2IDs(pks ...int64) *schemapb.IDs {

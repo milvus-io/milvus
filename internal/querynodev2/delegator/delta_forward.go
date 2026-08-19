@@ -380,7 +380,11 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 		})
 		future := pool.Submit(func() (struct{}, error) {
 			log.Debug(ctx, "delegator plan to applyDelete via worker")
-			err := retry.Handle(ctx, func() (bool, error) {
+			pks, err := storage.ParsePrimaryKeys2IDs(delData.PrimaryKeys)
+			if err != nil {
+				return struct{}{}, err
+			}
+			err = retry.Handle(ctx, func() (bool, error) {
 				if sd.Stopped() {
 					return false, merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing")
 				}
@@ -391,7 +395,7 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 					PartitionId:  delData.PartitionID,
 					VchannelName: sd.vchannelName,
 					SegmentIds:   segmentIDs,
-					PrimaryKeys:  storage.ParsePrimaryKeys2IDs(delData.PrimaryKeys),
+					PrimaryKeys:  pks,
 					Timestamps:   delData.Timestamps,
 					Scope:        scope,
 				})

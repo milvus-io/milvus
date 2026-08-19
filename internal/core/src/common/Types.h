@@ -20,11 +20,14 @@
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>
 #include <stdint.h>
+#include <array>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
@@ -111,8 +114,97 @@ using DataArray = proto::schema::FieldData;
 using VectorFieldProto = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
-using PkType = std::variant<std::monostate, int64_t, std::string>;
+using PkType = std::variant<std::monostate, int64_t, std::string, UUID>;
 using DefaultValueType = proto::schema::ValueField;
+
+// Native UUID type: a 128-bit RFC-4122 UUID stored as 16 big-endian bytes.
+// This is the canonical fixed-width representation at the arrow/disk/wire
+// boundary. The 36-char hex-with-dashes form exists only at the user-facing
+// text boundary and is converted exactly twice (insert via FromString, query
+// literal at expression construction). UUID is a scalar value type: trivially
+// copyable, equality/ordering comparable, and hashable.
+struct UUID {
+    std::array<uint8_t, 16> data{};
+
+    UUID() = default;
+
+    // Parse a 36-char RFC-4122 form "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    // into 16 big-endian bytes. Throws DataTypeInvalid on malformed input.
+    static UUID
+    FromString(std::string_view str);
+
+    // Format back into the 36-char lowercase hex-with-dashes form.
+    std::string
+    ToString() const;
+
+    bool
+    operator==(const UUID& other) const {
+        return data == other.data;
+    }
+
+    // Byte-wise big-endian lexicographic order so UUID ordering matches
+    // RFC-4122 textual ordering.
+    bool
+    operator<(const UUID& other) const {
+        return data < other.data;
+    }
+};
+
+inline UUID
+UUID::FromString(std::string_view str) {
+    if (str.size() != 36) {
+        ThrowInfo(DataTypeInvalid,
+                  "invalid UUID string, expect 36 chars, got {}",
+                  str.size());
+    }
+    UUID uuid{};
+    size_t out = 0;
+    auto hex_val = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        return -1;
+    };
+    for (size_t i = 0; i < str.size();) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (str[i] != '-') {
+                ThrowInfo(DataTypeInvalid, "invalid UUID string: {}", str);
+            }
+            ++i;
+            continue;
+        }
+        int hi = hex_val(str[i]);
+        int lo = hex_val(str[i + 1]);
+        if (hi < 0 || lo < 0) {
+            ThrowInfo(DataTypeInvalid, "invalid UUID string: {}", str);
+        }
+        uuid.data[out++] = static_cast<uint8_t>((hi << 4) | lo);
+        i += 2;
+    }
+    AssertInfo(out == 16, "UUID parsing produced {} bytes, expected 16", out);
+    return uuid;
+}
+
+inline std::string
+UUID::ToString() const {
+    static const char* kHex = "0123456789abcdef";
+    std::string out;
+    out.reserve(36);
+    for (size_t i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) {
+            out.push_back('-');
+        }
+        out.push_back(kHex[data[i] >> 4]);
+        out.push_back(kHex[data[i] & 0x0F]);
+    }
+    return out;
+}
 
 struct QueryIteratorCursor {
     PkType last_pk;
@@ -851,8 +943,11 @@ struct TypeTraits<DataType::TEXT> : public TypeTraits<DataType::VARCHAR> {
 };
 
 template <>
-struct TypeTraits<DataType::UUID> : public TypeTraits<DataType::VARCHAR> {
+struct TypeTraits<DataType::UUID> {
+    using NativeType = milvus::UUID;
     static constexpr DataType TypeKind = DataType::UUID;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
     static constexpr const char* Name = "UUID";
 };
 
@@ -999,6 +1094,22 @@ bool
 IsFixedSizeType(DataType type);
 
 }  // namespace milvus
+
+namespace std {
+template <>
+struct hash<milvus::UUID> {
+    size_t
+    operator()(const milvus::UUID& uuid) const noexcept {
+        // FNV-1a over the 16 bytes.
+        size_t h = 14695981039346656037ULL;
+        for (uint8_t b : uuid.data) {
+            h = (h ^ b) * 1099511628211ULL;
+        }
+        return h;
+    }
+};
+}  // namespace std
+
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
     auto
