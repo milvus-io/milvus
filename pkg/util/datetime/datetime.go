@@ -60,6 +60,9 @@ func ParseDate(input string) (int32, error) {
 	if err != nil {
 		return 0, merr.WrapErrParameterInvalidMsg("invalid DATE literal '%s'", s)
 	}
+	if t.UTC().Format(dateLayout) != s {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid DATE literal '%s'", s)
+	}
 	days := t.Unix() / SecondsPerDay
 	if days < math.MinInt32 || days > math.MaxInt32 {
 		return 0, merr.WrapErrParameterInvalidMsg("DATE literal '%s' is out of int32 day range", s)

@@ -36,9 +36,9 @@ func TestParseDate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int32(-1), days)
 
-	days, err = ParseDate("2024-06-22")
+	days, err = ParseDate("2024-02-29")
 	require.NoError(t, err)
-	assert.Equal(t, "2024-06-22", FormatDate(days))
+	assert.Equal(t, "2024-02-29", FormatDate(days))
 }
 
 func TestParseDateRejects(t *testing.T) {
@@ -50,6 +50,9 @@ func TestParseDateRejects(t *testing.T) {
 		"2024-06-22T00:00:00Z",
 		"2024-06-22 00:00:00",
 		"not-a-date",
+		"2024-02-30",
+		"2023-02-29",
+		"2024-13-01",
 	}
 	for _, s := range invalid {
 		_, err := ParseDate(s)

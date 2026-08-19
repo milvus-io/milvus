@@ -742,6 +742,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
 		case *schemapb.ScalarField_TimestamptzData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetTimestamptzData().Data)
+		case *schemapb.ScalarField_DateData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDateData().Data)
+		case *schemapb.ScalarField_TimeData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetTimeData().Data)
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
 		case *schemapb.ScalarField_ArrayData:

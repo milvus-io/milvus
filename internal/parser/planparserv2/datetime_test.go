@@ -43,6 +43,8 @@ func TestExpr_DateTimeLiterals(t *testing.T) {
 		`TimeField is null`,
 		`DateField > DateField`,
 		`TimeField != TimeField`,
+		`"1970-01-01" <= DateField <= "1970-01-02"`,
+		`"00:00:00" < TimeField < "24:00:00"`,
 	}
 	for _, exprStr := range valid {
 		parsed, err := ParseExpr(helper, exprStr, nil)
@@ -75,6 +77,16 @@ func TestExpr_DateLiteralPacksDays(t *testing.T) {
 	require.NotNil(t, expr.GetUnaryRangeExpr())
 	assert.Equal(t, int64(1), expr.GetUnaryRangeExpr().GetValue().GetInt64Val())
 	assert.Equal(t, schemapb.DataType_Date, expr.GetUnaryRangeExpr().GetColumnInfo().GetDataType())
+}
+
+func TestExpr_DateRangePacksDays(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	expr, err := ParseExpr(helper, `"1970-01-01" <= DateField <= "1970-01-02"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr.GetBinaryRangeExpr())
+	assert.Equal(t, int64(0), expr.GetBinaryRangeExpr().GetLowerValue().GetInt64Val())
+	assert.Equal(t, int64(1), expr.GetBinaryRangeExpr().GetUpperValue().GetInt64Val())
+	assert.Equal(t, schemapb.DataType_Date, expr.GetBinaryRangeExpr().GetColumnInfo().GetDataType())
 }
 
 func TestExpr_TimeLiteralPacksMicros(t *testing.T) {

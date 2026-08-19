@@ -815,6 +815,9 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 }
 
 func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	if typeutil.IsDateType(dataType) || typeutil.IsTimeType(dataType) {
+		return castValue(dataType, value)
+	}
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(value) {

@@ -184,6 +184,21 @@ func TestScalarAutoIndexParams_build(t *testing.T) {
 		assert.Equal(t, "TRIE", CParams.AutoIndexConfig.ScalarVarcharIndexType.GetValue())
 		assert.Equal(t, "INVERTED", CParams.AutoIndexConfig.ScalarBoolIndexType.GetValue())
 	})
+
+	t.Run("date and time keys are distinct from timestamptz", func(t *testing.T) {
+		map1 := map[string]any{
+			"timestamptz": "STL_SORT",
+			"date":        "INVERTED",
+			"time":        "STL_SORT",
+		}
+		jsonStrBytes, err := json.Marshal(map1)
+		assert.NoError(t, err)
+		err = bt.Save(CParams.AutoIndexConfig.ScalarAutoIndexParams.Key, string(jsonStrBytes))
+		assert.NoError(t, err)
+		assert.Equal(t, "STL_SORT", CParams.AutoIndexConfig.ScalarTimestampTzIndexType.GetValue())
+		assert.Equal(t, "INVERTED", CParams.AutoIndexConfig.ScalarDateIndexType.GetValue())
+		assert.Equal(t, "STL_SORT", CParams.AutoIndexConfig.ScalarTimeIndexType.GetValue())
+	})
 }
 
 func TestGetIndexParam_DefaultValue(t *testing.T) {

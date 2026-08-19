@@ -210,8 +210,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					return Params.AutoIndexConfig.ScalarIntIndexType.GetValue()
 				} else if typeutil.IsFloatingType(dataType) {
 					return Params.AutoIndexConfig.ScalarFloatIndexType.GetValue()
-				} else if typeutil.IsTimestamptzType(dataType) || typeutil.IsDateType(dataType) || typeutil.IsTimeType(dataType) {
+				} else if typeutil.IsTimestamptzType(dataType) {
 					return Params.AutoIndexConfig.ScalarTimestampTzIndexType.GetValue()
+				} else if typeutil.IsDateType(dataType) {
+					return Params.AutoIndexConfig.ScalarDateIndexType.GetValue()
+				} else if typeutil.IsTimeType(dataType) {
+					return Params.AutoIndexConfig.ScalarTimeIndexType.GetValue()
 				}
 				return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
 			}
