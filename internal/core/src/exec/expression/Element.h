@@ -122,7 +122,8 @@ class MultiElement : public BaseElement {
                                    float,
                                    double,
                                    std::string,
-                                   std::string_view>;
+                                   std::string_view,
+                                   milvus::UUID>;
 
     MultiElement() = default;
     virtual ~MultiElement() = default;
