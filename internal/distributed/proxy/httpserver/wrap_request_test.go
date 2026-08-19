@@ -210,6 +210,50 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		_, err := fieldData.AsSchemapb()
 		assert.Error(t, err)
 	})
+	t.Run("date_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Date,
+			Field: []byte(`["2024-06-22", "1970-01-01"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		result, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Date, result.GetType())
+		assert.Equal(t, []string{"2024-06-22", "1970-01-01"}, result.GetScalars().GetStringData().GetData())
+	})
+	t.Run("date_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Date,
+			Field: []byte("[1, 2, 3]"),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("time_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Time,
+			Field: []byte(`["12:30:00", "24:00:00"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		result, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Time, result.GetType())
+		assert.Equal(t, []string{"12:30:00", "24:00:00"}, result.GetScalars().GetStringData().GetData())
+	})
+	t.Run("time_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Time,
+			Field: []byte("[1, 2, 3]"),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
 	t.Run("string_not_support", func(t *testing.T) {
 		fieldData := FieldData{
 			Type:  schemapb.DataType_String,
