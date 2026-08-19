@@ -414,85 +414,57 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    // Global row offset of (chunk, chunk_pos) within the segment.
     int64_t
-    DataCursorRow(size_t chunk, int64_t chunk_pos) const {
+    RowOffsetInSegment(size_t chunk, int64_t chunk_pos) const {
         return segment_->is_chunked()
                    ? segment_->num_rows_until_chunk(field_id_, chunk) +
                          chunk_pos
                    : static_cast<int64_t>(chunk) * size_per_chunk_ + chunk_pos;
     }
 
-    void
-    MoveCursorForDataMultipleChunk() {
-        int64_t processed_size = 0;
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-            auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            const auto active_remaining =
-                active_count_ - DataCursorRow(i, data_pos);
-            if (active_remaining <= 0) {
-                break;
-            }
-            // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-
-            size = std::min(
-                {size, batch_size_ - processed_size, active_remaining});
-            if (size <= 0) {
-                continue;
-            }
-
-            processed_size += size;
-            current_data_chunk_ = i;
-            current_data_chunk_pos_ = data_pos + size;
-            if (processed_size >= batch_size_) {
-                break;
-            }
+    // Row count of `chunk`. Non-chunked segments are always Growing (Sealed is
+    // always chunked) and use a fixed chunk size, so only the trailing chunk is
+    // partial and is bounded by active_count_. Callers must pass a chunk below
+    // num_data_chunk_.
+    int64_t
+    ChunkRowCount(size_t chunk) const {
+        if (segment_->is_chunked()) {
+            return segment_->chunk_size(field_id_, chunk);
         }
-        current_data_global_pos_ =
-            DataCursorRow(current_data_chunk_, current_data_chunk_pos_);
-    }
-    // Non-chunked segments are always Growing (Sealed is always chunked).
-    void
-    MoveCursorForDataSingleChunk() {
-        int64_t processed_size = 0;
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-            auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            const auto active_remaining =
-                active_count_ - DataCursorRow(i, data_pos);
-            if (active_remaining <= 0) {
-                break;
-            }
-            auto size = (i == (num_data_chunk_ - 1) &&
-                         active_count_ % size_per_chunk_ != 0)
-                            ? active_count_ % size_per_chunk_ - data_pos
-                            : size_per_chunk_ - data_pos;
-
-            size = std::min(
-                {size, batch_size_ - processed_size, active_remaining});
-            if (size <= 0) {
-                continue;
-            }
-
-            processed_size += size;
-            current_data_chunk_ = i;
-            current_data_chunk_pos_ = data_pos + size;
-            if (processed_size >= batch_size_) {
-                break;
-            }
-        }
-        current_data_global_pos_ =
-            DataCursorRow(current_data_chunk_, current_data_chunk_pos_);
+        return std::min(
+            size_per_chunk_,
+            active_count_ - static_cast<int64_t>(chunk) * size_per_chunk_);
     }
 
     void
     MoveCursorForData() {
-        if (segment_->is_chunked()) {
-            MoveCursorForDataMultipleChunk();
-        } else {
-            MoveCursorForDataSingleChunk();
+        int64_t processed_size = 0;
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+            const auto active_remaining =
+                active_count_ - RowOffsetInSegment(i, data_pos);
+            if (active_remaining <= 0) {
+                break;
+            }
+            int64_t size = ChunkRowCount(i) - data_pos;
+
+            size = std::min(
+                {size, batch_size_ - processed_size, active_remaining});
+            if (size <= 0) {
+                continue;
+            }
+
+            processed_size += size;
+            current_data_chunk_ = i;
+            current_data_chunk_pos_ = data_pos + size;
+            if (processed_size >= batch_size_) {
+                break;
+            }
         }
+        current_data_global_pos_ =
+            RowOffsetInSegment(current_data_chunk_, current_data_chunk_pos_);
     }
 
     void
@@ -1463,7 +1435,7 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
-            const auto row_start = DataCursorRow(i, data_pos);
+            const auto row_start = RowOffsetInSegment(i, data_pos);
             const auto active_remaining = active_count_ - row_start;
             if (active_remaining <= 0) {
                 break;
@@ -1680,7 +1652,7 @@ class SegmentExpr : public Expr {
         }
 
         current_data_global_pos_ =
-            DataCursorRow(current_data_chunk_, current_data_chunk_pos_);
+            RowOffsetInSegment(current_data_chunk_, current_data_chunk_pos_);
         return processed_elems;
     }
 
@@ -3024,13 +2996,7 @@ class SegmentExpr : public Expr {
             return first_chunk;
         }
 
-        const auto chunk_rows =
-            segment_->is_chunked()
-                ? segment_->chunk_size(field_id_, first_chunk)
-                : (first_chunk == num_data_chunk_ - 1 &&
-                           active_count_ % size_per_chunk_ != 0
-                       ? active_count_ % size_per_chunk_
-                       : size_per_chunk_);
+        const auto chunk_rows = ChunkRowCount(first_chunk);
         if (current_data_chunk_pos_ >= chunk_rows) {
             ++first_chunk;
         }
