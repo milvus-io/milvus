@@ -716,15 +716,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-		if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
-			CollectionID: req.GetCollectionID(),
-			Segments: []dataview.LoadableSegment{{
-				SegmentID:   req.GetSegmentID(),
-				VChannel:    req.GetChannel(),
-				PartitionID: req.GetPartitionID(),
-			}},
-		}); err != nil {
-			mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		if isSegmentHealthy(segment) && !segment.GetIsInvisible() {
+			if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+				CollectionID: segment.GetCollectionID(),
+				Segments: []dataview.LoadableSegment{{
+					SegmentID:   segment.GetID(),
+					VChannel:    segment.GetInsertChannel(),
+					PartitionID: segment.GetPartitionID(),
+				}},
+			}); err != nil {
+				mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+				return merr.Status(err), nil
+			}
 		}
 	}
 
@@ -3228,17 +3232,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
 	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
-	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
-	var loadableSegments []dataview.LoadableSegment
-	collectionID := int64(0)
-	if s.dataViewManager != nil {
-		loadableSegments = s.getImportDataViewSegments(ctx, segIDs)
-	}
-	if len(loadableSegments) > 0 {
-		if segment := s.meta.GetSegment(ctx, loadableSegments[0].SegmentID); segment != nil {
-			collectionID = segment.GetCollectionID()
-		}
-	}
+	collectionID, segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
 
 	commitTs := req.GetCommitTimestamp()
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
@@ -3267,6 +3261,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// block unrelated import metadata operations. This also runs on an
 	// idempotent retry whose vchannel was already committed.
 	if s.dataViewManager != nil && collectionID != 0 {
+		loadableSegments := s.getImportDataViewSegments(ctx, segIDs)
 		if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
 			CollectionID: collectionID,
 			Segments:     loadableSegments,
@@ -3303,14 +3298,16 @@ func (s *Server) getImportDataViewSegments(ctx context.Context, segmentIDs []int
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
 // the given import job that are assigned to the given vchannel.
 // This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
-func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
+func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) (int64, []int64) {
 	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	var collectionID int64
 	var segIDs []int64
 	for _, task := range tasks {
 		it, ok := task.(*importTask)
 		if !ok {
 			continue
 		}
+		collectionID = it.GetCollectionID()
 		// Collect all candidate segment IDs from this task (safe copies).
 		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
 		candidates = append(candidates, it.GetSegmentIDs()...)
@@ -3326,5 +3323,5 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 			segIDs = append(segIDs, segID)
 		}
 	}
-	return segIDs
+	return collectionID, segIDs
 }

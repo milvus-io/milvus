@@ -6642,6 +6642,36 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
 	})
 
+	t.Run("mix retries DataView replacement after SegmentMeta commit", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		meta.dataViewManager = &failOnceCompactDataViewManager{Manager: manager, fail: true}
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		compactionResult := proto.Clone(result).(*datapb.CompactionPlanResult)
+
+		segments, mutation, err := meta.CompleteCompactionMutation(ctx, task, compactionResult)
+		require.Error(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(1).GetState())
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(2).GetState())
+		require.NotNil(t, meta.segments.GetSegment(3))
+
+		require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		segments, mutation, err = meta.CompleteCompactionMutation(ctx, task, compactionResult)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
+	})
+
 	t.Run("clustering does not publish temporary output", func(t *testing.T) {
 		meta, manager := newMetaWithDataView(t)
 		task := &datapb.CompactionTask{

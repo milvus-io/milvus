@@ -156,7 +156,6 @@ func (s *mixCoordImpl) activateFunc() error {
 		return err
 	}
 	mlog.Info(s.ctx, "mixCoord startup success", mlog.String("address", s.session.GetAddress()))
-	s.startAndUpdateHealthy()
 	s.enableExternalAccess()
 	return err
 }
@@ -238,8 +237,9 @@ func (s *mixCoordImpl) enableExternalAccess() {
 	rootcoord.RegisterDDLCallbacks(s.rootcoordServer)
 	RegisterWALCallbacks(s)
 
-	// The distributed server starts accepting RPCs only after callbacks are
-	// registered and the combined Coordinator has entered Healthy state.
+	// Publish Healthy only after every callback is registered. The distributed
+	// server waits on the barrier below before it starts serving external RPCs.
+	s.startAndUpdateHealthy()
 	s.recoveryBarrier.Ready()
 }
 

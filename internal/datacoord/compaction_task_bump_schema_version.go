@@ -362,11 +362,16 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 		return err
 	}
 	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), result)
+	if newSegments != nil && metricMutation != nil {
+		// SegmentMeta is already committed when DataView publication fails.
+		// Commit its metrics once; a retry returns an empty mutation and only
+		// republishes the DataView replacement.
+		metricMutation.commit()
+	}
 	if err != nil {
 		return err
 	}
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-	metricMutation.commit()
 	for _, newSegID := range newSegmentIDs {
 		select {
 		case getBuildIndexChSingleton() <- newSegID:

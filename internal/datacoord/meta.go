@@ -2751,11 +2751,11 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 		}
 	}
 
+	mutationApplied := m.compactionMutationAppliedLocked(t.GetInputSegments())
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.segments.GetSegment(segmentID)
 		if !isSegmentHealthy(segment) {
-			if t.GetType() == datapb.CompactionType_SortCompaction &&
-				m.sortCompactionMutationAppliedLocked(segmentID) {
+			if mutationApplied {
 				continue
 			}
 			// SHOULD NOT HAPPEN: input segment was dropped.
@@ -2774,13 +2774,64 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	return nil
 }
 
-func (m *meta) sortCompactionMutationAppliedLocked(segmentID int64) bool {
-	segment := m.segments.GetSegment(segmentID)
-	if segment == nil || !segment.GetCompacted() {
+func (m *meta) compactionMutationAppliedLocked(inputSegments []int64) bool {
+	if len(inputSegments) == 0 {
 		return false
 	}
-	compactTo, ok := m.segments.GetCompactionTo(segmentID)
-	return ok && len(compactTo) > 0
+	for _, segmentID := range inputSegments {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil || !segment.GetCompacted() {
+			return false
+		}
+		if _, ok := m.segments.GetCompactionTo(segmentID); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *meta) appliedCompactionResultLocked(
+	task *datapb.CompactionTask,
+	result *datapb.CompactionPlanResult,
+) ([]*SegmentInfo, bool, error) {
+	switch task.GetType() {
+	case datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_BumpSchemaVersionCompaction:
+	default:
+		return nil, false, nil
+	}
+	if !m.compactionMutationAppliedLocked(task.GetInputSegments()) {
+		return nil, false, nil
+	}
+
+	actual := make(map[int64]*SegmentInfo)
+	for _, segmentID := range task.GetInputSegments() {
+		compactTo, _ := m.segments.GetCompactionTo(segmentID)
+		for _, segment := range compactTo {
+			actual[segment.GetID()] = segment
+		}
+	}
+	if len(actual) != len(result.GetSegments()) {
+		return nil, true, merr.WrapErrIllegalCompactionPlanMsg(
+			"compaction inputs were already committed to %d outputs, but worker result contains %d",
+			len(actual),
+			len(result.GetSegments()),
+		)
+	}
+
+	compactTo := make([]*SegmentInfo, 0, len(result.GetSegments()))
+	for _, resultSegment := range result.GetSegments() {
+		segment := actual[resultSegment.GetSegmentID()]
+		if segment == nil {
+			return nil, true, merr.WrapErrIllegalCompactionPlanMsg(
+				"compaction inputs were already committed to different outputs than worker result Segment %d",
+				resultSegment.GetSegmentID(),
+			)
+		}
+		compactTo = append(compactTo, segment)
+	}
+	return compactTo, true, nil
 }
 
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
@@ -2790,21 +2841,27 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		err            error
 	)
 	m.segMu.Lock()
-	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction:
-		newSegments, metricMutation, err = m.completeMixCompactionMutation(t, result)
-	case datapb.CompactionType_ClusteringCompaction:
-		newSegments, metricMutation, err = m.completeClusterCompactionMutation(t, result)
-	case datapb.CompactionType_SortCompaction:
-		newSegments, metricMutation, err = m.completeSortCompactionMutation(t, result)
-	case datapb.CompactionType_BumpSchemaVersionCompaction:
-		newSegments, metricMutation, err = m.completeBumpSchemaVersionCompactionMutation(t, result)
-	default:
-		err = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	if appliedSegments, applied, appliedErr := m.appliedCompactionResultLocked(t, result); applied {
+		newSegments = appliedSegments
+		metricMutation = &segMetricMutation{stateChange: make(segmentMetricStateChange)}
+		err = appliedErr
+	} else {
+		switch t.GetType() {
+		case datapb.CompactionType_MixCompaction:
+			newSegments, metricMutation, err = m.completeMixCompactionMutation(t, result)
+		case datapb.CompactionType_ClusteringCompaction:
+			newSegments, metricMutation, err = m.completeClusterCompactionMutation(t, result)
+		case datapb.CompactionType_SortCompaction:
+			newSegments, metricMutation, err = m.completeSortCompactionMutation(t, result)
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
+			newSegments, metricMutation, err = m.completeBumpSchemaVersionCompactionMutation(t, result)
+		default:
+			err = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+		}
 	}
 	if err == nil && m.shouldPublishDataViewAfterCompactionLocked(t) {
 		publishErr := m.publishDataViewAfterCompaction(ctx, t, newSegments)
-		if publishErr != nil && t.GetType() == datapb.CompactionType_SortCompaction {
+		if publishErr != nil {
 			m.segMu.Unlock()
 			return newSegments, metricMutation, publishErr
 		}

@@ -600,7 +600,7 @@ func (t *clusteringCompactionTask) completeTask() error {
 	// mark input segments as dropped
 	// now, the segment view only includes the result segments.
 	if err = t.markInputSegmentsDropped(); err != nil {
-		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, skip it and wait retry")
+		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, wait for retry", mlog.Err(err))
 		return err
 	}
 	if meta, ok := t.meta.(*meta); ok {

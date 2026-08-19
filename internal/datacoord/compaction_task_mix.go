@@ -227,9 +227,9 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	// Also prepare metric updates.
 	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask), result)
 	if newSegments != nil && metricMutation != nil {
-		// SegmentMeta is already committed when SortCompaction reports a
-		// DataView publication error. Commit its metrics once; the retry path
-		// returns an empty mutation and only republishes the DataView replacement.
+		// SegmentMeta is already committed when DataView publication reports an
+		// error. Commit its metrics once; the retry path returns an empty mutation
+		// and only republishes the DataView replacement.
 		metricMutation.commit()
 	}
 	if err != nil {

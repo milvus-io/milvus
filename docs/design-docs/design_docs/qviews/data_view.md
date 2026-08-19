@@ -96,6 +96,12 @@ state or tombstone. RootCoord first persists CollectionMeta as Dropping, then
 DataViewManager deletes the Collection's snapshot prefix and removes its
 manager state. New access no longer finds the Collection, while an already
 issued `DataViewRef` continues to own its in-memory snapshot until `Deref`.
+Drop holds the manager map lock through the prefix deletion. This deliberately
+serializes the rare Collection DDL against mutations for other Collections: if
+the map lock were released before deletion, a concurrent event could recreate
+the state and persist a key behind the prefix delete. Avoiding that
+serialization requires an additional in-memory lifecycle/tombstone state,
+which this design intentionally does not duplicate from CollectionMeta.
 
 ## Versioning
 
@@ -123,7 +129,9 @@ because their new snapshot already absorbs the latest transform state.
 StreamingNode Flush has a stronger completion contract: a successful `OnFlush`
 means every supplied Segment is immediately allowed to load on QueryNode and is
 already part of the published DataView. There is no temporary/unavailable
-flush state.
+flush state. `SaveBinlogPaths` reports a DataView catalog failure to
+StreamingNode even though SegmentMeta was already committed; its retry reads
+the committed `SegmentInfo` and republishes the same idempotent Flush event.
 
 The current no-op behavior returns the latest DataVersion. That behavior is
 sufficient for membership idempotency but is not, by itself, a stable
@@ -162,9 +170,12 @@ durably loadable, the compaction owner publishes one `OnCompact` event that
 removes the flushed input and adds the final output, advancing CompactVersion.
 If SegmentMeta replacement succeeds but DataView publication fails, the
 persisted compaction lineage makes completion replayable and the task retries
-the idempotent DataView replacement. A future implementation should perform
-sorting of newly flushed Segments on StreamingNode and publish the final sorted
-Segment directly, eliminating this intermediate replacement.
+only the idempotent DataView replacement. MixCompaction and replacement-style
+Backfill use the same recovery rule: a retry verifies that the persisted
+`CompactFrom -> CompactTo` lineage exactly matches the worker result before it
+replays DataView publication. A future implementation should perform sorting
+of newly flushed Segments on StreamingNode and publish the final sorted Segment
+directly, eliminating this intermediate replacement.
 
 Intermediate invisible Segments do not produce DataView membership events.
 In particular, clustering compaction does not publish its temporary Segments;
@@ -175,8 +186,9 @@ the same Segment chain cannot reach DataView out of order.
 
 Import commit keeps the DataView catalog write outside the ImportMeta write
 lock. `HandleCommitVchannel` first commits the per-vchannel ImportMeta state and
-releases that lock, then calls `OnImport` with the final loadable membership.
-An `OnImport` failure fails the RPC so StreamingNode retries; a retry republishes
+releases that lock, then resolves the candidate Segment IDs against the latest
+SegmentMeta and calls `OnImport` with the final loadable membership. An
+`OnImport` failure fails the RPC so StreamingNode retries; a retry republishes
 the same idempotent membership even when ImportMeta already records the
 vchannel as committed.
 
@@ -253,7 +265,11 @@ For a valid Collection, recovery picks the maximum version as latest,
 initializes runtime ref counts to zero, and rejects conflicting snapshots with
 the same version. It expands absent legacy `segment_manifest_versions` entries
 to zero but does not repair or rebuild membership from SegmentMeta or any other
-metadata source.
+metadata source. A malformed snapshot or undecodable value therefore aborts
+Coordinator recovery instead of being deleted: in this PR DataView membership
+is not reconstructible, so deleting the only durable snapshot would turn
+metadata corruption into silent data loss. The recovery barrier keeps external
+writes closed until the problem is repaired.
 
 Recovery validates every discovered Collection against CollectionMeta before
 deleting any stale prefix. This prevents a transient validation failure from
@@ -264,16 +280,19 @@ recovers CollectionMeta, then DataCoord and QueryCoord recover their metadata;
 DataCoord's Collection details are part of this synchronous initialization and
 are no longer left to a background reload. MixCoord registers the DataCoord,
 QueryCoord, RootCoord, and WAL DDL callbacks only after all three Coordinator
-initialization/start phases have completed and MixCoord has entered Healthy
-state, so the StreamingCoord broadcaster may discover pending callback work but
+initialization/start phases have completed, and only then transitions to
+Healthy. The StreamingCoord broadcaster may discover pending callback work but
 cannot replay it during recovery.
 
 The distributed MixCoord constructs the gRPC server and registers its services
 before recovery, but delays `grpcServer.Serve` until the same recovery barrier
-is ready. Consequently external RPCs cannot enter Coordinator handlers during
-recovery, while in-process Coordinator calls and Coordinator-owned background
-loops are unaffected. Normal CollectionMeta and DataViewManager APIs do not
-carry or wait on the barrier.
+is ready in both normal and active/standby deployments. A standby therefore
+does not expose Coordinator gRPC until it wins election and completes recovery;
+its liveness is reported through the process HTTP health endpoint, which treats
+StandBy as healthy. Consequently external RPCs cannot enter Coordinator or
+StreamingCoord handlers during recovery. In-process Coordinator calls and
+Coordinator-owned background loops are unaffected. Normal CollectionMeta and
+DataViewManager APIs do not carry or wait on the barrier.
 
 ## Garbage collection
 
