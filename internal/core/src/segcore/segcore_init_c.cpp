@@ -252,31 +252,35 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const float max_disk_usage_percentage,
                        const char* disk_path,
                        const int64_t loading_timeout_ms,
-                       const int64_t warmup_loading_timeout_ms) {
+                       const int64_t warmup_loading_timeout_ms,
+                       const double max_loading_memory_ratio) {
     std::string disk_path_str(disk_path);
-    milvus::cachinglayer::Manager::ConfigureTieredStorage(
-        {scalarFieldCacheWarmupPolicy,
-         vectorFieldCacheWarmupPolicy,
-         scalarIndexCacheWarmupPolicy,
-         vectorIndexCacheWarmupPolicy},
-        {memory_low_watermark_bytes,
-         memory_high_watermark_bytes,
-         memory_max_bytes,
-         disk_low_watermark_bytes,
-         disk_high_watermark_bytes,
-         disk_max_bytes},
-        storage_usage_tracking_enabled,
-        eviction_enabled,
-        {cache_touch_window_ms,
-         background_eviction_enabled,
-         eviction_interval_ms,
-         cache_cell_unaccessed_survival_time,
-         overloaded_memory_threshold_percentage,
-         max_disk_usage_percentage,
-         std::move(disk_path_str),
-         loading_resource_factor},
-        std::chrono::milliseconds(loading_timeout_ms),
-        std::chrono::milliseconds(warmup_loading_timeout_ms));
+    milvus::cachinglayer::TieredStorageOptions options;
+    options.warmup_policies = {scalarFieldCacheWarmupPolicy,
+                               vectorFieldCacheWarmupPolicy,
+                               scalarIndexCacheWarmupPolicy,
+                               vectorIndexCacheWarmupPolicy};
+    options.cache_limit = {memory_low_watermark_bytes,
+                           memory_high_watermark_bytes,
+                           memory_max_bytes,
+                           disk_low_watermark_bytes,
+                           disk_high_watermark_bytes,
+                           disk_max_bytes};
+    options.storage_usage_tracking_enabled = storage_usage_tracking_enabled;
+    options.eviction_enabled = eviction_enabled;
+    options.eviction_config = {cache_touch_window_ms,
+                               background_eviction_enabled,
+                               eviction_interval_ms,
+                               cache_cell_unaccessed_survival_time,
+                               overloaded_memory_threshold_percentage,
+                               max_disk_usage_percentage,
+                               std::move(disk_path_str),
+                               loading_resource_factor};
+    options.loading_timeout = std::chrono::milliseconds(loading_timeout_ms);
+    options.warmup_loading_timeout =
+        std::chrono::milliseconds(warmup_loading_timeout_ms);
+    options.max_loading_mem_ratio = max_loading_memory_ratio;
+    milvus::cachinglayer::Manager::ConfigureTieredStorage(options);
 }
 
 extern "C" void
