@@ -343,6 +343,61 @@ TEST(TextMatch, Index) {
     }
 }
 
+TEST(TextMatch, IcuTokenPositionsKeepPhraseSlopTokenBased) {
+    using Index = index::TextMatchIndex;
+    auto token_position_params = R"({
+        "tokenizer": {
+            "type": "icu",
+            "position_mode": "token"
+        }
+    })";
+    auto token_position_index =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "icu_token_positions",
+                                "milvus_tokenizer",
+                                token_position_params,
+                                /*enable_background_merge=*/false);
+    token_position_index->CreateReader(milvus::index::SetBitsetSealed);
+    token_position_index->AddTextSealed("hello unrelated world", true, 0);
+    token_position_index->Commit();
+    token_position_index->Reload();
+
+    auto token_position_result_with_slop_one =
+        token_position_index->PhraseMatchQuery("hello world", 1);
+    ASSERT_EQ(token_position_result_with_slop_one.size(), 1);
+    ASSERT_FALSE(token_position_result_with_slop_one[0]);
+    auto token_position_result =
+        token_position_index->PhraseMatchQuery("hello world", 2);
+    ASSERT_EQ(token_position_result.size(), 1);
+    ASSERT_TRUE(token_position_result[0]);
+
+    auto char_position_params = R"({
+        "tokenizer": {
+            "type": "icu",
+            "position_mode": "char"
+        }
+    })";
+    auto char_position_index =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "icu_char_positions",
+                                "milvus_tokenizer",
+                                char_position_params,
+                                /*enable_background_merge=*/false);
+    char_position_index->CreateReader(milvus::index::SetBitsetSealed);
+    char_position_index->AddTextSealed("hello unrelated world", true, 0);
+    char_position_index->Commit();
+    char_position_index->Reload();
+
+    auto char_position_result =
+        char_position_index->PhraseMatchQuery("hello world", 2);
+    ASSERT_EQ(char_position_result.size(), 1);
+    ASSERT_FALSE(char_position_result[0]);
+    auto char_position_result_with_character_slop =
+        char_position_index->PhraseMatchQuery("hello world", 10);
+    ASSERT_EQ(char_position_result_with_character_slop.size(), 1);
+    ASSERT_TRUE(char_position_result_with_character_slop[0]);
+}
+
 TEST(TextMatch, FuzzyIndex) {
     using Index = index::TextMatchIndex;
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
