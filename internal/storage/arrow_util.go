@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -232,11 +234,16 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		if ba.IsNull(idx) {
 			if defaultValue != nil {
 				val := defaultValue.GetBytesData()
-				if len(val) == 0 && defaultValue.GetStringData() != "" {
-					if u, err := typeutil.ParseUUID(defaultValue.GetStringData()); err == nil {
-						val = u[:]
-					} else {
-						return 0, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", field.GetName())
+				if len(val) == 0 {
+					defStr := defaultValue.GetStringData()
+					if defStr != "" {
+						u, err := typeutil.ParseUUID(defStr)
+						if err == nil {
+							mlog.Warn(context.TODO(), "legacy String UUID fallback for default value", mlog.String("field", field.GetName()))
+							val = u[:]
+						} else {
+							return 0, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", field.GetName())
+						}
 					}
 				}
 				if len(val) != 0 && len(val) != 16 {
@@ -388,14 +395,18 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 					return nil, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(schema.GetDefaultValue().GetBytesData()), schema.GetName())
 				}
 				uuidBytes = schema.GetDefaultValue().GetBytesData()
-			} else if schema.GetDefaultValue().GetStringData() != "" {
-				u, err := typeutil.ParseUUID(schema.GetDefaultValue().GetStringData())
-				if err != nil {
-					return nil, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", schema.GetName())
-				}
-				uuidBytes = u[:]
 			} else {
-				uuidBytes = make([]byte, 16)
+				defStr2 := schema.GetDefaultValue().GetStringData()
+				if defStr2 != "" {
+					u, err := typeutil.ParseUUID(defStr2)
+					if err != nil {
+						return nil, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", schema.GetName())
+					}
+					mlog.Warn(context.TODO(), "legacy String UUID fallback for default value", mlog.String("field", schema.GetName()))
+					uuidBytes = u[:]
+				} else {
+					uuidBytes = make([]byte, 16)
+				}
 			}
 			if len(uuidBytes) != 16 {
 				return nil, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(uuidBytes), schema.GetName())

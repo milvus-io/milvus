@@ -45,15 +45,15 @@ TEST(UuidTest, ToProtoDataTypeMapping) {
     ASSERT_EQ(proto_type, proto::schema::DataType::UUID);
 }
 
-// Verify that InitScalarFieldData creates a std::string-backed FieldData
-// for UUID, consistent with STRING/VARCHAR handling.
+// Verify that InitScalarFieldData creates a FixedSizeBinary(16)-backed FieldData
+// for UUID (IsFixedSizeType true, not VarChar-backed std::string).
 TEST(UuidTest, InitScalarFieldData) {
     auto field_data = InitScalarFieldData(DataType::UUID, false, 10);
     ASSERT_NE(field_data, nullptr);
     ASSERT_EQ(field_data->get_data_type(), DataType::UUID);
 }
 
-// Verify that InitScalarFieldDataWithLength creates a std::string-backed
+// Verify that InitScalarFieldDataWithLength creates a FixedSizeBinary(16)-backed
 // FieldData for UUID at a given capacity.
 TEST(UuidTest, InitScalarFieldDataWithLength) {
     constexpr int64_t kLength = 100;
@@ -64,8 +64,8 @@ TEST(UuidTest, InitScalarFieldDataWithLength) {
 }
 
 // Verify that a UUID field can be added to a Schema via AddDebugField.
-// IsStringDataType(UUID) is true, but UUID carries no max_length type param;
-// FieldMeta defaults it to the fixed 36-char canonical length.
+// IsStringDataType(UUID) is false (IsFixedSizeType true, 16B), UUID carries
+// no max_length type param; FieldMeta defaults canonical input to 36-char.
 TEST(UuidTest, SchemaAddField) {
     auto schema = std::make_shared<Schema>();
     auto field_id = schema->AddDebugField("uuid_field", DataType::UUID);

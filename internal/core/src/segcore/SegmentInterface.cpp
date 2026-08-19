@@ -598,6 +598,14 @@ SegmentInternalInterface::FillTargetEntry(
                     }
                     break;
                 }
+                case DataType::UUID: {
+                    auto uuid_ids = ids->mutable_uuid_id();
+                    auto& src_data = col_data->scalars().bytes_data();
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
+                        *(uuid_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
+                    break;
+                }
                 default: {
                     ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported datatype {}",
@@ -938,6 +946,16 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
                 for (int64_t i = 0; i < count; ++i) {
                     data_ptr->at(i) = field_meta.default_value()->string_data();
+                }
+                break;
+            }
+            case DataType::UUID: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_bytes_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->bytes_data();
                 }
                 break;
             }

@@ -16,6 +16,7 @@
 
 #include "common/FieldData.h"
 #include "common/FastMem.h"
+#include "log/Log.h"
 
 #include <simdjson.h>
 #include <string.h>
@@ -339,36 +340,20 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(string_array);
         }
         case DataType::UUID: {
-            // Tolerant read during transition: sealed files may hold either
-            // FixedSizeBinary(16) (canonical) or String (36-char) chunks.
             AssertInfo(
-                array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY ||
-                    array->type()->id() == arrow::Type::type::STRING,
-                "inconsistent data type for UUID");
+                array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
+                "UUID data must be BytesData 16B, got StringData");
             FixedVector<milvus::UUID> values(element_count);
-            if (array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY) {
-                auto fsb_array =
-                    std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
-                        array);
-                AssertInfo(fsb_array->byte_width() ==
-                               static_cast<int32_t>(sizeof(milvus::UUID)),
-                           "unexpected UUID byte width {}",
-                           fsb_array->byte_width());
-                for (size_t index = 0; index < element_count; ++index) {
-                    milvus::fastmem::FastMemcpy(values[index].data.data(),
-                                                fsb_array->GetValue(index),
-                                                sizeof(milvus::UUID));
-                }
-            } else {
-                auto string_array =
-                    std::dynamic_pointer_cast<arrow::StringArray>(array);
-                for (size_t index = 0; index < element_count; ++index) {
-                    if (string_array->IsNull(index)) {
-                        continue;
-                    }
-                    values[index] = milvus::UUID::FromString(
-                        string_array->GetString(index));
-                }
+            auto fsb_array =
+                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(array);
+            AssertInfo(fsb_array->byte_width() ==
+                            static_cast<int32_t>(sizeof(milvus::UUID)),
+                        "unexpected UUID byte width {}",
+                        fsb_array->byte_width());
+            for (size_t index = 0; index < element_count; ++index) {
+                milvus::fastmem::FastMemcpy(values[index].data.data(),
+                                             fsb_array->GetValue(index),
+                                             sizeof(milvus::UUID));
             }
             if (nullable_) {
                 return FillFieldData(values.data(),

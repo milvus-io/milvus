@@ -355,14 +355,6 @@ func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 				stats.UpdateMinMax(pk)
 				stats.BF.Add(u[:])
 			}
-		} else if strFd, ok := msgs.(*StringFieldData); ok {
-			for _, str := range strFd.Data {
-				if u, err := typeutil.ParseUUID(str); err == nil {
-					pk := NewUUIDFieldValue(u)
-					stats.UpdateMinMax(pk)
-					stats.BF.Add(u[:])
-				}
-			}
 		}
 	default:
 		// TODO::
@@ -411,10 +403,6 @@ func (stats *FieldStats) Update(pk ScalarFieldValue) {
 	case schemapb.DataType_UUID:
 		if b, ok := pk.GetValue().([16]byte); ok {
 			stats.BF.Add(b[:])
-		} else if str, ok := pk.GetValue().(string); ok {
-			if u, err := typeutil.ParseUUID(str); err == nil {
-				stats.BF.Add(u[:])
-			}
 		}
 	default:
 		// todo support vector field

@@ -18,6 +18,7 @@
 
 #include <boost/align/aligned_allocator.hpp>
 #include <folly/FBVector.h>
+#include <folly/hash/Hash.h>
 #include <folly/small_vector.h>
 #include <stdint.h>
 #include <array>
@@ -43,6 +44,7 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "fmt/core.h"
+#include "fmt/format.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -1132,6 +1134,23 @@ struct hash<milvus::UUID> {
 };
 }  // namespace std
 
+namespace folly {
+template <>
+struct hasher<milvus::UUID> {
+    size_t
+    operator()(const milvus::UUID& uuid) const noexcept {
+        // FNV-1a over the 16 bytes, consistent with std::hash<UUID> but
+        // returned via folly::hasher API required by VectorHasher.
+        // Also compatible with folly::hash::hash_combine pattern.
+        size_t h = 14695981039346656037ULL;
+        for (uint8_t b : uuid.data) {
+            h = (h ^ b) * 1099511628211ULL;
+        }
+        return h;
+    }
+};
+}  // namespace folly
+
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
     auto
@@ -1182,6 +1201,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::GEOMETRY:
                 name = "GEOMETRY";
+                break;
+            case milvus::DataType::UUID:
+                name = "UUID";
                 break;
             case milvus::DataType::ROW:
                 name = "ROW";
@@ -1661,6 +1683,14 @@ struct fmt::formatter<milvus::ErrorCode> : fmt::formatter<std::string> {
                 break;
         }
         return fmt::formatter<std::string>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<milvus::UUID> : fmt::formatter<std::string> {
+    auto
+    format(const milvus::UUID& u, fmt::format_context& ctx) const {
+        return fmt::formatter<std::string>::format(u.ToString(), ctx);
     }
 };
 

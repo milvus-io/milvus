@@ -14,10 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#pragma once
+#include <type_traits>
+
+#include "common/Types.h"
+
 namespace milvus::index {
 template <typename T>
 struct IndexStructure {
-    IndexStructure() : a_(0), idx_(0) {
+    IndexStructure() : idx_(0) {
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            a_ = milvus::UUID{};
+        } else {
+            a_ = T(0);
+        }
     }
     explicit IndexStructure(const T a) : a_(a), idx_(0) {
     }

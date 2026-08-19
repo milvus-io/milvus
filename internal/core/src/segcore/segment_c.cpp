@@ -1781,6 +1781,8 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
         result->varchar_primary_keys = nullptr;
         result->varchar_primary_key_offsets = nullptr;
         result->varchar_primary_keys_size = 0;
+        result->uuid_primary_keys = nullptr;
+        result->uuid_primary_keys_size = 0;
         result->num_primary_keys = 0;
 
         if (start_offset < 0 || end_offset < start_offset) {
@@ -1849,8 +1851,7 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                 break;
             }
             case milvus::DataType::VARCHAR:
-            case milvus::DataType::STRING:
-            case milvus::DataType::UUID: {
+            case milvus::DataType::STRING: {
                 auto pk_vec = insert_record.get_data<std::string>(field_id);
                 std::vector<std::string_view> views;
                 views.reserve(result->num_primary_keys);
@@ -1897,6 +1898,25 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                 }
                 result->varchar_primary_key_offsets[result->num_primary_keys] =
                     offset;
+                break;
+            }
+            case milvus::DataType::UUID: {
+                auto pk_vec = insert_record.get_data<milvus::UUID>(field_id);
+                size_t total_size = result->num_primary_keys * sizeof(milvus::UUID);
+                result->uuid_primary_keys =
+                    static_cast<uint8_t*>(malloc(total_size));
+                if (!result->uuid_primary_keys) {
+                    return milvus::FailureCStatus(
+                        milvus::UnexpectedError,
+                        "failed to allocate uuid primary keys");
+                }
+                result->uuid_primary_keys_size = total_size;
+                for (size_t i = 0; i < result->num_primary_keys; i++) {
+                    const auto& uuid = (*pk_vec)[start_offset + static_cast<int64_t>(i)];
+                    std::memcpy(result->uuid_primary_keys + i * sizeof(milvus::UUID),
+                                uuid.data.data(),
+                                sizeof(milvus::UUID));
+                }
                 break;
             }
             default:
@@ -2740,9 +2760,14 @@ FreePrimaryKeysResult(CPrimaryKeysResult* result) {
         free(result->varchar_primary_key_offsets);
         result->varchar_primary_key_offsets = nullptr;
     }
+    if (result && result->uuid_primary_keys) {
+        free(result->uuid_primary_keys);
+        result->uuid_primary_keys = nullptr;
+    }
     if (result) {
         result->num_primary_keys = 0;
         result->varchar_primary_keys_size = 0;
+        result->uuid_primary_keys_size = 0;
     }
 }
 

@@ -883,21 +883,15 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_UUID:
 			var data [][16]byte
 			if srcField.GetScalars().GetBytesData() != nil {
-				for _, b := range srcField.GetScalars().GetBytesData().GetData() {
+				for _, b := range srcField.GetScalars().GetBytesData().GetData() { // uuid BytesData strict
 					u, err := typeutil.BytesToUUID(b)
 					if err != nil {
 						return nil, err
 					}
 					data = append(data, u)
 				}
-			} else if srcField.GetScalars().GetStringData() != nil {
-				for _, s := range srcField.GetScalars().GetStringData().GetData() {
-					u, err := typeutil.ParseUUID(s)
-					if err != nil {
-						return nil, err
-					}
-					data = append(data, u)
-				}
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("invalid UUID field data: expected BytesData with 16-byte values")
 			}
 			fieldData = &UUIDFieldData{
 				Data:      data,
@@ -1866,6 +1860,20 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetDoubleData()
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return fieldSchema.GetDefaultValue().GetStringData()
+	case schemapb.DataType_UUID:
+		if len(fieldSchema.GetDefaultValue().GetBytesData()) == 16 {
+			var u [16]byte
+			copy(u[:], fieldSchema.GetDefaultValue().GetBytesData())
+			return u
+		}
+		defStr := fieldSchema.GetDefaultValue().GetStringData()
+		if defStr != "" {
+			u, _ := typeutil.ParseUUID(defStr)
+			mlog.Warn(context.TODO(), "legacy String UUID fallback for default value")
+			return u
+		}
+		var zero [16]byte
+		return zero
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
 	case schemapb.DataType_JSON:

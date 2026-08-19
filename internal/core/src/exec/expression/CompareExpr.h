@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -60,6 +61,56 @@ struct CompareElementFunc {
                const TargetBitmap& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        // UUID heterogenous guard: UUID only comparable with UUID. When exactly
+        // one side is UUID the cross-type instantiation would try UUID==double
+        // etc which has no operator==. Handle heterogenous early so the
+        // generic Op{}(UUID, non-UUID) never instantiates.
+        if constexpr (std::is_same_v<T, milvus::UUID> !=
+                      std::is_same_v<U, milvus::UUID>) {
+            if constexpr (op == proto::plan::OpType::NotEqual) {
+                if constexpr (filter_type == FilterType::random) {
+                    for (int i = 0; i < static_cast<int>(size); ++i) {
+                        res[i] = true;
+                    }
+                } else {
+                    if (!bitmap_input.empty()) {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            if (!bitmap_input[start_cursor + i]) {
+                                continue;
+                            }
+                            res[i] = true;
+                        }
+                    } else {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            res[i] = true;
+                        }
+                    }
+                }
+            } else {
+                // Equal and all ordering ops (>, >=, <, <=) are false for
+                // heterogenous UUID vs non-UUID. res was pre-initialized to
+                // false; explicitly clear to be safe and respect bitmap.
+                if constexpr (filter_type == FilterType::random) {
+                    for (int i = 0; i < static_cast<int>(size); ++i) {
+                        res[i] = false;
+                    }
+                } else {
+                    if (!bitmap_input.empty()) {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            if (!bitmap_input[start_cursor + i]) {
+                                continue;
+                            }
+                            res[i] = false;
+                        }
+                    } else {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            res[i] = false;
+                        }
+                    }
+                }
+            }
+            return;
+        }
         // This is the original code, kept here for the documentation purposes
         // also, used for iterative filter
         if constexpr (filter_type == FilterType::random) {

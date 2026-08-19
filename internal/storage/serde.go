@@ -393,10 +393,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				copy(u[:], value)
 				return u, nil
 			}
-			if arr, ok := a.(*array.String); ok && i < arr.Len() {
-				// Fallback for string UUID
-				return typeutil.ParseUUID(arr.Value(i))
-			}
 			return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
