@@ -3006,3 +3006,91 @@ func Test_appendConsistecyLevel(t *testing.T) {
 	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
 	assert.Len(t, properties, 0)
 }
+
+// The direct RootCoord path never went through validator.ValidateFunction:
+// prepareSchema only validated fields and assigned IDs, so a client hitting
+// RootCoord directly could persist a MinHash schema the proxy path rejects.
+// prepareSchema is the real create path — these cases must fail there, not
+// only in the validator helper.
+func Test_createCollectionTask_prepareSchema_validatesFunctions(t *testing.T) {
+	buildTask := func(numHashes string) createCollectionTask {
+		collectionName := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				}},
+				{Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "32"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "minhash", Type: schemapb.FunctionType_MinHash,
+				InputFieldNames: []string{"text"}, OutputFieldNames: []string{"hash"},
+				Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: numHashes}},
+			}},
+		}
+		return createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+	}
+
+	t.Run("overflowing num_hashes rejected", func(t *testing.T) {
+		// (2^59+1)*32 wraps around int64 to 32; a multiply-based check passes
+		// and the runner then attempts an impossibly large permutation alloc.
+		task := buildTask("576460752303423489")
+		err := task.prepareSchema(context.TODO())
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not match expected dim")
+	})
+
+	t.Run("valid minhash accepted", func(t *testing.T) {
+		task := buildTask("1")
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+	})
+}
+
+// External collections are exempt from the direct-path function validation:
+// prepareSchema sees the RESOLVED schema (e.g. nullability inferred from the
+// external source), not the user-submitted one the proxy validated — judging
+// it by user-schema rules rejects legal external tables (a nullable
+// TextEmbedding input resolved from parquet, as the go-sdk e2e creates).
+func Test_createCollectionTask_prepareSchema_skipsFunctionValidationForExternal(t *testing.T) {
+	collectionName := funcutil.GenRandomStr()
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+			{Name: "doc", DataType: schemapb.DataType_VarChar, Nullable: true, ExternalField: "doc", TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "1024"},
+			}},
+			{Name: "dense", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "8"},
+			}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "tei_fn", Type: schemapb.FunctionType_TextEmbedding,
+			InputFieldNames: []string{"doc"}, OutputFieldNames: []string{"dense"},
+		}},
+	}
+	task := createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			CollectionName: collectionName,
+		},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
+		},
+	}
+	err := task.prepareSchema(context.TODO())
+	assert.NoError(t, err)
+}
