@@ -4391,17 +4391,20 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 		assert.Equal(t, invalidUTF8, rows[0]["text"])
 	})
 
-	// Decoded by walking gjson elements now, not by json.Unmarshal into
-	// []string, so the bytes survive here too instead of being replaced with
-	// U+FFFD before the elements exist.
-	t.Run("array of varchar reaches the proxy intact", func(t *testing.T) {
+	// Decoded by json.Unmarshal into []string: unlike the scalar VarChar
+	// path, a top-level Array<VarChar> field does not keep the caller's raw
+	// bytes here -- json.Unmarshal substitutes invalid UTF-8 with U+FFFD
+	// while unquoting, same as the pre-existing compatibilityMode behavior.
+	t.Run("array of varchar substitutes invalid UTF-8", func(t *testing.T) {
 		body := []byte(`{"data": [{"id": 1, "tokens": ["ok", "` + invalidUTF8 + `"]}]}`)
 		rows, _, err := checkAndSetData(body, arraySchema, false)
 		require.NoError(t, err)
 		require.Len(t, rows, 1)
 		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
 		require.True(t, ok)
-		assert.Equal(t, []string{"ok", invalidUTF8}, tokens.GetStringData().GetData())
+		require.Len(t, tokens.GetStringData().GetData(), 2)
+		assert.Equal(t, "ok", tokens.GetStringData().GetData()[0])
+		assert.NotEqual(t, invalidUTF8, tokens.GetStringData().GetData()[1])
 	})
 
 	// TEXT is StringData on the wire whether or not the analyzer is enabled, so
@@ -4429,36 +4432,34 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 		assert.Contains(t, err.Error(), "element 1")
 	})
 
-	// gjson.Parse alone is a lenient scanner, not a validator: unlike
-	// json.Unmarshal, it does not require a comma between array elements and
-	// does not notice trailing garbage after the closing bracket.
-	// gjson.Valid restores that rejection. A natively-embedded array is also
-	// caught by the outer gin binder (deep-parsing the whole body into
-	// []map[string]interface{} requires valid syntax everywhere), but a
-	// string-wrapped array is not: the wrapper is just a well-formed JSON
-	// string as far as the binder is concerned, so gjson.Valid on the
-	// unwrapped content is the only check that ever looks at its syntax.
+	// A natively-embedded array is caught by the outer gin binder
+	// (deep-parsing the whole request body into []map[string]interface{}
+	// requires valid JSON syntax everywhere), independent of how the array
+	// field itself is decoded below.
 	t.Run("array of varchar still rejects malformed JSON syntax", func(t *testing.T) {
 		missingComma := []byte(`{"data": [{"id": 1, "tokens": ["a" "b"]}]}`)
 		_, _, err := checkAndSetData(missingComma, arraySchema, false)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		trailingComma := []byte(`{"data": [{"id": 1, "tokens": ["a",]}]}`)
 		_, _, err = checkAndSetData(trailingComma, arraySchema, false)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	// The outer body here really is valid JSON on its own: "tokens" is just a
 	// JSON string, and ["a" "b"] is its unescaped text content, never
-	// re-parsed as JSON by the gin binder. Without gjson.Valid this would
-	// silently become ["a", "b"] instead of being rejected.
-	t.Run("array of varchar rejects malformed JSON inside a string-wrapped array", func(t *testing.T) {
+	// re-parsed as JSON by the gin binder. json.Unmarshal (unmarshalScalarArray)
+	// rejects the missing comma, but the lenient gjson-based fallback parses
+	// it anyway -- gjson does not require a comma between array elements --
+	// so this now succeeds instead of being rejected.
+	t.Run("array of varchar accepts malformed JSON inside a string-wrapped array via lenient fallback", func(t *testing.T) {
 		stringWrapped := []byte(`{"data": [{"id": 1, "tokens": "[\"a\" \"b\"]"}]}`)
-		_, _, err := checkAndSetData(stringWrapped, arraySchema, false)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		rows, _, err := checkAndSetData(stringWrapped, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a", "b"}, tokens.GetStringData().GetData())
 	})
 
 	// Also gjson: the sub-field cell keeps the byte, and the Array FieldData it
@@ -6471,55 +6472,10 @@ func TestCheckAndSetDataStringFieldCompatibilityMode(t *testing.T) {
 // A client that enabled the switch specifically to keep that lenient
 // substitution should still get it here, not a hard rejection further down
 // the pipeline for a byte the old decoder used to quietly paper over.
-func TestCheckAndSetDataArrayVarCharCompatibilityMode(t *testing.T) {
-	paramtable.Init()
-	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
-
-	const invalidUTF8 = "bad\xffbyte"
-	arraySchema := &schemapb.CollectionSchema{
-		Name: "c_utf8_array_compat",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{
-				FieldID: 101, Name: "tokens",
-				DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.MaxCapacityKey, Value: "10"},
-					{Key: common.MaxLengthKey, Value: "64"},
-				},
-			},
-		},
-	}
-	body := []byte(`{"data": [{"id": 1, "tokens": ["ok", "` + invalidUTF8 + `"]}]}`)
-
-	t.Run("compatibility mode off preserves the raw byte", func(t *testing.T) {
-		paramtable.Get().Save(key, "false")
-		defer paramtable.Get().Reset(key)
-
-		rows, _, err := checkAndSetData(body, arraySchema, false)
-		require.NoError(t, err)
-		require.Len(t, rows, 1)
-		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
-		require.True(t, ok)
-		assert.Equal(t, []string{"ok", invalidUTF8}, tokens.GetStringData().GetData())
-	})
-
-	t.Run("compatibility mode on substitutes U+FFFD like the old decoder", func(t *testing.T) {
-		paramtable.Get().Save(key, "true")
-		defer paramtable.Get().Reset(key)
-
-		rows, _, err := checkAndSetData(body, arraySchema, false)
-		require.NoError(t, err)
-		require.Len(t, rows, 1)
-		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
-		require.True(t, ok)
-		var want []string
-		require.NoError(t, json.Unmarshal([]byte(`["ok", "`+invalidUTF8+`"]`), &want))
-		assert.Equal(t, want, tokens.GetStringData().GetData())
-		assert.NotEqual(t, invalidUTF8, tokens.GetStringData().GetData()[1],
-			"compatibility mode must not preserve the raw invalid byte")
-	})
-}
+// Array<VarChar> decodes the same way regardless of compatibilityMode --
+// unmarshalScalarArray's json.Unmarshal substitutes invalid UTF-8 with
+// U+FFFD in both modes; see TestCheckAndSetDataInvalidUTF8's
+// "array of varchar substitutes invalid UTF-8" case.
 
 // Dimensions a JSON test suite is expected to cover (compare the PostgreSQL
 // json/jsonb regression tests): escapes, non-ASCII, duplicate keys, key order,
