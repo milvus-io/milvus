@@ -130,51 +130,7 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
 	map[int64]stats.SegmentBelongs,
 ) {
-	if recoverInfos.WritePathRecovery != nil {
-		return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections)
-	}
-
-	// recover the segment infos from the streaming node segment assignment meta storage
-	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
-	growingBelongs := make(map[int64]stats.SegmentBelongs)
-	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
-	for _, rawMeta := range recoverInfos.SegmentAssignments {
-		coll, ok := collections[rawMeta.GetCollectionId()]
-		if !ok {
-			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
-		}
-		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
-			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
-		}
-		if _, ok := seenSegments[rawMeta.GetSegmentId()]; ok {
-			panic(fmt.Sprintf("segment assignment meta is dirty, segment repeated, %d", rawMeta.GetSegmentId()))
-		}
-		seenSegments[rawMeta.GetSegmentId()] = struct{}{}
-		uniqueKey := PartitionUniqueKey{
-			CollectionID: rawMeta.GetCollectionId(),
-			PartitionID:  rawMeta.GetPartitionId(),
-		}
-		switch rawMeta.GetState() {
-		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
-			m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
-			growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
-				PChannel:     pchannel.Name,
-				VChannel:     m.GetVChannel(),
-				CollectionID: rawMeta.GetCollectionId(),
-				PartitionID:  rawMeta.GetPartitionId(),
-				SegmentID:    m.GetSegmentID(),
-			}
-			if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
-				partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
-			}
-			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
-		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
-			continue
-		default:
-			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
-		}
-	}
-	return partitionToSegmentManagers, growingBelongs
+	return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections)
 }
 
 func newSegmentAllocManagersFromWritePathRecovery(
@@ -210,32 +166,7 @@ func newSegmentAllocManagersFromWritePathRecovery(
 
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
 func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*CollectionInfo {
-	if recoverInfos.WritePathRecovery != nil {
-		return newCollectionInfosFromWritePathRecovery(recoverInfos.WritePathRecovery.VChannels)
-	}
-
-	// collectionMap is a map from collectionID to collectionInfo.
-	collectionInfoMap := make(map[int64]*CollectionInfo, len(recoverInfos.VChannels))
-	for _, vchannelInfo := range recoverInfos.VChannels {
-		currentPartition := make(map[int64]struct{}, len(vchannelInfo.CollectionInfo.Partitions))
-		for _, partition := range vchannelInfo.CollectionInfo.Partitions {
-			currentPartition[partition.PartitionId] = struct{}{}
-		}
-		// add all partitions id into the collection info.
-		currentPartition[common.AllPartitionsID] = struct{}{}
-		// Only keep the latest schema, as shard_interceptor only needs the current write view
-		var latestSchema *streamingpb.CollectionSchemaOfVChannel
-		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
-			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
-		}
-		collectionInfo := &CollectionInfo{
-			VChannel:     vchannelInfo.Vchannel,
-			PartitionIDs: currentPartition,
-		}
-		collectionInfo.setSchema(latestSchema)
-		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = collectionInfo
-	}
-	return collectionInfoMap
+	return newCollectionInfosFromWritePathRecovery(recoverInfos.WritePathRecovery.VChannels)
 }
 
 func newCollectionInfosFromWritePathRecovery(

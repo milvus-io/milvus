@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -83,8 +84,10 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().Close().Return().Once()
 	snapshot := &recovery.RecoverySnapshot{
-		VChannels:          map[string]*streamingpb.VChannelMeta{},
-		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
+		WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+			VChannels:       map[string]moduleapi.VChannelWritePathRecoveryState{},
+			GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+		},
 		Checkpoint: &recovery.WALCheckpoint{
 			MessageID: rmq.NewRmqID(1),
 			TimeTick:  1,

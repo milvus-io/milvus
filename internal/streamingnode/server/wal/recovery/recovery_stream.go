@@ -2,7 +2,6 @@ package recovery
 
 import (
 	"context"
-	"maps"
 
 	"github.com/cockroachdb/errors"
 
@@ -61,12 +60,8 @@ L:
 	}
 	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
-	vchannelCount := len(snapshot.VChannels)
-	segmentCount := len(snapshot.SegmentAssignments)
-	if snapshot.WritePathRecovery != nil {
-		vchannelCount = len(snapshot.WritePathRecovery.VChannels)
-		segmentCount = len(snapshot.WritePathRecovery.GrowingSegments)
-	}
+	vchannelCount := len(snapshot.WritePathRecovery.VChannels)
+	segmentCount := len(snapshot.WritePathRecovery.GrowingSegments)
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
 		mlog.Int("vchannels", vchannelCount),
@@ -74,10 +69,9 @@ L:
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
 	}
-	if snapshot.AlterWALInfo != nil {
+	if state := snapshot.PChannelControl.GetAlterWalState(); state.GetStage() != streamingpb.AlterWALStage_NONE {
 		logFields = append(logFields,
-			mlog.Bool("foundAlterWALMsg", snapshot.AlterWALInfo.FoundAlterWALMsg),
-			mlog.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
+			mlog.Stringer("targetWALName", state.GetTargetWalName()),
 		)
 	}
 	r.Logger().Info(context.TODO(), "recovery from wal stream done", logFields...)
@@ -86,90 +80,15 @@ L:
 
 func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
+		WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+			VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
+			GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
+		},
 		Checkpoint:      r.getCompletedCheckpoint(),
 		PChannelControl: clonePChannelControl(r.pchannelControl),
 	}
 	if r.vchannelManager != nil {
-		moduleSnapshot := r.vchannelManager.RecoverySnapshot()
-		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
-			switch typed := s.(type) {
-			case *moduleapi.WritePathRecoveryModuleSnapshot:
-				if snapshot.WritePathRecovery == nil {
-					snapshot.WritePathRecovery = &moduleapi.WritePathRecoveryModuleSnapshot{
-						VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
-						GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
-					}
-				}
-				maps.Copy(snapshot.WritePathRecovery.VChannels, typed.VChannels)
-				maps.Copy(snapshot.WritePathRecovery.GrowingSegments, typed.GrowingSegments)
-			case *moduleapi.VChannelModuleSnapshot:
-				if snapshot.VChannels == nil {
-					snapshot.VChannels = maps.Clone(typed.VChannels)
-				} else {
-					maps.Copy(snapshot.VChannels, typed.VChannels)
-				}
-				snapshot.mergeLegacyVChannelsIntoWritePathRecovery(typed.VChannels)
-			case *moduleapi.SegmentModuleSnapshot:
-				if snapshot.SegmentAssignments == nil {
-					snapshot.SegmentAssignments = maps.Clone(typed.Segments)
-				} else {
-					maps.Copy(snapshot.SegmentAssignments, typed.Segments)
-				}
-				snapshot.mergeLegacySegmentsIntoWritePathRecovery(typed.Segments)
-			}
-		}
-	}
-	if r.alterWALInfo != nil {
-		alterWALInfoCopy := *r.alterWALInfo
-		snapshot.AlterWALInfo = &alterWALInfoCopy
+		snapshot.WritePathRecovery = r.vchannelManager.RecoverySnapshot()
 	}
 	return snapshot
-}
-
-func (s *RecoverySnapshot) ensureWritePathRecovery() *moduleapi.WritePathRecoveryModuleSnapshot {
-	if s.WritePathRecovery == nil {
-		s.WritePathRecovery = &moduleapi.WritePathRecoveryModuleSnapshot{
-			VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
-			GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
-		}
-	}
-	return s.WritePathRecovery
-}
-
-func (s *RecoverySnapshot) mergeLegacyVChannelsIntoWritePathRecovery(vchannels map[string]*streamingpb.VChannelMeta) {
-	write := s.ensureWritePathRecovery()
-	for vchannel, meta := range vchannels {
-		if meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || meta.GetCollectionInfo() == nil {
-			continue
-		}
-		collection := meta.GetCollectionInfo()
-		state := moduleapi.VChannelWritePathRecoveryState{
-			VChannel:     vchannel,
-			CollectionID: collection.GetCollectionId(),
-			PartitionIDs: make([]int64, 0, len(collection.GetPartitions())),
-		}
-		for _, partition := range collection.GetPartitions() {
-			state.PartitionIDs = append(state.PartitionIDs, partition.GetPartitionId())
-		}
-		if schemas := collection.GetSchemas(); len(schemas) > 0 {
-			state.Schema = schemas[len(schemas)-1].GetSchema()
-		}
-		write.VChannels[vchannel] = state
-	}
-}
-
-func (s *RecoverySnapshot) mergeLegacySegmentsIntoWritePathRecovery(segments map[int64]*streamingpb.SegmentAssignmentMeta) {
-	write := s.ensureWritePathRecovery()
-	for segmentID, meta := range segments {
-		if meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-			continue
-		}
-		write.GrowingSegments[segmentID] = moduleapi.SegmentWritePathRecoveryState{
-			VChannel:     meta.GetVchannel(),
-			CollectionID: meta.GetCollectionId(),
-			PartitionID:  meta.GetPartitionId(),
-			SegmentID:    meta.GetSegmentId(),
-			Stat:         meta.GetStat(),
-		}
-	}
 }

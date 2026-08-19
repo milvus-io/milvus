@@ -162,8 +162,6 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *dirtyPersistSnapshot
 	scannerWG              sync.WaitGroup
 	ackTrackerWG           sync.WaitGroup
-	// used to mark switch MQ msg found
-	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
 	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
@@ -537,24 +535,9 @@ func (r *recoveryStorageImpl) updatePChannelControl(msg message.ImmutableMessage
 			}
 		}
 	}
-	if r.alterWALInfo != nil && r.alterWALInfo.FoundAlterWALMsg && (r.pchannelControl.AlterWalState == nil || r.pchannelControl.AlterWalState.Stage == streamingpb.AlterWALStage_NONE) {
-		r.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
-			TargetWalName: r.alterWALInfo.TargetWALName,
-			TimeTick:      r.alterWALInfo.AlterWALTs,
-			Configs:       r.alterWALInfo.AlterWALConfig,
-			Stage:         streamingpb.AlterWALStage_FLUSHING,
-		}
-		changed = true
-	}
 	if msg.MessageType() == message.MessageTypeAlterWAL {
 		alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
 		header := alterWAL.Header()
-		r.alterWALInfo = &AlterWALInfo{
-			FoundAlterWALMsg: true,
-			TargetWALName:    header.TargetWalName,
-			AlterWALConfig:   header.Config,
-			AlterWALTs:       msg.TimeTick(),
-		}
 		if r.pchannelControl.AlterWalState == nil || r.pchannelControl.AlterWalState.Stage == streamingpb.AlterWALStage_NONE {
 			r.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
 				TargetWalName: header.TargetWalName,

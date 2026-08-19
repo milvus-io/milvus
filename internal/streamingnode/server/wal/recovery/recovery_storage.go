@@ -5,7 +5,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
@@ -20,20 +19,13 @@ type WALCheckpoint = utility.WALCheckpoint
 
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
-	VChannels          map[string]*streamingpb.VChannelMeta
-	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
-	WritePathRecovery  *moduleapi.WritePathRecoveryModuleSnapshot
+	WritePathRecovery *moduleapi.WritePathRecoveryModuleSnapshot
 	// Checkpoint is the in-memory completed frontier after bounded startup
 	// replay. It fences write-path recovery, but is not catalog-published until
 	// the background persistence transaction stores all required snapshots.
 	Checkpoint      *WALCheckpoint
 	PChannelControl *streamingpb.PChannelRecoveryControlMeta
 	TxnBuffer       *utility.TxnBuffer
-	// Used during WAL alteration process
-	AlterWALInfo *AlterWALInfo
-	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
-	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
-	SalvageCheckpoint *utility.ReplicateCheckpoint
 }
 
 type dirtyPersistSnapshot struct {
@@ -48,17 +40,9 @@ type dirtyPersistSnapshot struct {
 
 func clonePChannelControl(control *streamingpb.PChannelRecoveryControlMeta) *streamingpb.PChannelRecoveryControlMeta {
 	if control == nil {
-		return nil
+		return &streamingpb.PChannelRecoveryControlMeta{}
 	}
 	return proto.Clone(control).(*streamingpb.PChannelRecoveryControlMeta)
-}
-
-// AlterWALInfo contains information about WAL alteration process.
-type AlterWALInfo struct {
-	FoundAlterWALMsg bool
-	TargetWALName    commonpb.WALName
-	AlterWALConfig   map[string]string
-	AlterWALTs       uint64
 }
 
 type BuildRecoveryStreamParam struct {

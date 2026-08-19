@@ -102,14 +102,6 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	} else if r.pchannelControl == nil {
 		r.installPChannelControl(nil)
 	}
-	if state := r.pchannelControl.GetAlterWalState(); state.GetStage() != streamingpb.AlterWALStage_NONE {
-		r.alterWALInfo = &AlterWALInfo{
-			FoundAlterWALMsg: true,
-			TargetWALName:    state.GetTargetWalName(),
-			AlterWALConfig:   state.GetConfigs(),
-			AlterWALTs:       state.GetTimeTick(),
-		}
-	}
 	if _, err := r.migrateLegacyRecoveryInfo(ctx, vchannelMetas, segmentMetas, transformLogMetas); err != nil {
 		return err
 	}

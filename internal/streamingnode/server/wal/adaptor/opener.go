@@ -221,9 +221,9 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	}
 	param.RecoveryStorage = rs
 
-	// Handle alter WAL if found in snapshot
+	// Handle alter WAL if found in snapshot.
 	// This flushes all remaining data and triggers WAL switch to the target implementation
-	if snapshot.AlterWALInfo != nil && snapshot.AlterWALInfo.FoundAlterWALMsg {
+	if snapshot.PChannelControl.GetAlterWalState().GetStage() != streamingpb.AlterWALStage_NONE {
 		return o.handleAlterWAL(ctx, opt, roWAL, rs, resources, snapshot)
 	}
 
@@ -312,13 +312,13 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, opt *wal.OpenOpt
 	roWAL *roWALAdaptorImpl, rs recovery.RecoveryStorage,
 	resources *walOpenResources, snapshot *recovery.RecoverySnapshot,
 ) (wal.WAL, error) {
+	alterWALState := snapshot.PChannelControl.GetAlterWalState()
 	mlog.Info(ctx, "detected alter WAL message in snapshot",
 		mlog.String("channel", opt.Channel.String()),
-		mlog.Bool("foundAlterWAL", snapshot.AlterWALInfo.FoundAlterWALMsg),
-		mlog.Stringer("targetWAL", snapshot.AlterWALInfo.TargetWALName),
+		mlog.Stringer("targetWAL", alterWALState.GetTargetWalName()),
 		mlog.String("checkpointMessageID", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
-		mlog.Any("alterWALConfig", snapshot.AlterWALInfo.AlterWALConfig))
+		mlog.Any("alterWALConfig", alterWALState.GetConfigs()))
 
 	if snapshot.PChannelControl.GetAlterWalState().GetStage() == streamingpb.AlterWALStage_FLUSHING {
 		flushingErr := o.handleAlterWALFlushingStage(ctx, opt, roWAL, rs, resources, snapshot)
@@ -334,7 +334,7 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, opt *wal.OpenOpt
 		}
 	}
 
-	targetWALName := snapshot.AlterWALInfo.TargetWALName
+	targetWALName := alterWALState.GetTargetWalName()
 	return nil, status.NewInner("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
 }
 
@@ -345,8 +345,9 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	// Wait until all effects through the target have been published. A published
 	// checkpoint proves both object durability and catalog visibility of every
 	// component snapshot required by that point.
-	targetTimeTick := snapshot.AlterWALInfo.AlterWALTs
-	targetWALName := snapshot.AlterWALInfo.TargetWALName
+	alterWALState := snapshot.PChannelControl.GetAlterWalState()
+	targetTimeTick := alterWALState.GetTimeTick()
+	targetWALName := alterWALState.GetTargetWalName()
 	mlog.Info(ctx, "waiting for flush completion before WAL switch",
 		mlog.String("channel", opt.Channel.Name),
 		mlog.Uint64("targetTimeTick", targetTimeTick))

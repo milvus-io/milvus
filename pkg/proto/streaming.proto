@@ -683,14 +683,11 @@ message StreamingNodeManagerCollectStatusResponse {
 // We need to add vchannel meta in wal meta, so the wal can recover the information of it.
 // The vchannel meta is also used to store the vchannel operation result, such as shard-splitting.
 message VChannelMeta {
-    reserved 5;
-    reserved "load_config";
-
     string vchannel = 1; // vchannel name.
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
-    uint64 tombstone_time_tick = 6; // The timetick this retained vchannel meta starts filtering replay.
+    uint64 tombstone_time_tick = 5; // The timetick this retained vchannel meta starts filtering replay.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -755,12 +752,8 @@ message SegmentAssignmentMeta {
     int64 storage_version        = 7; // only available if level is L1 or Legacy.
     uint64 checkpoint_time_tick  = 8; // Complete durable effects of segment-relevant messages through this timetick.
     L1SegmentPersistedStorage persisted_storage = 9;
-    reserved 10;
-    reserved "sealed_at_data_version";
-    reserved 11;
-    reserved "data_checkpoint_time_tick";
-    uint64 tombstone_time_tick = 12; // This retained segment meta starts filtering replay.
-    bool l1_commit_done = 13; // DataCoord accepted the final L1 binlog commit.
+    uint64 tombstone_time_tick = 10; // This retained segment meta starts filtering replay.
+    bool l1_commit_done = 11; // DataCoord accepted the final L1 binlog commit.
 }
 
 message L1SegmentPersistedStorage {
@@ -811,8 +804,6 @@ message WALCheckpoint {
     common.ReplicateConfiguration replicate_config = 4;
     common.ReplicateCheckpoint replicate_checkpoint = 5;
     AlterWALState alter_wal_state = 6;
-    reserved 7;
-    reserved "data_checkpoint";
 }
 
 message PChannelRecoveryControlMeta {

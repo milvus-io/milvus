@@ -20,55 +20,11 @@ const (
 	ModuleNameTransformLog ModuleName = "transformlog"
 )
 
-type ModuleSnapshot interface {
-	ModuleName() ModuleName
-}
-
-type CompositeModuleSnapshot []ModuleSnapshot
-
-func (CompositeModuleSnapshot) ModuleName() ModuleName {
-	return ""
-}
-
-func FlattenModuleSnapshot(snapshot ModuleSnapshot) []ModuleSnapshot {
-	if snapshot == nil {
-		return nil
-	}
-	if composite, ok := snapshot.(CompositeModuleSnapshot); ok {
-		return composite
-	}
-	return []ModuleSnapshot{snapshot}
-}
-
-type VChannelModuleSnapshot struct {
-	VChannels map[string]*streamingpb.VChannelMeta
-}
-
-func (*VChannelModuleSnapshot) ModuleName() ModuleName {
-	return ModuleNameVChannel
-}
-
-type SegmentModuleSnapshot struct {
-	Segments map[int64]*streamingpb.SegmentAssignmentMeta
-}
-
-func (*SegmentModuleSnapshot) ModuleName() ModuleName {
-	return ModuleNameSegment
-}
-
-type TransformLogModuleSnapshot struct {
-	TransformLogs map[string]*streamingpb.VChannelTransformLogMeta
-}
-
 // WritePathRecoveryModuleSnapshot contains only the state needed to resume the WAL
 // write path. It intentionally excludes persisted binlogs and historical schemas.
 type WritePathRecoveryModuleSnapshot struct {
 	VChannels       map[string]VChannelWritePathRecoveryState
 	GrowingSegments map[int64]SegmentWritePathRecoveryState
-}
-
-func (*WritePathRecoveryModuleSnapshot) ModuleName() ModuleName {
-	return ModuleNameVChannel
 }
 
 type VChannelWritePathRecoveryState struct {
@@ -84,10 +40,6 @@ type SegmentWritePathRecoveryState struct {
 	PartitionID  int64
 	SegmentID    int64
 	Stat         *streamingpb.SegmentAssignmentStat
-}
-
-func (*TransformLogModuleSnapshot) ModuleName() ModuleName {
-	return ModuleNameTransformLog
 }
 
 type SnapshotKey struct {

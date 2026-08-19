@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -335,6 +336,39 @@ func TestRecoveryStorageStartsVChannelDataRecovery(t *testing.T) {
 	assert.Contains(t, snapshot.WritePathRecovery.VChannels, "v2")
 	assert.Contains(t, snapshot.WritePathRecovery.GrowingSegments, int64(1))
 	assert.Contains(t, snapshot.WritePathRecovery.GrowingSegments, int64(2))
+}
+
+func TestBuildInitialRecoverySnapshotUsesCanonicalState(t *testing.T) {
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+	})
+	defer storage.metrics.Close()
+	defer storage.taskScheduler.Close()
+
+	msg := newBroadcastAckMessageWith(t, message.NewAlterWALMessageBuilderV2().
+		WithHeader(&message.AlterWALMessageHeader{
+			TargetWalName: commonpb.WALName_Kafka,
+			Config:        map[string]string{"bootstrap.servers": "localhost:9092"},
+		}).
+		WithBody(&message.AlterWALMessageBody{}).
+		WithClusterLevelBroadcast(message.ClusterChannels{
+			Channels:       []string{"test-pchannel"},
+			ControlChannel: funcutil.GetControlChannel("test-pchannel"),
+		}), 1, 20)
+	storage.updatePChannelControl(msg)
+
+	snapshot := storage.buildInitialRecoverySnapshot()
+
+	require.NotNil(t, snapshot.WritePathRecovery)
+	assert.NotNil(t, snapshot.WritePathRecovery.VChannels)
+	assert.NotNil(t, snapshot.WritePathRecovery.GrowingSegments)
+	require.NotNil(t, snapshot.PChannelControl)
+	state := snapshot.PChannelControl.GetAlterWalState()
+	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, state.GetStage())
+	assert.Equal(t, commonpb.WALName_Kafka, state.GetTargetWalName())
+	assert.Equal(t, uint64(20), state.GetTimeTick())
+	assert.Equal(t, "localhost:9092", state.GetConfigs()["bootstrap.servers"])
 }
 
 func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {

@@ -194,24 +194,24 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	return true
 }
 
-func (m *VChannelRecoveryModule) RecoverySnapshot() moduleapi.ModuleSnapshot {
+func (m *VChannelRecoveryModule) RecoverySnapshot() *moduleapi.WritePathRecoveryModuleSnapshot {
+	snapshot := &moduleapi.WritePathRecoveryModuleSnapshot{
+		VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
+		GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
+	}
 	if m == nil {
-		return nil
+		return snapshot
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	snapshot := &moduleapi.WritePathRecoveryModuleSnapshot{}
 	if m.vchannelView != nil {
 		if state, ok := m.vchannelView.WritePathRecoveryState(); ok {
-			snapshot.VChannels = map[string]moduleapi.VChannelWritePathRecoveryState{m.vchannel: state}
+			snapshot.VChannels[m.vchannel] = state
 		}
 	}
 	for id, view := range m.segments {
 		view.ResumePendingRecovery()
 		if state, ok := view.WritePathRecoveryState(); ok {
-			if snapshot.GrowingSegments == nil {
-				snapshot.GrowingSegments = make(map[int64]moduleapi.SegmentWritePathRecoveryState)
-			}
 			snapshot.GrowingSegments[id] = state
 		}
 	}
