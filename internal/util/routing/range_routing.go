@@ -94,20 +94,28 @@ func DeriveRange(shards []RangeShard) (*RangeRoutingTable, error) {
 	sorted := make([]RangeShard, len(shards))
 	copy(sorted, shards)
 	sort.Slice(sorted, func(i, j int) bool {
-		// nil lower (-inf) sorts first; otherwise compare bytewise.
-		if sorted[i].Lower == nil {
-			return sorted[j].Lower != nil
+		// An unbounded lower (-inf) sorts first; otherwise compare bytewise.
+		//
+		// Tested by LENGTH, not against nil, and that is not a style choice.
+		// proto3 scalar bytes carry no field presence, so an unset bound and an
+		// explicitly-empty []byte{} are the same value on the wire and the proto
+		// documents both as unbounded. A nil test agrees with that only for a
+		// message that has been through a round trip; one built in process --
+		// which is how the coordinator assembles a topology -- can hold []byte{}
+		// and would be read as bounded at the empty key.
+		if len(sorted[i].Lower) == 0 {
+			return len(sorted[j].Lower) != 0
 		}
-		if sorted[j].Lower == nil {
+		if len(sorted[j].Lower) == 0 {
 			return false
 		}
 		return bytes.Compare(sorted[i].Lower, sorted[j].Lower) < 0
 	})
 
-	if sorted[0].Lower != nil {
+	if len(sorted[0].Lower) != 0 {
 		return nil, errors.Errorf("range routing table does not start at -inf, first lower is %x", sorted[0].Lower)
 	}
-	if sorted[len(sorted)-1].Upper != nil {
+	if len(sorted[len(sorted)-1].Upper) != 0 {
 		return nil, errors.Errorf("range routing table does not end at +inf, last upper is %x", sorted[len(sorted)-1].Upper)
 	}
 
@@ -120,7 +128,7 @@ func DeriveRange(shards []RangeShard) (*RangeRoutingTable, error) {
 		// every interior boundary must be contiguous: this shard's upper is the
 		// next shard's lower, with no gap and no overlap.
 		if i+1 < len(sorted) {
-			if shard.Upper == nil {
+			if len(shard.Upper) == 0 {
 				return nil, errors.Errorf("non-last range routing shard %s has an unbounded upper", shard.Vchannel)
 			}
 			if !bytes.Equal(shard.Upper, sorted[i+1].Lower) {
@@ -145,15 +153,16 @@ func (t *RangeRoutingTable) NumShards() int {
 
 // Lookup returns the vchannel owning the routing key by binary search over the
 // shard ranges: the owning shard is the first whose exclusive upper bound is
-// greater than the key (a nil upper is +inf). Because the shards cover the whole
+// greater than the key (an unbounded upper is +inf). Because the shards cover the whole
 // space, every key resolves to exactly one shard.
 func (t *RangeRoutingTable) Lookup(key []byte) string {
 	i := sort.Search(len(t.uppers), func(i int) bool {
-		// nil upper (+inf) is greater than every key; otherwise key < upper.
-		return t.uppers[i] == nil || bytes.Compare(key, t.uppers[i]) < 0
+		// An unbounded upper (+inf) is greater than every key; otherwise
+		// key < upper. Length, not nil: see DeriveRange.
+		return len(t.uppers[i]) == 0 || bytes.Compare(key, t.uppers[i]) < 0
 	})
 	if i >= len(t.channels) {
-		// unreachable: the last upper is nil so the predicate holds at i = last.
+		// unreachable: the last upper is unbounded so the predicate holds at i = last.
 		return ""
 	}
 	return t.channels[i]

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -181,4 +182,43 @@ func TestLookupNamespace(t *testing.T) {
 		}
 		assert.Equalf(t, want, table.LookupNamespace(ns), "namespace=%q", ns)
 	}
+}
+
+// An unbounded bound is one of ZERO LENGTH, not one that is nil.
+//
+// proto3 scalar bytes carry no field presence: an unset bound and an
+// explicitly-empty []byte{} are the same value on the wire, and the proto
+// documents both as unbounded. A message that has been through a round trip
+// always arrives with nil, so a nil test looks correct — but a topology
+// assembled in process, which is how the coordinator builds one, can hold
+// []byte{} and would then be read as bounded at the empty key: the table would
+// be rejected as "not starting at -inf" and every route through it would fail.
+func TestRangeRoutingTreatsEmptyBoundsAsUnbounded(t *testing.T) {
+	empty := []byte{}
+
+	table, err := DeriveRange([]RangeShard{
+		{Vchannel: "v0", Lower: empty, Upper: []byte("m")},
+		{Vchannel: "v1", Lower: []byte("m"), Upper: empty},
+	})
+	require.NoError(t, err, "explicitly-empty bounds must read as -inf and +inf")
+
+	assert.Equal(t, "v0", table.Lookup([]byte("a")))
+	assert.Equal(t, "v0", table.Lookup(nil), "the empty key belongs to the shard starting at -inf")
+	assert.Equal(t, "v1", table.Lookup([]byte("m")))
+	assert.Equal(t, "v1", table.Lookup([]byte("zzz")))
+
+	// Mixing the two spellings across shards must not change the outcome.
+	mixed, err := DeriveRange([]RangeShard{
+		{Vchannel: "v0", Lower: nil, Upper: []byte("m")},
+		{Vchannel: "v1", Lower: []byte("m"), Upper: empty},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, table.Lookup([]byte("zzz")), mixed.Lookup([]byte("zzz")))
+
+	// An interior shard may not be unbounded on the right, however it is spelled.
+	_, err = DeriveRange([]RangeShard{
+		{Vchannel: "v0", Lower: nil, Upper: empty},
+		{Vchannel: "v1", Lower: []byte("m"), Upper: nil},
+	})
+	assert.Error(t, err, "an empty upper on a non-last shard is still unbounded, and still invalid")
 }

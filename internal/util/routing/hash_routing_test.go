@@ -116,9 +116,6 @@ func TestDeriveHashMultiBucketShard(t *testing.T) {
 	assert.Equal(t, "narrow", tbl.Lookup(3))
 }
 
-
-
-
 func TestDeriveHashRejectsMalformed(t *testing.T) {
 	cases := []struct {
 		name   string

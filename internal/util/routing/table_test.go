@@ -63,7 +63,6 @@ func TestDeriveHashWithBucketsRoutesBySlot(t *testing.T) {
 	}
 }
 
-
 func TestDeriveRangeRoutesByNamespace(t *testing.T) {
 	mid := EncodeNamespace("m")
 	tbl, err := Derive(schemapb.RoutingMode_RoutingModeRange,
@@ -147,7 +146,6 @@ func TestShardsFromMetaFiltersNonWritableShards(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "tgtB", ch)
 }
-
 
 func TestShardsFromMetaRejectsLengthMismatch(t *testing.T) {
 	_, err := ShardsFromMeta([]string{"a", "b"}, []*schemapb.CollectionShardInfo{{}})
