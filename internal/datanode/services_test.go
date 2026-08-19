@@ -121,6 +121,12 @@ func TestFirstExternalSourceURI(t *testing.T) {
 	}
 	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
 
+	_, err = firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "s3://foreign-bucket/root/../object"},
+	})
+	assert.Error(t, err)
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
 	_, err = firstExternalSourceURI(nil)
 	assert.Error(t, err)
 	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
@@ -870,6 +876,15 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 }
 
 func (s *DataNodeServicesSuite) TestCopySegment() {
+	s.Run("unhealthy datanode", func() {
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer s.node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		status, err := s.node.copySegment(s.ctx, &datapb.CopySegmentRequest{}, false)
+		s.NoError(err)
+		s.Error(merr.CheckRPCCall(status, nil))
+	})
+
 	s.Run("successful copy segment", func() {
 		req := &datapb.CopySegmentRequest{
 			JobID:         100,
@@ -924,6 +939,34 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 		status, err := s.node.copySegment(s.ctx, req, false)
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	})
+
+	s.Run("external source resolution failure", func() {
+		targetCM := &struct{ storage.ChunkManager }{}
+		factory := &copySegmentStorageFactoryTarget{}
+		mockFactory := mockey.Mock((*copySegmentStorageFactoryTarget).NewChunkManager).
+			Return(targetCM, nil).
+			Build()
+		defer mockFactory.UnPatch()
+
+		originalFactory := s.node.storageFactory
+		s.node.storageFactory = factory
+		defer func() { s.node.storageFactory = originalFactory }()
+
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).
+			Return(nil, merr.WrapErrServiceInternalMsg("resolve source storage failed")).
+			Build()
+		defer mockResolve.UnPatch()
+
+		req := &datapb.CopySegmentRequest{
+			StorageConfig: s.storageConfig,
+			Sources: []*datapb.CopySegmentSource{
+				{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+			},
+		}
+		status, err := s.node.copySegment(s.ctx, req, true)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
 }
 
@@ -1712,6 +1755,13 @@ func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
 						SegmentId:    666,
 					},
 				},
+			}
+			if test.taskType == taskcommon.ExternalCopySegment {
+				copyReq.Sources[0].SourceRootPath = fmt.Sprintf(
+					"s3://%s/%s",
+					s.storageConfig.GetBucketName(),
+					s.storageConfig.GetRootPath(),
+				)
 			}
 
 			payload, err := proto.Marshal(copyReq)
