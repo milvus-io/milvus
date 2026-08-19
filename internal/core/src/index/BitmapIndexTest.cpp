@@ -11,15 +11,24 @@
 
 #include <boost/container/vector.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <arrow/buffer.h>
+#include <arrow/io/interfaces.h>
+#include <arrow/result.h>
+#include <arrow/status.h>
+#include <arrow/util/future.h>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <stdlib.h>
+#include <atomic>
 #include <cstddef>
+#include <cstring>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <unordered_set>
 #include <variant>
@@ -44,17 +53,201 @@
 #include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/IndexEntryReader.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
+#include "storage/RemoteInputStream.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
+
+namespace {
+
+class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
+ public:
+    explicit AsyncTrackingRandomAccessFile(std::vector<uint8_t> content)
+        : content_(std::move(content)) {
+    }
+
+    arrow::Status
+    Close() override {
+        closed_ = true;
+        return arrow::Status::OK();
+    }
+
+    arrow::Result<int64_t>
+    Tell() const override {
+        return position_;
+    }
+
+    bool
+    closed() const override {
+        return closed_;
+    }
+
+    arrow::Status
+    Seek(int64_t position) override {
+        position_ = position;
+        return arrow::Status::OK();
+    }
+
+    arrow::Result<int64_t>
+    Read(int64_t nbytes, void* out) override {
+        auto result = CopyRange(position_, nbytes, out);
+        if (!result.ok()) {
+            return result;
+        }
+        position_ += nbytes;
+        return result;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Buffer>>
+    Read(int64_t nbytes) override {
+        ARROW_ASSIGN_OR_RAISE(auto buffer, MakeBuffer(position_, nbytes));
+        position_ += nbytes;
+        return buffer;
+    }
+
+    arrow::Result<int64_t>
+    ReadAt(int64_t position, int64_t nbytes, void* out) override {
+        read_at_calls_.fetch_add(1);
+        return CopyRange(position, nbytes, out);
+    }
+
+    arrow::Future<std::shared_ptr<arrow::Buffer>>
+    ReadAsync(const arrow::io::IOContext&,
+              int64_t position,
+              int64_t nbytes) override {
+        async_read_calls_.fetch_add(1);
+        return arrow::Future<std::shared_ptr<arrow::Buffer>>::MakeFinished(
+            MakeBuffer(position, nbytes));
+    }
+
+    arrow::Result<int64_t>
+    GetSize() override {
+        return static_cast<int64_t>(content_.size());
+    }
+
+    size_t
+    ReadAtCalls() const {
+        return read_at_calls_.load();
+    }
+
+    size_t
+    AsyncReadCalls() const {
+        return async_read_calls_.load();
+    }
+
+ private:
+    arrow::Result<int64_t>
+    CopyRange(int64_t position, int64_t nbytes, void* out) const {
+        if (position < 0 || nbytes < 0 ||
+            static_cast<size_t>(position + nbytes) > content_.size()) {
+            return arrow::Status::Invalid("read range out of bounds");
+        }
+        std::memcpy(out, content_.data() + position, nbytes);
+        return nbytes;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Buffer>>
+    MakeBuffer(int64_t position, int64_t nbytes) const {
+        if (position < 0 || nbytes < 0 ||
+            static_cast<size_t>(position + nbytes) > content_.size()) {
+            return arrow::Status::Invalid("read range out of bounds");
+        }
+        return std::make_shared<arrow::Buffer>(content_.data() + position,
+                                               nbytes);
+    }
+
+    std::vector<uint8_t> content_;
+    int64_t position_{0};
+    std::atomic<size_t> read_at_calls_{0};
+    std::atomic<size_t> async_read_calls_{0};
+    bool closed_{false};
+};
+
+class ExposedBitmapIndex : public BitmapIndex<int32_t> {
+ public:
+    using BitmapIndex<int32_t>::BitmapIndex;
+
+    void
+    LoadEntriesWithAsyncReadForTest(
+        milvus::storage::IndexEntryReader& reader,
+        const milvus::Config& config,
+        milvus::index::ScalarIndexV3AsyncLoadContext& async_ctx) {
+        LoadEntriesWithAsyncRead(reader, config, async_ctx);
+    }
+};
+
+struct BitmapAsyncLoadFixture {
+    explicit BitmapAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        boost::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::Int32);
+        field_schema.set_nullable(true);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 9100, 9100};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~BitmapAsyncLoadFixture() {
+        boost::filesystem::remove_all(root_path);
+    }
+
+    std::vector<uint8_t>
+    ReadPackedBytes(const std::vector<std::string>& index_files) {
+        auto file_manager = std::make_shared<storage::MemFileManagerImpl>(ctx);
+        auto input = file_manager->OpenInputStream(index_files.front());
+        std::vector<uint8_t> bytes(input->Size());
+        input->ReadAt(bytes.data(), 0, bytes.size());
+        return bytes;
+    }
+
+    std::unique_ptr<storage::IndexEntryReader>
+    OpenAsyncReader(std::vector<uint8_t> bytes,
+                    AsyncTrackingRandomAccessFile** remote_file) {
+        auto tracking_file =
+            std::make_shared<AsyncTrackingRandomAccessFile>(std::move(bytes));
+        *remote_file = tracking_file.get();
+        std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = tracking_file;
+        auto input =
+            std::make_shared<storage::RemoteInputStream>(std::move(arrow_file));
+        return storage::IndexEntryReader::Open(input, input->Size());
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
+
+std::unique_ptr<bool[]>
+MakeBoolArray(const std::vector<bool>& values) {
+    auto result = std::make_unique<bool[]>(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+        result[i] = values[i];
+    }
+    return result;
+}
+
+}  // namespace
 
 template <typename T>
 static std::vector<T>
@@ -74,6 +267,91 @@ GenerateData<std::string>(const size_t size, const size_t cardinality) {
         result.push_back(std::to_string(rand() % cardinality));
     }
     return result;
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_memory");
+
+    std::vector<int32_t> data{1, 2, 1, 3, 2, 4, 1};
+    std::vector<bool> valid_flags{true, false, true, true, true, false, true};
+    auto valid_data = MakeBoolArray(valid_flags);
+
+    ExposedBitmapIndex build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data(), valid_data.get());
+    auto stats = build_index.UploadUnified({});
+
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = fixture.OpenAsyncReader(
+        fixture.ReadPackedBytes(stats->GetIndexFiles()), &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedBitmapIndex load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::ENABLE_OFFSET_CACHE] = true;
+    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
+        nullptr,
+        milvus::proto::common::LoadPriority::HIGH,
+        "bitmap_async_memory"};
+
+    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
+
+    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(load_index.Reverse_Lookup(1), std::nullopt);
+    auto value = int32_t{1};
+    auto hits = load_index.In(1, &value);
+    EXPECT_TRUE(hits[0]);
+    EXPECT_FALSE(hits[1]);
+    EXPECT_TRUE(hits[2]);
+    EXPECT_FALSE(hits[3]);
+    EXPECT_FALSE(hits[4]);
+    EXPECT_FALSE(hits[5]);
+    EXPECT_TRUE(hits[6]);
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_mmap");
+    fixture.field_schema.set_nullable(false);
+    fixture.field_meta.field_schema = fixture.field_schema;
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+
+    std::vector<int32_t> data(DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 32);
+    std::iota(data.begin(), data.end(), 0);
+
+    ExposedBitmapIndex build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = fixture.OpenAsyncReader(
+        fixture.ReadPackedBytes(stats->GetIndexFiles()), &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedBitmapIndex load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
+        nullptr,
+        milvus::proto::common::LoadPriority::HIGH,
+        "bitmap_async_mmap"};
+
+    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
+
+    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_TRUE(load_index.is_mmap_);
+    ASSERT_EQ(load_index.Count(), data.size());
+    auto value = int32_t{17};
+    auto hits = load_index.In(1, &value);
+    EXPECT_TRUE(hits[17]);
 }
 
 template <typename T>

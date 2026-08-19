@@ -215,6 +215,13 @@ class BitmapIndex : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+ protected:
+    void
+    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
+                             const Config& config,
+                             ScalarIndexV3AsyncLoadContext& async_ctx) override;
+
+ public:
     bool
     SupportPatternMatch() const override {
         return std::is_same_v<T, std::string>;

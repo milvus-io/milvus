@@ -16,7 +16,9 @@
 #include <memory>
 
 #include "arrow/io/interfaces.h"
+#include "arrow/util/future.h"
 #include "filemanager/InputStream.h"
+#include "milvus-storage/filesystem/async_random_access_file.h"
 
 namespace milvus::storage {
 
@@ -36,6 +38,9 @@ class RemoteInputStream : public milvus::InputStream {
     size_t
     ReadAt(void* data, size_t offset, size_t size) override;
 
+    arrow::Future<int64_t>
+    ReadAtAsyncInto(int64_t position, int64_t nbytes, uint8_t* out);
+
     size_t
     Read(int fd, size_t size) override;
 
@@ -51,6 +56,7 @@ class RemoteInputStream : public milvus::InputStream {
  private:
     size_t file_size_;
     std::shared_ptr<arrow::io::RandomAccessFile> remote_file_;
+    std::shared_ptr<milvus_storage::NonBlockingReadAtFile> async_read_at_file_;
 };
 
 }  // namespace milvus::storage

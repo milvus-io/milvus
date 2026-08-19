@@ -13,6 +13,12 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <arrow/buffer.h>
+#include <arrow/io/interfaces.h>
+#include <arrow/result.h>
+#include <arrow/status.h>
+#include <arrow/util/future.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -34,6 +40,8 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
+#include "milvus-storage/common/extend_status.h"
+#include "segcore/async_load/AsyncLoadExecutor.h"
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
@@ -442,6 +450,124 @@ class TrackingDelayedInputStream : public milvus::InputStream {
     std::atomic<size_t> max_active_reads_{0};
 };
 
+class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
+ public:
+    explicit AsyncTrackingRandomAccessFile(
+        std::vector<uint8_t> content,
+        arrow::Status async_read_status = arrow::Status::OK())
+        : content_(std::move(content)),
+          async_read_status_(std::move(async_read_status)) {
+    }
+
+    arrow::Status
+    Close() override {
+        closed_ = true;
+        return arrow::Status::OK();
+    }
+
+    arrow::Result<int64_t>
+    Tell() const override {
+        return position_;
+    }
+
+    bool
+    closed() const override {
+        return closed_;
+    }
+
+    arrow::Status
+    Seek(int64_t position) override {
+        position_ = position;
+        return arrow::Status::OK();
+    }
+
+    arrow::Result<int64_t>
+    Read(int64_t nbytes, void* out) override {
+        auto result = CopyRange(position_, nbytes, out);
+        if (!result.ok()) {
+            return result;
+        }
+        position_ += nbytes;
+        return result;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Buffer>>
+    Read(int64_t nbytes) override {
+        ARROW_ASSIGN_OR_RAISE(auto buffer, MakeBuffer(position_, nbytes));
+        position_ += nbytes;
+        return buffer;
+    }
+
+    arrow::Result<int64_t>
+    ReadAt(int64_t position, int64_t nbytes, void* out) override {
+        read_at_calls_.fetch_add(1);
+        return CopyRange(position, nbytes, out);
+    }
+
+    arrow::Future<std::shared_ptr<arrow::Buffer>>
+    ReadAsync(const arrow::io::IOContext&,
+              int64_t position,
+              int64_t nbytes) override {
+        async_read_calls_.fetch_add(1);
+        if (!async_read_status_.ok()) {
+            return arrow::Future<std::shared_ptr<arrow::Buffer>>::MakeFinished(
+                arrow::Result<std::shared_ptr<arrow::Buffer>>(
+                    async_read_status_));
+        }
+        return arrow::Future<std::shared_ptr<arrow::Buffer>>::MakeFinished(
+            MakeBuffer(position, nbytes));
+    }
+
+    arrow::Result<int64_t>
+    GetSize() override {
+        return static_cast<int64_t>(content_.size());
+    }
+
+    void
+    ResetCounters() {
+        read_at_calls_.store(0);
+        async_read_calls_.store(0);
+    }
+
+    size_t
+    ReadAtCalls() const {
+        return read_at_calls_.load();
+    }
+
+    size_t
+    AsyncReadCalls() const {
+        return async_read_calls_.load();
+    }
+
+ private:
+    arrow::Result<int64_t>
+    CopyRange(int64_t position, int64_t nbytes, void* out) const {
+        if (position < 0 || nbytes < 0 ||
+            static_cast<size_t>(position + nbytes) > content_.size()) {
+            return arrow::Status::Invalid("read range out of bounds");
+        }
+        std::memcpy(out, content_.data() + position, nbytes);
+        return nbytes;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Buffer>>
+    MakeBuffer(int64_t position, int64_t nbytes) const {
+        if (position < 0 || nbytes < 0 ||
+            static_cast<size_t>(position + nbytes) > content_.size()) {
+            return arrow::Status::Invalid("read range out of bounds");
+        }
+        return std::make_shared<arrow::Buffer>(content_.data() + position,
+                                               nbytes);
+    }
+
+    std::vector<uint8_t> content_;
+    arrow::Status async_read_status_;
+    int64_t position_{0};
+    std::atomic<size_t> read_at_calls_{0};
+    std::atomic<size_t> async_read_calls_{0};
+    bool closed_{false};
+};
+
 }  // namespace
 
 namespace {
@@ -468,6 +594,18 @@ VerifyPattern(const std::vector<uint8_t>& data, size_t expected_size) {
         ASSERT_EQ(data[i], static_cast<uint8_t>(i % 256))
             << "Mismatch at byte " << i;
     }
+}
+
+std::vector<uint8_t>
+ReadLocalFileBytes(const std::string& path) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    EXPECT_TRUE(input.is_open()) << "failed to open " << path;
+    auto size = static_cast<size_t>(input.tellg());
+    input.seekg(0);
+    std::vector<uint8_t> data(size);
+    input.read(reinterpret_cast<char*>(data.data()), size);
+    EXPECT_TRUE(input.good()) << "failed to read " << path;
+    return data;
 }
 
 }  // namespace
@@ -1705,6 +1843,206 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
     EXPECT_EQ(entry.data, streamed);
 }
 
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntryStreamAsyncUsesRemoteReadAsyncAndKeepsOrder) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path = kV3FilePath + "_stream_async_remote";
+    const size_t slice_size = kMinStreamSliceSize;
+    const size_t entry_size = 3 * slice_size;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto remote_file = std::make_shared<AsyncTrackingRandomAccessFile>(
+        ReadLocalFileBytes(GetRootPath() + "/" + file_path));
+    auto* remote_file_ptr = remote_file.get();
+    std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = remote_file;
+    auto input = std::make_shared<RemoteInputStream>(std::move(arrow_file));
+    auto reader = IndexEntryReader::Open(input, GetFileSize(file_path));
+
+    remote_file_ptr->ResetCounters();
+    TransientMemoryBudget::GetLoadTransientBudget().SetCapacityBytes(
+        slice_size);
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.slice_size = slice_size;
+
+    std::vector<uint8_t> streamed;
+    std::vector<size_t> slice_sizes;
+    reader->ReadEntryStreamAsync(
+        "data",
+        [&](const uint8_t* d, size_t len) {
+            slice_sizes.push_back(len);
+            streamed.insert(streamed.end(), d, d + len);
+        },
+        options);
+
+    EXPECT_EQ(streamed, data);
+    EXPECT_EQ(slice_sizes,
+              (std::vector<size_t>{slice_size, slice_size, slice_size}));
+    EXPECT_GT(remote_file_ptr->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file_ptr->ReadAtCalls(), 0);
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntryStreamAsyncPreservesStorageErrorClassification) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path = kV3FilePath + "_stream_async_error_status";
+    auto data = GeneratePattern(kMinStreamSliceSize);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto remote_file = std::make_shared<AsyncTrackingRandomAccessFile>(
+        ReadLocalFileBytes(GetRootPath() + "/" + file_path),
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+            "storage throttled",
+            "retry later"));
+    std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = remote_file;
+    auto input = std::make_shared<RemoteInputStream>(std::move(arrow_file));
+    auto reader = IndexEntryReader::Open(input, GetFileSize(file_path));
+
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.slice_size = kMinStreamSliceSize;
+
+    try {
+        reader->ReadEntryStreamAsync(
+            "data", [](const uint8_t*, size_t) {}, options);
+        FAIL() << "expected storage error";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::StorageTransientError);
+    }
+    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryToMemoryAsyncMatchesReadEntry) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path = kV3FilePath + "_stream_async_memory";
+    const size_t entry_size = 2 * kMinStreamSliceSize + 17;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    auto reader = IndexEntryReader::Open(input, GetFileSize(file_path));
+
+    TransientMemoryBudget::GetLoadTransientBudget().SetCapacityBytes(
+        kMinStreamSliceSize);
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.slice_size = kMinStreamSliceSize;
+
+    auto entry = reader->ReadEntryToMemoryAsync("data", options);
+    EXPECT_EQ(entry.data, data);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryToFileAsyncWritesEntry) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path = kV3FilePath + "_stream_async_file";
+    const size_t entry_size = 2 * kMinStreamSliceSize + 31;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    auto reader = IndexEntryReader::Open(input, GetFileSize(file_path));
+
+    TransientMemoryBudget::GetLoadTransientBudget().SetCapacityBytes(
+        kMinStreamSliceSize);
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.localize_disk_executor =
+        milvus::segcore::async_load::AsyncLoadDiskExecutor();
+    options.slice_size = kMinStreamSliceSize;
+
+    auto local_file = GetRootPath() + "/stream_async_entry_output.bin";
+    reader->ReadEntryToFileAsync(
+        "data", local_file, options, milvus::storage::io::Priority::HIGH);
+
+    EXPECT_EQ(ReadLocalFileBytes(local_file), data);
+    ::unlink(local_file.c_str());
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntryStreamAsyncCancellationWhileWaitingBudget) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path =
+        kV3FilePath + "_stream_async_cancel_budget_wait";
+    const size_t slice_size = kMinStreamSliceSize;
+    auto data = GeneratePattern(slice_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    budget.SetCapacityBytes(slice_size);
+    budget.Acquire(slice_size, TransientBudgetPriority::High);
+    auto cleanup = folly::makeGuard(
+        [&budget, slice_size]() { budget.Release(slice_size); });
+
+    folly::CancellationSource source;
+    auto input = CreateInputStream(file_path);
+    auto reader = IndexEntryReader::Open(
+        input, GetFileSize(file_path), 0, milvus::HIGH, source.getToken());
+
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.slice_size = slice_size;
+
+    std::atomic<size_t> slice_count{0};
+    auto future = std::async(std::launch::async, [&]() {
+        reader->ReadEntryStreamAsync(
+            "data",
+            [&slice_count](const uint8_t*, size_t) {
+                slice_count.fetch_add(1);
+            },
+            options);
+    });
+
+    EXPECT_EQ(future.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(slice_count.load(), 0);
+
+    source.requestCancellation();
+
+    ASSERT_EQ(future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    try {
+        future.get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    } catch (const std::exception& e) {
+        FAIL() << "unexpected cancellation exception: " << e.what();
+    }
+    EXPECT_EQ(slice_count.load(), 0);
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamToFileWritesEntry) {
     const std::string file_path = kV3FilePath + "_stream_to_file";
     const size_t entry_size = 3 * 1024 * 1024 + 19;
@@ -1810,7 +2148,7 @@ TEST_F(IndexEntryWriterV3Test,
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(2 * entry_size);
-    budget.Acquire(entry_size);
+    budget.Acquire(entry_size, TransientBudgetPriority::High);
     bool budget_held = true;
     auto budget_cleanup = folly::makeGuard([&]() {
         if (budget_held) {
@@ -1962,7 +2300,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCancellationWhileWaitingBudget) {
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(slice_size);
-    budget.Acquire(slice_size);
+    budget.Acquire(slice_size, TransientBudgetPriority::High);
     auto cleanup = folly::makeGuard([&budget, old_capacity, slice_size]() {
         budget.Release(slice_size);
         budget.SetCapacityBytes(old_capacity);

@@ -49,6 +49,8 @@
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/async_load/AsyncLoadExecutor.h"
+#include "milvus-storage/common/extend_status.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
@@ -604,6 +606,196 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry("idx_to_offsets",
                        idx_to_offsets_.data(),
                        idx_to_offsets_.size() * sizeof(int32_t));
+}
+
+void
+StringIndexSort::LoadEntriesWithAsyncRead(
+    storage::IndexEntryReader& reader,
+    const Config& config,
+    ScalarIndexV3AsyncLoadContext& async_ctx) {
+    config_ = config;
+
+    uint32_t version = reader.GetMeta<uint32_t>("version");
+    if (version != SERIALIZATION_VERSION) {
+        ThrowInfo(milvus::ErrorCode::Unsupported,
+                  fmt::format("Unsupported StringIndexSort serialization "
+                              "version: {}, expected: {}",
+                              version,
+                              SERIALIZATION_VERSION));
+    }
+    total_num_rows_ = reader.GetMeta<size_t>("num_rows");
+    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(async_ctx.load_priority);
+    auto write_priority =
+        storage::io::GetPriorityFromLoadPriority(load_priority);
+
+    storage::EntryStreamAsyncOptions read_options;
+    read_options.priority = load_priority;
+    read_options.localize_disk_executor =
+        milvus::segcore::async_load::AsyncLoadDiskExecutor();
+    read_options.trace_label = async_ctx.trace_label;
+
+    auto valid_bitset_entry =
+        reader.ReadEntryToMemoryAsync("valid_bitset", read_options);
+    auto expected_valid_bitset_size = (total_num_rows_ + 7) / 8;
+    AssertInfo(valid_bitset_entry.data.size() >= expected_valid_bitset_size,
+               "invalid valid_bitset size: expected at least {}, got {}",
+               expected_valid_bitset_size,
+               valid_bitset_entry.data.size());
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (size_t i = 0; i < total_num_rows_; ++i) {
+        uint8_t byte = valid_bitset_entry.data[i / 8];
+        if (byte & (1 << (i % 8))) {
+            valid_bitset_.set(i);
+        }
+    }
+
+    auto get_idx_to_offsets_bytes = [&]() {
+        AssertInfo(total_num_rows_ <=
+                       std::numeric_limits<size_t>::max() / sizeof(int32_t),
+                   "idx_to_offsets size overflow for {} rows",
+                   total_num_rows_);
+        auto expected_offsets_bytes = total_num_rows_ * sizeof(int32_t);
+        auto offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+        AssertInfo(offsets_bytes == expected_offsets_bytes,
+                   "invalid idx_to_offsets size: expected {}, got {}",
+                   expected_offsets_bytes,
+                   offsets_bytes);
+        return offsets_bytes;
+    };
+
+    if (config.contains(MMAP_FILE_PATH)) {
+        LOG_INFO(
+            "StringIndexSort::LoadEntriesWithAsyncRead: loading with mmap "
+            "strategy");
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        auto mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        mmap_impl->SetMmapFilePath(mmap_path);
+
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_path).parent_path());
+        auto data_size = reader.GetEntrySize("index_data");
+        {
+            auto fw = storage::FileWriter(mmap_path, write_priority);
+            auto* executor = read_options.localize_disk_executor;
+            size_t written = 0;
+            reader.ReadEntryStreamAsync(
+                "index_data",
+                [&](const uint8_t* d, size_t len) {
+                    auto write_future = milvus::segcore::async_load::
+                        SubmitAsyncLoadExecutorTask<arrow::Status>(
+                            executor, [&fw, d, len]() {
+                                fw.Write(d, len);
+                                return arrow::Status::OK();
+                            });
+                    auto status = std::move(write_future).get();
+                    if (!status.ok()) {
+                        throw milvus_storage::ToSegcoreError(status);
+                    }
+                    written += len;
+                },
+                read_options);
+            AssertInfo(written == data_size,
+                       "index_data async stream read size mismatch: got {}, "
+                       "expected {}",
+                       written,
+                       data_size);
+
+            auto write_padding = [&](const uint8_t* data, size_t len) {
+                auto write_future =
+                    milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<
+                        arrow::Status>(executor, [&fw, data, len]() {
+                        fw.Write(data, len);
+                        return arrow::Status::OK();
+                    });
+                auto status = std::move(write_future).get();
+                if (!status.ok()) {
+                    throw milvus_storage::ToSegcoreError(status);
+                }
+            };
+
+            auto aligned =
+                ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            if (aligned > data_size) {
+                std::vector<uint8_t> padding(aligned - data_size, 0);
+                write_padding(padding.data(), padding.size());
+            }
+            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
+            write_padding(mmap_pad.data(), mmap_pad.size());
+            fw.Finish();
+        }
+
+        if (reader.HasEntry("idx_to_offsets")) {
+            mmap_meta_filepath_ = mmap_path + "-meta";
+            size_t offsets_bytes = get_idx_to_offsets_bytes();
+            reader.ReadEntryToFileAsync("idx_to_offsets",
+                                        mmap_meta_filepath_,
+                                        read_options,
+                                        write_priority);
+            mmap_meta_size_ = offsets_bytes;
+            auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
+            mmap_meta_data_ = static_cast<char*>(mmap(NULL,
+                                                      mmap_meta_size_,
+                                                      PROT_READ,
+                                                      MAP_PRIVATE,
+                                                      meta_file.Descriptor(),
+                                                      0));
+            if (mmap_meta_data_ == MAP_FAILED) {
+                meta_file.Close();
+                remove(mmap_meta_filepath_.c_str());
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "failed to mmap idx_to_offsets meta: {}",
+                          strerror(errno));
+            }
+            meta_file.Close();
+
+            idx_to_offsets_ptr_ =
+                reinterpret_cast<const int32_t*>(mmap_meta_data_);
+            idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
+
+            mmap_impl->LoadFromFile(data_size,
+                                    total_num_rows_,
+                                    valid_bitset_,
+                                    idx_to_offsets_,
+                                    /*skip_idx_to_offsets=*/true);
+        } else {
+            idx_to_offsets_.resize(total_num_rows_);
+            mmap_impl->LoadFromFile(
+                data_size, total_num_rows_, valid_bitset_, idx_to_offsets_);
+            idx_to_offsets_ptr_ = idx_to_offsets_.data();
+            idx_to_offsets_size_ = idx_to_offsets_.size();
+        }
+        impl_ = std::move(mmap_impl);
+    } else {
+        LOG_INFO(
+            "StringIndexSort::LoadEntriesWithAsyncRead: loading with "
+            "memory strategy");
+        idx_to_offsets_.resize(total_num_rows_);
+        auto data_size = reader.GetEntrySize("index_data");
+        auto index_data_entry =
+            reader.ReadEntryToMemoryAsync("index_data", read_options);
+        AssertInfo(index_data_entry.data.size() == data_size,
+                   "index_data async read size mismatch: got {}, expected {}",
+                   index_data_entry.data.size(),
+                   data_size);
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        mmap_impl->LoadFromBuffer(std::move(index_data_entry.data),
+                                  total_num_rows_,
+                                  valid_bitset_,
+                                  idx_to_offsets_);
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
+        impl_ = std::move(mmap_impl);
+    }
+
+    is_built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void

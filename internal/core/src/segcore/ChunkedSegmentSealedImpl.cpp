@@ -133,6 +133,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
@@ -2293,7 +2294,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         });
         load_group_futures.emplace_back(std::move(future));
     }
-
     storage::WaitAllFutures(load_group_futures);
     if (schema_snapshot->is_external_collection()) {
         committer.Commit(
@@ -2720,7 +2720,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     ArrowSchemaPtr arrow_schema = schema_snapshot->ConvertToArrowSchema();
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-
     for (auto& [id, info] : load_info.field_infos) {
         AssertInfo(info.row_count > 0,
                    "[StorageV2] The row count of field data is 0");
@@ -3030,7 +3029,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
     SCOPE_CGO_CALL_METRIC();
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     auto* staged_runtime = committer.runtime();
     AssertInfo(
@@ -8201,7 +8199,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         });
         load_group_futures.emplace_back(std::move(future));
     }
-
     storage::WaitAllFutures(load_group_futures);
 }
 
@@ -8348,7 +8345,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             warmup_policy,
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
-            segment_load_info.GetInsertChannel());
+            segment_load_info.GetInsertChannel(),
+            std::nullopt,
+            storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -8494,7 +8493,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
-            std::move(column_size_estimate));
+            std::move(column_size_estimate),
+            storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

@@ -42,6 +42,8 @@
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
+#include "segcore/async_load/AsyncLoadExecutor.h"
+#include "milvus-storage/common/extend_status.h"
 
 namespace milvus {
 namespace index {
@@ -1539,6 +1541,153 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     LOG_INFO(
         "LoadEntries bitmap index with cardinality = {}, num_rows = {} for "
         "segment_id = {}, field_id = {}, mmap = {}",
+        Cardinality(),
+        total_num_rows_,
+        file_index_meta.segment_id,
+        file_index_meta.field_id,
+        is_mmap_);
+
+    is_built_ = true;
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+BitmapIndex<T>::LoadEntriesWithAsyncRead(
+    storage::IndexEntryReader& reader,
+    const Config& config,
+    ScalarIndexV3AsyncLoadContext& async_ctx) {
+    auto enable_offset_cache =
+        GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
+
+    auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
+    total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
+    is_nested_index_ =
+        reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
+    valid_bitset_ =
+        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
+    bool rebuild_validity_from_postings =
+        schema_.nullable() && !is_nested_index_;
+
+    storage::EntryStreamAsyncOptions read_options;
+    read_options.priority = async_ctx.load_priority;
+    read_options.localize_disk_executor =
+        milvus::segcore::async_load::AsyncLoadDiskExecutor();
+    read_options.trace_label = async_ctx.trace_label;
+
+    auto entry_names = reader.GetEntryNames();
+    if (std::find(entry_names.begin(),
+                  entry_names.end(),
+                  BITMAP_INDEX_VALID_BITSET) != entry_names.end()) {
+        auto valid_bitset_entry = reader.ReadEntryToMemoryAsync(
+            BITMAP_INDEX_VALID_BITSET, read_options);
+        DeserializeValidBitsetData(valid_bitset_entry.data.data(),
+                                   valid_bitset_entry.data.size());
+        rebuild_validity_from_postings = false;
+    }
+
+    ChooseIndexLoadMode(index_length);
+
+    auto priority = GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                        config, milvus::LOAD_PRIORITY)
+                        .value_or(async_ctx.load_priority);
+    auto* materialize_executor =
+        milvus::segcore::async_load::AsyncLoadMaterializeExecutor();
+
+    if (config.contains(MMAP_FILE_PATH) &&
+        build_mode_ == BitmapIndexBuildMode::ROARING) {
+        auto mmap_filepath =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+        AssertInfo(mmap_filepath.has_value(),
+                   "mmap filepath is empty when load index");
+
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_filepath.value()).parent_path());
+        auto tmp_path = mmap_filepath.value() + ".tmp_load";
+        auto tmp_path_guard =
+            folly::makeGuard([&tmp_path]() { unlink(tmp_path.c_str()); });
+
+        reader.ReadEntryToFileAsync(
+            BITMAP_INDEX_DATA,
+            tmp_path,
+            read_options,
+            storage::io::GetPriorityFromLoadPriority(priority));
+
+        auto tmp_size = std::filesystem::file_size(tmp_path);
+        auto tmp_file = File::Open(tmp_path, O_RDONLY);
+        auto* tmp_map = mmap(
+            NULL, tmp_size, PROT_READ, MAP_PRIVATE, tmp_file.Descriptor(), 0);
+        AssertInfo(tmp_map != MAP_FAILED,
+                   "failed to mmap temp file: {}",
+                   strerror(errno));
+        tmp_file.Close();
+        auto tmp_map_guard = folly::makeGuard(
+            [tmp_map, tmp_size]() { munmap(tmp_map, tmp_size); });
+
+        auto status =
+            std::move(
+                milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<
+                    arrow::Status>(materialize_executor,
+                                   [this,
+                                    mmap_filepath = mmap_filepath.value(),
+                                    tmp_map,
+                                    tmp_size,
+                                    index_length,
+                                    priority,
+                                    rebuild_validity_from_postings]() {
+                                       MMapIndexData(
+                                           mmap_filepath,
+                                           static_cast<const uint8_t*>(tmp_map),
+                                           tmp_size,
+                                           index_length,
+                                           priority,
+                                           rebuild_validity_from_postings);
+                                       return arrow::Status::OK();
+                                   }))
+                .get();
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
+        }
+    } else {
+        auto index_data_entry =
+            reader.ReadEntryToMemoryAsync(BITMAP_INDEX_DATA, read_options);
+        auto status =
+            std::move(
+                milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<
+                    arrow::Status>(materialize_executor,
+                                   [this,
+                                    data = std::move(index_data_entry.data),
+                                    index_length,
+                                    rebuild_validity_from_postings]() {
+                                       DeserializeIndexData(
+                                           data.data(),
+                                           index_length,
+                                           rebuild_validity_from_postings);
+                                       return arrow::Status::OK();
+                                   }))
+                .get();
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
+        }
+    }
+
+    if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
+        auto status =
+            std::move(milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<
+                          arrow::Status>(materialize_executor, [this]() {
+                BuildOffsetCache();
+                return arrow::Status::OK();
+            })).get();
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
+        }
+    }
+
+    auto file_index_meta = this->file_manager_->GetIndexMeta();
+
+    LOG_INFO(
+        "LoadEntriesWithAsyncRead bitmap index with cardinality = {}, num_rows "
+        "= {} for segment_id = {}, field_id = {}, mmap = {}",
         Cardinality(),
         total_num_rows_,
         file_index_meta.segment_id,

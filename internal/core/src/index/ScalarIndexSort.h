@@ -201,6 +201,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+ protected:
+    void
+    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
+                             const Config& config,
+                             ScalarIndexV3AsyncLoadContext& async_ctx) override;
+
  public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&

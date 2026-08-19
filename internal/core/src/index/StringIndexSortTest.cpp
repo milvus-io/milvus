@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -15,8 +16,14 @@
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/StringIndexSort.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -40,6 +47,48 @@ class StringIndexBaseTest : public ::testing::Test {
 class StringIndexSortTest : public StringIndexBaseTest {};
 
 namespace {
+
+class ExposedStringIndexSort : public StringIndexSort {
+ public:
+    using StringIndexSort::StringIndexSort;
+
+    void
+    LoadEntriesWithAsyncReadForTest(storage::IndexEntryReader& reader,
+                                    const Config& config,
+                                    ScalarIndexV3AsyncLoadContext& async_ctx) {
+        LoadEntriesWithAsyncRead(reader, config, async_ctx);
+    }
+};
+
+struct StringSortAsyncLoadFixture {
+    explicit StringSortAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        std::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::String);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 1000, 10000};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~StringSortAsyncLoadFixture() {
+        std::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
 
 void
 CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
@@ -77,6 +126,82 @@ CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
 }
 
 }  // namespace
+
+TEST(StringIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_async_memory");
+    std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
+
+    ExposedStringIndexSort build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedStringIndexSort load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
+        nullptr,
+        milvus::proto::common::LoadPriority::HIGH,
+        "string_sort_async_memory"};
+
+    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
+
+    EXPECT_GE(remote_file->AsyncReadCalls(), 2);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    std::vector<std::string> values{"alpha", "delta"};
+    auto bitset = load_index.In(values.size(), values.data());
+    EXPECT_TRUE(bitset[0]);
+    EXPECT_TRUE(bitset[1]);
+    EXPECT_FALSE(bitset[2]);
+    EXPECT_FALSE(bitset[3]);
+    EXPECT_EQ(load_index.Reverse_Lookup(2), data[2]);
+}
+
+TEST(StringIndexSortV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_async_mmap");
+    std::vector<std::string> data{"zero", "one", "two", "three", "four"};
+
+    ExposedStringIndexSort build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedStringIndexSort load_index(fixture.ctx);
+    Config config;
+    config[milvus::index::MMAP_FILE_PATH] =
+        fixture.root_path + "/mmap/string_sort";
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
+        nullptr,
+        milvus::proto::common::LoadPriority::HIGH,
+        "string_sort_async_mmap"};
+
+    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
+
+    EXPECT_GE(remote_file->AsyncReadCalls(), 3);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    auto bitset = load_index.PrefixMatch("t");
+    EXPECT_FALSE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+    EXPECT_TRUE(bitset[2]);
+    EXPECT_TRUE(bitset[3]);
+    EXPECT_FALSE(bitset[4]);
+    EXPECT_EQ(load_index.Reverse_Lookup(4), data[4]);
+}
 
 TEST_F(StringIndexSortTest, ConstructorMemory) {
     Config config;

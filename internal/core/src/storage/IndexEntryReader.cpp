@@ -28,16 +28,24 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "arrow/result.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/futures/Future.h"
+#include "folly/futures/Promise.h"
+#include "milvus-storage/common/extend_status.h"
 #include "nlohmann/json.hpp"
-#include "storage/EntryStreamUtils.h"
+#include "segcore/async_load/AsyncLoadExecutor.h"
 #include "storage/Crc32cUtil.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/PluginLoader.h"
+#include "storage/RemoteInputStream.h"
 
 namespace milvus::storage {
 namespace {
@@ -51,16 +59,39 @@ struct ActiveSliceTask {
     std::future<void> future;
 };
 
+struct AsyncActiveSliceTask {
+    size_t seq{0};
+    size_t expected_read_bytes{0};
+    TransientBudgetLease lease;
+    std::shared_ptr<std::vector<uint8_t>> data;
+    folly::SemiFuture<size_t> future;
+};
+
+struct PendingAsyncAdmission {
+    size_t seq{0};
+    size_t budget_bytes{0};
+    size_t read_bytes{0};
+    folly::coro::Future<TransientBudgetLease> future;
+};
+
+TransientBudgetPriority
+TransientPriorityForLoad(milvus::proto::common::LoadPriority load_priority) {
+    return load_priority == milvus::proto::common::LoadPriority::LOW
+               ? TransientBudgetPriority::Low
+               : TransientBudgetPriority::High;
+}
+
 class TransientBudgetGuard {
  public:
     TransientBudgetGuard(size_t slice_transient_bytes,
+                         TransientBudgetPriority priority,
                          const folly::CancellationToken& cancellation_token,
                          const std::string& operation)
         : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
         auto acquired =
             TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
-                slice_transient_bytes_, cancellation_token);
+                slice_transient_bytes_, priority, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
             ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
@@ -147,6 +178,43 @@ DrainFutures(std::vector<std::future<void>>& futures,
     }
 }
 
+folly::SemiFuture<size_t>
+BridgeArrowReadFuture(arrow::Future<int64_t> arrow_future) {
+    folly::Promise<size_t> promise;
+    auto future = promise.getSemiFuture();
+    auto shared_promise =
+        std::make_shared<folly::Promise<size_t>>(std::move(promise));
+    arrow_future.AddCallback(
+        [shared_promise](const arrow::Result<int64_t>& result) mutable {
+            if (!result.ok()) {
+                shared_promise->setException(
+                    milvus_storage::ToSegcoreError(result.status()));
+                return;
+            }
+            shared_promise->setValue(static_cast<size_t>(*result));
+        });
+    return future;
+}
+
+folly::SemiFuture<size_t>
+SubmitReadAtAsync(std::shared_ptr<milvus::InputStream> input,
+                  milvus::proto::common::LoadPriority priority,
+                  size_t offset,
+                  size_t len,
+                  const std::shared_ptr<std::vector<uint8_t>>& data) {
+    if (auto remote = std::dynamic_pointer_cast<RemoteInputStream>(input)) {
+        return BridgeArrowReadFuture(
+            remote->ReadAtAsyncInto(static_cast<int64_t>(offset),
+                                    static_cast<int64_t>(len),
+                                    data->data()));
+    }
+
+    return milvus::segcore::async_load::SubmitPriorityLoadTask(
+        priority, [input, offset, len, data]() {
+            return input->ReadAt(data->data(), offset, len);
+        });
+}
+
 void
 ReadOrderedEntryStream(
     size_t num_slices,
@@ -170,6 +238,7 @@ ReadOrderedEntryStream(
 
     auto& pool = ThreadPools::GetThreadPool(priority);
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto budget_priority = TransientPriorityForThreadPool(priority);
     size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
@@ -226,12 +295,14 @@ ReadOrderedEntryStream(
 
         if (block_for_budget) {
             auto acquired = budget.AcquireUntil(slice_transient_byte_count,
+                                                budget_priority,
                                                 cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
             }
-        } else if (!budget.TryAcquire(slice_transient_byte_count)) {
+        } else if (!budget.TryAcquire(slice_transient_byte_count,
+                                      budget_priority)) {
             return false;
         }
 
@@ -313,6 +384,201 @@ ReadOrderedEntryStream(
 
         std::vector<uint8_t>{}.swap(task.result->data);
         budget.Release(task.slice_transient_bytes);
+
+        if (first_error) {
+            drainActiveTasks();
+            break;
+        }
+
+        refill();
+    }
+
+    if (first_error) {
+        std::rethrow_exception(first_error);
+    }
+
+    AssertInfo(running_crc == expected_crc,
+               "{}: expected {}, actual {}",
+               crc_error_context,
+               Crc32cToHex(expected_crc),
+               Crc32cToHex(running_crc));
+}
+
+void
+ReadOrderedEntryStreamAsync(
+    size_t num_slices,
+    uint32_t expected_crc,
+    const std::string& crc_error_context,
+    const folly::CancellationToken& cancellation_token,
+    const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
+    const SliceTransientBytes& slice_budget_bytes,
+    const std::function<size_t(size_t seq)>& slice_read_bytes,
+    const std::function<folly::SemiFuture<size_t>(
+        size_t seq, const std::shared_ptr<std::vector<uint8_t>>& data)>&
+        submit_read,
+    const std::function<std::vector<uint8_t>(
+        size_t seq, std::vector<uint8_t>&& data)>& decode_slice,
+    milvus::proto::common::LoadPriority priority) {
+    ThrowIfCancelled(cancellation_token, "ReadEntryStreamAsync");
+    if (num_slices == 0) {
+        auto actual_crc = Crc32cValue(nullptr, 0);
+        AssertInfo(actual_crc == expected_crc,
+                   "{}: expected {}, actual {}",
+                   crc_error_context,
+                   Crc32cToHex(expected_crc),
+                   Crc32cToHex(actual_crc));
+        return;
+    }
+
+    size_t max_active_tasks =
+        std::min(num_slices,
+                 std::max<size_t>(1,
+                                  milvus::ThreadPools::GetThreadPool(
+                                      milvus::PriorityForLoad(priority))
+                                      .GetMaxThreadNum()));
+
+    size_t next_submit = 0;
+    uint32_t running_crc = 0;
+    bool first = true;
+    std::deque<AsyncActiveSliceTask> active_tasks;
+    std::optional<PendingAsyncAdmission> pending_admission;
+    std::exception_ptr first_error = nullptr;
+
+    auto rememberError = [&](std::exception_ptr error) {
+        if (!first_error) {
+            first_error = std::move(error);
+        }
+    };
+
+    auto rememberCancellation = [&]() {
+        try {
+            ThrowIfCancelled(cancellation_token, "ReadEntryStreamAsync");
+            return false;
+        } catch (...) {
+            rememberError(std::current_exception());
+            return true;
+        }
+    };
+
+    auto drainActiveTasks = [&]() {
+        while (!active_tasks.empty()) {
+            auto task = std::move(active_tasks.front());
+            active_tasks.pop_front();
+            try {
+                std::move(task.future).get();
+            } catch (...) {
+                rememberError(std::current_exception());
+            }
+            task.lease.Release();
+        }
+    };
+
+    auto ensurePendingAdmission = [&]() {
+        if (pending_admission.has_value() || next_submit >= num_slices) {
+            return;
+        }
+        auto seq = next_submit;
+        auto budget_bytes = slice_budget_bytes(seq);
+        pending_admission = PendingAsyncAdmission{
+            seq,
+            budget_bytes,
+            slice_read_bytes(seq),
+            TransientMemoryBudget::GetLoadTransientBudget().AcquireAsync(
+                budget_bytes,
+                TransientPriorityForLoad(priority),
+                cancellation_token)};
+    };
+
+    auto startPendingAdmission = [&](bool block_for_budget) -> bool {
+        ensurePendingAdmission();
+        if (!pending_admission.has_value()) {
+            return false;
+        }
+        if (!block_for_budget && !pending_admission->future.isReady()) {
+            return false;
+        }
+
+        auto pending = std::move(*pending_admission);
+        pending_admission.reset();
+
+        TransientBudgetLease lease;
+        try {
+            lease = folly::coro::blockingWait(std::move(pending.future));
+        } catch (...) {
+            if (!rememberCancellation()) {
+                rememberError(std::current_exception());
+            }
+            return false;
+        }
+
+        if (rememberCancellation()) {
+            lease.Release();
+            return false;
+        }
+
+        auto data = std::make_shared<std::vector<uint8_t>>(pending.read_bytes);
+        try {
+            auto future = submit_read(pending.seq, data);
+            active_tasks.push_back(AsyncActiveSliceTask{pending.seq,
+                                                        pending.read_bytes,
+                                                        std::move(lease),
+                                                        std::move(data),
+                                                        std::move(future)});
+            next_submit++;
+            return true;
+        } catch (...) {
+            lease.Release();
+            rememberError(std::current_exception());
+            return false;
+        }
+    };
+
+    auto refill = [&]() {
+        while (!first_error && next_submit < num_slices &&
+               active_tasks.size() < max_active_tasks) {
+            bool block_for_budget = active_tasks.empty();
+            if (!startPendingAdmission(block_for_budget)) {
+                break;
+            }
+        }
+    };
+
+    auto deliverSlice = [&](AsyncActiveSliceTask& task) {
+        try {
+            ThrowIfCancelled(cancellation_token, "ReadEntryStreamAsync");
+            auto bytes_read = std::move(task.future).get();
+            ThrowIfCancelled(cancellation_token, "ReadEntryStreamAsync");
+            AssertInfo(bytes_read == task.expected_read_bytes,
+                       "Failed to read entry slice");
+            auto decoded = decode_slice(task.seq, std::move(*task.data));
+            uint32_t slice_crc = Crc32cValue(decoded.data(), decoded.size());
+            running_crc =
+                first ? slice_crc
+                      : Crc32cCombine(running_crc, slice_crc, decoded.size());
+            first = false;
+            slice_consumer(decoded.data(), decoded.size());
+        } catch (...) {
+            rememberError(std::current_exception());
+        }
+    };
+
+    refill();
+
+    while (!active_tasks.empty()) {
+        auto task = std::move(active_tasks.front());
+        active_tasks.pop_front();
+
+        if (!first_error) {
+            deliverSlice(task);
+        } else {
+            try {
+                std::move(task.future).get();
+            } catch (...) {
+                rememberError(std::current_exception());
+            }
+        }
+
+        task.lease.Release();
 
         if (first_error) {
             drainActiveTasks();
@@ -973,6 +1239,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t plain_len = std::min(remaining, slice_size_);
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
                 EncryptedStreamBudgetBytes(slice.size, plain_len),
+                TransientPriorityForThreadPool(priority_),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1031,6 +1298,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t src_offset = pm.offset + output_offset;
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
                 SaturatingMultiply(len, kFileStreamBufferMultiplier),
+                TransientPriorityForThreadPool(priority_),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1263,6 +1531,68 @@ IndexEntryReader::ReadEntryStream(
 }
 
 void
+IndexEntryReader::ReadEntryStreamAsync(
+    const std::string& name,
+    std::function<void(const uint8_t* data, size_t len)> slice_consumer,
+    EntryStreamAsyncOptions options) {
+    CheckCancelled("IndexEntryReader::ReadEntryStreamAsync");
+    auto it = entry_index_.find(name);
+    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    const auto& meta = it->second;
+
+    if (meta.encrypted) {
+        ReadEncryptedEntryStreamAsync(meta.enc, slice_consumer, options);
+    } else {
+        ReadPlainEntryStreamAsync(meta.plain, slice_consumer, options);
+    }
+}
+
+Entry
+IndexEntryReader::ReadEntryToMemoryAsync(const std::string& name,
+                                         EntryStreamAsyncOptions options) {
+    Entry entry;
+    entry.data.reserve(GetEntrySize(name));
+    ReadEntryStreamAsync(
+        name,
+        [&entry](const uint8_t* data, size_t len) {
+            entry.data.insert(entry.data.end(), data, data + len);
+        },
+        std::move(options));
+    return entry;
+}
+
+void
+IndexEntryReader::ReadEntryToFileAsync(const std::string& name,
+                                       const std::string& local_path,
+                                       EntryStreamAsyncOptions options,
+                                       io::Priority write_priority) {
+    CheckCancelled("IndexEntryReader::ReadEntryToFileAsync");
+    if (options.localize_disk_executor == nullptr) {
+        options.localize_disk_executor =
+            milvus::segcore::async_load::AsyncLoadDiskExecutor();
+    }
+
+    auto writer = FileWriter(local_path, write_priority);
+    auto* executor = options.localize_disk_executor;
+    ReadEntryStreamAsync(
+        name,
+        [&writer, executor](const uint8_t* data, size_t len) {
+            auto write_future =
+                milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<
+                    arrow::Status>(executor, [&writer, data, len]() {
+                    writer.Write(data, len);
+                    return arrow::Status::OK();
+                });
+            auto status = std::move(write_future).get();
+            if (!status.ok()) {
+                throw milvus_storage::ToSegcoreError(status);
+            }
+        },
+        std::move(options));
+    writer.Finish();
+}
+
+void
 IndexEntryReader::ReadPlainEntryStream(
     const PlainEntryMeta& pm,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
@@ -1309,6 +1639,53 @@ IndexEntryReader::ReadPlainEntryStream(
                            slice_consumer,
                            sliceTransientBytes,
                            load_slice);
+}
+
+void
+IndexEntryReader::ReadPlainEntryStreamAsync(
+    const PlainEntryMeta& pm,
+    const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
+    const EntryStreamAsyncOptions& options) {
+    auto slice_size = options.slice_size;
+    AssertInfo(
+        slice_size >= kMinStreamSliceSize,
+        "ReadEntryStreamAsync slice_size must be at least {} bytes, got {}",
+        kMinStreamSliceSize,
+        slice_size);
+    AssertInfo(IsStreamSliceSizeAligned(slice_size),
+               "ReadEntryStreamAsync slice_size must be {}-byte aligned, got "
+               "{}",
+               kStreamSliceAlignment,
+               slice_size);
+    auto entry_size = static_cast<size_t>(pm.size);
+    auto num_slices = PlainStreamSliceCount(entry_size, slice_size);
+    auto sliceBytes = [entry_size, slice_size, num_slices](size_t seq) {
+        return PlainStreamSliceBytes(entry_size, slice_size, num_slices, seq);
+    };
+    auto input = input_;
+    auto priority = options.priority;
+    auto submit_read = [input, pm, slice_size, sliceBytes, priority](
+                           size_t seq,
+                           const std::shared_ptr<std::vector<uint8_t>>& data) {
+        size_t off = seq * slice_size;
+        size_t len = sliceBytes(seq);
+        size_t src = MILVUS_V3_MAGIC_SIZE + pm.offset + off;
+        return SubmitReadAtAsync(input, priority, src, len, data);
+    };
+    auto decode_plain = [](size_t, std::vector<uint8_t>&& data) {
+        return std::move(data);
+    };
+
+    ReadOrderedEntryStreamAsync(num_slices,
+                                pm.crc32,
+                                "CRC-32C mismatch in async stream read",
+                                cancellation_token_,
+                                slice_consumer,
+                                sliceBytes,
+                                sliceBytes,
+                                submit_read,
+                                decode_plain,
+                                options.priority);
 }
 
 void
@@ -1383,6 +1760,73 @@ IndexEntryReader::ReadEncryptedEntryStream(
                            slice_consumer,
                            sliceTransientBytes,
                            load_slice);
+}
+
+void
+IndexEntryReader::ReadEncryptedEntryStreamAsync(
+    const EncryptedEntryMeta& em,
+    const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
+    const EntryStreamAsyncOptions& options) {
+    size_t num_slices = em.slices.size();
+    auto slicePlainBytes = [this, &em](size_t seq) {
+        size_t output_offset = seq * slice_size_;
+        AssertInfo(output_offset < em.original_size,
+                   "Encrypted slice {} exceeds original entry size {}",
+                   seq,
+                   em.original_size);
+        size_t remaining = em.original_size - output_offset;
+        return std::min(remaining, slice_size_);
+    };
+    auto sliceBudgetBytes = [&](size_t seq) {
+        auto plain_len = slicePlainBytes(seq);
+        auto cipher_len = em.slices[seq].size;
+        return EncryptedStreamBudgetBytes(cipher_len, plain_len);
+    };
+    auto sliceCipherBytes = [&em](size_t seq) {
+        return static_cast<size_t>(em.slices[seq].size);
+    };
+    auto input = input_;
+    auto priority = options.priority;
+    auto submit_read = [input, &em, priority](
+                           size_t seq,
+                           const std::shared_ptr<std::vector<uint8_t>>& data) {
+        const auto& slice = em.slices[seq];
+        return SubmitReadAtAsync(input,
+                                 priority,
+                                 MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                 slice.size,
+                                 data);
+    };
+    auto cipher_plugin = cipher_plugin_;
+    int64_t ez_id = ez_id_;
+    int64_t collection_id = collection_id_;
+    auto edek = edek_;
+    auto decode_encrypted =
+        [cipher_plugin, ez_id, collection_id, edek, slicePlainBytes](
+            size_t seq, std::vector<uint8_t>&& cipher) {
+            auto expected_plain_len = slicePlainBytes(seq);
+            auto dec = cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
+            auto plain = dec->Decrypt(cipher.data(), cipher.size());
+            AssertInfo(plain.size() == expected_plain_len,
+                       "Decrypted size mismatch: expected {}, got {}",
+                       expected_plain_len,
+                       plain.size());
+            return std::vector<uint8_t>(
+                reinterpret_cast<const uint8_t*>(plain.data()),
+                reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());
+        };
+
+    ReadOrderedEntryStreamAsync(
+        num_slices,
+        em.crc32,
+        "CRC-32C mismatch in encrypted async stream read",
+        cancellation_token_,
+        slice_consumer,
+        sliceBudgetBytes,
+        sliceCipherBytes,
+        submit_read,
+        decode_encrypted,
+        options.priority);
 }
 
 }  // namespace milvus::storage

@@ -41,16 +41,17 @@ import (
 
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize                      = 16
-	DefaultLoadTransientBudgetBytes            = 0
-	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 1800 // s, for node
-	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
-	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
-	DefaultHighPriorityThreadCoreCoefficient   = 10
-	DefaultMiddlePriorityThreadCoreCoefficient = 5
-	DefaultLowPriorityThreadCoreCoefficient    = 1
-	DefaultThreadPoolMaxThreadsSize            = 16
+	DefaultIndexSliceSize                        = 16
+	DefaultLoadTransientBudgetBytes              = 0
+	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
+	DefaultGracefulTime                          = 5000 // ms
+	DefaultGracefulStopTimeout                   = 1800 // s, for node
+	DefaultProxyGracefulStopTimeout              = 30   // s，for proxy
+	DefaultCoordGracefulStopTimeout              = 5    // s，for coord
+	DefaultHighPriorityThreadCoreCoefficient     = 10
+	DefaultMiddlePriorityThreadCoreCoefficient   = 5
+	DefaultLowPriorityThreadCoreCoefficient      = 1
+	DefaultThreadPoolMaxThreadsSize              = 16
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -881,11 +882,11 @@ Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will b
 		Key:          "common.diskWriteNumThreads",
 		Version:      "2.6.0",
 		DefaultValue: "0",
-		Doc: `This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
-It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
-For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
-The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
-In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
+		Doc: `This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
+Storage V2 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
+The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
+For example, set this parameter to 1 to serialize these local file writes.
+The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
@@ -3891,7 +3892,9 @@ type queryNodeConfig struct {
 
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
-	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+	StorageV2CellTargetSizeBytes          ParamItem `refreshable:"true"`
+	StorageV2EnableAsyncLoad              ParamItem `refreshable:"true"`
+	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -5171,6 +5174,35 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
+
+	p.StorageV2EnableAsyncLoad = ParamItem{
+		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Temporary rollout switch for async storage v2 field-data and scalar packed-index v3 loading. Translators capture the mode at construction; scalar indexes read it when loading starts.",
+		Export:       false,
+	}
+	p.StorageV2EnableAsyncLoad.Init(base.mgr)
+
+	p.StorageV2AsyncLoadReadWindowSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes),
+		Doc: `Target estimated loaded-byte threshold for one storage v2 async read window. ` +
+			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
+			`The value must be positive. Default 16 MiB.`,
+		Export: true,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes must be positive, using default 16 MiB",
+					mlog.String("configured", v))
+				return strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes)
+			}
+			return v
+		},
+	}
+	p.StorageV2AsyncLoadReadWindowSizeBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",

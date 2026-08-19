@@ -39,13 +39,12 @@
 #include "index/IndexInfo.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
-#include "pb/common.pb.h"
-#include "storage/ChunkManager.h"
-#include "storage/Types.h"
-#include "storage/Util.h"
 #include "index/StringIndexMarisa.h"
+#include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -94,6 +93,207 @@ GetTempFileManagerCtx(CDataType data_type) {
     auto ctx = milvus::storage::FileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
     return ctx;
+}
+
+class TestScalarIndexV3AsyncFallback
+    : public milvus::index::ScalarIndex<int32_t> {
+ public:
+    explicit TestScalarIndexV3AsyncFallback(
+        const milvus::storage::FileManagerContext& ctx)
+        : milvus::index::ScalarIndex<int32_t>("test_scalar_v3_async") {
+        file_manager_ =
+            std::make_shared<milvus::storage::MemFileManagerImpl>(ctx);
+    }
+
+    milvus::index::ScalarIndexType
+    GetIndexType() const override {
+        return milvus::index::ScalarIndexType::STLSORT;
+    }
+
+    knowhere::BinarySet
+    Serialize(const milvus::Config&) override {
+        return {};
+    }
+
+    void
+    Load(const knowhere::BinarySet&, const milvus::Config&) override {
+    }
+
+    void
+    Load(milvus::tracer::TraceContext, const milvus::Config&) override {
+    }
+
+    void
+    Build(const milvus::Config&) override {
+    }
+
+    void
+    Build(size_t, const int32_t*, const bool* = nullptr) override {
+    }
+
+    int64_t
+    Count() override {
+        return load_entries_calls_;
+    }
+
+    milvus::index::IndexStatsPtr
+    Upload(const milvus::Config& config) override {
+        return UploadUnified(config);
+    }
+
+    const bool
+    HasRawData() const override {
+        return false;
+    }
+
+    const milvus::TargetBitmap
+    In(size_t, const int32_t*) override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    IsNull() override {
+        return {};
+    }
+
+    milvus::TargetBitmap
+    IsNotNull() override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    NotIn(size_t, const int32_t*) override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    Range(const int32_t&, milvus::OpType) override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    Range(const int32_t&, bool, const int32_t&, bool) override {
+        return {};
+    }
+
+    std::optional<int32_t>
+    Reverse_Lookup(size_t) const override {
+        return std::nullopt;
+    }
+
+    int64_t
+    Size() override {
+        return 0;
+    }
+
+    void
+    WriteEntries(milvus::storage::IndexEntryWriter* writer) override {
+        constexpr int32_t payload = 42;
+        writer->WriteEntry("payload", &payload, sizeof(payload));
+    }
+
+    void
+    LoadEntries(milvus::storage::IndexEntryReader& reader,
+                const milvus::Config&) override {
+        auto entry = reader.ReadEntry("payload");
+        ASSERT_EQ(entry.data.size(), sizeof(int32_t));
+        load_entries_calls_++;
+    }
+
+    int load_entries_calls_{0};
+};
+
+class TestScalarIndexV3AsyncOptIn : public TestScalarIndexV3AsyncFallback {
+ public:
+    using TestScalarIndexV3AsyncFallback::TestScalarIndexV3AsyncFallback;
+
+    void
+    LoadEntriesWithAsyncRead(
+        milvus::storage::IndexEntryReader& reader,
+        const milvus::Config& config,
+        milvus::index::ScalarIndexV3AsyncLoadContext& async_ctx) override {
+        ASSERT_NE(async_ctx.op_ctx, nullptr);
+        EXPECT_EQ(async_ctx.load_priority,
+                  milvus::proto::common::LoadPriority::LOW);
+        async_load_entries_calls_++;
+        LoadEntries(reader, config);
+    }
+
+    int async_load_entries_calls_{0};
+};
+
+TEST(ScalarIndexV3AsyncLoadConfigTest,
+     LoadUnifiedUsesSyncPathWhenSharedFlagDisabled) {
+    auto old_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto guard = folly::makeGuard([old_enabled]() {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled);
+    });
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(false);
+
+    auto ctx = GetTempFileManagerCtx(Int32);
+    TestScalarIndexV3AsyncOptIn build_index(ctx);
+    auto stats = build_index.UploadUnified({});
+
+    TestScalarIndexV3AsyncOptIn load_index(ctx);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] = stats->GetIndexFiles();
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::LOW;
+    milvus::OpContext op_ctx;
+    load_index.LoadUnified(load_config, &op_ctx);
+
+    EXPECT_EQ(load_index.load_entries_calls_, 1);
+    EXPECT_EQ(load_index.async_load_entries_calls_, 0);
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest,
+     LoadUnifiedUsesAsyncHookWhenSharedFlagEnabled) {
+    auto old_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto guard = folly::makeGuard([old_enabled]() {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled);
+    });
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+
+    auto ctx = GetTempFileManagerCtx(Int32);
+    TestScalarIndexV3AsyncOptIn build_index(ctx);
+    auto stats = build_index.UploadUnified({});
+
+    TestScalarIndexV3AsyncOptIn load_index(ctx);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] = stats->GetIndexFiles();
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::LOW;
+    milvus::OpContext op_ctx;
+    load_index.LoadUnified(load_config, &op_ctx);
+
+    EXPECT_EQ(load_index.load_entries_calls_, 1);
+    EXPECT_EQ(load_index.async_load_entries_calls_, 1);
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest,
+     LoadUnifiedFallsBackToSyncPathWhenAsyncHookIsNotOverridden) {
+    auto old_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto guard = folly::makeGuard([old_enabled]() {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled);
+    });
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+
+    auto ctx = GetTempFileManagerCtx(Int32);
+    TestScalarIndexV3AsyncFallback build_index(ctx);
+    auto stats = build_index.UploadUnified({});
+
+    TestScalarIndexV3AsyncFallback load_index(ctx);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] = stats->GetIndexFiles();
+    load_index.LoadUnified(load_config);
+
+    EXPECT_EQ(load_index.load_entries_calls_, 1);
 }
 
 TYPED_TEST_P(TypedScalarIndexTest, Constructor) {

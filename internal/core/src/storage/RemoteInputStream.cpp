@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <utility>
@@ -11,6 +12,7 @@
 #include "log/Log.h"
 
 #include "RemoteInputStream.h"
+#include "arrow/buffer.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
@@ -105,7 +107,10 @@ ReadWithRetry(const char* operation,
 
 RemoteInputStream::RemoteInputStream(
     std::shared_ptr<arrow::io::RandomAccessFile>&& remote_file)
-    : remote_file_(std::move(remote_file)) {
+    : remote_file_(std::move(remote_file)),
+      async_read_at_file_(
+          std::dynamic_pointer_cast<milvus_storage::NonBlockingReadAtFile>(
+              remote_file_)) {
     auto status = remote_file_->GetSize();
     AssertInfo(status.ok(), "Failed to get size of remote file");
     file_size_ = static_cast<size_t>(status.ValueOrDie());
@@ -151,6 +156,33 @@ RemoteInputStream::ReadAt(void* data, size_t offset, size_t size) {
                file_size_,
                status.status().ToString());
     return static_cast<size_t>(status.ValueOrDie());
+}
+
+arrow::Future<int64_t>
+RemoteInputStream::ReadAtAsyncInto(int64_t position,
+                                   int64_t nbytes,
+                                   uint8_t* out) {
+    if (async_read_at_file_ != nullptr) {
+        return async_read_at_file_->ReadAtAsyncInto(position, nbytes, out);
+    }
+
+    return remote_file_
+        ->ReadAsync(arrow::io::default_io_context(), position, nbytes)
+        .Then([out, nbytes](const std::shared_ptr<arrow::Buffer>& buffer)
+                  -> arrow::Result<int64_t> {
+            if (buffer == nullptr) {
+                return arrow::Status::IOError(
+                    "Remote async read returned a null buffer");
+            }
+            if (buffer->size() != nbytes) {
+                return arrow::Status::IOError("Remote async read returned ",
+                                              std::to_string(buffer->size()),
+                                              " bytes, expected ",
+                                              std::to_string(nbytes));
+            }
+            std::memcpy(out, buffer->data(), static_cast<size_t>(nbytes));
+            return nbytes;
+        });
 }
 
 size_t
