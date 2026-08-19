@@ -44,15 +44,32 @@ The request carries:
 - consistency level;
 - a Legacy Search or Retrieve request.
 
+The top-level `partition_ids` is the authoritative partition selection for
+Phase 1 planning. The nested Legacy request retains the same field for wire
+compatibility and later Phase 2 execution; callers construct both from the same
+request and must not give them different meanings.
+
 The response contains a `QueryPlan` with:
 
 - the exact `ShardID` and QueryView version;
 - growing and transforming MVCC frontiers;
 - the complete list of StreamingNode and QueryNode work targets;
-- the request after any node-side global optimization.
+- a small Legacy plan delta containing only fields rewritten by node-side global
+  optimization;
+- an explicit `skip_execution` decision when planning proves the shard has no
+  Phase 2 work.
 
-The client rejects an empty plan, a missing version, a mismatched shard, an
-invalid work node, and duplicate work nodes before Phase 2 starts.
+The client rejects an empty plan, missing MVCC, a missing version, a mismatched
+shard, an invalid work node, and duplicate work nodes before Phase 2 starts. A
+StreamingNode target requires a nonzero growing frontier and a QueryNode target
+requires a nonzero transforming frontier. Their relative ordering is not
+validated because a valid QueryView transition may make transforming newer than
+growing. An empty work-node list is accepted only with `skip_execution=true`,
+and a skipped plan must not also contain work nodes.
+
+The deprecated full-request response fields remain readable for rolling upgrade
+compatibility. New Phase 1 implementations return `legacy_search_plan` or
+`legacy_retrieve_plan` and do not echo the potentially large original request.
 
 ### 2.2 Phase 2: ViewQueryService
 
@@ -64,6 +81,12 @@ The Legacy request's `mvcc_timestamp` is projected per node:
 |---|---|
 | StreamingNode | `growing_timetick` |
 | QueryNode | `transforming_timetick` |
+
+The client does not convert a planned MVCC frontier into
+`guarantee_timestamp`. Node-side Phase 2 handlers own visibility waiting:
+StreamingNode waits for the growing frontier, while QueryNode waits for the
+transforming frontier. This keeps planning consistency separate from Legacy
+request guarantee semantics.
 
 The Query Client does not own connections or endpoint discovery. A
 `ViewQueryServiceClient` implementation receives a typed `qviews.WorkNode`; the
@@ -98,13 +121,15 @@ For each collection request, the Legacy client performs the following steps:
 4. Select and validate the primary `ShardID`.
 5. Call `GetQueryPlan` on that primary.
 6. Validate the returned plan.
-7. Clone the planned Legacy request for every work node and project its MVCC.
+7. Clone the caller's Legacy request, apply the plan delta, and project its MVCC
+   for every work node.
 8. Fan out Phase 2 calls concurrently with `errgroup.WithContext`.
 9. Add successful raw results to a shard-aware collector.
 10. Return raw results and the successful `ShardPlan` for each vchannel.
 
-An empty work-node list is valid and returns an empty result for that shard.
-An empty successful Retrieve response is not added to the raw result list.
+An explicit skipped plan returns an empty result for that shard. Every successful
+Phase 2 response is retained, including a Retrieve response with no IDs or
+fields, because it may still carry cost or other metadata.
 
 ## 5. Retry and Result Isolation
 
@@ -123,8 +148,10 @@ the reset, preventing late writes from repopulating the failed attempt.
 Ordinary transport retry belongs to the future concrete node clients. A
 non-QueryView error is terminal for the current shard execution.
 
-`ViewQueryClientConfig.MaxRetries` currently means maximum shard attempts. Values below one
-use the default of three attempts.
+`ViewQueryClientConfig.MaxAttempts` is the maximum number of complete shard
+attempts. Values below one use the default of three attempts. Retryable
+QueryView failures use bounded exponential backoff configured by
+`RetryInitialBackoff` and `RetryMaxBackoff`; cancellation interrupts the wait.
 
 ## 6. Error Boundary
 
@@ -132,10 +159,13 @@ Nodes attach `viewpb.ViewError` to gRPC status details. `viewerror.ConvertViewEr
 preserves context cancellation, deadline, and EOF while retaining other gRPC
 status information for QueryView detail extraction.
 
-Retryable QueryView exhaustion becomes retriable `merr.ErrServiceUnavailable`.
-Untyped dependency or invariant failures become `merr.ErrServiceInternal`.
-Existing typed merr and context errors pass through unchanged. Therefore the
-public Legacy client boundary does not leak an unclassified QueryView error.
+Retryable QueryView exhaustion and retryable QueryView errors become retriable
+`merr.ErrServiceUnavailable`; non-retryable QueryView errors become
+`merr.ErrServiceInternal`. gRPC `Unavailable` and gRPC `DeadlineExceeded`
+without QueryView details also become `merr.ErrServiceUnavailable`. Untyped
+dependency or invariant failures become `merr.ErrServiceInternal`. Existing
+typed merr and local context errors pass through unchanged. Therefore the public
+Legacy client boundary does not leak an unclassified QueryView error.
 
 ## 7. Injected Interfaces
 
