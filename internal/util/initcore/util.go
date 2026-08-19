@@ -29,6 +29,7 @@ import "C"
 import (
 	"context"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -251,6 +252,71 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 
 func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
+}
+
+func UpdateStorageV2AsyncLoadEnabled(enabled bool) {
+	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+}
+
+func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConfig func()) {
+	var syncMu sync.Mutex
+	serializedSync := func() {
+		syncMu.Lock()
+		defer syncMu.Unlock()
+		syncConfig()
+	}
+
+	register(serializedSync)
+	serializedSync()
+}
+
+// RegisterStorageV2AsyncLoadEnabledWatcher keeps the C++ async-load switch in
+// sync with paramtable and catches up any update that arrived during startup.
+func RegisterStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string) {
+	registerStorageV2AsyncLoadEnabledWatcher(ctx, pt, source, UpdateStorageV2AsyncLoadEnabled)
+}
+
+func registerStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string, apply func(bool)) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
+	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+		pt.Watch(item.Key, config.NewHandler(item.Key+"."+source, func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			syncConfig()
+		}))
+	}, func() {
+		enabled := item.GetAsBool()
+		apply(enabled)
+		mlog.Info(ctx, "queryNode.segcore.storageV2.enableAsyncLoad updated",
+			mlog.String("source", source),
+			mlog.Bool("enabled", enabled))
+	})
+}
+
+func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+		pt.Watch(item.Key, config.NewHandler(item.Key+".core", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			syncConfig()
+		}))
+	}, func() {
+		UpdateStorageV2AsyncLoadReadWindowSizeBytes(item.GetAsInt64())
+	})
+}
+
+func UpdateStorageV2AsyncLoadReadWindowSizeBytes(bytes int64) {
+	C.SetStorageV2AsyncLoadReadWindowSizeBytes(C.int64_t(bytes))
+}
+
+func GetStorageV2AsyncLoadReadWindowSizeBytes() int64 {
+	return int64(C.GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

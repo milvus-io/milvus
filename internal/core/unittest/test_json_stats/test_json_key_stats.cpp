@@ -12,22 +12,29 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <simdjson.h>
 #include <stddef.h>
+#include <chrono>
 #include <cstdint>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <random>
 #include <set>
 #include <string>
+#include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
 
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
+#include "common/init_c.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
@@ -46,10 +53,12 @@
 #include "indexbuilder/IndexCreatorBase.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -448,7 +457,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     }
 
     void
-    Load() {
+    Load(const std::string& warmup_policy = "") {
         storage::FileManagerContext ctx(
             field_meta_, index_meta_, chunk_manager_, fs_);
         Config config;
@@ -457,6 +466,9 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         config[milvus::index::MMAP_FILE_PATH] = TestLocalPath + "mmap-file";
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
+        if (!warmup_policy.empty()) {
+            config[milvus::index::WARMUP] = warmup_policy;
+        }
         config[STATS_BASE_PATH_KEY] =
             storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
                                                   index_build_id_,
@@ -520,6 +532,113 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     std::vector<std::string> index_files_;
     milvus_storage::ArrowFileSystemPtr fs_;
 };
+
+class JsonKeyStatsAsyncLoadTest
+    : public JsonKeyStatsUploadLoadTest,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {};
+
+TEST_P(JsonKeyStatsAsyncLoadTest, HonorsRolloutForMmapEagerAndLazyLoad) {
+    const auto [eager_load, enable_async_load] = GetParam();
+    segment_id_ = 100 + static_cast<int64_t>(eager_load) * 10 +
+                  static_cast<int64_t>(enable_async_load);
+    std::vector<std::string> json_strings = {
+        R"({"int": 1, "double": 1.5, "string": "test", "bool": true})",
+        R"({"int": 2, "double": 2.5, "string": "test2", "bool": false})",
+        R"({"int": 3, "double": 3.5, "string": "test3", "bool": true})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+
+    auto previous_rollout =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    ::SetStorageV2AsyncLoadEnabled(enable_async_load);
+
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    auto cleanup_guard = folly::makeGuard([&]() {
+        ::SetStorageV2AsyncLoadEnabled(previous_rollout);
+        pool.Configure(0);
+    });
+
+    std::string lazy_field;
+    if (!eager_load) {
+        Load("disable");
+        auto shredding_fields = load_index_->GetShreddingFields("/int");
+        ASSERT_FALSE(shredding_fields.empty());
+        lazy_field = *shredding_fields.begin();
+    }
+
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+    auto* worker_executor =
+        dynamic_cast<folly::CPUThreadPoolExecutor*>(io_executor.get());
+    ASSERT_NE(worker_executor, nullptr);
+
+    auto blocker_started_promise = std::make_shared<std::promise<void>>();
+    auto blocker_started = blocker_started_promise->get_future();
+    auto release_blocker_promise = std::make_shared<std::promise<void>>();
+    auto release_blocker = release_blocker_promise->get_future().share();
+    io_executor->add([blocker_started_promise, release_blocker]() {
+        blocker_started_promise->set_value();
+        release_blocker.wait();
+    });
+    if (blocker_started.wait_for(std::chrono::seconds(5)) !=
+        std::future_status::ready) {
+        release_blocker_promise->set_value();
+        FAIL() << "local file I/O blocker did not start";
+    }
+
+    std::future<int64_t> operation;
+    bool blocker_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!blocker_released) {
+            release_blocker_promise->set_value();
+        }
+    });
+    if (eager_load) {
+        operation = std::async(std::launch::async, [this]() {
+            Load("sync");
+            return load_index_->Count();
+        });
+    } else {
+        operation = std::async(std::launch::async,
+                               [this, lazy_field = std::move(lazy_field)]() {
+                                   TargetBitmap valid_res(data_.size(), true);
+                                   TargetBitmapView valid_res_view(valid_res);
+                                   return load_index_->ExecutorForGettingValid(
+                                       nullptr, lazy_field, valid_res_view);
+                               });
+    }
+
+    if (enable_async_load) {
+        auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (worker_executor->getPendingTaskCount() == 0 &&
+               operation.wait_for(std::chrono::milliseconds(0)) !=
+                   std::future_status::ready &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        EXPECT_GT(worker_executor->getPendingTaskCount(), 0);
+        EXPECT_EQ(operation.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+    } else {
+        EXPECT_EQ(operation.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        EXPECT_EQ(worker_executor->getPendingTaskCount(), 0);
+    }
+
+    release_blocker_promise->set_value();
+    blocker_released = true;
+    release_guard.dismiss();
+    EXPECT_EQ(operation.get(), static_cast<int64_t>(data_.size()));
+}
+
+INSTANTIATE_TEST_SUITE_P(JsonKeyStatsAsyncLoadModes,
+                         JsonKeyStatsAsyncLoadTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 TEST_F(JsonKeyStatsUploadLoadTest, TestSimpleJson) {
     std::vector<std::string> json_strings = {

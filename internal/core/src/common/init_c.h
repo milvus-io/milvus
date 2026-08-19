@@ -123,6 +123,20 @@ UpdateArrowIOThreadPoolMetrics();
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
 
+// Updates the rollout default used by newly constructed manifest translators.
+void
+SetStorageV2AsyncLoadEnabled(bool enabled);
+
+// Target estimated-byte threshold for one storage v2 async read window.
+// The value must be positive; non-positive values restore the process default.
+// A window always contains at least one cell, so an oversized cell may exceed
+// the configured threshold.
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
+
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes();
+
 #ifdef __cplusplus
 };
 #endif

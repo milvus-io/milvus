@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -31,6 +32,8 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
+#include "folly/OperationCancelled.h"
+#include "folly/coro/Promise.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
@@ -70,16 +73,58 @@ struct StreamSliceResult {
     std::exception_ptr error = nullptr;
 };
 
+enum class TransientBudgetPriority {
+    High,
+    Low,
+};
+
+inline TransientBudgetPriority
+TransientPriorityForThreadPool(milvus::ThreadPoolPriority priority) {
+    return priority == milvus::ThreadPoolPriority::LOW
+               ? TransientBudgetPriority::Low
+               : TransientBudgetPriority::High;
+}
+
+class TransientMemoryBudget;
+
+class TransientBudgetLease {
+ public:
+    TransientBudgetLease() = default;
+    TransientBudgetLease(const TransientBudgetLease&) = delete;
+    TransientBudgetLease&
+    operator=(const TransientBudgetLease&) = delete;
+    TransientBudgetLease(TransientBudgetLease&& other) noexcept;
+    TransientBudgetLease&
+    operator=(TransientBudgetLease&& other) noexcept;
+    ~TransientBudgetLease();
+
+    void
+    Release();
+
+ private:
+    friend class TransientMemoryBudget;
+
+    TransientBudgetLease(TransientMemoryBudget* budget, size_t bytes)
+        : budget_(budget), bytes_(bytes) {
+    }
+
+    TransientMemoryBudget* budget_{nullptr};
+    size_t bytes_{0};
+};
+
 /// Byte budget for transient data that has been submitted for async work but
 /// has not been consumed yet. Capacity 0 means unlimited.
 ///
 /// Usage:
-///   - Call Acquire(bytes) to block until budget is available.
-///   - Call AcquireUntil(bytes, cancellation_token) to block until budget is
-///     available or cancellation is requested.
-///   - Call TryAcquire(bytes) for non-blocking replenish in refill loops.
+///   - Call AcquireAsync(bytes, priority, token) for a cancellable RAII lease.
+///   - Call Acquire(bytes, priority) to block until budget is available.
+///   - Call AcquireUntil(bytes, priority, cancellation_token) to block until
+///     budget is available or cancellation is requested.
+///   - Call TryAcquire(bytes, priority) for non-blocking replenish in refill
+///     loops.
 ///   - Call Release(bytes) after the transient data has been consumed.
 ///   - Oversized requests are allowed to run exclusively to guarantee progress.
+/// Async waiters are admitted high-priority first without reserved capacity.
 class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
@@ -93,13 +138,67 @@ class TransientMemoryBudget {
         GetLoadTransientBudget().SetCapacityBytes(bytes);
     }
 
+    folly::coro::Future<TransientBudgetLease>
+    AcquireAsync(size_t bytes,
+                 TransientBudgetPriority priority,
+                 const folly::CancellationToken& cancellation_token = {}) {
+        auto [promise, future] =
+            folly::coro::makePromiseContract<TransientBudgetLease>();
+        auto pending = std::make_shared<PendingAdmission>();
+        pending->promise = std::move(promise);
+        pending->bytes = bytes;
+
+        auto merged_cancellation_token = folly::cancellation_token_merge(
+            cancellation_token, pending->promise.getCancellationToken());
+        if (merged_cancellation_token.canBeCancelled()) {
+            std::weak_ptr<PendingAdmission> weak_pending = pending;
+            pending->cancellation_callback =
+                std::make_unique<folly::CancellationCallback>(
+                    merged_cancellation_token, [this, weak_pending]() {
+                        if (auto admission = weak_pending.lock()) {
+                            CancelPending(std::move(admission));
+                        }
+                    });
+        }
+
+        bool admitted = false;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            if (pending->state != PendingAdmission::State::Cancelled) {
+                if (CanAdmitImmediatelyLocked(priority, bytes)) {
+                    MarkAdmittedLocked(pending);
+                    admitted = true;
+                } else {
+                    EnqueuePendingLocked(pending, priority);
+                }
+            }
+        }
+
+        if (admitted) {
+            FulfillAdmission(std::move(pending));
+        }
+        return future;
+    }
+
     /// Block until enough budget is available. Safe to call when the calling
     /// thread has no inflight tasks (no risk of deadlock with channel pop).
     void
-    Acquire(size_t bytes) {
+    Acquire(size_t bytes, TransientBudgetPriority priority) {
+        auto pending = std::make_shared<PendingAdmission>();
+        pending->bytes = bytes;
+        pending->legacy = true;
+
         std::unique_lock<std::mutex> lock(mu_);
-        cv_.wait(lock, [this, bytes] { return CanAcquireLocked(bytes); });
-        inflight_bytes_ += bytes;
+        if (CanAdmitImmediatelyLocked(priority, bytes)) {
+            MarkAdmittedLocked(pending);
+        } else {
+            EnqueuePendingLocked(pending, priority);
+            cv_.wait(lock, [&pending] {
+                return pending->state != PendingAdmission::State::Pending;
+            });
+        }
+        AssertInfo(pending->state == PendingAdmission::State::Admitted,
+                   "Blocking legacy budget admission was not admitted");
     }
 
     /// Block until enough budget is available, or cancellation is requested.
@@ -107,37 +206,49 @@ class TransientMemoryBudget {
     /// its work.
     bool
     AcquireUntil(size_t bytes,
+                 TransientBudgetPriority priority,
                  const folly::CancellationToken& cancellation_token) {
-        folly::CancellationCallback cancel_callback(
-            cancellation_token, [this]() noexcept {
-                // Pair with wait(lock, predicate) to avoid losing a cancel
-                // notification between predicate check and wait.
-                std::lock_guard<std::mutex> lock(mu_);
-                cv_.notify_all();
-            });
+        auto pending = std::make_shared<PendingAdmission>();
+        pending->bytes = bytes;
+        pending->legacy = true;
+        if (cancellation_token.canBeCancelled()) {
+            std::weak_ptr<PendingAdmission> weak_pending = pending;
+            pending->cancellation_callback =
+                std::make_unique<folly::CancellationCallback>(
+                    cancellation_token, [this, weak_pending]() {
+                        if (auto admission = weak_pending.lock()) {
+                            CancelPending(std::move(admission));
+                        }
+                    });
+        }
 
         bool acquired = false;
         {
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait(lock, [this, bytes, &cancellation_token] {
-                return cancellation_token.isCancellationRequested() ||
-                       CanAcquireLocked(bytes);
-            });
-            if (!cancellation_token.isCancellationRequested()) {
-                inflight_bytes_ += bytes;
-                acquired = true;
+            if (pending->state != PendingAdmission::State::Cancelled) {
+                if (CanAdmitImmediatelyLocked(priority, bytes)) {
+                    MarkAdmittedLocked(pending);
+                } else {
+                    EnqueuePendingLocked(pending, priority);
+                    cv_.wait(lock, [&pending] {
+                        return pending->state !=
+                               PendingAdmission::State::Pending;
+                    });
+                }
             }
+            acquired = pending->state == PendingAdmission::State::Admitted;
         }
 
+        pending->cancellation_callback.reset();
         return acquired;
     }
 
     /// Try to claim budget. Returns true if under budget.
     /// Used in the refill loop where blocking could cause deadlock.
     bool
-    TryAcquire(size_t bytes) {
+    TryAcquire(size_t bytes, TransientBudgetPriority priority) {
         std::lock_guard<std::mutex> lock(mu_);
-        if (CanAcquireLocked(bytes)) {
+        if (CanAdmitImmediatelyLocked(priority, bytes)) {
             inflight_bytes_ += bytes;
             return true;
         }
@@ -146,6 +257,7 @@ class TransientMemoryBudget {
 
     void
     Release(size_t bytes) {
+        PendingResolution resolution;
         {
             std::lock_guard<std::mutex> lock(mu_);
             AssertInfo(bytes <= inflight_bytes_,
@@ -154,7 +266,9 @@ class TransientMemoryBudget {
                        bytes,
                        inflight_bytes_);
             inflight_bytes_ -= bytes;
+            resolution = TakeAdmittedLocked();
         }
+        ResolvePending(std::move(resolution));
         cv_.notify_all();
     }
 
@@ -166,30 +280,66 @@ class TransientMemoryBudget {
 
     void
     SetCapacityBytes(size_t bytes) {
-        std::lock_guard<std::mutex> update_lock(capacity_update_mutex_);
-        auto old_capacity = CapacityBytes();
-        auto expanding =
-            old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
-        auto& overhead_controller = LoadMemoryOverheadController::GetInstance();
-        if (expanding && !overhead_controller.UpdateBudgetBytes(bytes)) {
-            return;
-        }
+        PendingResolution resolution;
         {
-            std::lock_guard<std::mutex> lock(mu_);
-            capacity_bytes_ = bytes;
+            std::lock_guard<std::mutex> update_lock(capacity_update_mutex_);
+            auto old_capacity = CapacityBytes();
+            auto expanding =
+                old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
+            auto& overhead_controller =
+                LoadMemoryOverheadController::GetInstance();
+            if (expanding && !overhead_controller.UpdateBudgetBytes(bytes)) {
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                capacity_bytes_ = bytes;
+                resolution = TakeAdmittedLocked();
+            }
+            if (!expanding) {
+                overhead_controller.UpdateBudgetBytes(bytes);
+            }
         }
-        if (!expanding) {
-            overhead_controller.UpdateBudgetBytes(bytes);
-        }
+        ResolvePending(std::move(resolution));
         cv_.notify_all();
     }
 
     void
     NotifyCapacityUpdated() {
+        PendingResolution resolution;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            resolution = TakeAdmittedLocked();
+        }
+        ResolvePending(std::move(resolution));
         cv_.notify_all();
     }
 
  private:
+    struct PendingAdmission;
+    using PendingQueue = std::list<std::shared_ptr<PendingAdmission>>;
+
+    struct PendingAdmission {
+        enum class State {
+            Pending,
+            Admitted,
+            Cancelled,
+        };
+
+        size_t bytes{0};
+        folly::coro::Promise<TransientBudgetLease> promise;
+        std::unique_ptr<folly::CancellationCallback> cancellation_callback;
+        State state{State::Pending};
+        bool legacy{false};
+        // Queue membership and this iterator are protected by mu_.
+        PendingQueue* queue{nullptr};
+        PendingQueue::iterator queue_position{};
+    };
+
+    struct PendingResolution {
+        PendingQueue admitted;
+    };
+
     TransientMemoryBudget() = default;
 
     explicit TransientMemoryBudget(size_t capacity_bytes)
@@ -202,7 +352,7 @@ class TransientMemoryBudget {
     }
 
     bool
-    CanAcquireLocked(size_t bytes) const {
+    CanAcquireCapacityLocked(size_t bytes) const {
         auto capacity_bytes = CapacityBytesLocked();
         if (capacity_bytes == 0) {
             return true;
@@ -214,12 +364,144 @@ class TransientMemoryBudget {
                bytes <= capacity_bytes - inflight_bytes_;
     }
 
+    bool
+    CanAdmitImmediatelyLocked(TransientBudgetPriority priority,
+                              size_t bytes) const {
+        if (!CanAcquireCapacityLocked(bytes)) {
+            return false;
+        }
+        if (priority == TransientBudgetPriority::High) {
+            return high_pending_.empty();
+        }
+        return high_pending_.empty() && low_pending_.empty();
+    }
+
+    void
+    EnqueuePendingLocked(const std::shared_ptr<PendingAdmission>& pending,
+                         TransientBudgetPriority priority) {
+        auto& queue = priority == TransientBudgetPriority::High ? high_pending_
+                                                                : low_pending_;
+        auto position = queue.insert(queue.end(), pending);
+        pending->queue = &queue;
+        pending->queue_position = position;
+    }
+
+    void
+    MarkAdmittedLocked(const std::shared_ptr<PendingAdmission>& pending) {
+        pending->state = PendingAdmission::State::Admitted;
+        inflight_bytes_ += pending->bytes;
+    }
+
+    PendingResolution
+    TakeAdmittedLocked() {
+        PendingResolution resolution;
+
+        auto admit_queue = [this, &resolution](auto& queue) {
+            while (!queue.empty()) {
+                auto& pending = queue.front();
+                if (!CanAcquireCapacityLocked(pending->bytes)) {
+                    break;
+                }
+                auto admitted = pending;
+                resolution.admitted.splice(
+                    resolution.admitted.end(), queue, queue.begin());
+                admitted->queue = nullptr;
+                MarkAdmittedLocked(admitted);
+            }
+        };
+        admit_queue(high_pending_);
+        if (high_pending_.empty()) {
+            admit_queue(low_pending_);
+        }
+        return resolution;
+    }
+
+    void
+    FulfillAdmission(std::shared_ptr<PendingAdmission> pending) {
+        if (pending->legacy) {
+            // AcquireUntil owns and clears the cancellation callback after waking.
+            return;
+        }
+        pending->cancellation_callback.reset();
+        auto lease = TransientBudgetLease(this, pending->bytes);
+        pending->promise.trySetValue(std::move(lease));
+    }
+
+    void
+    ResolvePending(PendingResolution resolution) {
+        for (auto& pending : resolution.admitted) {
+            FulfillAdmission(std::move(pending));
+        }
+    }
+
+    void
+    CancelPending(std::shared_ptr<PendingAdmission> pending) {
+        PendingResolution resolution;
+        bool cancelled = false;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            if (pending->state == PendingAdmission::State::Pending) {
+                pending->state = PendingAdmission::State::Cancelled;
+                if (pending->queue != nullptr) {
+                    pending->queue->erase(pending->queue_position);
+                    pending->queue = nullptr;
+                }
+                cancelled = true;
+                resolution = TakeAdmittedLocked();
+            }
+        }
+        if (cancelled) {
+            if (!pending->legacy) {
+                pending->promise.trySetException(folly::OperationCancelled{});
+            }
+            ResolvePending(std::move(resolution));
+            cv_.notify_all();
+        }
+    }
+
     std::mutex capacity_update_mutex_;
     mutable std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
     size_t capacity_bytes_{0};
+    PendingQueue high_pending_;
+    PendingQueue low_pending_;
 };
+
+inline TransientBudgetLease::TransientBudgetLease(
+    TransientBudgetLease&& other) noexcept
+    : budget_(other.budget_), bytes_(other.bytes_) {
+    other.budget_ = nullptr;
+    other.bytes_ = 0;
+}
+
+inline TransientBudgetLease&
+TransientBudgetLease::operator=(TransientBudgetLease&& other) noexcept {
+    if (this != &other) {
+        Release();
+        budget_ = other.budget_;
+        bytes_ = other.bytes_;
+        other.budget_ = nullptr;
+        other.bytes_ = 0;
+    }
+    return *this;
+}
+
+inline TransientBudgetLease::~TransientBudgetLease() {
+    Release();
+}
+
+inline void
+TransientBudgetLease::Release() {
+    if (budget_ == nullptr || bytes_ == 0) {
+        return;
+    }
+    auto* budget = budget_;
+    auto bytes = bytes_;
+    budget_ = nullptr;
+    bytes_ = 0;
+    budget->Release(bytes);
+}
 
 inline size_t
 SaturatingMultiply(size_t value, size_t multiplier) {

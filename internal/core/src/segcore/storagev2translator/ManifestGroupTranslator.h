@@ -38,6 +38,7 @@
 #include "common/protobuf_utils.h"
 #include "milvus-storage/reader.h"
 #include "pb/common.pb.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -100,7 +101,8 @@ class ManifestGroupTranslator
         int64_t fallback_bytes_per_row = 0,
         std::string shard = "",
         std::optional<ColumnSizeEstimateResult> column_size_estimate =
-            std::nullopt);
+            std::nullopt,
+        bool enable_async_load = false);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -191,6 +193,19 @@ class ManifestGroupTranslator
     }
 
  private:
+    using CellResult = std::pair<milvus::cachinglayer::cid_t,
+                                 std::unique_ptr<milvus::GroupChunk>>;
+
+    std::vector<CellResult>
+    get_cells_legacy(milvus::OpContext* ctx,
+                     const std::vector<milvus::cachinglayer::cid_t>& cids,
+                     std::vector<milvus::segcore::CellSpec> cell_specs);
+
+    std::vector<CellResult>
+    get_cells_via_async_pipeline(
+        milvus::OpContext* ctx,
+        std::vector<milvus::segcore::CellSpec> cell_specs);
+
     /**
      * @brief Load a cell from multiple Arrow Tables
      *
@@ -222,6 +237,7 @@ class ManifestGroupTranslator
     std::string mmap_dir_path_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+    bool enable_async_load_{false};
 };
 
 }  // namespace milvus::segcore::storagev2translator

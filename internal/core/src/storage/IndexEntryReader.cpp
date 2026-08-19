@@ -54,13 +54,14 @@ struct ActiveSliceTask {
 class TransientBudgetGuard {
  public:
     TransientBudgetGuard(size_t slice_transient_bytes,
+                         TransientBudgetPriority priority,
                          const folly::CancellationToken& cancellation_token,
                          const std::string& operation)
         : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
         auto acquired =
             TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
-                slice_transient_bytes_, cancellation_token);
+                slice_transient_bytes_, priority, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
             ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
@@ -170,6 +171,7 @@ ReadOrderedEntryStream(
 
     auto& pool = ThreadPools::GetThreadPool(priority);
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto budget_priority = TransientPriorityForThreadPool(priority);
     size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
@@ -226,12 +228,14 @@ ReadOrderedEntryStream(
 
         if (block_for_budget) {
             auto acquired = budget.AcquireUntil(slice_transient_byte_count,
+                                                budget_priority,
                                                 cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
             }
-        } else if (!budget.TryAcquire(slice_transient_byte_count)) {
+        } else if (!budget.TryAcquire(slice_transient_byte_count,
+                                      budget_priority)) {
             return false;
         }
 
@@ -973,6 +977,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t plain_len = std::min(remaining, slice_size_);
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
                 EncryptedStreamBudgetBytes(slice.size, plain_len),
+                TransientPriorityForThreadPool(priority_),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1031,6 +1036,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t src_offset = pm.offset + output_offset;
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
                 SaturatingMultiply(len, kFileStreamBufferMultiplier),
+                TransientPriorityForThreadPool(priority_),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
