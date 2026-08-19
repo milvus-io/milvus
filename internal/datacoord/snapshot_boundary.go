@@ -170,6 +170,17 @@ func (b *SnapshotBoundary) SeekTs(channel string) (uint64, bool) {
 // A file with no TimestampTo is kept. Those are legacy or not-yet-populated
 // binlogs, and dropping deletes because their metadata is incomplete would
 // resurrect rows -- the wrong direction to fail in.
+//
+// LIMITATION -- this does not bound deletes on a StorageV3 segment. There the
+// manifest is the authoritative delete set: L0 application writes a new
+// manifest version carrying the delta entries, the capture records that version
+// verbatim, and restore resolves a V3 segment by listing the manifest's base
+// path -- which contains the deltalogs too, since BuildDeltaLogPathV3 puts them
+// at {basePath}/_delta/. So every delta file is copied and referenced whatever
+// this returns, and a V3 snapshot carries deletes as of capture rather than as
+// of the boundary. Bounding them would mean rewriting the manifest, which is
+// not attempted here. The error is over-deletion (rows deleted after the cut
+// are missing), the same direction the spanning-file case above chooses.
 func filterDeltalogsBefore(deltalogs []*datapb.FieldBinlog, seekTs uint64) []*datapb.FieldBinlog {
 	kept := func(binlog *datapb.Binlog) bool {
 		return binlog.GetTimestampTo() == 0 || binlog.GetTimestampFrom() < seekTs

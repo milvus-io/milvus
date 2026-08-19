@@ -1233,6 +1233,15 @@ func (sm *snapshotMeta) SetSnapshotStaging(collectionID int64) {
 // for the life of the process -- acceptable because the flag is in-memory, the
 // retry can only be abandoned by process shutdown, and CreateSnapshot refuses
 // up front (checkSnapshotVisibilityReachable) the conditions that can never resolve.
+//
+// LIMITATION -- being in-memory cuts the other way across a restart. The
+// boundary is cut when the message is appended, but this flag is set only when
+// the ack callback runs, and after a DataCoord restart that callback is
+// replayed from persisted state minutes or hours later. The whole interval is
+// unprotected: a boundary-changing compaction can commit inside it, and because
+// it retires its inputs, GenSnapshot's lineage walk cannot tell afterwards.
+// Closing this would mean persisting the freeze, or re-deriving it at startup
+// from pending broadcast tasks; neither is attempted here.
 func (sm *snapshotMeta) ClearSnapshotStaging(collectionID int64) {
 	sm.segmentProtectionMu.Lock()
 	defer sm.segmentProtectionMu.Unlock()
