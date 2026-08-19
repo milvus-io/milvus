@@ -525,6 +525,8 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return true
+	case schemapb.DataType_Timestamptz:
+		return typeutil.IsTimestamptzType(right)
 	default:
 		return false
 	}

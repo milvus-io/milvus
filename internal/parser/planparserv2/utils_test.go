@@ -256,6 +256,10 @@ func Test_canBeComparedDataType(t *testing.T) {
 		{schemapb.DataType_VarChar, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Array, false},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_Timestamptz, true},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_Int64, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Timestamptz, false},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_JSON, false},
 	}
 
 	for _, c := range cases {
