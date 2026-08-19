@@ -250,9 +250,9 @@ func newLayout(channels map[string]int, vchannels map[string]map[string]int64, s
 		layout.Channels[newChannelID(c)] = types.PChannelInfo{
 			Name:       c,
 			Term:       0,
-			AccessMode: types.AccessModeRW,
+			AccessMode: types.AccessModeRO,
 		}
-		layout.ExpectedAccessMode[newChannelID(c)] = types.AccessModeRW
+		layout.ExpectedAccessMode[newChannelID(c)] = types.AccessModeRO
 	}
 	return layout
 }

@@ -59,20 +59,26 @@ func NewProtoFromPChannelInfo(pchannel PChannelInfo) *streamingpb.PChannelInfo {
 
 // ChannelID is the unique identifier of a pchannel.
 type ChannelID struct {
-	Name string
-	// TODO: add replica id in future.
+	Name         string
+	WALReplicaID int64
 }
 
 func (id ChannelID) IsZero() bool {
-	return id.Name == ""
+	return id.Name == "" && id.WALReplicaID == 0
 }
 
 func (id ChannelID) String() string {
+	if id.WALReplicaID != 0 {
+		return fmt.Sprintf("%s#%d", id.Name, id.WALReplicaID)
+	}
 	return id.Name
 }
 
 // LT is used to make a ChannelID sortable.
 func (id1 ChannelID) LT(id2 ChannelID) bool {
+	if id1.Name == id2.Name {
+		return id1.WALReplicaID < id2.WALReplicaID
+	}
 	return id1.Name < id2.Name
 }
 
@@ -95,10 +101,15 @@ func (c PChannelInfo) String() string {
 
 // PChannelInfoAssigned is a pair that represent a channel assignment of channel
 type PChannelInfoAssigned struct {
-	Channel PChannelInfo
-	Node    StreamingNodeInfo
+	Channel         PChannelInfo
+	WALReplicaID    int64
+	AssignmentEpoch int64
+	Node            StreamingNodeInfo
 }
 
 func (c PChannelInfoAssigned) String() string {
+	if c.WALReplicaID != 0 {
+		return fmt.Sprintf("%s#%d@epoch%d>%s", c.Channel, c.WALReplicaID, c.AssignmentEpoch, c.Node)
+	}
 	return fmt.Sprintf("%s>%s", c.Channel, c.Node)
 }

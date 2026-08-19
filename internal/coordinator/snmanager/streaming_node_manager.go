@@ -89,6 +89,34 @@ func (s *StreamingNodeManager) AllocVirtualChannels(ctx context.Context, param b
 	return balancer.AllocVirtualChannels(ctx, param)
 }
 
+// EnsureReadOnlyWALReplica ensures that a serviceable read-only WAL replica
+// exists for the PChannel in the requested resource group.
+func (s *StreamingNodeManager) EnsureReadOnlyWALReplica(ctx context.Context, pchannel string, resourceGroup string) error {
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	return b.EnsureReadOnlyWALReplica(ctx, pchannel, resourceGroup)
+}
+
+// ReleaseReadOnlyWALReplica releases a non-primary read-only WAL replica.
+func (s *StreamingNodeManager) ReleaseReadOnlyWALReplica(ctx context.Context, pchannel string, walReplicaID int64) error {
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	return b.ReleaseReadOnlyWALReplica(ctx, pchannel, walReplicaID)
+}
+
+// SwitchWALPrimaryReplica promotes an existing read-only WAL replica to primary.
+func (s *StreamingNodeManager) SwitchWALPrimaryReplica(ctx context.Context, pchannel string, targetReplicaID int64) error {
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	return b.SwitchWALPrimaryReplica(ctx, pchannel, targetReplicaID)
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 // Return -1 and error if the vchannel is not found or context is canceled.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {

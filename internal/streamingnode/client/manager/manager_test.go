@@ -102,11 +102,15 @@ func TestManager(t *testing.T) {
 			pickedServerID, ok := contextutil.GetPickServerID(ctx)
 			assert.True(t, ok)
 			assert.Equal(t, serverID, pickedServerID)
+			assert.Equal(t, int64(2), snmcsr.GetWalReplicaId())
+			assert.Equal(t, int64(7), snmcsr.GetAssignmentEpoch())
 			return nil, nil
 		})
 	err = m.Assign(context.Background(), types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "p", Term: 1},
-		Node:    types.StreamingNodeInfo{ServerID: serverID},
+		Channel:         types.PChannelInfo{Name: "p", Term: 1},
+		WALReplicaID:    2,
+		AssignmentEpoch: 7,
+		Node:            types.StreamingNodeInfo{ServerID: serverID},
 	})
 	assert.NoError(t, err)
 
@@ -117,11 +121,15 @@ func TestManager(t *testing.T) {
 			pickedServerID, ok := contextutil.GetPickServerID(ctx)
 			assert.True(t, ok)
 			assert.Equal(t, serverID, pickedServerID)
+			assert.Equal(t, int64(2), snmrr.GetWalReplicaId())
+			assert.Equal(t, int64(7), snmrr.GetAssignmentEpoch())
 			return nil, nil
 		})
 	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "p", Term: 1},
-		Node:    types.StreamingNodeInfo{ServerID: serverID},
+		Channel:         types.PChannelInfo{Name: "p", Term: 1},
+		WALReplicaID:    2,
+		AssignmentEpoch: 7,
+		Node:            types.StreamingNodeInfo{ServerID: serverID},
 	})
 	assert.NoError(t, err)
 
