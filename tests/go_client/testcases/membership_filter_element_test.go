@@ -20,7 +20,6 @@ package testcases
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -114,7 +113,7 @@ func TestMembershipFilterRejectedInElementPredicates(t *testing.T) {
 	})
 
 	t.Run("document-level sibling conjunction stays legal", func(t *testing.T) {
-		expr := fmt.Sprintf("bloom_match(doc_int, {bf}) && element_filter(structA, $[int_val] > 0)")
+		expr := "bloom_match(doc_int, {bf}) && element_filter(structA, $[int_val] > 0)"
 		opt := client.NewQueryOption(collName).
 			WithFilter(expr).WithOutputFields("id").
 			WithTemplateParam("bf", bloomBlob).

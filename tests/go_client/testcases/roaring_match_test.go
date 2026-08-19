@@ -273,7 +273,7 @@ func TestRoaringMatchInvalidInputRejected(t *testing.T) {
 	require.NoError(t, err)
 	_, err = mc.Query(ctx, client.NewQueryOption(collectionName).
 		WithFilter(fmt.Sprintf("roaring_match(%s, {rb})", roaringCreatorField)).WithOutputFields("id").
-		WithTemplateParam("rb", client.RoaringBitmapBlob(valid[:len(valid)-1])).
+		WithTemplateParam("rb", valid[:len(valid)-1]).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "roaring_match bitmap blob is invalid")
 }
@@ -585,7 +585,7 @@ func TestRoaringMatchIntTypeMatrix(t *testing.T) {
 			fmt.Sprintf("roaring_match(%s, {rb})", field), blob)
 		seen := map[int64]bool{}
 		for _, id := range got {
-			v := int64(id%domain) - shift
+			v := id%domain - shift
 			seen[v] = true
 			require.Truef(t, isMember(members, v), "roaring_match returned non-member value=%d (id=%d) on %s", v, id, field)
 		}
