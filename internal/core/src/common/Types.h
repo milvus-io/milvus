@@ -114,7 +114,6 @@ using DataArray = proto::schema::FieldData;
 using VectorFieldProto = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
-using PkType = std::variant<std::monostate, int64_t, std::string, UUID>;
 using DefaultValueType = proto::schema::ValueField;
 
 // Native UUID type: a 128-bit RFC-4122 UUID stored as 16 big-endian bytes.
@@ -205,6 +204,8 @@ UUID::ToString() const {
     }
     return out;
 }
+
+using PkType = std::variant<std::monostate, int64_t, std::string, UUID>;
 
 struct QueryIteratorCursor {
     PkType last_pk;
