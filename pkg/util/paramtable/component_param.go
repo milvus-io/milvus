@@ -2261,6 +2261,8 @@ type proxyConfig struct {
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 
+	SkipInvalidateShardLeaderCacheOnTimeout ParamItem `refreshable:"true"`
+
 	AccessLog AccessLogConfig
 
 	// connection manager
@@ -2670,6 +2672,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "time interval to update shard leader cache, in seconds",
 	}
 	p.ShardLeaderCacheInterval.Init(base.mgr)
+
+	p.SkipInvalidateShardLeaderCacheOnTimeout = ParamItem{
+		Key:          "proxy.skipInvalidateShardLeaderCacheOnTimeout",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc:          "Whether to keep shard leader cache when QueryNode RPC is canceled or exceeds the request deadline. NotShardLeader still invalidates shard leader cache.",
+		Export:       true,
+	}
+	p.SkipInvalidateShardLeaderCacheOnTimeout.Init(base.mgr)
 
 	p.ReplicaSelectionPolicy = ParamItem{
 		Key:          "proxy.replicaSelectionPolicy",
