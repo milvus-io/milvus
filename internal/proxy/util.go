@@ -3099,14 +3099,14 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest, *milvuspb.PinSnapshotDataRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RestoreSnapshotRequest:
 		targetDBName := r.GetTargetDbName()
 		if targetDBName == "" {
 			targetDBName = GetCurDBNameFromContextOrDefault(ctx)
 		}
-		return getDatabaseID(targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+		return getDatabaseID(metaCache, targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.UnpinSnapshotDataRequest:
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
