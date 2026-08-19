@@ -961,7 +961,7 @@ func TestQueryCoordForceLoadPriority(t *testing.T) {
 func TestQueryNodeMaxLoadingMemoryRatio(t *testing.T) {
 	Init()
 	params := Get()
-	item := params.QueryNodeCfg.TieredMaxLoadingMemoryRatio
+	item := &params.QueryNodeCfg.TieredMaxLoadingMemoryRatio
 
 	assert.Equal(t, "queryNode.segcore.tieredStorage.maxLoadingMemoryRatio", item.Key)
 	assert.InDelta(t, 1.0, item.GetAsFloat(), 0.0001)
