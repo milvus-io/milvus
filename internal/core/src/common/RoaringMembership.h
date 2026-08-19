@@ -41,9 +41,16 @@ class RoaringMembership {
     // SDK builder (client/v3/roaringfilter) and the Go proxy validator
     // (pkg/v3/util/roaringfilter). Nothing in the build links the three, so
     // TestRoaringSegcoreConstantsMatch (internal/parser/planparserv2) pins each
-    // to its Go counterpart. It reads these declarations as text, so a constant
-    // added here must keep the `constexpr <type> <name> = <initializer>;` shape
-    // and the k-prefixed name, or it is invisible to that check.
+    // to its Go counterpart by reading these declarations as text. It fails
+    // rather than skips whenever it cannot read what it is pinned to, so keep
+    // the k-prefixed name and the `constexpr <type> <name> = <initializer>;`
+    // shape: an enum member, two declarators in one statement, or an
+    // initializer it cannot evaluate are each reported as a failure, not
+    // silently ignored. A `#define` anywhere in this file or in
+    // RoaringMembership.cpp fails it outright -- it does not expand macros, and
+    // a macro can declare a constant without its name ever appearing next to a
+    // value -- so keep both files macro-free, or replace the pin with a
+    // static_assert against a generated header.
     static constexpr std::string_view kMagic = "MRB1";
     static constexpr uint16_t kVersion = 1;
     static constexpr uint16_t kFormatPortableRoaring64 = 1;

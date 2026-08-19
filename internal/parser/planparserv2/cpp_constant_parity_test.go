@@ -102,10 +102,13 @@ package planparserv2
 // invisible.
 //
 // And the completeness scan reads `const`/`constexpr` declarations, so a *new*
-// constant introduced as an enum member or a #define is not caught and asked to
-// be classified. That gap is bounded to constants nobody has pinned: for a
-// pinned name, the binding invariant above covers every form, so an existing
-// constant cannot be hidden that way.
+// constant introduced as an enum member is not caught and asked to be
+// classified. That gap is bounded to constants nobody has pinned: for a pinned
+// name, the binding invariant above covers every form, so an existing constant
+// cannot be hidden that way. A #define is not in that gap and not a gap at all:
+// it is not asked to be classified either, but only because the whole scan
+// refuses the source and fails, which the comments in RoaringMembership.{h,cpp}
+// say so a C++ author is not surprised by a Go test.
 //
 // Generating the C++ constants from the Go ones, or static_asserting them
 // against a generated header, would close all of these; that is the upgrade path

@@ -38,8 +38,10 @@ namespace {
 // this file, and every k-prefixed constant here has to be classified there as
 // pinned or deliberately unpinned -- so adding one, renaming one, or deleting
 // one fails a Go test until that list is updated. Keep the shape
-// `constexpr <type> <name> = <initializer>;`; a #define or an enum is invisible
-// to that check instead.
+// `constexpr <type> <name> = <initializer>;`, and keep this file free of
+// `#define`: that check reads these declarations as text and does not expand
+// macros, so it fails outright on a macro rather than risk being shown the
+// wrong declaration. See RoaringMembership.h for the rest of that constraint.
 constexpr uint32_t kPortableCookieNoRun = 12346;
 constexpr uint16_t kPortableCookieRun = 12347;
 constexpr uint32_t kPortableArrayMaxCardinality = 4096;
