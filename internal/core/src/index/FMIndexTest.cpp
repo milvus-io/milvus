@@ -25,6 +25,7 @@
 
 #include "common/Consts.h"
 #include "common/FieldData.h"
+#include "common/RegexQuery.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "index/FMIndex.h"
@@ -96,6 +97,11 @@ Inner(index::FMIndex* idx, const std::string& p) {
     const auto& bm = idx->PatternMatch(p, proto::plan::OpType::InnerMatch);
     return SetBits(bm);
 }
+std::vector<int64_t>
+Match(index::FMIndex* idx, const std::string& p) {
+    const auto& bm = idx->PatternMatch(p, proto::plan::OpType::Match);
+    return SetBits(bm);
+}
 
 }  // namespace
 
@@ -139,44 +145,35 @@ TEST(FMIndex, EmptyPatternMatchesAllRows) {
 
 // ShouldUseOp is the executor's routing gate (UnaryIndexFunc): true routes the
 // op to this index, false downgrades to the raw-data scan. Range ops MUST be
-// declined — Range() throws Unsupported, so routing them here would fail the
-// query (`field > "x"`, BETWEEN) instead of scanning. Match/RegexMatch are not
-// answered exactly in v1 and must also decline. Equal/NotEqual (== and IN/NOT
-// IN) are intentionally declined too: a set of exact values is served better by
-// the raw-data scan or an equality-oriented index (INVERTED), not by FMINDEX's
-// prefix enumeration.
+// declined. Range() throws Unsupported, so routing them here would fail the
+// query (`field > "x"`, BETWEEN) instead of scanning. RegexMatch stays declined
+// (required-literal extraction is a later follow-up). Equal/NotEqual (== and
+// IN/NOT IN) are intentionally declined too: a set of exact values is served
+// better by the raw-data scan or an equality-oriented index (INVERTED), not by
+// FMINDEX's prefix enumeration. General LIKE (Match) is on the allowlist.
 TEST(FMIndex, ShouldUseOpDeclinesRangeAndRegex) {
     auto idx = MakeRawDataIndex({"apple", "banana"});
 
-    // The allowlist is the three anchored pattern ops (PrefixMatch/PostfixMatch/
-    // InnerMatch), all answered exactly by the count-first pattern path.
+    // The allowlist is the three anchored pattern ops plus general LIKE.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::PrefixMatch));
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::PostfixMatch));
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match));
 
-    // Equality family declines — routed to the scan / an equality index.
+    // Equality family declines. Routed to the scan / an equality index.
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Equal));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::NotEqual));
 
-    // Everything else declines (falls back to the raw-data scan) — wrongly
-    // accepting would route into Range()/PatternMatch overloads that throw.
+    // Everything else declines (falls back to the raw-data scan). Wrongly
+    // accepting would route into Range() overloads that throw.
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::GreaterThan));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::GreaterEqual));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::LessThan));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::LessEqual));
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::RegexMatch));
 
-    // And the ops it declines to route would indeed throw if reached directly.
     EXPECT_THROW(idx->Range("m", OpType::GreaterThan), SegcoreError);
-    try {
-        (void)idx->PatternMatch("app", proto::plan::OpType::Match);
-        FAIL() << "expected declined pattern op to fail if internally routed";
-    } catch (const SegcoreError& e) {
-        // The op was produced by the executor, so accidental routing is a
-        // system-side Unsupported error, never caller-blame OpTypeInvalid.
-        EXPECT_EQ(e.get_error_code(), ErrorCode::Unsupported);
-    }
+    EXPECT_EQ(Match(idx.get(), "a%e"), (std::vector<int64_t>{0}));
 }
 
 // Count-first guard, folded into ShouldUseOp(op, pattern): for the anchored
@@ -209,10 +206,17 @@ TEST(FMIndex, CountFirstGuardDeclinesHighHitPatterns) {
     // Absent pattern: occ = 0, cheapest possible index answer — accelerate.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, "QQQQ"));
     // Empty literal (LIKE '%', or a caller without literal information):
-    // always accelerate — answered by an O(rows) bitmap clone.
+    // always accelerate. Answered by an O(rows) bitmap clone.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::PrefixMatch, ""));
-    // Uncounted/declined op: the literal cannot rescue it.
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "zz"));
+    // General LIKE: rarest fragment uses the same occ bound. Absent fragment
+    // (occ 0) accelerates. High-hit fragment declines. No literal fragment
+    // (`%`, `%_%`) declines to brute force.
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%QQQQ%"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%COMMON%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%x%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%_%"));
     // Anchored variants count docs, not occurrences.
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::PrefixMatch,
                                   "x"));  // every row starts with x
@@ -266,6 +270,11 @@ TEST(FMIndex, CountFirstGuardAcceleratesLowHitAndMatchesAreExact) {
     // A marker absent from the corpus still accelerates (occ 0) and yields none.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, "QUOKKA"));
     EXPECT_TRUE(Inner(idx.get(), "QUOKKA").empty());
+
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%ZEBRA%"));
+    EXPECT_EQ(Match(idx.get(), "%ZEBRA%"), zebra);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "QOP%ZEBRA"));
+    EXPECT_TRUE(Match(idx.get(), "QOP%ZEBRA").empty());
 }
 
 // Degenerate corpus: every non-null row is the empty string, so
@@ -297,10 +306,12 @@ TEST(FMIndex, CountFirstGuardAcceleratesZeroHitOnZeroTokenSegment) {
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, ""));
     EXPECT_EQ(Inner(idx.get(), ""), all);
 
-    // Declined ops are still declined — the short-circuit only relaxes the cost
-    // model for the three anchored ops, it does not widen the allowlist.
+    // Declined ops are still declined. The short-circuit only relaxes the cost
+    // model for the three anchored ops and for Match when a fragment has occ 0.
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Equal, "abc"));
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "abc"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "abc"));
+    EXPECT_TRUE(Match(idx.get(), "abc").empty());
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%_%"));
 }
 
 // Library-level: a LoadView'd (zero-copy) index must answer doc queries with
@@ -1083,7 +1094,9 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
         run_binary("a", "z"),
         [](const std::string& s) { return s > "a" && s < "z"; },
         "BinaryRange a-z");
-    // DECLINED: general LIKE 'a%e' (interior wildcard -> Match) — regex scan.
+    // General LIKE 'a%e' (interior wildcard -> Match). Either the candidate
+    // recheck path or the scan (tiny corpus often trips the cost guard) must
+    // equal the brute-force oracle.
     expect_rows(
         run(proto::plan::OpType::Match, "a%e"),
         [](const std::string& s) {
@@ -1111,4 +1124,107 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
         run(proto::plan::OpType::PrefixMatch, ""),
         [](const std::string&) { return true; },
         "PrefixMatch empty");
+}
+
+// Index Match results must equal LikePatternMatcher brute force for every
+// pattern, including those ShouldUseOp declines. Recheck is the answer.
+TEST(FMIndex, MatchOracleEqualsBruteForce) {
+    std::vector<std::string> data{
+        "apple",
+        "apply",
+        "banana",
+        "grape",
+        "application",
+        "app",
+        "",
+        "foo bar",
+        "fooXbar",
+        "café",
+        "caf\xC3\xA9 extra",
+        "你好世界",
+        "hello你好world",
+        "a_b",
+        "a%b",
+        "100%",
+        std::string(200, 'z') + "NEEDLE" + std::string(200, 'z'),
+        std::string(80, 'q'),
+    };
+    auto idx = MakeRawDataIndex(data);
+
+    const std::vector<std::string> patterns{
+        "a%e",
+        "%foo%bar%",
+        "foo%bar",
+        "%app%",
+        "app%",
+        "%app",
+        "a_c",
+        "a_pple",
+        "%_%",
+        "%",
+        "%%",
+        "_",
+        "a\\_b",
+        "%\\%%",
+        "100\\%",
+        "%café%",
+        "%你好%",
+        "hello%world",
+        "%NEEDLE%",
+        "%q%",
+        "nope%nope",
+        "",
+        "app",
+        "%zz%NEEDLE%",
+        "application",
+        "%X%",
+    };
+
+    for (const auto& pattern : patterns) {
+        LikePatternMatcher matcher(pattern);
+        std::vector<int64_t> expected;
+        for (size_t i = 0; i < data.size(); ++i) {
+            if (matcher(data[i])) {
+                expected.push_back(static_cast<int64_t>(i));
+            }
+        }
+        EXPECT_EQ(Match(idx.get(), pattern), expected) << "pattern=[" << pattern
+                                                      << "]";
+    }
+}
+
+TEST(FMIndex, MatchGuardDeclinesUnselectiveAndStillExact) {
+    std::vector<std::string> data;
+    std::string filler(500, 'x');
+    data.reserve(1000);
+    for (int i = 0; i < 1000; i++) {
+        std::string row = filler;
+        if (i % 200 == 0) {
+            row += "RARE";
+        }
+        data.push_back(std::move(row));
+    }
+    auto idx = MakeRawDataIndex(data);
+
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%x%"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%x%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%_%"));
+
+    LikePatternMatcher rare("%RARE%");
+    std::vector<int64_t> expected;
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (rare(data[i])) {
+            expected.push_back(static_cast<int64_t>(i));
+        }
+    }
+    EXPECT_EQ(Match(idx.get(), "%RARE%"), expected);
+    LikePatternMatcher every("%x%");
+    std::vector<int64_t> every_expected;
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (every(data[i])) {
+            every_expected.push_back(static_cast<int64_t>(i));
+        }
+    }
+    EXPECT_EQ(Match(idx.get(), "%x%"), every_expected);
 }

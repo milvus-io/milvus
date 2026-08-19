@@ -2022,13 +2022,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 std::string
 PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
     switch (expr_->op_type_) {
-        // Anchored pattern ops: FMINDEX's count-first guard uses the literal
-        // (CountPrefix/Suffix/Count) to decline degenerate high-hit patterns.
+        // Anchored pattern ops and general LIKE: FMINDEX's count-first guard
+        // uses the literal to decline degenerate high-hit patterns.
         // Equality (Equal/IN) is intentionally NOT accelerated by FMINDEX
         // (ShouldUseOp declines it), so it needs no literal here.
         case proto::plan::PrefixMatch:
         case proto::plan::PostfixMatch:
         case proto::plan::InnerMatch:
+        case proto::plan::Match:
             return GetValueFromProto<std::string>(expr_->val_);
         default:
             return "";

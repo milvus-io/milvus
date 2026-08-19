@@ -29,9 +29,11 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/RegexQuery.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
 #include "index/Meta.h"
+#include "index/NgramInvertedIndex.h"
 #include "index/Utils.h"
 #include "knowhere/binaryset.h"
 #include "log/Log.h"
@@ -312,6 +314,34 @@ FMIndex::DocsToBitmap(const std::vector<uint64_t>& docs) const {
     return bitset;
 }
 
+bool
+FMIndex::MatchGuardAccepts(const std::string& pattern) const {
+    if (pattern.empty()) {
+        return true;
+    }
+    auto parts = split_by_wildcard(pattern);
+    if (parts.empty()) {
+        return false;
+    }
+    int64_t occ = static_cast<int64_t>(
+        fm_.Count(bytes(parts[0]), parts[0].size()));
+    for (size_t i = 1; i < parts.size(); ++i) {
+        int64_t c =
+            static_cast<int64_t>(fm_.Count(bytes(parts[i]), parts[i].size()));
+        if (c < occ) {
+            occ = c;
+        }
+    }
+    if (occ == 0) {
+        return true;
+    }
+    const double ratio = static_cast<double>(
+        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
+    return static_cast<double>(occ) *
+               static_cast<double>(fm_.sa_sample_rate()) <
+           ratio * static_cast<double>(TotalTokens());
+}
+
 const TargetBitmap
 FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
     tracer::AutoSpan span("FMIndex::PatternMatch", tracer::GetRootSpan());
@@ -330,7 +360,7 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
             case proto::plan::OpType::InnerMatch:
                 return IsNotNull();
             default:
-                break;  // fall through so the op switch throws OpTypeInvalid.
+                break;  // Match falls through to candidate plus recheck.
         }
     }
     // The executor passes the RAW literal (PrefixMatch gets "abc" not "abc%"),
@@ -353,6 +383,56 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
             fm_.VisitMatchingDocs(bytes(pattern),
                                   pattern.size(),
                                   [&](uint64_t d) { bitset.set(d); });
+            return bitset;
+        }
+        case proto::plan::OpType::Match: {
+            // Candidates from the rarest literal fragment, then the existing
+            // LikePatternMatcher over those rows only. The matcher is the
+            // brute-force semantics; the index only prunes.
+            LikePatternMatcher matcher(pattern);
+            auto recheck = [&](uint64_t d) -> bool {
+                if (d >= static_cast<uint64_t>(total_rows_) ||
+                    null_bitmap_[d]) {
+                    return false;
+                }
+                auto raw =
+                    fm_.Extract(d, 0, std::numeric_limits<size_t>::max());
+                return matcher(raw);
+            };
+            auto parts = split_by_wildcard(pattern);
+            if (parts.empty()) {
+                TargetBitmap bitset(total_rows_);
+                for (int64_t i = 0; i < total_rows_; ++i) {
+                    if (recheck(static_cast<uint64_t>(i))) {
+                        bitset.set(i);
+                    }
+                }
+                return bitset;
+            }
+            const std::string* rarest = &parts[0];
+            size_t rarest_occ = fm_.Count(bytes(*rarest), rarest->size());
+            for (size_t i = 1; i < parts.size(); ++i) {
+                size_t occ = fm_.Count(bytes(parts[i]), parts[i].size());
+                if (occ < rarest_occ) {
+                    rarest_occ = occ;
+                    rarest = &parts[i];
+                }
+            }
+            TargetBitmap candidates(total_rows_);
+            fm_.VisitMatchingDocs(bytes(*rarest),
+                                  rarest->size(),
+                                  [&](uint64_t d) {
+                                      if (d < static_cast<uint64_t>(
+                                                  total_rows_)) {
+                                          candidates.set(d);
+                                      }
+                                  });
+            TargetBitmap bitset(total_rows_);
+            for (int64_t i = 0; i < total_rows_; ++i) {
+                if (candidates[i] && recheck(static_cast<uint64_t>(i))) {
+                    bitset.set(i);
+                }
+            }
             return bitset;
         }
         default:

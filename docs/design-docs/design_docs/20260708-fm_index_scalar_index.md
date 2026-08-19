@@ -4,19 +4,16 @@
 - **Updated:** 2026-07-14 (v2 — scope expanded from `InnerMatch`-only to prefix /
   suffix / equality / general `LIKE` / regex; grounded in the completed core
   implementation and its benchmarks)
-- **Updated:** 2026-07-17 (v3 — this document describes the full FM-index design,
-  but the **shipped PR delivers only `VARCHAR` + the three anchored `LIKE` forms**
-  (prefix/infix/suffix). Equality (`==`/`!=`/`IN`/`NOT IN`), general `LIKE`,
-  regex, occurrence-count API, and `JSON`/`TEXT`/`ARRAY` are deliberate
-  follow-ups — declined at routing or rejected at index creation in this
-  release. See Goals for the delivered-vs-deferred split.)
+- **Updated:** 2026-08-19 (v4 — general `Match` candidate plus recheck is wired
+  for VARCHAR. RegexMatch, equality, occurrence-count API, and `JSON`/`TEXT`/`ARRAY`
+  stay deferred.)
 - **Author(s):** @xiaofanluan
 - **Status:** Draft
 - **Component:** C++ Core (index, exec/expression), QueryNode, Go index-param-check,
   Storage V3 (LOB)
 - **Core implementation:** [`xiaofan-luan/fm-index-lite`](https://github.com/xiaofan-luan/fm-index-lite)
   (self-contained C++17, complete, benchmarked — this is PR 1 of the original plan)
-- **Related Issues:** TBD
+- **Related Issues:** #51577 (v1 anchored LIKE), #52683 (general Match)
 - **Released:** TBD
 
 ## Summary
@@ -185,6 +182,8 @@ sample rate are tracked follow-ups.
   or proto changes.
 - Cost-guarded execution: the index declines patterns where a scan is cheaper,
   using its own O(|P|) count (`queryNode.fmindexCostRatio`, default 0.001).
+- General `Match` (`LIKE` with interior `%`/`_`): rarest literal fragment
+  produces candidates; `LikePatternMatcher` rechecks those rows.
 - Standard scalar-index lifecycle: per-sealed-segment build, V3 single-file
   serialization, mmap (zero-copy view), caching-layer pinning.
 - Growing segments and any op the index declines fall back to the existing
@@ -201,9 +200,9 @@ sample rate are tracked follow-ups.
   must route the equality family to RawData before either method is reached.
 - **`TEXT`, `JSON` string paths, `ARRAY<VARCHAR>`, struct sub-fields** — other
   data types. Rejected at `create_index` for now (VARCHAR-only checker).
-- **General `Match` (`LIKE` with interior `%`/`_`) and `RegexMatch`** two-phase
-  (candidate + recheck) acceleration — reuses the NGRAM machinery; designed
-  here but not wired in this PR (both stay on the brute-force path).
+- **`RegexMatch`** two-phase (required-literal extraction + recheck)
+  acceleration. Designed here but not wired (stays on the brute-force path).
+  Literal extraction is a harder problem than LIKE fragment splitting.
 - **Occurrence enumeration / count API** (`(pk, offset)` lists, batched
   scoring) surfaced as a user-facing decontamination primitive.
 
@@ -270,7 +269,7 @@ proto, or planner changes**:
 | `PostfixMatch` | `LocateSuffixDocs(P)` | **yes** | exact | none |
 | `InnerMatch` | `MatchingDocs(P)` | **yes** | exact | none |
 | `Equal` / `In` / `NotIn` | *(library can do `LocatePrefixDocs(P)` ∩ length filter, but…)* | **no** — `ShouldUseOp` declines the equality family; routed to scan / `INVERTED` | exact via fallback | n/a |
-| `Match` | literal-factor decomposition → per-factor anchored/infix bitmaps, AND in ascending-count order | **no** (follow-up) — brute-force path | — | — |
+| `Match` | rarest literal fragment `VisitMatchingDocs` then `LikePatternMatcher` recheck | **yes** | exact after recheck | yes |
 | `RegexMatch` | `extract_literals_from_regex` → per-literal `MatchingDocs`, AND | **no** (follow-up) — brute-force path | — | — |
 | `Range` (lexicographic) | — | **no** — `ShouldUseOp` = false → existing paths | — | n/a |
 
@@ -498,9 +497,10 @@ All integration points verified against master (branch state of 2026-07-14).
   - `HasRawData() = false`; `Reverse_Lookup` unsupported (phase-2 verification
     reads raw data through the segment, as NGRAM's does; `Extract` could serve
     this later — Future Work).
-  - (PR 3, **not this PR**) two-phase entry points mirroring
-    `NgramInvertedIndex::ExecutePhase1/2` for `Match`/`RegexMatch` — not
-    implemented here; general `LIKE` / regex currently fall back to the scan.
+  - general `Match` is answered by `PatternMatch` (rarest fragment candidates
+    plus `LikePatternMatcher` recheck via `Extract`). RegexMatch two-phase
+    entry points mirroring `NgramInvertedIndex::ExecutePhase1/2` are still
+    not wired; regex stays on the scan.
 - **Registration**: `ScalarIndexType::FMINDEX` (`ScalarIndex.h:39-49` +
   To/FromString), `FMINDEX_INDEX_TYPE = "FMINDEX"` (`Meta.h`), param key
   `fm_sa_sample_rate` (`Meta.h`), `std::optional<FMIndexParams>` in
@@ -540,8 +540,8 @@ All integration points verified against master (branch state of 2026-07-14).
   wavelet words, sampled bitmaps, sampled-SA values AND doc boundaries are all
   viewed in place (the samples through a narrow/wide-aware accessor, so the
   compact 4-byte on-disk form is served directly); the ISA table (Extract's
-  anchor) is built lazily on first `Extract`, which no Milvus query op calls.
-  What a load DOES rebuild in RAM is the rank directories, whose size is
+  anchor) is built lazily on first `Extract`, which general `Match` recheck
+  now calls. What a load DOES rebuild in RAM is the rank directories, whose size is
   controlled by `fm_block_bytes` (at the default 64-byte block, roughly 1/8 of
   the packed wavelet words), plus small derived metadata — so mmap-resident
   memory is bounded by and in practice well under the blob size. The
