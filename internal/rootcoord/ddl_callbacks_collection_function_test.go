@@ -18,12 +18,15 @@ package rootcoord
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -31,8 +34,11 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -106,8 +112,11 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) createTestCollection() *mo
 		},
 		VirtualChannelNames: []string{"test_channel"},
 		EnableDynamicField:  false,
-		Properties:          []*commonpb.KeyValuePair{{Key: "key1", Value: "value1"}},
-		SchemaVersion:       1,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "key1", Value: "value1"},
+			{Key: common.MaxFieldIDKey, Value: "104"},
+		},
+		SchemaVersion: 1,
 	}
 }
 
@@ -195,6 +204,51 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.Error(err)
 	suite.Contains(err.Error(), "broadcast error")
+}
+
+func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_SchemaPayloadTooLarge() {
+	ctx := context.Background()
+	oldColl := suite.createTestCollection()
+	newColl := oldColl.Clone()
+	newColl.Description = strings.Repeat("large collection description", 256)
+	dbName := "test_db"
+	collectionName := "test_collection"
+
+	finalSchema := newColl.ToCollectionSchemaPB()
+	finalSchema.Version = newColl.SchemaVersion + 1
+	limit := proto.Size(finalSchema)
+	old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(limit))
+	suite.T().Cleanup(func() { paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old) })
+
+	core := newTestCore(withHealthyCode())
+	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+	core.meta = mockMeta
+	cacheLookups := 0
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).
+		Run(func(context.Context, string, string, uint64, bool) { cacheLookups++ }).
+		Return(oldColl, nil).Maybe()
+	mockMeta.EXPECT().ListAliases(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).
+		Return([]string{}, nil).Maybe()
+
+	analyzerPreparations := 0
+	analyzerMocker := mockey.Mock((*Core).prepareAlterCollectionAnalyzerFileResources).To(
+		func(*Core, context.Context, *model.Collection, *schemapb.CollectionSchema) ([]int64, error) {
+			analyzerPreparations++
+			return nil, nil
+		},
+	).Build()
+	suite.T().Cleanup(func() { analyzerMocker.UnPatch() })
+
+	broadcasts := 0
+	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).
+		Run(func(context.Context, message.BroadcastMutableMessage) { broadcasts++ }).
+		Return(&types.BroadcastAppendResult{}, nil).Maybe()
+
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, oldColl, newColl, dbName, collectionName)
+	suite.ErrorIs(err, merr.ErrParameterTooLarge)
+	suite.Zero(cacheLookups, "schema payload validation must reject before cache lookup")
+	suite.Zero(analyzerPreparations, "schema payload validation must reject before analyzer resource reservation")
+	suite.Zero(broadcasts, "schema payload validation must reject before broadcast")
 }
 
 // Test alterFunctionGenNewCollection function

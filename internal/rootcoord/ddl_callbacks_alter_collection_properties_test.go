@@ -17,6 +17,8 @@ package rootcoord
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -693,6 +696,65 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+}
+
+func TestDDLCallbacksAlterCollectionProperties_TTLFieldPayloadTooLarge(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionTTLFieldPayload" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	testSchema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "description",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", Description: strings.Repeat("large field description", 1024), DataType: schemapb.DataType_Int64},
+			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	finalProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	finalProperties[common.CollectionTTLFieldKey] = "ttl"
+	finalSchema := coll.ToCollectionSchemaPB()
+	finalSchema.Properties = common.NewKeyValuePairs(finalProperties)
+	limit := proto.Size(finalSchema)
+	require.Greater(t, limit, proto.Size(coll.ToCollectionSchemaPB()))
+	old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(limit))
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old) })
+
+	broadcasts := 0
+	mockBroadcaster := mock_broadcaster.NewMockBroadcastAPI(t)
+	mockBroadcaster.EXPECT().Close().Return().Maybe()
+	mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).
+		Run(func(context.Context, message.BroadcastMutableMessage) { broadcasts++ }).
+		Return(&types.BroadcastAppendResult{}, nil).Maybe()
+	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcaster, nil).Build()
+	t.Cleanup(func() { lockMocker.UnPatch() })
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterTooLarge)
+	require.Zero(t, broadcasts, "schema payload validation must reject before broadcast")
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
