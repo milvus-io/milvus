@@ -1627,10 +1627,13 @@ TEST(BitmapIndexArrayNestedTest,
     stlsort_index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
     ASSERT_EQ(stlsort_index->Count(), 4);
 
-    // Upload produces the legacy milvus_packed_stlsort_index.v3 file.
+    // Upload produces the legacy milvus_packed_stlsort_index.v3 file; the
+    // physical type is recovered from the filename, not from meta keys.
     auto create_index_result = stlsort_index->UploadUnified({});
     ASSERT_EQ(create_index_result->GetIndexFiles().size(), 1);
     auto index_files = create_index_result->GetIndexFiles();
+    EXPECT_EQ(index_files[0].substr(index_files[0].find_last_of('/') + 1),
+              "milvus_packed_stlsort_index.v3");
 
     // The file meta must genuinely lack the hybrid index_type key so this test
     // exercises the inference branch (not the HasMeta branch).
