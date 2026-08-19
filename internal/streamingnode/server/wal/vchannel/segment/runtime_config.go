@@ -24,7 +24,6 @@ type runtimeConfig struct {
 	packWriter      PackWriter
 	runtime         moduleapi.Runtime
 	flushPolicy     flushPolicy
-	metaAndData     bool
 	commitL1Limiter *commitL1Limiter
 	owner           ViewOwner
 }

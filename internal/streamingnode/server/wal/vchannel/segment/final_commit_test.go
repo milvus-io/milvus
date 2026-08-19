@@ -43,7 +43,7 @@ func TestFinalCommitPersistsStorageOwnedCompletionMarker(t *testing.T) {
 		false,
 		writeOnlyInsertBuffer{},
 		nil,
-		runtimeConfig{lifecycle: lifecycle, metaAndData: true, owner: testSegmentOwner{}},
+		runtimeConfig{lifecycle: lifecycle, owner: testSegmentOwner{}},
 	)
 
 	view.mu.Lock()
@@ -73,7 +73,7 @@ func TestFinalCommitFailureKeepsMessageDurabilityPending(t *testing.T) {
 		false,
 		writeOnlyInsertBuffer{},
 		nil,
-		runtimeConfig{lifecycle: lifecycle, metaAndData: true, owner: testSegmentOwner{}},
+		runtimeConfig{lifecycle: lifecycle, owner: testSegmentOwner{}},
 	)
 
 	view.mu.Lock()

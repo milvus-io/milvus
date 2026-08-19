@@ -28,7 +28,6 @@ func TestTransformLogFailedChunkWriteRetainsMessageRef(t *testing.T) {
 		Store:    store,
 		Runtime:  moduleapi.Runtime{Scheduler: scheduler},
 	})
-	transformLog.SwitchIntoMetaAndData()
 	owner := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 10))
 	probe := owner.Clone()
 
@@ -50,7 +49,6 @@ func TestTransformLogFailedChunkWriteRetainsMessageRef(t *testing.T) {
 
 func TestTransformLogDoesNotCloneUnrelatedMessage(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
-	transformLog.SwitchIntoMetaAndData()
 	raw := message.CreateTestTimeTickSyncMessage(t, 1, 10, walimplstest.NewTestMessageID(10)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(11))
 	owner := newRefCountedTransformMessage(raw)
@@ -72,7 +70,6 @@ func TestTransformLogRequestPersistThrough(t *testing.T) {
 		Store:    newMemoryStore(),
 		Runtime:  moduleapi.Runtime{Scheduler: scheduler},
 	})
-	transformLog.SwitchIntoMetaAndData()
 	first := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 10))
 	second := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 11))
 	observeRetainedTransformMessage(transformLog, first)
@@ -106,7 +103,6 @@ func TestTransformLogBarrierRefCompletesWithoutMaterialization(t *testing.T) {
 		Materializer: materializer,
 		Runtime:      moduleapi.Runtime{Scheduler: scheduler},
 	})
-	transformLog.SwitchIntoMetaAndData()
 	deleteMessage := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 10))
 	barrierMessage := newRefCountedTransformMessage(newTransformLogTestManualFlushMessage(t, 20))
 
@@ -132,7 +128,6 @@ func TestTransformLogMultiChunkFlushReleasesRefsByDurablePrefix(t *testing.T) {
 		Store:    newMemoryStore(),
 		Runtime:  moduleapi.Runtime{Scheduler: scheduler},
 	})
-	transformLog.SwitchIntoMetaAndData()
 	first := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 10))
 	second := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 11))
 	barrier := newRefCountedTransformMessage(newTransformLogTestManualFlushMessage(t, 20))
@@ -176,7 +171,6 @@ func TestTransformLogRegistersBarrierRefBeforeConcurrentFlushCommit(t *testing.T
 		MaxRows:  100,
 		Store:    store,
 	})
-	transformLog.SwitchIntoMetaAndData()
 	deleteMessage := newRefCountedTransformMessage(newTransformLogTestDeleteMessage(t, 10))
 	observeRetainedTransformMessage(transformLog, deleteMessage)
 	deleteMessage.Release()

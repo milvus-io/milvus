@@ -13,9 +13,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// runBoundedMetaScannerAndSwitchModules recovers fast module metadata from a bounded WAL scan,
-// then switches modules into MetaAndData mode and returns their open snapshot.
-func (r *recoveryStorageImpl) runBoundedMetaScannerAndSwitchModules(
+// runBoundedMetaScannerAndStartDataRecovery recovers fast module metadata from
+// a bounded WAL scan, starts safe recovered data tasks, and returns the write
+// path snapshot.
+func (r *recoveryStorageImpl) runBoundedMetaScannerAndStartDataRecovery(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
@@ -59,7 +60,7 @@ L:
 	if rs.Error() != nil {
 		return nil, errors.Wrap(rs.Error(), "failed to read the recovery info from wal")
 	}
-	snapshot = r.switchModulesIntoMetaAndData()
+	snapshot = r.startDataRecovery()
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	vchannelCount := len(snapshot.VChannels)
 	segmentCount := len(snapshot.SegmentAssignments)
@@ -84,12 +85,12 @@ L:
 	return snapshot, nil
 }
 
-func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
+func (r *recoveryStorageImpl) startDataRecovery() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
 		Checkpoint: r.checkpoint.Clone(),
 	}
 	if r.vchannelManager != nil {
-		moduleSnapshot := r.vchannelManager.SwitchIntoMetaAndData()
+		moduleSnapshot := r.vchannelManager.StartDataRecovery()
 		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
 			switch typed := s.(type) {
 			case *moduleapi.WritePathRecoveryModuleSnapshot:

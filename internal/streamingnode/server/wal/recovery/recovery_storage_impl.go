@@ -50,7 +50,7 @@ func RecoverRecoveryStorage(
 		rs.Logger().Warn(context.TODO(), "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	snapshot, err := rs.runBoundedMetaScannerAndSwitchModules(ctx, recoveryStreamBuilder, lastTimeTickMessage)
+	snapshot, err := rs.runBoundedMetaScannerAndStartDataRecovery(ctx, recoveryStreamBuilder, lastTimeTickMessage)
 	if err != nil {
 		rs.Logger().Warn(context.TODO(), "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
@@ -65,7 +65,7 @@ func RecoverRecoveryStorage(
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
 	rs.startAckTracker()
-	rs.startDataLiveScanner(recoveryStreamBuilder)
+	rs.startDataLiveScanner(recoveryStreamBuilder, lastTimeTickMessage)
 	return rs, snapshot, nil
 }
 
@@ -139,12 +139,13 @@ type recoveryStorageImpl struct {
 	dirtyCounter           int // records the message count since last persist snapshot.
 	moduleDirty            bool
 	// used to trigger the recovery persist operation.
-	persistNotifier        chan struct{}
-	truncator              walimpls.WALImpls
-	metrics                *recoveryMetrics
-	pendingPersistSnapshot *dirtyPersistSnapshot
-	dataScannerWG          sync.WaitGroup
-	ackTrackerWG           sync.WaitGroup
+	persistNotifier             chan struct{}
+	truncator                   walimpls.WALImpls
+	metrics                     *recoveryMetrics
+	pendingPersistSnapshot      *dirtyPersistSnapshot
+	dataScannerWG               sync.WaitGroup
+	ackTrackerWG                sync.WaitGroup
+	dataRecoveryBarrierTimeTick uint64
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -373,10 +374,14 @@ func consumePointReached(current, point utility.WALConsumeCheckpoint) bool {
 }
 
 // observeMessage observes a message and update the recovery storage.
-func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
+func (r *recoveryStorageImpl) observeMessage(
+	ctx context.Context,
+	msg message.ImmutableMessage,
+	mode moduleapi.ObserveMode,
+) {
 	owner := r.ackTracker.Track(msg)
 	dispatch := owner.Clone()
-	r.observeModulesMessage(ctx, dispatch)
+	r.observeModulesMessage(ctx, dispatch, mode)
 	dispatch.Release()
 	r.updateCheckpoint(msg)
 	r.broadcastAck.Accept(owner)
@@ -391,7 +396,7 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 func (r *recoveryStorageImpl) observeMetaOnlyMessage(ctx context.Context, msg message.ImmutableMessage) {
 	owner := message.NewOwnedImmutableMessage(msg, nil)
 	dispatch := owner.Clone()
-	r.observeModulesMessage(ctx, dispatch)
+	r.observeModulesMessage(ctx, dispatch, moduleapi.ObserveModeMetaOnly)
 	dispatch.Release()
 	owner.Release()
 	r.updateCheckpoint(msg)
@@ -412,17 +417,22 @@ func (r *recoveryStorageImpl) observeMetaScannerMessage(ctx context.Context, msg
 func (r *recoveryStorageImpl) observeDataScannerMessage(ctx context.Context, msg message.ImmutableMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.observeMessage(ctx, msg)
+	mode := moduleapi.ObserveModeMetaAndData
+	if msg.TimeTick() <= r.dataRecoveryBarrierTimeTick {
+		mode = moduleapi.ObserveModeDataOnly
+	}
+	r.observeMessage(ctx, msg, mode)
 }
 
 func (r *recoveryStorageImpl) observeModulesMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
+	mode moduleapi.ObserveMode,
 ) {
 	if r.vchannelManager == nil {
 		panic("recovery modules are not initialized")
 	}
-	r.vchannelManager.ObserveMessage(ctx, retained)
+	r.vchannelManager.ObserveMessage(ctx, retained, mode)
 }
 
 func consumePointFromMessage(msg message.ImmutableMessage) utility.WALConsumeCheckpoint {
@@ -432,12 +442,16 @@ func consumePointFromMessage(msg message.ImmutableMessage) utility.WALConsumeChe
 	}
 }
 
-func (r *recoveryStorageImpl) startDataLiveScanner(recoveryStreamBuilder RecoveryStreamBuilder) {
+func (r *recoveryStorageImpl) startDataLiveScanner(
+	recoveryStreamBuilder RecoveryStreamBuilder,
+	recoveryBarrier message.ImmutableMessage,
+) {
 	checkpoint := r.checkpoint.DataCheckpoint
 	if checkpoint == nil || checkpoint.MessageID == nil {
 		r.Logger().Warn(context.TODO(), "skip data scanner because wal data checkpoint is nil")
 		return
 	}
+	r.dataRecoveryBarrierTimeTick = recoveryBarrier.TimeTick()
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint:     checkpoint.MessageID,
 		EndTimeTick:         0,

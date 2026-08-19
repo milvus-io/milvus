@@ -193,7 +193,10 @@ func TestRecoveryStorageCloseWaitsForDataLiveScanner(t *testing.T) {
 		ch:     make(chan message.ImmutableMessage),
 		closed: make(chan struct{}),
 	}
-	storage.startDataLiveScanner(&recordingRecoveryStreamBuilder{stream: stream})
+	storage.startDataLiveScanner(
+		&recordingRecoveryStreamBuilder{stream: stream},
+		newAckTestTimeTickMessage(t, 3, 3),
+	)
 	go storage.backgroundTask()
 
 	storage.Close()
@@ -245,12 +248,14 @@ func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 	defer storage.taskScheduler.Close()
 
 	builder := &recordingRecoveryStreamBuilder{}
-	storage.startDataLiveScanner(builder)
+	recoveryBarrier := newAckTestTimeTickMessage(t, 3, 3)
+	storage.startDataLiveScanner(builder, recoveryBarrier)
 	storage.dataScannerWG.Wait()
 
 	assert.True(t, builder.param.UseWriteAheadBuffer)
 	assert.True(t, checkpoint.DataCheckpoint.MessageID.EQ(builder.param.StartCheckpoint))
 	assert.Equal(t, uint64(0), builder.param.EndTimeTick)
+	assert.Equal(t, recoveryBarrier.TimeTick(), storage.dataRecoveryBarrierTimeTick)
 }
 
 func TestRecoveryStorageCompletesMessageWithoutConsumerRefs(t *testing.T) {
@@ -305,13 +310,12 @@ func TestRecoveryStorageExposesVChannelRecoveryManager(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	manager.SwitchIntoMetaAndData()
 	storage.vchannelManager = manager
 
 	assert.Same(t, manager, storage.VChannelManager())
 }
 
-func TestRecoveryStorageSwitchesVChannelManagerIntoMetaAndData(t *testing.T) {
+func TestRecoveryStorageStartsVChannelDataRecovery(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  1,
@@ -334,7 +338,7 @@ func TestRecoveryStorageSwitchesVChannelManagerIntoMetaAndData(t *testing.T) {
 	require.NoError(t, err)
 	storage.vchannelManager = manager
 
-	snapshot := storage.switchModulesIntoMetaAndData()
+	snapshot := storage.startDataRecovery()
 
 	require.NotNil(t, snapshot.WritePathRecovery)
 	assert.Contains(t, snapshot.WritePathRecovery.VChannels, "v1")
@@ -372,6 +376,51 @@ func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, walimplstest.NewTestMessageID(1).EQ(completed.MessageID))
 	assert.Equal(t, uint64(1), completed.TimeTick)
+}
+
+func TestRecoveryStorageSelectsObserveModeByRecoveryBarrierTimeTick(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  1,
+		},
+	}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	storage.dataRecoveryBarrierTimeTick = 20
+	var modes []moduleapi.ObserveMode
+	mock := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(
+		_ *vchannel.PChannelRecoveryManager,
+		_ context.Context,
+		_ message.RetainedImmutableMessage,
+		mode moduleapi.ObserveMode,
+	) {
+		modes = append(modes, mode)
+	}).Build()
+	defer mock.UnPatch()
+
+	storage.observeDataScannerMessage(context.Background(), newRecoveryTestBarrier(10))
+	storage.observeDataScannerMessage(context.Background(), newRecoveryTestBarrier(20))
+	storage.observeDataScannerMessage(context.Background(), newRecoveryTestBarrier(30))
+
+	require.Equal(t, []moduleapi.ObserveMode{
+		moduleapi.ObserveModeDataOnly,
+		moduleapi.ObserveModeDataOnly,
+		moduleapi.ObserveModeMetaAndData,
+	}, modes)
+}
+
+func newRecoveryTestBarrier(timetick uint64) message.ImmutableMessage {
+	messageID := int64(timetick)
+	return message.NewRecoveryBarrierMessageBuilderV2().
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).
+		WithAllVChannel().
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(messageID - 1)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(messageID))
 }
 
 func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {

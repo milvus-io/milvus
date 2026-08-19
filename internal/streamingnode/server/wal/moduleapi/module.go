@@ -13,6 +13,25 @@ type CleanupContext struct {
 	DataPhysicalTimeTick uint64
 }
 
+// ObserveMode selects which recovery domain consumes a WAL message.
+// RecoveryStorage owns the mode transition and passes it with every message so
+// downstream modules never need to infer or retain scanner state.
+type ObserveMode uint8
+
+const (
+	ObserveModeMetaOnly ObserveMode = iota + 1
+	ObserveModeDataOnly
+	ObserveModeMetaAndData
+)
+
+func (m ObserveMode) ApplyMeta() bool {
+	return m == ObserveModeMetaOnly || m == ObserveModeMetaAndData
+}
+
+func (m ObserveMode) ApplyData() bool {
+	return m == ObserveModeDataOnly || m == ObserveModeMetaAndData
+}
+
 type ModuleName string
 
 const (

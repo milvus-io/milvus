@@ -53,6 +53,7 @@ func installRetainingManager(t *testing.T, storage *recoveryStorageImpl, retaine
 		_ *vchannel.PChannelRecoveryManager,
 		_ context.Context,
 		retainedMessage message.RetainedImmutableMessage,
+		_ moduleapi.ObserveMode,
 	) {
 		retained.message = retainedMessage.Message()
 		retained.handle = retainedMessage.Clone()

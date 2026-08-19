@@ -58,7 +58,6 @@ func NewSegmentView(
 		flushPolicy:           flushPolicy,
 		schema:                schema,
 		finalCommitDone:       finalCommitDoneFromMeta(meta),
-		metaAndData:           config.metaAndData,
 		commitL1Limiter:       config.commitL1Limiter,
 		owner:                 config.owner,
 	}
@@ -164,7 +163,6 @@ type SegmentView struct {
 	pendingDataHandles []pendingDataHandle
 	flushPolicy        flushPolicy                // decides when pending insert data should be flushed.
 	schema             *schemapb.CollectionSchema // schema used to encode pending insert data.
-	metaAndData        bool                       // false during meta-only replay; true when data tasks may run.
 	commitL1Limiter    *commitL1Limiter
 	owner              ViewOwner
 }
@@ -184,15 +182,16 @@ func (s *SegmentView) HasDirty() bool {
 func (s *SegmentView) ObserveCreateSegmentMessageV2(
 	_ context.Context,
 	owned message.RetainedImmutableCreateSegmentMessageV2,
+	mode moduleapi.ObserveMode,
 ) bool {
+	if !mode.ApplyData() {
+		return false
+	}
 	msg := owned.Message()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.shouldSkipReplayLocked(msg.TimeTick()) {
-		return false
-	}
-	if !s.metaAndData {
 		return false
 	}
 	timetick := msg.TimeTick()
@@ -205,92 +204,36 @@ func (s *SegmentView) ObserveCreateSegmentMessageV2(
 	return true
 }
 
-func (s *SegmentView) ObserveInsertMessageV1(
+func (s *SegmentView) ObserveInsert(
 	_ context.Context,
-	owned message.RetainedImmutableInsertMessageV1,
-	assignment *messagespb.PartitionSegmentAssignment,
+	owned message.RetainedImmutableMessage,
+	batch InsertBatch,
+	mode moduleapi.ObserveMode,
 ) bool {
-	msg := owned.Message()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	changed := false
-	if !s.canReplayInsertLocked(msg.TimeTick()) {
+	if len(batch.assignments) == 0 || !s.canReplayInsertLocked(batch.timeTick) {
 		return false
 	}
-	if msg.TimeTick() > s.meta.CheckpointTimeTick {
-		s.observeInsertMetaLocked(msg.TimeTick(), assignment)
+	changed := false
+	if mode.ApplyMeta() && batch.timeTick > s.meta.CheckpointTimeTick {
+		for _, assignment := range batch.assignments {
+			s.observeInsertMetaLocked(batch.timeTick, assignment)
+		}
 		changed = true
 	}
-	if !s.metaAndData {
+	if !mode.ApplyData() || batch.timeTick <= s.meta.GetDataCheckpointTimeTick() ||
+		batch.timeTick <= s.pending.DataTimeTick() {
 		return changed
 	}
-	if msg.TimeTick() <= s.meta.GetDataCheckpointTimeTick() {
-		return changed
-	}
-	if msg.TimeTick() <= s.pending.DataTimeTick() {
-		return changed
-	}
-	s.pending.append(owned.CloneHandle(), assignment)
+	s.pending.appendMessage(owned.Clone(), batch.rows, batch.binarySize)
 	changed = true
-	if s.flushPolicy != nil && s.flushPolicy.ShouldFlush(s.pending, msg.TimeTick()) {
+	if s.flushPolicy != nil && s.flushPolicy.ShouldFlush(s.pending, batch.timeTick) {
 		task := s.newFlushL1BufferTaskLocked()
 		s.runtime.Scheduler.Submit(task)
 	}
 	return changed
-}
-
-func (s *SegmentView) ObserveTxnMessage(
-	_ context.Context,
-	owned message.RetainedImmutableTxnMessage,
-) bool {
-	msg := owned.Message()
-	var task segmentTask
-	matched := false
-	appliedData := false
-	timetick := msg.TimeTick()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.shouldSkipReplayLocked(timetick) {
-		return false
-	}
-	if !s.canReplayInsertLocked(timetick) {
-		return false
-	}
-
-	metaTimeTick := s.meta.CheckpointTimeTick
-	pendingDataTimeTick := s.pending.DataTimeTick()
-	appliedMeta := false
-	var rows uint64
-	var binarySize uint64
-	err := forEachSegmentInsertMessage(msg, s.meta.GetSegmentId(), func(insert segmentInsertMessage) error {
-		matched = true
-		if timetick > metaTimeTick {
-			s.observeInsertMetaLocked(timetick, insert.Assignment)
-			appliedMeta = true
-		}
-		if s.metaAndData &&
-			timetick > s.meta.GetDataCheckpointTimeTick() &&
-			timetick > pendingDataTimeTick {
-			rows += insert.Assignment.GetRows()
-			binarySize += insert.Assignment.GetBinarySize()
-			appliedData = true
-		}
-		return nil
-	})
-	if err != nil || !matched {
-		return false
-	}
-	if appliedData {
-		s.pending.appendMessage(owned.CloneHandle(), rows, binarySize)
-		if s.flushPolicy != nil && s.flushPolicy.ShouldFlush(s.pending, timetick) {
-			task = s.newFlushL1BufferTaskLocked()
-		}
-	}
-	if task != nil {
-		s.runtime.Scheduler.Submit(task)
-	}
-	return appliedMeta || appliedData
 }
 
 func (s *SegmentView) observeInsertMetaLocked(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
@@ -305,14 +248,20 @@ func (s *SegmentView) observeInsertMetaLocked(timetick uint64, assignment *messa
 func (s *SegmentView) Flush(
 	_ context.Context,
 	owned message.RetainedImmutableMessage,
+	mode moduleapi.ObserveMode,
 ) bool {
 	msg := owned.Message()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	timetick := msg.TimeTick()
-	closed, flushTimeTick, metaChanged := s.observeFlushMeta(timetick)
-	if !s.metaAndData {
+	closed := s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	flushTimeTick := s.meta.GetCheckpointTimeTick()
+	metaChanged := false
+	if mode.ApplyMeta() {
+		closed, flushTimeTick, metaChanged = s.observeFlushMeta(timetick)
+	}
+	if !mode.ApplyData() {
 		return metaChanged
 	}
 	if !closed || flushTimeTick <= s.meta.GetDataCheckpointTimeTick() {
@@ -505,10 +454,6 @@ func (info *SegmentView) EnsureFinalCommit() bool {
 		info.mu.Unlock()
 		return true
 	}
-	if !info.metaAndData {
-		info.mu.Unlock()
-		return false
-	}
 	task := info.newCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick())
 	scheduler := info.runtime.Scheduler
 	info.mu.Unlock()
@@ -518,13 +463,10 @@ func (info *SegmentView) EnsureFinalCommit() bool {
 	return false
 }
 
-func (info *SegmentView) SwitchIntoMetaAndData() {
+// StartDataRecovery resumes data work that was durable before restart but had
+// not yet completed its final coordinator commit.
+func (info *SegmentView) StartDataRecovery() {
 	info.mu.Lock()
-	if info.metaAndData {
-		info.mu.Unlock()
-		return
-	}
-	info.metaAndData = true
 	var task segmentTask
 	if shouldRetryRecoveredFinalCommit(info.meta) {
 		task = info.newRecoveredCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick())

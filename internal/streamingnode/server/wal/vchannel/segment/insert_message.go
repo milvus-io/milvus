@@ -15,6 +15,31 @@ type segmentInsertMessage struct {
 	TimeTick   uint64
 }
 
+// InsertBatch is the part of one Insert or Txn WAL message assigned to a
+// single segment. The vchannel layer builds batches once and each SegmentView
+// consumes exactly one batch.
+type InsertBatch struct {
+	timeTick    uint64
+	assignments []*messagespb.PartitionSegmentAssignment
+	rows        uint64
+	binarySize  uint64
+}
+
+func BuildInsertBatches(raw message.ImmutableMessage) (map[int64]InsertBatch, error) {
+	batches := make(map[int64]InsertBatch)
+	err := forEachSegmentInsertMessage(raw, 0, func(insert segmentInsertMessage) error {
+		segmentID := insert.Assignment.GetSegmentAssignment().GetSegmentId()
+		batch := batches[segmentID]
+		batch.timeTick = insert.TimeTick
+		batch.assignments = append(batch.assignments, insert.Assignment)
+		batch.rows += insert.Assignment.GetRows()
+		batch.binarySize += insert.Assignment.GetBinarySize()
+		batches[segmentID] = batch
+		return nil
+	})
+	return batches, err
+}
+
 func forEachSegmentInsertMessage(
 	raw message.ImmutableMessage,
 	segmentID int64,

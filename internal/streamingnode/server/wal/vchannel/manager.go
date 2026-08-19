@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
@@ -49,8 +48,7 @@ type PChannelRecoveryManager struct {
 	dirtyModules       map[string]*VChannelRecoveryModule
 	cleanupModules     map[string]*VChannelRecoveryModule
 
-	config      PChannelManagerConfig
-	metaAndData atomic.Bool
+	config PChannelManagerConfig
 }
 
 func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecoveryManager, error) {
@@ -121,6 +119,7 @@ func (m *PChannelRecoveryManager) releaseInitialState() {
 func (m *PChannelRecoveryManager) ObserveMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
+	mode moduleapi.ObserveMode,
 ) {
 	if m == nil {
 		return
@@ -130,15 +129,15 @@ func (m *PChannelRecoveryManager) ObserveMessage(
 		return
 	}
 	if m.shouldBroadcast(msg) {
-		m.observeBroadcastMessage(ctx, retained)
+		m.observeBroadcastMessage(ctx, retained, mode)
 		return
 	}
 	for {
-		module := m.moduleForMessage(msg)
+		module := m.moduleForMessage(msg, mode)
 		if module == nil {
 			return
 		}
-		if !module.ObserveMessage(ctx, retained) {
+		if !module.ObserveMessage(ctx, retained, mode) {
 			continue
 		}
 		m.markModuleUpdated(module)
@@ -146,14 +145,13 @@ func (m *PChannelRecoveryManager) ObserveMessage(
 	}
 }
 
-func (m *PChannelRecoveryManager) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
+func (m *PChannelRecoveryManager) StartDataRecovery() moduleapi.ModuleSnapshot {
 	if m == nil {
 		return nil
 	}
-	m.metaAndData.Store(true)
 	snapshots := make([]moduleapi.ModuleSnapshot, 0, m.modules.Len()*3)
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
-		snapshots = append(snapshots, moduleapi.FlattenModuleSnapshot(module.SwitchIntoMetaAndData())...)
+		snapshots = append(snapshots, moduleapi.FlattenModuleSnapshot(module.StartDataRecovery())...)
 		return true
 	})
 	return aggregateModuleSnapshots(snapshots)
@@ -288,10 +286,11 @@ func (m *PChannelRecoveryManager) shouldBroadcast(msg message.ImmutableMessage) 
 func (m *PChannelRecoveryManager) observeBroadcastMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
+	mode moduleapi.ObserveMode,
 ) {
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
 		dispatch := retained.Clone()
-		observed := module.ObserveMessage(ctx, dispatch)
+		observed := module.ObserveMessage(ctx, dispatch, mode)
 		dispatch.Release()
 		if observed {
 			m.markModuleUpdated(module)
@@ -300,28 +299,23 @@ func (m *PChannelRecoveryManager) observeBroadcastMessage(
 	})
 }
 
-func (m *PChannelRecoveryManager) moduleForMessage(msg message.ImmutableMessage) *VChannelRecoveryModule {
+func (m *PChannelRecoveryManager) moduleForMessage(
+	msg message.ImmutableMessage,
+	mode moduleapi.ObserveMode,
+) *VChannelRecoveryModule {
 	vchannel := msg.VChannel()
 	if vchannel == "" {
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
+	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection || !mode.ApplyMeta() {
 		return module
 	}
 	module, err := m.newModule(vchannel)
 	if err != nil {
 		return nil
 	}
-	switched := false
-	if m.metaAndData.Load() {
-		module.SwitchIntoMetaAndData()
-		switched = true
-	}
-	module, loaded := m.modules.GetOrInsert(vchannel, module)
-	if !loaded && !switched && m.metaAndData.Load() {
-		module.SwitchIntoMetaAndData()
-	}
+	module, _ = m.modules.GetOrInsert(vchannel, module)
 	return module
 }
 

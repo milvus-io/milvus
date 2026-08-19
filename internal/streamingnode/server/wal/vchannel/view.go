@@ -15,40 +15,36 @@ import (
 )
 
 // NewVChannelViewFromMeta creates a VChannelView from persisted vchannel meta.
-func NewVChannelViewFromMeta(meta *streamingpb.VChannelMeta, configs ...runtimeConfig) *VChannelView {
+func NewVChannelViewFromMeta(meta *streamingpb.VChannelMeta) *VChannelView {
 	return NewVChannelView(
 		meta,
 		meta.GetCheckpointTimeTick(),
 		false,
-		firstRuntimeConfig(configs),
 	)
 }
 
 func newVChannelViewFromOwnedMeta(meta *streamingpb.VChannelMeta) *VChannelView {
-	return newVChannelView(meta, meta.GetCheckpointTimeTick(), false, runtimeConfig{})
+	return newVChannelView(meta, meta.GetCheckpointTimeTick(), false)
 }
 
 func NewVChannelView(
 	meta *streamingpb.VChannelMeta,
 	persistedMetaTimeTick uint64,
 	dirty bool,
-	config runtimeConfig,
 ) *VChannelView {
-	return newVChannelView(proto.Clone(meta).(*streamingpb.VChannelMeta), persistedMetaTimeTick, dirty, config)
+	return newVChannelView(proto.Clone(meta).(*streamingpb.VChannelMeta), persistedMetaTimeTick, dirty)
 }
 
 func newVChannelView(
 	meta *streamingpb.VChannelMeta,
 	persistedMetaTimeTick uint64,
 	dirty bool,
-	config runtimeConfig,
 ) *VChannelView {
 	return &VChannelView{
 		meta:                  meta,
 		persistedMetaTimeTick: persistedMetaTimeTick,
 		dirty:                 dirty,
 		schemaDirty:           dirty,
-		metaAndData:           config.metaAndData,
 	}
 }
 
@@ -91,14 +87,12 @@ type VChannelView struct {
 	schemaDirty                      bool
 	pendingDirtySnapshot             *streamingpb.VChannelMeta
 	pendingDirtySnapshotSavesSchemas bool
-
-	metaAndData bool
 }
 
 // NewVChannelViewFromCreateCollectionMessage creates a vchannel-level recovery
 // view from a CreateCollection WAL message.
 func NewVChannelViewFromCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) *VChannelView {
-	return NewVChannelView(NewVChannelMetaFromCreateCollectionMessage(msg), 0, true, runtimeConfig{})
+	return NewVChannelView(NewVChannelMetaFromCreateCollectionMessage(msg), 0, true)
 }
 
 func (info *VChannelView) ObserveCreateCollectionMessageV1(msg message.ImmutableCreateCollectionMessageV1) (*VChannelView, bool) {
@@ -106,10 +100,7 @@ func (info *VChannelView) ObserveCreateCollectionMessageV1(msg message.Immutable
 	if decision != existingCreateCollectionStartNew {
 		return nil, false
 	}
-	info.mu.Lock()
-	metaAndData := info.metaAndData
-	info.mu.Unlock()
-	return NewVChannelView(NewVChannelMetaFromCreateCollectionMessage(msg), 0, true, runtimeConfig{metaAndData: metaAndData}), true
+	return NewVChannelView(NewVChannelMetaFromCreateCollectionMessage(msg), 0, true), true
 }
 
 func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
@@ -206,12 +197,6 @@ func (info *VChannelView) HasCleanupCandidate() bool {
 		}
 	}
 	return false
-}
-
-func (info *VChannelView) SwitchIntoMetaAndData() {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	info.metaAndData = true
 }
 
 // IsActive returns true if the vchannel is active.

@@ -97,7 +97,6 @@ type TransformLog struct {
 	materializeMaxRows    uint64
 	materializeMaxBytes   uint64
 	runtime               moduleapi.Runtime
-	metaAndData           bool
 	flushTasks            []*transformFlushTask
 	materializeTasks      []*transformMaterializeTask
 	pendingMessages       []pendingMessage
@@ -124,12 +123,6 @@ func New(config Config) *TransformLog {
 	}
 }
 
-func (t *TransformLog) SwitchIntoMetaAndData() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.metaAndData = true
-}
-
 func (t *TransformLog) ObserveMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
@@ -143,7 +136,7 @@ func (t *TransformLog) observeMessage(
 	msg message.ImmutableMessage,
 	clone func() message.RetainedImmutableMessage,
 ) {
-	if t == nil || msg == nil || !t.isMetaAndData() {
+	if t == nil || msg == nil {
 		return
 	}
 	kind := messageutil.ClassifyTransformLogMessage(msg)
@@ -469,12 +462,6 @@ func (t *TransformLog) shouldMaterialize(ctx context.Context) bool {
 		maxBytes = defaultMaterializeMaxBytes
 	}
 	return rows >= maxRows || bytes >= maxBytes
-}
-
-func (t *TransformLog) isMetaAndData() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.metaAndData
 }
 
 func (t *TransformLog) shouldMaterializeByMessage(msg message.ImmutableMessage) bool {

@@ -64,8 +64,6 @@ func TestPChannelRecoveryManagerRequestsOnlyNamedVChannel(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(manager.Close)
-	manager.SwitchIntoMetaAndData()
-
 	observeVChannelDelete(t, manager.Module("v1"), "v1", 10)
 	observeVChannelDelete(t, manager.Module("v2"), "v2", 20)
 	require.Empty(t, scheduler.tasks)
@@ -101,7 +99,7 @@ func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchanne
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
 	owner := message.NewOwnedImmutableMessage(raw, nil)
 	retained := owner.Clone()
-	require.True(t, module.ObserveMessage(context.Background(), retained))
+	require.True(t, module.ObserveMessage(context.Background(), retained, moduleapi.ObserveModeMetaAndData))
 	retained.Release()
 	owner.Release()
 }
