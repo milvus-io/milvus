@@ -143,12 +143,11 @@ func (s *RerankBuilderTestSuite) TestBuildRRFChain() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> SortOp -> LimitOp -> SelectOp
-	s.Equal(4, len(fc.operators))
+	// Verify chain structure: MergeOp -> SortOp -> LimitOp
+	s.Equal(3, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Sort", fc.operators[1].Name())
 	s.Equal("Limit", fc.operators[2].Name())
-	s.Equal("Select", fc.operators[3].Name())
 }
 
 func (s *RerankBuilderTestSuite) TestBuildRRFChainDefaultK() {
@@ -380,14 +379,13 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChain() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> SortOp -> LimitOp -> SelectOp
-	s.Equal(6, len(fc.operators))
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> SortOp -> LimitOp
+	s.Equal(5, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
 	s.Equal("Map", fc.operators[2].Name())
 	s.Equal("Sort", fc.operators[3].Name())
 	s.Equal("Limit", fc.operators[4].Name())
-	s.Equal("Select", fc.operators[5].Name())
 }
 
 func (s *RerankBuilderTestSuite) TestBuildDecayChainMissingRequired() {
@@ -679,11 +677,10 @@ func (s *RerankBuilderTestSuite) TestBuildRRFChainWithGrouping() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> GroupByOp -> SelectOp (no Sort/Limit when grouping)
-	s.Equal(3, len(fc.operators))
+	// Verify chain structure: MergeOp -> GroupByOp (no Sort/Limit when grouping)
+	s.Equal(2, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("GroupBy", fc.operators[1].Name())
-	s.Equal("Select", fc.operators[2].Name())
 }
 
 func (s *RerankBuilderTestSuite) createCollectionSchemaWithCategory() *schemapb.CollectionSchema {
@@ -1213,13 +1210,12 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChainWithGrouping() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> GroupByOp -> SelectOp
-	s.Equal(5, len(fc.operators))
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> GroupByOp
+	s.Equal(4, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
 	s.Equal("Map", fc.operators[2].Name())
 	s.Equal("GroupBy", fc.operators[3].Name())
-	s.Equal("Select", fc.operators[4].Name())
 }
 
 func (s *RerankBuilderTestSuite) TestExecuteDecayWithGrouping_Basic() {
@@ -2709,8 +2705,8 @@ func (s *RerankBuilderTestSuite) TestBuildRerankChainInternal_RoundDecimalZero()
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Chain: Merge -> Sort -> Limit -> Map(RoundDecimal) -> Select = 5 operators
-	s.Equal(5, len(fc.operators))
+	// Chain: Merge -> Sort -> Limit -> Map(RoundDecimal) = 4 operators
+	s.Equal(4, len(fc.operators))
 	s.Equal("Map", fc.operators[3].Name())
 }
 
@@ -2903,11 +2899,10 @@ func (s *RerankBuilderTestSuite) TestBuildRerankChain_NoLimitOp() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Chain: Merge -> Sort -> Select (no Limit when limit=0)
-	s.Equal(3, len(fc.operators))
+	// Chain: Merge -> Sort (no Limit when limit=0)
+	s.Equal(2, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Sort", fc.operators[1].Name())
-	s.Equal("Select", fc.operators[2].Name())
 }
 
 // =============================================================================

@@ -39,13 +39,9 @@ const (
 	scoreFieldName = types.ScoreFieldName
 	segOffsetCol   = types.SegOffsetFieldName
 
-	// elementIndicesCol is a segment-specific column carrying per-row element
-	// indices for element-level (Struct Array) search. The C++ Arrow exporter
-	// populates it when SearchResult::element_level_ is true; the reduce
-	// pipeline propagates it and marshal writes it to
-	// SearchResultData.ElementIndices. It lives here (not in the generic chain
-	// package) because its semantics are specific to segment search results.
-	elementIndicesCol = "$element_indices"
+	// Keep the task-local alias so existing QueryNode reduce code and tests stay
+	// concise; the system-column contract is owned by function/chain/types.
+	elementIndicesCol = types.ElementIndicesFieldName
 )
 
 // groupByOptions configures GroupBy mode for heapMergeReduce.

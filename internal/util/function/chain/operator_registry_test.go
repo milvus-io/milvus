@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
 type OperatorRegistryTestSuite struct {
@@ -33,7 +35,7 @@ func TestOperatorRegistryTestSuite(t *testing.T) {
 }
 
 func (s *OperatorRegistryTestSuite) TestRegisterOperatorEmptyType() {
-	err := RegisterOperator("", func(repr *OperatorRepr) (Operator, error) { return nil, nil })
+	err := RegisterOperator("", func(_ *OperatorRepr, _ types.FunctionBuildContext) (Operator, error) { return nil, nil })
 	s.Error(err)
 	s.Contains(err.Error(), "cannot be empty")
 }
@@ -42,13 +44,19 @@ func (s *OperatorRegistryTestSuite) TestRegisterOperatorNilFactory() {
 	err := RegisterOperator("test_nil_factory", nil)
 	s.Error(err)
 	s.Contains(err.Error(), "cannot be nil")
+
+	err = RegisterOperator("test_nil_stateless_factory", statelessOperatorFactory(nil))
+	s.Error(err)
+	s.Contains(err.Error(), "cannot be nil")
 }
 
 func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryRegistered() {
-	// Built-in operators registered via init() (map, filter, sort, etc.)
-	factory, ok := GetOperatorFactory("map")
-	s.True(ok)
-	s.NotNil(factory)
+	// Built-in contextual and stateless operators are registered uniformly.
+	for _, opType := range []string{types.OpTypeMerge, types.OpTypeMap, types.OpTypeFilter, types.OpTypeSort} {
+		factory, ok := GetOperatorFactory(opType)
+		s.True(ok, opType)
+		s.NotNil(factory, opType)
+	}
 }
 
 func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryNotRegistered() {
@@ -59,20 +67,35 @@ func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryNotRegistered() {
 
 func (s *OperatorRegistryTestSuite) TestMustRegisterOperatorPanics() {
 	// Register a factory first
-	err := RegisterOperator("test_must_panic", func(repr *OperatorRepr) (Operator, error) { return nil, nil })
+	err := RegisterOperator("test_must_panic", func(_ *OperatorRepr, _ types.FunctionBuildContext) (Operator, error) { return nil, nil })
 	s.Require().NoError(err)
 
 	// Registering again should panic
 	s.Panics(func() {
-		MustRegisterOperator("test_must_panic", func(repr *OperatorRepr) (Operator, error) { return nil, nil })
+		MustRegisterOperator("test_must_panic", func(_ *OperatorRepr, _ types.FunctionBuildContext) (Operator, error) { return nil, nil })
 	})
 }
 
 func (s *OperatorRegistryTestSuite) TestRegisterOperatorDuplicate() {
-	err := RegisterOperator("test_duplicate_reg", func(repr *OperatorRepr) (Operator, error) { return nil, nil })
+	err := RegisterOperator("test_duplicate_reg", func(_ *OperatorRepr, _ types.FunctionBuildContext) (Operator, error) { return nil, nil })
 	s.Require().NoError(err)
 
-	err = RegisterOperator("test_duplicate_reg", func(repr *OperatorRepr) (Operator, error) { return nil, nil })
+	err = RegisterOperator("test_duplicate_reg", func(_ *OperatorRepr, _ types.FunctionBuildContext) (Operator, error) { return nil, nil })
 	s.Error(err)
 	s.Contains(err.Error(), "already registered")
+}
+
+func (s *OperatorRegistryTestSuite) TestOperatorFactoryReceivesBuildContext() {
+	const opType = "test_context_operator"
+	want := &types.SearchRuntimeInfo{MetricTypes: []string{"COSINE"}}
+	err := RegisterOperator(opType, func(_ *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
+		s.Same(want, buildCtx.Search)
+		return nil, nil
+	})
+	s.Require().NoError(err)
+
+	factory, ok := GetOperatorFactory(opType)
+	s.Require().True(ok)
+	_, err = factory(&OperatorRepr{Type: opType}, types.FunctionBuildContext{Search: want})
+	s.NoError(err)
 }

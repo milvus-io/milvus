@@ -422,6 +422,53 @@ func TestRerankFunctionDecaySingleVector(t *testing.T) {
 	}
 }
 
+func TestRerankFunctionSingleVectorPreservesGroupByValues(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	_, schema := createRerankFunctionTestCollection(ctx, t, mc, false)
+	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	decayReranker := entity.NewFunction().
+		WithName("test_decay_group_by").
+		WithType(entity.FunctionTypeRerank).
+		WithInputFields(common.DefaultInt64FieldName).
+		WithParam("reranker", "decay").
+		WithParam("function", "gauss").
+		WithParam("origin", defaultTimestamp).
+		WithParam("scale", 3600).
+		WithParam("decay", 0.5)
+
+	// Deliberately do not request the group-by field as an output field. This
+	// ensures the assertion below reads the dedicated GroupByFieldValues channel
+	// instead of a duplicate value returned through FieldsData.
+	results, err := mc.Search(ctx, client.NewSearchOption(
+		schema.CollectionName, common.DefaultLimit, queryVec,
+	).WithANNSField(common.DefaultFloatVecFieldName).
+		WithFunctionReranker(decayReranker).
+		WithGroupByField(common.DefaultVarcharFieldName).
+		WithGroupSize(1))
+
+	common.CheckErr(t, err, true)
+	require.Len(t, results, common.DefaultNq)
+	for _, result := range results {
+		require.Greater(t, result.ResultCount, 0)
+		require.NotNil(t, result.GroupByValue, "reranked grouped search must return group-by values")
+		require.Equal(t, common.DefaultVarcharFieldName, result.GroupByValue.Name())
+		require.Equal(t, result.ResultCount, result.GroupByValue.Len())
+
+		seen := make(map[any]struct{}, result.ResultCount)
+		for i := 0; i < result.ResultCount; i++ {
+			value, err := result.GroupByValue.Get(i)
+			require.NoError(t, err)
+			require.NotNil(t, value)
+			_, duplicate := seen[value]
+			require.False(t, duplicate, "group_size=1 must return at most one row per group")
+			seen[value] = struct{}{}
+		}
+	}
+}
+
 func TestRerankFunctionModelSingleVector(t *testing.T) {
 	t.Parallel()
 

@@ -181,7 +181,7 @@ func validateL2RerankSystemNames(repr *chain.ChainRepr) error {
 				return merr.WrapErrParameterInvalidMsg("op[%d] input %q: %v", opIdx, input, err)
 			}
 		}
-		for _, output := range op.WriteNames {
+		for _, output := range repr.Operators[opIdx].Outputs {
 			if !chain.IsFunctionChainSystemName(output) {
 				continue
 			}
