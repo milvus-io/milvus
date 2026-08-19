@@ -109,7 +109,7 @@ func (s *IndexSuite) TestCreateIndex() {
 	})
 }
 
-func (s *IndexSuite) TestIndexEvictableOptions() {
+func (s *IndexSuite) TestIndexEvictableProperties() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	fieldName := fmt.Sprintf("field_%s", s.randString(4))
 	indexName := fmt.Sprintf("idx_%s", s.randString(6))
@@ -118,12 +118,12 @@ func (s *IndexSuite) TestIndexEvictableOptions() {
 		collectionName,
 		fieldName,
 		index.NewHNSWIndex(entity.L2, 32, 128),
-	).WithEvictable(false).WithIndexName(indexName).Request()
+	).WithProperty(common.EvictableKey, false).WithIndexName(indexName).Request()
 	createParams := entity.KvPairsMap(createReq.GetExtraParams())
 	s.Equal("false", createParams[common.EvictableKey])
 
 	alterReq := NewAlterIndexPropertiesOption(collectionName, indexName).
-		WithEvictable(false).
+		WithProperty(common.EvictableKey, false).
 		Request()
 	alterParams := entity.KvPairsMap(alterReq.GetExtraParams())
 	s.Equal("false", alterParams[common.EvictableKey])

@@ -250,7 +250,10 @@ field_evictable_enabled(const SchemaPtr& schema,
     const auto& field_meta = schema->operator[](field_id);
     auto [has_setting, enabled] = schema->EvictableEnabled(
         field_id, IsVectorDataType(field_meta.get_data_type()), is_index);
-    return has_setting ? enabled : true;
+    return has_setting
+               ? enabled
+               : SegcoreConfig::default_config().get_evictable_default(
+                     IsVectorDataType(field_meta.get_data_type()), is_index);
 }
 
 static inline bool

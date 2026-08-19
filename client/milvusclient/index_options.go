@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v3/common"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 )
@@ -42,8 +41,8 @@ func (opt *createIndexOption) WithExtraParam(key string, value any) {
 	opt.extraParams[key] = value
 }
 
-func (opt *createIndexOption) WithEvictable(enabled bool) *createIndexOption {
-	opt.extraParams[common.EvictableKey] = enabled
+func (opt *createIndexOption) WithProperty(key string, value any) *createIndexOption {
+	opt.WithExtraParam(key, value)
 	return opt
 }
 
@@ -178,10 +177,6 @@ func (opt *alterIndexPropertiesOption) Request() *milvuspb.AlterIndexRequest {
 func (opt *alterIndexPropertiesOption) WithProperty(key string, value any) *alterIndexPropertiesOption {
 	opt.properties[key] = fmt.Sprintf("%v", value)
 	return opt
-}
-
-func (opt *alterIndexPropertiesOption) WithEvictable(enabled bool) *alterIndexPropertiesOption {
-	return opt.WithProperty(common.EvictableKey, enabled)
 }
 
 func NewAlterIndexPropertiesOption(collectionName string, indexName string) *alterIndexPropertiesOption {

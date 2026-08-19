@@ -240,6 +240,29 @@ class SegcoreConfig {
     get_take_for_output_result_count_limit() const {
         return take_for_output_result_count_limit_.load(
             std::memory_order_relaxed);
+
+    void
+    set_evictable_defaults(bool scalar_field,
+                           bool vector_field,
+                           bool scalar_index,
+                           bool vector_index) {
+        evictable_scalar_field_.store(scalar_field, std::memory_order_relaxed);
+        evictable_vector_field_.store(vector_field, std::memory_order_relaxed);
+        evictable_scalar_index_.store(scalar_index, std::memory_order_relaxed);
+        evictable_vector_index_.store(vector_index, std::memory_order_relaxed);
+    }
+
+    bool
+    get_evictable_default(bool is_vector, bool is_index) const {
+        if (is_vector) {
+            return is_index
+                       ? evictable_vector_index_.load(std::memory_order_relaxed)
+                       : evictable_vector_field_.load(
+                             std::memory_order_relaxed);
+        }
+        return is_index
+                   ? evictable_scalar_index_.load(std::memory_order_relaxed)
+                   : evictable_scalar_field_.load(std::memory_order_relaxed);
     }
 
     static constexpr int64_t kDefaultMaxGroupByGroups = 100000;
@@ -304,6 +327,10 @@ class SegcoreConfig {
     inline static bool reject_remote_vector_output_ = false;
     inline static std::atomic<int64_t> take_for_output_result_count_limit_{
         kDefaultTakeForOutputResultCountLimit};
+    inline static std::atomic<bool> evictable_scalar_field_{true};
+    inline static std::atomic<bool> evictable_vector_field_{true};
+    inline static std::atomic<bool> evictable_scalar_index_{true};
+    inline static std::atomic<bool> evictable_vector_index_{true};
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };

@@ -73,11 +73,12 @@ import (
 // mixed-version protocol error.
 const legacyLoadScopeIndex = querypb.LoadScope(2)
 
-// materializeLoadSegmentsEvictableDefaults clones a worker-bound load request
-// and makes the QueryNode-local eviction defaults explicit for segcore. The
-// clone is required because a delegator may reuse the coordinator request for
-// multiple workers whose local defaults differ.
-func materializeLoadSegmentsEvictableDefaults(req *querypb.LoadSegmentsRequest) *querypb.LoadSegmentsRequest {
+// materializeLoadSegmentsEvictableOverrides clones a worker-bound load request
+// and propagates collection-level eviction defaults to fields and indexes.
+// QueryNode-local defaults remain unset so each cache slot can resolve the
+// latest local configuration when it is created. The clone is required because
+// a delegator may reuse the coordinator request for multiple workers.
+func materializeLoadSegmentsEvictableOverrides(req *querypb.LoadSegmentsRequest) *querypb.LoadSegmentsRequest {
 	materialized := typeutil.Clone(req)
 	schema := materialized.GetSchema()
 	if schema == nil {
@@ -93,30 +94,18 @@ func materializeLoadSegmentsEvictableDefaults(req *querypb.LoadSegmentsRequest) 
 	vectorIndexDefault, hasVectorIndexDefault := common.GetEvictableByKey(
 		common.EvictableVectorIndexKey, schema.GetProperties()...)
 
-	fieldDefault := func(field *schemapb.FieldSchema) bool {
+	fieldDefault := func(field *schemapb.FieldSchema) (bool, bool) {
 		if typeutil.IsVectorType(field.GetDataType()) {
-			if hasVectorFieldDefault {
-				return vectorFieldDefault
-			}
-			return paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.GetAsBool()
+			return vectorFieldDefault, hasVectorFieldDefault
 		}
-		if hasScalarFieldDefault {
-			return scalarFieldDefault
-		}
-		return paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.GetAsBool()
+		return scalarFieldDefault, hasScalarFieldDefault
 	}
 
-	indexDefault := func(field *schemapb.FieldSchema) bool {
+	indexDefault := func(field *schemapb.FieldSchema) (bool, bool) {
 		if typeutil.IsVectorType(field.GetDataType()) {
-			if hasVectorIndexDefault {
-				return vectorIndexDefault
-			}
-			return paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.GetAsBool()
+			return vectorIndexDefault, hasVectorIndexDefault
 		}
-		if hasScalarIndexDefault {
-			return scalarIndexDefault
-		}
-		return paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.GetAsBool()
+		return scalarIndexDefault, hasScalarIndexDefault
 	}
 
 	fieldByID := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
@@ -126,9 +115,13 @@ func materializeLoadSegmentsEvictableDefaults(req *querypb.LoadSegmentsRequest) 
 			return
 		}
 
-		enabled := fieldDefault(field)
+		enabled, hasDefault := fieldDefault(field)
 		if inherited != nil {
 			enabled = *inherited
+			hasDefault = true
+		}
+		if !hasDefault {
+			return
 		}
 		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 			Key:   common.EvictableKey,
@@ -160,7 +153,10 @@ func materializeLoadSegmentsEvictableDefaults(req *querypb.LoadSegmentsRequest) 
 				continue
 			}
 
-			enabled := indexDefault(field)
+			enabled, hasDefault := indexDefault(field)
+			if !hasDefault {
+				continue
+			}
 			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
 				Key:   common.EvictableKey,
 				Value: strconv.FormatBool(enabled),
@@ -644,11 +640,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	// QueryCoord materializes explicit and collection-level settings before
-	// dispatch. Fill only the remaining gaps with this worker's local defaults,
-	// on a clone so neither the coordinator request nor another worker is
-	// affected. Both full load and Reopen consume the cloned request below.
-	req = materializeLoadSegmentsEvictableDefaults(req)
+	// Propagate collection-level settings to fields and indexes on a clone so
+	// neither the coordinator request nor another worker is affected. Leave
+	// QueryNode-local defaults unset for segcore to resolve when it creates each
+	// cache slot. Both full load and Reopen consume the cloned request below.
+	req = materializeLoadSegmentsEvictableOverrides(req)
 
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())

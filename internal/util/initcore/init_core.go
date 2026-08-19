@@ -409,11 +409,19 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(diskPath))
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
+	scalarFieldEvictable := C.bool(params.QueryNodeCfg.TieredEvictableScalarField.GetAsBool())
+	vectorFieldEvictable := C.bool(params.QueryNodeCfg.TieredEvictableVectorField.GetAsBool())
+	scalarIndexEvictable := C.bool(params.QueryNodeCfg.TieredEvictableScalarIndex.GetAsBool())
+	vectorIndexEvictable := C.bool(params.QueryNodeCfg.TieredEvictableVectorIndex.GetAsBool())
 
 	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
 		vectorIndexCacheWarmupPolicy,
+		scalarFieldEvictable,
+		vectorFieldEvictable,
+		scalarIndexEvictable,
+		vectorIndexEvictable,
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
 		storageUsageTrackingEnabled,
@@ -465,6 +473,10 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
+	scalarFieldEvictable := C.bool(params.QueryNodeCfg.TieredEvictableScalarField.GetAsBool())
+	vectorFieldEvictable := C.bool(params.QueryNodeCfg.TieredEvictableVectorField.GetAsBool())
+	scalarIndexEvictable := C.bool(params.QueryNodeCfg.TieredEvictableScalarIndex.GetAsBool())
+	vectorIndexEvictable := C.bool(params.QueryNodeCfg.TieredEvictableVectorIndex.GetAsBool())
 
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
@@ -474,7 +486,11 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 		scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
-		vectorIndexCacheWarmupPolicy)
+		vectorIndexCacheWarmupPolicy,
+		scalarFieldEvictable,
+		vectorFieldEvictable,
+		scalarIndexEvictable,
+		vectorIndexEvictable)
 
 	return nil
 }
@@ -790,6 +806,10 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 
