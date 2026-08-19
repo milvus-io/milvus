@@ -1408,6 +1408,7 @@ func appendFloatVectorFieldData(
 	bytesData := arrow.Float32Traits.CastToBytes(data.Data)
 	var appendValue func([]byte)
 	var appendNull func()
+	// Reserve grows row buffers geometrically; Append does the same for value data.
 	switch typedBuilder := builder.(type) {
 	case *array.FixedSizeBinaryBuilder:
 		dtype := typedBuilder.Type().(*arrow.FixedSizeBinaryType)
@@ -1418,17 +1419,12 @@ func appendFloatVectorFieldData(
 				dtype.ByteWidth,
 			)
 		}
-		if remaining := typedBuilder.Cap() - typedBuilder.Len(); remaining < logicalRows {
-			typedBuilder.Resize(typedBuilder.Len() + logicalRows)
-		}
+		typedBuilder.Reserve(logicalRows)
 		appendValue = typedBuilder.Append
 		appendNull = typedBuilder.AppendNull
 	case *array.BinaryBuilder:
-		if remaining := typedBuilder.Cap() - typedBuilder.Len(); remaining < logicalRows {
-			typedBuilder.Resize(typedBuilder.Len() + logicalRows)
-		}
-		typedBuilder.ReserveData(len(bytesData))
-		appendValue = typedBuilder.UnsafeAppend
+		typedBuilder.Reserve(logicalRows)
+		appendValue = typedBuilder.Append
 		appendNull = typedBuilder.AppendNull
 	default:
 		return merr.WrapErrServiceInternalMsg(

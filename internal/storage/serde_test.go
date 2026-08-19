@@ -40,8 +40,9 @@ type MockRecordWriter struct {
 }
 
 type reallocationCountingAllocator struct {
-	delegate      memory.Allocator
-	reallocations int
+	delegate         memory.Allocator
+	reallocations    int
+	reallocatedBytes int
 }
 
 func (a *reallocationCountingAllocator) Allocate(size int) []byte {
@@ -50,6 +51,7 @@ func (a *reallocationCountingAllocator) Allocate(size int) []byte {
 
 func (a *reallocationCountingAllocator) Reallocate(size int, b []byte) []byte {
 	a.reallocations++
+	a.reallocatedBytes += len(b)
 	return a.delegate.Reallocate(size, b)
 }
 
@@ -146,6 +148,82 @@ func TestBuildRecordFloatVectorReservesAndUsesSourceBytes(t *testing.T) {
 				}
 				assert.Equal(t, expected, arrow.Float32Traits.CastFromBytes(value))
 			}
+		})
+	}
+}
+
+func TestBuildRecordFloatVectorBuilderGrowthIsAmortized(t *testing.T) {
+	const (
+		dim        = 16
+		chunkCount = 128
+	)
+	tests := []struct {
+		name         string
+		nullable     bool
+		rowsPerChunk int
+	}{
+		{name: "fixed-size-binary", rowsPerChunk: 1024},
+		{name: "binary", nullable: true, rowsPerChunk: 16},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var validData []bool
+			if test.nullable {
+				validData = make([]bool, test.rowsPerChunk)
+			}
+			values := make([]float32, 0, test.rowsPerChunk*dim)
+			for row := 0; row < test.rowsPerChunk; row++ {
+				if test.nullable {
+					validData[row] = row%4 != 0
+					if !validData[row] {
+						continue
+					}
+				}
+				for column := 0; column < dim; column++ {
+					values = append(values, float32(row*dim+column))
+				}
+			}
+
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					Nullable: test.nullable,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			}}
+			insertData := &InsertData{Data: map[FieldID]FieldData{
+				100: &FloatVectorFieldData{
+					Data:      values,
+					ValidData: validData,
+					Dim:       dim,
+					Nullable:  test.nullable,
+				},
+			}}
+
+			arrowSchema, err := ConvertToArrowSchema(schema, false)
+			require.NoError(t, err)
+			allocator := &reallocationCountingAllocator{delegate: memory.NewGoAllocator()}
+			builder := array.NewRecordBuilder(allocator, arrowSchema)
+			defer builder.Release()
+
+			for i := 0; i < chunkCount; i++ {
+				require.NoError(t, BuildRecord(builder, insertData, schema))
+			}
+
+			totalValueBytes := len(values) * arrow.Float32SizeBytes * chunkCount
+			// Exact per-chunk growth exceeds chunkCount reallocations and copies
+			// quadratic data; geometric growth stays within these bounds.
+			assert.Less(t, allocator.reallocations, chunkCount)
+			assert.Less(t, allocator.reallocatedBytes, totalValueBytes*4)
+
+			record := builder.NewRecord()
+			defer record.Release()
+			assert.Equal(t, test.rowsPerChunk*chunkCount, int(record.NumRows()))
 		})
 	}
 }
