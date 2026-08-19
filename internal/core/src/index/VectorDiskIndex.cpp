@@ -246,7 +246,8 @@ ReadDiskRawDataRows(const LocalChunkManagerPtr& local_chunk_manager,
 void
 ApplyDiskAnnBuildThreadConfig(const IndexType& index_type,
                               knowhere::Json& build_config) {
-    if (index_type != knowhere::IndexEnum::INDEX_DISKANN) {
+    if (index_type != knowhere::IndexEnum::INDEX_DISKANN &&
+        index_type != knowhere::IndexEnum::INDEX_AISAQ) {
         return;
     }
 
