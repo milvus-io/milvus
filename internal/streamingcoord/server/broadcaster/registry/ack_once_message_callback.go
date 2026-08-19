@@ -16,7 +16,12 @@ import (
 // It will be called when the message is acked by streamingnode at one channel at a time.
 type (
 	MessageAckOnceCallback[H proto.Message, B proto.Message] = func(ctx context.Context, result message.AckResult[H, B]) error
-	messageInnerAckOnceCallback                              = func(ctx context.Context, msg message.ImmutableMessage) error
+	// ResolvedMessageAckOnceCallback is an ack-once callback whose registration
+	// future has already been resolved. Resolving and invoking are deliberately
+	// separate so callers can wait for component registration without holding
+	// task-local locks.
+	ResolvedMessageAckOnceCallback func(ctx context.Context, msg message.ImmutableMessage) error
+	messageInnerAckOnceCallback    = ResolvedMessageAckOnceCallback
 )
 
 // messageAckOnceCallbacks is the map of message type to the ack once callback function.
@@ -75,18 +80,56 @@ func CallMessageAckOnceCallbacks(ctx context.Context, msgs ...message.ImmutableM
 	return nil
 }
 
-// callMessageAckOnceCallback calls the ack once callback function for the message type.
-func callMessageAckOnceCallback(ctx context.Context, msg message.ImmutableMessage) error {
+// ResolveMessageAckOnceCallback waits until the ack-once callback for typ is
+// registered. A nil callback means the message type has no ack-once callback.
+func ResolveMessageAckOnceCallback(ctx context.Context, typ message.MessageTypeWithVersion) (ResolvedMessageAckOnceCallback, error) {
 	messageAckOnceCallbacksMu.RLock()
-	callbackFuture, ok := messageAckOnceCallbacks[msg.MessageTypeWithVersion()]
+	callbackFuture, ok := messageAckOnceCallbacks[typ]
 	messageAckOnceCallbacksMu.RUnlock()
 	if !ok {
-		// No callback need tobe called, return nil
-		return nil
+		return nil, nil
 	}
 	callback, err := callbackFuture.GetWithContext(ctx)
 	if err != nil {
-		return merr.Wrap(err, "when waiting callback registered")
+		return nil, merr.Wrap(err, "when waiting callback registered")
 	}
-	return callback(ctx, msg)
+	return callback, nil
+}
+
+// CallResolvedMessageAckOnceCallbacks invokes a callback that has already been
+// resolved. Multiple messages retain the existing parallel invocation behavior.
+func CallResolvedMessageAckOnceCallbacks(ctx context.Context, callback ResolvedMessageAckOnceCallback, msgs ...message.ImmutableMessage) error {
+	if callback == nil || len(msgs) == 0 {
+		return nil
+	}
+	if len(msgs) == 1 {
+		return callback(ctx, msgs[0])
+	}
+	wg := &sync.WaitGroup{}
+	wg.Add(len(msgs))
+	errc := make(chan error, len(msgs))
+	for _, msg := range msgs {
+		msg := msg
+		go func() {
+			defer wg.Done()
+			errc <- callback(ctx, msg)
+		}()
+	}
+	wg.Wait()
+	close(errc)
+	for err := range errc {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// callMessageAckOnceCallback calls the ack once callback function for the message type.
+func callMessageAckOnceCallback(ctx context.Context, msg message.ImmutableMessage) error {
+	callback, err := ResolveMessageAckOnceCallback(ctx, msg.MessageTypeWithVersion())
+	if err != nil {
+		return err
+	}
+	return CallResolvedMessageAckOnceCallbacks(ctx, callback, msg)
 }
