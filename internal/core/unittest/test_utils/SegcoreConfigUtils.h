@@ -46,6 +46,8 @@ class ScopedSegcoreConfigRestore {
           nprobe_(config.get_nprobe()),
           enable_interim_segment_index_(
               config.get_enable_interim_segment_index()),
+          interim_index_target_version_(
+              config.get_interim_index_target_version()),
           sub_dim_(config.get_sub_dim()),
           refine_ratio_(config.get_refine_ratio()),
           dense_vector_interim_index_type_(
@@ -60,6 +62,7 @@ class ScopedSegcoreConfigRestore {
         config_.set_nlist(nlist_);
         config_.set_nprobe(nprobe_);
         config_.set_enable_interim_segment_index(enable_interim_segment_index_);
+        config_.set_interim_index_target_version(interim_index_target_version_);
         config_.set_sub_dim(sub_dim_);
         config_.set_refine_ratio(refine_ratio_);
         config_.set_dense_vector_intermin_index_type(
@@ -78,6 +81,7 @@ class ScopedSegcoreConfigRestore {
     int64_t nlist_;
     int64_t nprobe_;
     bool enable_interim_segment_index_;
+    int32_t interim_index_target_version_;
     int64_t sub_dim_;
     float refine_ratio_;
     std::string dense_vector_interim_index_type_;
@@ -87,6 +91,7 @@ class ScopedSegcoreConfigRestore {
 
 struct InterimIndexConfigForTest {
     bool enable_interim_segment_index = true;
+    int32_t target_index_version = -1;
     int64_t chunk_rows = 32 * 1024;
     int64_t nlist = 100;
     int64_t nprobe = 4;
@@ -104,6 +109,7 @@ ApplyInterimIndexConfigForTest(
     config.set_chunk_rows(options.chunk_rows);
     config.set_enable_interim_segment_index(
         options.enable_interim_segment_index);
+    config.set_interim_index_target_version(options.target_index_version);
     config.set_nlist(options.nlist);
     config.set_nprobe(options.nprobe);
     if (options.dense_vector_interim_index_type.has_value()) {

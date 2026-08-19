@@ -2699,6 +2699,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);
 
+            const auto index_version =
+                segcore_config_.get_interim_index_version();
             std::unique_ptr<
                 milvus::cachinglayer::Translator<milvus::index::IndexBase>>
                 translator =
@@ -2709,6 +2711,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
                         field_id.get(),
                         interim_index_type,
                         index_metric,
+                        index_version,
                         build_config,
                         dim,
                         is_sparse,
@@ -2723,8 +2726,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
-            auto index_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
+
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                 index_has_raw_data_[field_id] =

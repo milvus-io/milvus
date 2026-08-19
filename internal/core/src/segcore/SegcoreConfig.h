@@ -18,6 +18,8 @@
 #include "common/Json.h"
 #include "index/Utils.h"
 #include "common/EasyAssert.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/version.h"
 
 namespace milvus::segcore {
 
@@ -71,6 +73,23 @@ class SegcoreConfig {
     bool
     get_enable_interim_segment_index() const {
         return enable_interim_segment_index_;
+    }
+
+    int32_t
+    get_interim_index_target_version() const {
+        return interim_index_target_version_;
+    }
+
+    int32_t
+    get_interim_index_version() const {
+        return interim_index_target_version_ == -1
+                   ? knowhere::Version::GetCurrentVersion().VersionNumber()
+                   : interim_index_target_version_;
+    }
+
+    void
+    set_interim_index_target_version(int32_t target_version) {
+        interim_index_target_version_ = target_version;
     }
 
     void
@@ -184,6 +203,7 @@ class SegcoreConfig {
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
     inline static bool enable_interim_segment_index_ = false;
+    inline static int32_t interim_index_target_version_ = -1;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
     inline static int64_t nprobe_ = 4;
