@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -129,6 +130,10 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
 	map[int64]stats.SegmentBelongs,
 ) {
+	if recoverInfos.WritePathRecovery != nil {
+		return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections)
+	}
+
 	// recover the segment infos from the streaming node segment assignment meta storage
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
 	growingBelongs := make(map[int64]stats.SegmentBelongs)
@@ -172,8 +177,43 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	return partitionToSegmentManagers, growingBelongs
 }
 
+func newSegmentAllocManagersFromWritePathRecovery(
+	pchannel types.PChannelInfo,
+	segments map[int64]moduleapi.SegmentWritePathRecoveryState,
+	collections map[int64]*CollectionInfo,
+) (map[PartitionUniqueKey]map[int64]*segmentAllocManager, map[int64]stats.SegmentBelongs) {
+	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
+	growingBelongs := make(map[int64]stats.SegmentBelongs, len(segments))
+	for segmentID, state := range segments {
+		if _, ok := collections[state.CollectionID]; !ok {
+			panic(fmt.Sprintf("write path recovery state is dirty, collection not found, %d", state.CollectionID))
+		}
+		if _, ok := collections[state.CollectionID].PartitionIDs[state.PartitionID]; !ok {
+			panic(fmt.Sprintf("write path recovery state is dirty, partition not found, %d", state.PartitionID))
+		}
+		uniqueKey := PartitionUniqueKey{CollectionID: state.CollectionID, PartitionID: state.PartitionID}
+		if partitionToSegmentManagers[uniqueKey] == nil {
+			partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+		}
+		manager := newSegmentAllocManagerFromRecovery(pchannel, state)
+		partitionToSegmentManagers[uniqueKey][segmentID] = manager
+		growingBelongs[segmentID] = stats.SegmentBelongs{
+			PChannel:     pchannel.Name,
+			VChannel:     state.VChannel,
+			CollectionID: state.CollectionID,
+			PartitionID:  state.PartitionID,
+			SegmentID:    segmentID,
+		}
+	}
+	return partitionToSegmentManagers, growingBelongs
+}
+
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
 func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*CollectionInfo {
+	if recoverInfos.WritePathRecovery != nil {
+		return newCollectionInfosFromWritePathRecovery(recoverInfos.WritePathRecovery.VChannels)
+	}
+
 	// collectionMap is a map from collectionID to collectionInfo.
 	collectionInfoMap := make(map[int64]*CollectionInfo, len(recoverInfos.VChannels))
 	for _, vchannelInfo := range recoverInfos.VChannels {
@@ -194,6 +234,28 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 		}
 		collectionInfo.setSchema(latestSchema)
 		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = collectionInfo
+	}
+	return collectionInfoMap
+}
+
+func newCollectionInfosFromWritePathRecovery(
+	vchannels map[string]moduleapi.VChannelWritePathRecoveryState,
+) map[int64]*CollectionInfo {
+	collectionInfoMap := make(map[int64]*CollectionInfo, len(vchannels))
+	for vchannel, state := range vchannels {
+		partitionIDs := make(map[int64]struct{}, len(state.PartitionIDs)+1)
+		for _, partitionID := range state.PartitionIDs {
+			partitionIDs[partitionID] = struct{}{}
+		}
+		partitionIDs[common.AllPartitionsID] = struct{}{}
+		collectionInfo := &CollectionInfo{
+			VChannel:     vchannel,
+			PartitionIDs: partitionIDs,
+		}
+		if state.Schema != nil {
+			collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: state.Schema})
+		}
+		collectionInfoMap[state.CollectionID] = collectionInfo
 	}
 	return collectionInfoMap
 }

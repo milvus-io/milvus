@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -296,6 +297,61 @@ func TestShardManager(t *testing.T) {
 	assert.Equal(t, len(segmentIDs), 1)
 	assert.Equal(t, segmentIDs[0], int64(1013))
 	m.Close()
+}
+
+func TestRecoverShardManagerFromWritePathRecoverySnapshot(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	channel := types.PChannelInfo{Name: "test_write_path_recovery", Term: 1}
+	w := mock_wal.NewMockWAL(t)
+	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} { return make(chan struct{}) }).Maybe()
+	future := syncutil.NewFuture[wal.WAL]()
+	future.Set(w)
+
+	schema := &schemapb.CollectionSchema{
+		Name:    "recovered_collection",
+		Version: 7,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	manager := RecoverShardManager(&ShardManagerRecoverParam{
+		ChannelInfo: channel,
+		WAL:         future,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v1": {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionIDs: []int64{2},
+						Schema:       schema,
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					1001: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  2,
+						SegmentID:    1001,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    50,
+							CreateSegmentTimeTick: 101,
+						},
+					},
+				},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 300},
+		},
+		TxnManager: &mockedTxnManager{},
+	}).(*shardManagerImpl)
+	defer manager.Close()
+
+	require.NoError(t, manager.CheckIfCollectionExists(1))
+	require.Contains(t, manager.collections[1].PartitionIDs, int64(2))
+	require.Equal(t, int32(7), manager.collections[1].SchemaVersion())
+	require.Contains(t, manager.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}].segments, int64(1001))
 }
 
 func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t *testing.T) {
