@@ -121,6 +121,12 @@ class GrowingOffsetMapping final : public OffsetMapping {
         bool* valid_data,
         std::vector<int64_t>& physical_offsets) const override;
 
+    void
+    ApplyValidDataByLogicalOffsets(
+        const int64_t* logical_offsets,
+        int64_t count,
+        TargetBitmapView valid_result) const override;
+
  private:
     // Append-only array of int32_t for one writer and many lock-free readers.
     //
