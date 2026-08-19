@@ -32,16 +32,23 @@ namespace milvus {
 namespace {
 
 // These are RoaringFormatSpec values, not a Milvus contract, so unlike the
-// limits in RoaringMembership.h they are not pinned to a Go counterpart by
-// value; each side is held to the format behaviourally by its own fixtures.
-// TestRoaringSegcoreConstantsMatch (internal/parser/planparserv2) still reads
-// this file, and every k-prefixed constant here has to be classified there as
-// pinned or deliberately unpinned -- so adding one, renaming one, or deleting
-// one fails a Go test until that list is updated. Keep the shape
-// `constexpr <type> <name> = <initializer>;`, and keep this file free of
-// `#define`: that check reads these declarations as text and does not expand
-// macros, so it fails outright on a macro rather than risk being shown the
-// wrong declaration. See RoaringMembership.h for the rest of that constraint.
+// limits in RoaringMembership.h they are not generated from a Go counterpart:
+// both sides implement a published format, and two of them are derived rather
+// than chosen (kPortableBitmapBytes is 65536/8, kPortableRoaring64MinEntryBytes
+// is the 4-byte high key plus the 8-byte minimum child).
+//
+// Each side is instead held to the format behaviourally, at the boundary, by
+// fixtures written independently on each side -- the Go validator accepts
+// CRoaring-written bytes (TestValidateAcceptsCRoaringGeneratedFixtures) and
+// this file accepts Go-written ones (ParsesGoGeneratedBitmapFixture and its
+// siblings), across every container type and both sides of the offset-table
+// threshold. That catches something a value check cannot: flipping a `>` to a
+// `>=` here diverges the two sides while every declaration still reads the
+// same. It is not strictly stronger, though. Tightening
+// kPortableRoaring64MinEntryBytes 12 -> 16 fails on both sides; loosening it
+// 12 -> 8 fails on neither, which is benign -- the bound is a pre-filter and
+// the full scan behind it rejects the same input -- but the two sides really
+// can drift in that direction unnoticed.
 constexpr uint32_t kPortableCookieNoRun = 12346;
 constexpr uint16_t kPortableCookieRun = 12347;
 constexpr uint32_t kPortableArrayMaxCardinality = 4096;
