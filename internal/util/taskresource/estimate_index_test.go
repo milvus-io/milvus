@@ -150,8 +150,8 @@ func TestEstimateAnalyzeScalesWithInputAndIsCapped(t *testing.T) {
 
 	assert.Greater(t, small.Memory, int64(0))
 	assert.Greater(t, huge.Memory, small.Memory)
-	// The cap now bounds the phase-2 grant only; what actually binds a large
-	// dataset is the training buffer the task allocates today.
+	// A small dataset bounds the charge; a large one is bounded by the training
+	// buffer the task allocates, which is all the charge ever grows to.
 	assert.LessOrEqual(t, huge.Memory, int64(float64(testNodeMemory)*0.8))
 }
 
@@ -293,10 +293,10 @@ func TestEstimateStatsFloorAppliesToTinyField(t *testing.T) {
 	assert.Equal(t, int64(64)*mib, got.Memory)
 }
 
-// TestEstimateAnalyzeExactFormulaBelowCap pins the multiplication for a
-// dataset smaller than the training buffer: the dataset bounds the charge,
-// because the training set cannot be larger than the data that exists.
-func TestEstimateAnalyzeExactFormulaBelowCap(t *testing.T) {
+// TestEstimateAnalyzeDatasetBoundsTheCharge pins the branch where the dataset
+// is smaller than the training buffer: the dataset bounds the charge, because
+// the training set cannot be larger than the data that exists.
+func TestEstimateAnalyzeDatasetBoundsTheCharge(t *testing.T) {
 	paramtable.Init()
 	mockNodeMemory(t, testNodeMemory)
 
@@ -324,12 +324,10 @@ func TestEstimateAnalyzeChargesTheBufferTheTaskActuallyAllocates(t *testing.T) {
 	got := EstimateAnalyze(1000*gib, 0.8)
 
 	assert.Equal(t, int64(float64(testNodeMemory)*0.8), got.Memory)
-	// The point of the fix: this must be well past the old cap, which is what
-	// made the task look free.
-	assert.Greater(t, got.Memory,
-		10*paramtable.Get().DataCoordCfg.ResourceAnalyzeMaxMemory.GetAsInt64())
-	// And past the node's own task budget, so the guard treats it as oversized
-	// and runs it alone -- the behavior analyzeTaskSlotUsage=65535 used to buy.
+	// The point of the fix: this must be past the node's own task budget, so the
+	// guard treats it as oversized and runs it alone -- the behavior
+	// analyzeTaskSlotUsage=65535 used to buy, and what the old estimator's
+	// min(dataset, 4GiB) answer threw away.
 	assert.Greater(t, got.Memory, int64(float64(testNodeMemory)*
 		paramtable.Get().DataNodeCfg.ResourceMemoryRatio.GetAsFloat()))
 }
