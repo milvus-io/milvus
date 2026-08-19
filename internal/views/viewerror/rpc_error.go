@@ -77,7 +77,7 @@ func (s *ViewClientStatus) Error() string {
 		return "query view RPC status is nil"
 	}
 	if viewErr := s.TryIntoViewError(); viewErr != nil {
-		return fmt.Sprintf("%s: %s; %s", s.method, s.Status.Err(), viewErr)
+		return fmt.Sprintf("%s: %s; %s", s.method, s.Err(), viewErr)
 	}
-	return fmt.Sprintf("%s: %s", s.method, s.Status.Err())
+	return fmt.Sprintf("%s: %s", s.method, s.Err())
 }
