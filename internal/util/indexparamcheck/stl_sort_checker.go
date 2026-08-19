@@ -36,16 +36,18 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 	dataType := field.GetDataType()
 	if typeutil.IsArrayType(dataType) && typeutil.IsStructSubField(field.GetName()) {
 		elemType := field.GetElementType()
-		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) {
-			return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType())
+		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) &&
+			!typeutil.IsDateType(elemType) && !typeutil.IsTimeType(elemType) {
+			return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar, timestamptz, date or time field, got struct sub-field of %s", field.GetElementType())
 		}
 		return nil
 	}
 	if typeutil.IsJSONType(dataType) {
 		return nil
 	}
-	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) {
-		return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got %s", field.GetDataType())
+	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) &&
+		!typeutil.IsDateType(dataType) && !typeutil.IsTimeType(dataType) {
+		return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar, timestamptz, date or time field, got %s", field.GetDataType())
 	}
 	return nil
 }

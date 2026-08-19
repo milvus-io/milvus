@@ -1086,6 +1086,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 				return err
 			}
 		}
+		dateTimePacked2IsoStr(t.result.GetFieldsData())
 	}
 	log.Debug(ctx, "Query PostExecute done")
 	return nil

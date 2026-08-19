@@ -47,6 +47,34 @@ func genEmptyLongFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	}
 }
 
+func genEmptyDateFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DateData{DateData: &schemapb.DateArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
+func genEmptyTimeFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimeData{TimeData: &schemapb.TimeArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
 func genEmptyFloatFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      field.GetDataType(),
@@ -301,6 +329,10 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyDoubleFieldData(field), nil
 	case schemapb.DataType_Timestamptz:
 		return genEmptyLongFieldData(field), nil
+	case schemapb.DataType_Date:
+		return genEmptyDateFieldData(field), nil
+	case schemapb.DataType_Time:
+		return genEmptyTimeFieldData(field), nil
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return genEmptyVarCharFieldData(field), nil
 	case schemapb.DataType_Array:

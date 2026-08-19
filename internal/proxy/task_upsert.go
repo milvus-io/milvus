@@ -1012,6 +1012,38 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 				},
 			},
 		}), nil
+	case schemapb.DataType_Date:
+		return withValidData(&schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DateData{
+						DateData: &schemapb.DateArray{
+							Data: make([]int32, upsertIDSize),
+						},
+					},
+				},
+			},
+		}), nil
+	case schemapb.DataType_Time:
+		return withValidData(&schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimeData{
+						TimeData: &schemapb.TimeArray{
+							Data: make([]int64, upsertIDSize),
+						},
+					},
+				},
+			},
+		}), nil
 
 	// the intput data of geometry field is in wkt format
 	case schemapb.DataType_Geometry:

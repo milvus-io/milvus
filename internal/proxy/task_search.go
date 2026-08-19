@@ -1476,6 +1476,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	if t.result != nil && t.result.GetResults() != nil {
+		dateTimePacked2IsoStr(t.result.GetResults().GetFieldsData())
+	}
 
 	// Legacy-wire downgrade: the old SDK only reads the singular channel
 	// (GroupByFieldValue). All internal pipeline stages emit to the plural
