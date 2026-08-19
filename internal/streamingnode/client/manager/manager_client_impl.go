@@ -76,7 +76,8 @@ func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64
 				ServerID: serverID,
 				Address:  session.Address,
 			},
-			ResourceGroup: rg,
+			ResourceGroup:  rg,
+			NoQueryService: session.HasNoQueryService(),
 		}
 	}
 	return result, nil

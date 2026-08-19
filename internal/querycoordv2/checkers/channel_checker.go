@@ -273,12 +273,36 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	plans := make([]assign.ChannelAssignPlan, 0)
 	for _, ch := range channels {
 		var rwNodes []int64
-		if streamingutil.IsStreamingServiceEnabled() {
+		streamingOn := streamingutil.IsStreamingServiceEnabled()
+		if streamingOn {
 			rwNodes = replica.GetRWSQNodes()
-		} else {
+		}
+		// Falling back covers the replica whose streaming nodes serve no
+		// queries BY DECLARATION, where the delegator belongs on a regular
+		// query node. The trigger is that declaration, never merely an empty
+		// streaming-query-node set: a streaming node mid-restart empties the
+		// set for a moment too, and placing the delegator on a regular query
+		// node then would strand it there - nothing migrates it back when the
+		// streaming node returns. In that window this checker does what it
+		// always did: nothing, until the node re-registers. With the
+		// streaming service off this is the path it always took.
+		if len(rwNodes) == 0 {
+			if streamingOn && !assign.ResourceGroupServesNoQueries(replica.GetResourceGroup()) {
+				continue
+			}
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
 				rwNodes = replica.GetRWNodes()
 			}
+		}
+		if len(rwNodes) == 0 {
+			// No candidate at any tier. Without this line the failure mode is
+			// pure silence: no task, no log, the collection just never
+			// becomes queryable while the checker retries every tick.
+			mlog.RatedWarn(ctx, 0.1, "no node can take this channel's delegator: no serving streaming node and no regular query node in the replica",
+				mlog.FieldCollectionID(replica.GetCollectionID()),
+				mlog.String("channel", ch.GetChannelName()),
+				mlog.String("resourceGroup", replica.GetResourceGroup()))
+			continue
 		}
 		plan := c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
 		plans = append(plans, plan...)

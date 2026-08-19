@@ -68,7 +68,30 @@ type shardClientMgrImpl struct {
 	// leaders under another's name after an alias repoint or a cross-db rename. Eviction is by
 	// collection id only -- the cache deliberately does not depend on the mutable
 	// collection->database mapping. See issue #51533.
-	collLeader map[int64]*shardLeaders // collectionID -> collection_leaders
+	//
+	// The resource group is part of the key because it is part of the question: a request
+	// scoped to one resource group and an unscoped one ask GetShardLeaders different things and
+	// get different answers, so caching them under the same key would serve one scope's leaders
+	// to another. An unscoped lookup keys on the empty string and therefore keeps a cache of
+	// exactly the shape it had when the key was the bare collection id.
+	collLeader map[shardLeaderCacheKey]*shardLeaders
+	// scopedKeys indexes, per collection, the resource-group scopes that have
+	// an entry in collLeader - so invalidation can delete exactly a
+	// collection's entries instead of scanning the whole cache under the
+	// write lock. Invalidation runs on every failed search/query and on
+	// querycoord's balance broadcasts; a proxy holding tens of thousands of
+	// loaded collections cannot afford a full-table scan per failure. With no
+	// scoped entries ever written (a stock binary) this map stays empty and
+	// invalidation is the O(1) delete it was before scopes existed.
+	scopedKeys map[int64]typeutil.Set[string]
+}
+
+// shardLeaderCacheKey identifies one cached shard-leader answer: the collection
+// it is about, and the resource group the answer was restricted to ("" for the
+// collection-wide answer).
+type shardLeaderCacheKey struct {
+	collectionID  int64
+	resourceGroup string
 }
 
 const (
@@ -96,7 +119,8 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[int64]*shardLeaders),
+		collLeader: make(map[shardLeaderCacheKey]*shardLeaders),
+		scopedKeys: make(map[int64]typeutil.Set[string]),
 		mixCoord:   mixCoord,
 	}
 	for _, opt := range options {
@@ -112,11 +136,12 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 
 func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error) {
 	method := "GetShard"
+	key := shardLeaderCacheKey{collectionID: collectionID, resourceGroup: routingResourceGroup(ctx)}
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	cacheShardLeaders := m.getCachedShardLeaders(key, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, key)
 		if err != nil {
 			return nil, err
 		}
@@ -128,11 +153,12 @@ func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, datab
 
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
 	method := "GetShardLeaderList"
+	key := shardLeaderCacheKey{collectionID: collectionID, resourceGroup: routingResourceGroup(ctx)}
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	cacheShardLeaders := m.getCachedShardLeaders(key, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, key)
 		if err != nil {
 			return nil, err
 		}
@@ -142,9 +168,9 @@ func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, c
 	return cacheShardLeaders.GetShardLeaderList(), nil
 }
 
-func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller string) *shardLeaders {
+func (m *shardClientMgrImpl) getCachedShardLeaders(key shardLeaderCacheKey, caller string) *shardLeaders {
 	m.leaderMut.RLock()
-	cacheShardLeaders := m.collLeader[collectionID]
+	cacheShardLeaders := m.collLeader[key]
 	m.leaderMut.RUnlock()
 
 	if cacheShardLeaders != nil {
@@ -156,11 +182,15 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller st
 	return cacheShardLeaders
 }
 
-func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
+func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, key shardLeaderCacheKey) (*shardLeaders, error) {
+	collectionID := key.collectionID
 	log := mlog.With(
 		mlog.String("db", database),
 		mlog.FieldCollectionName(collectionName),
 		mlog.FieldCollectionID(collectionID))
+	if key.resourceGroup != "" {
+		log = log.With(mlog.String("resourceGroup", key.resourceGroup))
+	}
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)
@@ -174,6 +204,13 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		),
 		CollectionID:            collectionID,
 		WithUnserviceableShards: true,
+		// Empty unless the request was scoped at its entry, in which case the
+		// coordinator answers only for the replicas in that resource group.
+		// The filter cannot be applied here: the response flattens every
+		// replica into one list per channel, so which replica - and therefore
+		// which resource group - a leader belongs to is gone by the time it
+		// arrives.
+		ResourceGroup: key.resourceGroup,
 	}
 	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
 	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
@@ -205,7 +242,15 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	}
 
 	m.leaderMut.Lock()
-	m.collLeader[collectionID] = newShardLeaders
+	m.collLeader[key] = newShardLeaders
+	if key.resourceGroup != "" {
+		scopes, ok := m.scopedKeys[collectionID]
+		if !ok {
+			scopes = typeutil.NewSet[string]()
+			m.scopedKeys[collectionID] = scopes
+		}
+		scopes.Insert(key.resourceGroup)
+	}
 	m.leaderMut.Unlock()
 
 	return newShardLeaders, nil
@@ -253,14 +298,27 @@ func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
 func (m *shardClientMgrImpl) RemoveDatabase(database string) {}
 
 // InvalidateShardLeaderCache drops the cached shard leaders for the given collection ids.
-// Called on shard-leader balance (querycoord), collection drop, and search/query retry. Because
-// the cache is keyed by id, this is a direct O(len(collections)) delete instead of a full scan.
+// Called on shard-leader balance (querycoord), collection drop, and search/query retry.
+//
+// Every resource-group scope of the named collections goes, not just the collection-wide entry:
+// a caller invalidating a collection is saying its leaders moved, and leaving one scope's copy
+// behind would keep routing queries scoped to it at query nodes that no longer serve it. The
+// scopes come from the scopedKeys index, so the cost is O(entries of the named collections) -
+// the O(1) delete of issue #51533 when no scoped entry exists - never a scan of the whole
+// cache under the write lock, which on a proxy holding many collections would stall every
+// GetShard behind each failed query's invalidation.
 func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 	mlog.Info(context.TODO(), "Invalidate shard cache for collections", mlog.Int64s("collectionIDs", collections))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
 	for _, collectionID := range collections {
-		delete(m.collLeader, collectionID)
+		delete(m.collLeader, shardLeaderCacheKey{collectionID: collectionID})
+		if scopes, ok := m.scopedKeys[collectionID]; ok {
+			for rg := range scopes {
+				delete(m.collLeader, shardLeaderCacheKey{collectionID: collectionID, resourceGroup: rg})
+			}
+			delete(m.scopedKeys, collectionID)
+		}
 	}
 }
 

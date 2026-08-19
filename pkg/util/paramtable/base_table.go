@@ -69,6 +69,31 @@ func globalConfigPrefixs() []string {
 // Use _test.yaml only for test related purpose.
 var defaultYaml = []string{"milvus.yaml", "_test.yaml", "default.yaml", "user.yaml"}
 
+// UsePrimaryConfigName replaces the primary configuration file name - the
+// first entry of the list above - for every paramtable initialized after the
+// call. A deployment form whose configuration contract names a different
+// primary file calls this from its own main, before any component
+// initializes a paramtable; the rest of the list keeps its meaning
+// everywhere. A missing file is skipped exactly as a missing milvus.yaml is,
+// so pointing at a name the config directory does not carry falls back to
+// the compiled-in defaults rather than failing.
+//
+// NOT concurrency-safe and NOT effective after a paramtable initialized: it
+// writes the package-level default source list that Init reads once. The
+// contract is the caller's - a deployment form's main calls it exactly once,
+// single-threaded, before anything else touches paramtable - and nothing
+// here enforces it, deliberately: a lock or an after-Init panic would imply
+// this is a runtime switch, and it is a boot-time declaration.
+func UsePrimaryConfigName(name string) {
+	defaultYaml[0] = name
+}
+
+// PrimaryConfigName reports the current primary configuration file name, for
+// callers that need to verify their wiring.
+func PrimaryConfigName() string {
+	return defaultYaml[0]
+}
+
 // BaseTable the basics of paramtable
 type BaseTable struct {
 	once   sync.Once

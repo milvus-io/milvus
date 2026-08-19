@@ -146,6 +146,12 @@ func (s *StreamingNodeManager) GetWALLocated(vChannel string) int64 {
 }
 
 // GetStreamingQueryNodeIDs returns the server ids of the streaming query nodes.
+//
+// Every streaming node is returned, including one that declared it does not
+// serve shard queries: this answers "which nodes own a write ahead log", which
+// is what the callers that count streaming nodes or dispatch a request to one
+// are asking. Placing a shard delegator is a different question, and
+// GetStreamingQueryNodeIDsByResourceGroup is what answers it.
 func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
 	streamingNodes := s.fetchStreamingNodes()
 	streamingNodeIDs := typeutil.NewUniqueSet()
@@ -156,16 +162,67 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
 }
 
 // GetStreamingQueryNodeIDsByResourceGroup returns the server ids of the streaming query nodes grouped by resource group.
+//
+// A streaming node that declared it does not serve shard queries is left out.
+// This is the only thing that feeds a replica's streaming query nodes, and a
+// replica's streaming query nodes are the only nodes a shard delegator is ever
+// placed on, so leaving it out here is what keeps a delegator off it - rather
+// than each placement site having to remember to exclude it.
+//
+// No streaming node declares this unless a deployment labels it, so a stock
+// binary groups exactly the nodes it always did.
 func (s *StreamingNodeManager) GetStreamingQueryNodeIDsByResourceGroup() map[string]typeutil.UniqueSet {
 	streamingNodes := s.fetchStreamingNodes()
 	nodesByRG := make(map[string]typeutil.UniqueSet)
 	for _, node := range streamingNodes {
+		if node.NoQueryService {
+			continue
+		}
 		if _, ok := nodesByRG[node.ResourceGroup]; !ok {
 			nodesByRG[node.ResourceGroup] = typeutil.NewUniqueSet()
 		}
 		nodesByRG[node.ResourceGroup].Insert(node.ServerID)
 	}
 	return nodesByRG
+}
+
+// NoQueryServiceResourceGroups returns the resource groups whose streaming
+// nodes ALL declare no-query-service - at least one node, none serving. This
+// is the positive signal the checkers' delegator fallback keys on: "this
+// resource group's delegators belong on regular query nodes by declaration"
+// is a different fact from "the streaming-query-node set happens to be empty
+// right now", which is what a streaming node mid-restart looks like.
+// StreamingNodeResourceGroups returns every resource group that currently has
+// at least one streaming node, whatever it declares. The complement is how a
+// caller tells "this resource group has no streaming nodes at all" from "its
+// streaming nodes declare no-query-service" - two facts with different
+// consequences for delegator placement.
+func (s *StreamingNodeManager) StreamingNodeResourceGroups() typeutil.Set[string] {
+	saw, _ := s.StreamingNodeRGView()
+	return saw
+}
+
+// StreamingNodeRGView answers both resource-group questions from ONE fetch:
+// which groups have any streaming node, and which of those declare
+// no-query-service throughout. Callers needing both must use this rather
+// than the two single-set accessors, which would fetch twice and could see
+// two different node sets.
+func (s *StreamingNodeManager) StreamingNodeRGView() (all, noQuery typeutil.Set[string]) {
+	streamingNodes := s.fetchStreamingNodes()
+	all = typeutil.NewSet[string]()
+	serving := typeutil.NewSet[string]()
+	for _, node := range streamingNodes {
+		all.Insert(node.ResourceGroup)
+		if !node.NoQueryService {
+			serving.Insert(node.ResourceGroup)
+		}
+	}
+	return all, all.Complement(serving)
+}
+
+func (s *StreamingNodeManager) NoQueryServiceResourceGroups() typeutil.Set[string] {
+	_, noQuery := s.StreamingNodeRGView()
+	return noQuery
 }
 
 // fetchStreamingNodes fetches all streaming nodes from balancer, falling back to cached nodes on error.

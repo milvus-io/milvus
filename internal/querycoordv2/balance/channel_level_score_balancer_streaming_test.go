@@ -186,6 +186,15 @@ func TestChannelLevelScoreBalancer_StreamingChannelPlanTakesPriority(t *testing.
 	mockSQNodes := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
 		Return(typeutil.NewUniqueSet(339, 333)).Build()
 	defer mockSQNodes.UnPatch()
+	// Channel assignment asks which streaming nodes may carry a delegator, and
+	// that question is answered per resource group. Left unmocked, the real
+	// manager waits on a streaming coord balancer that a unit test never
+	// starts, and the wait has no deadline.
+	mockSQNodesByRG := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDsByResourceGroup).
+		Return(map[string]typeutil.UniqueSet{
+			meta.DefaultResourceGroupName: typeutil.NewUniqueSet(339, 333),
+		}).Build()
+	defer mockSQNodesByRG.UnPatch()
 	mockWALLocated := mockey.Mock((*snmanager.StreamingNodeManager).GetWALLocated).Return(int64(333)).Build()
 	defer mockWALLocated.UnPatch()
 

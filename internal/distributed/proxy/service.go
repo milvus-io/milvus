@@ -94,17 +94,21 @@ type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
 	milvuspb.UnimplementedMilvusServiceServer
 
-	ctx                context.Context
-	wg                 sync.WaitGroup
-	grpcHTTPWg         sync.WaitGroup
-	proxy              types.ProxyComponent
-	httpListener       net.Listener
-	grpcListener       net.Listener
-	tcpServer          cmux.CMux
-	httpServer         *http.Server
-	grpcInternalServer *grpc.Server
-	grpcExternalServer *grpc.Server
-	listenerManager    *listenerManager
+	ctx          context.Context
+	wg           sync.WaitGroup
+	grpcHTTPWg   sync.WaitGroup
+	proxy        types.ProxyComponent
+	httpListener net.Listener
+	// The internal-domain listeners a form's extension declares; nil when
+	// none is installed. See internal_domain.go.
+	internalDomainGrpcServer *grpc.Server
+	internalDomainHTTPServer *http.Server
+	grpcListener             net.Listener
+	tcpServer                cmux.CMux
+	httpServer               *http.Server
+	grpcInternalServer       *grpc.Server
+	grpcExternalServer       *grpc.Server
+	listenerManager          *listenerManager
 
 	serverID atomic.Int64
 
@@ -127,13 +131,15 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
-	username, password, ok := httpserver.ParseUsernamePassword(c)
-	if ok {
-		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
-			c.Set(httpserver.ContextUsername, username)
-			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
-			return
+	if !proxy.ExternalListenerRequiresAPIKey() {
+		username, password, ok := httpserver.ParseUsernamePassword(c)
+		if ok {
+			if proxy.PasswordVerify(c, username, password) {
+				mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
+				c.Set(httpserver.ContextUsername, username)
+				c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
+				return
+			}
 		}
 	}
 	rawToken := httpserver.GetAuthorization(c)
@@ -291,6 +297,13 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	mlog.Debug(context.TODO(), "Get proxy rate limiter done")
 
 	var unaryServerOption grpc.ServerOption
+	// The stream side carries the auth interceptor and nothing else. An
+	// interceptor chain binds to one of gRPC's two call kinds, so without
+	// this the unary chain's authentication simply does not apply to a
+	// stream method on the same listener - CreateReplicateStream would
+	// answer an unauthenticated caller with authorization enabled.
+	streamServerOption := grpc.StreamInterceptor(
+		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptor))
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
@@ -316,6 +329,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		streamServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
 			// both inbound and outbound
@@ -595,6 +609,11 @@ func (s *Server) start() error {
 		}
 	}
 
+	if err := s.startInternalDomainServers(); err != nil {
+		mlog.Error(context.TODO(), "failed to start the internal-domain listeners", mlog.Err(err))
+		return err
+	}
+
 	return nil
 }
 
@@ -650,6 +669,8 @@ func (s *Server) Stop() (err error) {
 			logger.Info(s.ctx, "Proxy stop internal grpc server")
 			utils.GracefulStopGRPCServer(s.grpcInternalServer)
 		}
+
+		s.stopInternalDomainServers()
 
 		if s.listenerManager != nil {
 			s.listenerManager.Close()

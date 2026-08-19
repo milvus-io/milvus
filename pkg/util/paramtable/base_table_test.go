@@ -151,3 +151,16 @@ func TestNewBaseTableFromYamlOnly(t *testing.T) {
 	gp = NewBaseTableFromYamlOnly(yaml)
 	assert.Empty(t, gp.Get("key"))
 }
+
+// The primary configuration file is replaceable per deployment form; the rest
+// of the list keeps its meaning, and a table initialized after the call reads
+// the new name in milvus.yaml's position.
+func TestUsePrimaryConfigName(t *testing.T) {
+	old := PrimaryConfigName()
+	defer UsePrimaryConfigName(old)
+
+	UsePrimaryConfigName("kite.yaml")
+	assert.Equal(t, "kite.yaml", PrimaryConfigName())
+	assert.Equal(t, []string{"kite.yaml", "_test.yaml", "default.yaml", "user.yaml"}, defaultYaml,
+		"only the primary entry may change; the layering of the others is load-bearing")
+}

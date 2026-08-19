@@ -112,7 +112,15 @@ func (f *commonChannelNodeFilter) FilterNodes(ctx context.Context, nodes []int64
 	nodes = filterSQNIfStreamingServiceEnabled(nodes)
 
 	if forceAssign {
-		return nodes
+		// Force skips the load-based screens (state, resource exhaustion),
+		// not existence: a node whose session is gone cannot execute
+		// anything, and a grow task aimed at it just fails and retries every
+		// tick. This matters most when the streaming-query-node set is
+		// momentarily empty and the filter above passed the candidates
+		// through unscreened.
+		return lo.Filter(nodes, func(node int64, _ int) bool {
+			return f.nodeManager.Get(node) != nil
+		})
 	}
 
 	return lo.Filter(nodes, func(node int64, _ int) bool {

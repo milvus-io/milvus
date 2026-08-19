@@ -67,9 +67,17 @@ type HandlersV2 struct {
 }
 
 func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
+	return NewHandlersV2WithCheckAuth(proxyClient, proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool())
+}
+
+// NewHandlersV2WithCheckAuth builds the v2 handlers with an explicit
+// authorization decision, for a listener whose auth posture differs from the
+// global switch - an internal-domain listener serves the control plane with
+// no credentials however the external one is configured.
+func NewHandlersV2WithCheckAuth(proxyClient types.ProxyComponent, checkAuth bool) *HandlersV2 {
 	return &HandlersV2{
 		proxy:     proxyClient,
-		checkAuth: proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
+		checkAuth: checkAuth,
 	}
 }
 

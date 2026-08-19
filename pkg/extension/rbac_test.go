@@ -1,0 +1,93 @@
+package extension
+
+import (
+	"context"
+	"testing"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+)
+
+// fakeCredentialStore is a no-op CredentialStore used only to prove that the
+// store handed to Bootstrap is the same instance SetProvider was given.
+type fakeCredentialStore struct{}
+
+func (fakeCredentialStore) HasCredential(context.Context, string) (bool, error)    { return false, nil }
+func (fakeCredentialStore) CreateCredential(context.Context, string, string) error { return nil }
+func (fakeCredentialStore) CreateRole(context.Context, string, *milvuspb.RoleEntity) error {
+	return nil
+}
+
+func (fakeCredentialStore) AlterUserRole(context.Context, string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error {
+	return nil
+}
+
+func (fakeCredentialStore) ListUser(context.Context, string, *milvuspb.UserEntity, bool) ([]*milvuspb.UserResult, error) {
+	return nil, nil
+}
+
+func (fakeCredentialStore) AlterGrant(context.Context, string, *milvuspb.GrantEntity, milvuspb.OperatePrivilegeType) error {
+	return nil
+}
+
+// fakeBootstrapper records the store it was called with and returns a
+// preconfigured error.
+type fakeBootstrapper struct {
+	err    error
+	seen   CredentialStore
+	called bool
+}
+
+func (f *fakeBootstrapper) Bootstrap(ctx context.Context, store CredentialStore) error {
+	f.called = true
+	f.seen = store
+	return f.err
+}
+
+func TestCapabilitiesReportsRBACBootstrapPresence(t *testing.T) {
+	assert.False(t, Capabilities{}.has(CapRBACBootstrap),
+		"an empty table must not claim to supply the rbac bootstrap capability")
+	assert.True(t, Capabilities{RBACBootstrap: &fakeBootstrapper{}}.has(CapRBACBootstrap))
+}
+
+func TestSetProviderRejectsMissingRBACBootstrapCapability(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+
+	err := SetProvider(fakeProvider{
+		name:     "testprovider",
+		requires: []CapabilityID{CapRBACBootstrap},
+		caps:     Capabilities{},
+	})
+	assert.ErrorContains(t, err, string(CapRBACBootstrap))
+}
+
+func TestInstalledRBACBootstrapperIsReachableThroughCaps(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+
+	b := &fakeBootstrapper{}
+	assert.NoError(t, SetProvider(fakeProvider{name: "testprovider", caps: Capabilities{RBACBootstrap: b}}))
+
+	got := Caps().RBACBootstrap
+	assert.NotNil(t, got)
+
+	store := fakeCredentialStore{}
+	assert.NoError(t, got.Bootstrap(context.Background(), store))
+	assert.True(t, b.called)
+	assert.Equal(t, store, b.seen, "the store passed to Bootstrap must be the one SetProvider received")
+}
+
+func TestBootstrapErrorIsPropagated(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+
+	want := errors.New("seeding failed")
+	b := &fakeBootstrapper{err: want}
+	assert.NoError(t, SetProvider(fakeProvider{name: "testprovider", caps: Capabilities{RBACBootstrap: b}}))
+
+	err := Caps().RBACBootstrap.Bootstrap(context.Background(), fakeCredentialStore{})
+	assert.ErrorIs(t, err, want, "an error from Bootstrap must survive install, Caps, and the call unwrapped and unreplaced")
+}

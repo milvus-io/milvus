@@ -260,7 +260,7 @@ collectionID → shardLeaders {
 - **Hit**: When cached shard leaders are used (tracked via `ProxyCacheStatsCounter`)
 - **Miss**: When cache lookup fails, triggers RPC to QueryCoord via `GetShardLeaders`
 - **Invalidation** (the cache is keyed by the cluster-unique collection id):
-  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by id (called on shard-leader changes, collection drop, and search/query retry). O(len(collectionIDs)) direct deletes.
+  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by id (called on shard-leader changes, collection drop, and search/query retry). O(entries of the named collections): the unscoped entry is one direct delete, and any resource-group-scoped entries are found through a per-collection scope index (`scopedKeys`) rather than by scanning the cache. With no scoped entries ever written (a stock binary) this is the plain O(len(collectionIDs)) delete.
   - `RemoveDatabase(db)`: No-op. DropDatabase requires an empty database, so its collections were already dropped and evicted by id; the id-keyed cache does not track database membership.
 
 ### Client Purging
