@@ -55,20 +55,22 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxBloomFilterPlanSize is the aggregate serialized size budget for
-	// bloom-bearing plans in one Search, HybridSearch, or Query request. It is
+	// DefaultMaxMembershipFilterPlanSize is the aggregate serialized size budget for
+	// membership-filter-bearing plans in one Search, HybridSearch, Query, or
+	// complex Delete request. It is
 	// deliberately below the default 256 MiB proxy gRPC client send limit so
 	// placeholders and the rest of the internal request retain ample headroom.
-	DefaultMaxBloomFilterPlanSize = 128 * 1024 * 1024
+	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
-	MaxClusterIDBits                = 3
+	DefaultMaxDegree                     = 56
+	DefaultSearchListSize                = 100
+	DefaultPQCodeBudgetGBRatio           = 0.125
+	DefaultBuildNumThreadsRatio          = 1.0
+	DefaultSearchCacheBudgetGBRatio      = 0.10
+	DefaultLoadNumThreadRatio            = 8.0
+	DefaultBeamWidthRatio                = 4.0
+	MaxClusterIDBits                     = 3
+	defaultTakeForOutputResultCountLimit = "10000"
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -2207,20 +2209,25 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval                  ParamItem `refreshable:"false"`
-	HealthCheckTimeout                ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
-	MaxNameLength                     ParamItem `refreshable:"true"`
-	MaxCollectionDescriptionLength    ParamItem `refreshable:"true"`
-	MaxUsernameLength                 ParamItem `refreshable:"true"`
-	MaxUserDescriptionLength          ParamItem `refreshable:"true"`
-	MinPasswordLength                 ParamItem `refreshable:"true"`
-	MaxPasswordLength                 ParamItem `refreshable:"true"`
-	MaxFieldNum                       ParamItem `refreshable:"true"`
-	MaxVectorFieldNum                 ParamItem `refreshable:"true"`
-	MaxShardNum                       ParamItem `refreshable:"true"`
-	MaxBloomFilterSize                ParamItem `refreshable:"true"`
-	MaxBloomFilterPlanSize            ParamItem `refreshable:"true"`
+	TimeTickInterval               ParamItem `refreshable:"false"`
+	HealthCheckTimeout             ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
+	MaxNameLength                  ParamItem `refreshable:"true"`
+	MaxCollectionDescriptionLength ParamItem `refreshable:"true"`
+	MaxUsernameLength              ParamItem `refreshable:"true"`
+	MaxUserDescriptionLength       ParamItem `refreshable:"true"`
+	MinPasswordLength              ParamItem `refreshable:"true"`
+	MaxPasswordLength              ParamItem `refreshable:"true"`
+	MaxFieldNum                    ParamItem `refreshable:"true"`
+	MaxVectorFieldNum              ParamItem `refreshable:"true"`
+	MaxShardNum                    ParamItem `refreshable:"true"`
+	// Shared by bloom_match and roaring_match. There are no Bloom-named Go
+	// fields: the old `proxy.maxBloomFilterSize` / `proxy.maxBloomFilterPlanSize`
+	// YAML keys stay accepted through FallbackKeys in init(), which is where
+	// deployment compatibility actually matters.
+	MaxMembershipFilterSize     ParamItem `refreshable:"true"`
+	MaxMembershipFilterPlanSize ParamItem `refreshable:"true"`
+
 	MaxDimension                      ParamItem `refreshable:"true"`
 	GinLogging                        ParamItem `refreshable:"false"`
 	GinLogSkipPaths                   ParamItem `refreshable:"false"`
@@ -2395,15 +2402,13 @@ func (p *proxyConfig) init(base *BaseTable) {
 	}
 	p.MaxShardNum.Init(base.mgr)
 
-	p.MaxBloomFilterSize = ParamItem{
-		Key: "proxy.maxBloomFilterSize",
-		// 64 MiB. Budgets the SBBF body; the fixed 32-byte MBF1 header is allowed
-		// on top, so the gate is `len(blob) > maxSize + mbf1HeaderSize` and a
-		// full 64 MiB body passes exactly (see validateBloomFilterBlob). Because
-		// SBBF bodies are powers of two, any value in [64 MiB, 128 MiB) admits
-		// the same set of filters; 64 MiB is chosen as the smallest of those, so
-		// the number states the real ceiling rather than implying headroom that
-		// does not exist.
+	p.MaxMembershipFilterSize = ParamItem{
+		Key:          "proxy.maxMembershipFilterSize",
+		FallbackKeys: []string{"proxy.maxBloomFilterSize"},
+		// 64 MiB. Budgets one membership-filter body; the fixed 32-byte MBF1 or
+		// MRB1 header is allowed on top. Bloom SBBF bodies are powers of two, so
+		// any value in [64 MiB, 128 MiB) admits the same Bloom filters; 64 MiB is
+		// chosen as the smallest of those values.
 		//
 		// A 64 MiB body admits ~48.6M int64 members at the default fpr=0.005 and
 		// ~55.4M at fpr=0.01. Raised from 32 MiB (~24M members) so 50M-member
@@ -2414,38 +2419,39 @@ func (p *proxyConfig) init(base *BaseTable) {
 		// and reports it in the rejection.
 		DefaultValue: "67108864",
 		Version:      "3.0.0",
-		Doc: "The maximum byte size of the SBBF body in a client pre-built bloom_match " +
-			"filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on " +
-			"top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
-			"so this bounds per-request memory/network amplification. Must not exceed the MBF1 " +
-			"format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies " +
+		Doc: "The maximum byte size of one client pre-built bloom_match or roaring_match " +
+			"filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed " +
+			"on top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
+			"so this bounds per-membership-filter memory/network amplification. Must not exceed the format " +
+			"cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies " +
 			"up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. " +
 			"Raising the member count past a tier boundary requires raising the fpr too, not " +
-			"only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of " +
-			"the request.",
+			"only this limit. Roaring filters remain independently limited to 262144 high " +
+			"containers and a 64 MiB decoded-memory estimate per filter. Keep " +
+			"proxy.grpc.serverMaxRecvSize above this plus the rest of the request.",
 		Export: true,
 	}
-	p.MaxBloomFilterSize.Init(base.mgr)
+	p.MaxMembershipFilterSize.Init(base.mgr)
 
-	p.MaxBloomFilterPlanSize = ParamItem{
-		Key:          "proxy.maxBloomFilterPlanSize",
-		DefaultValue: strconv.Itoa(DefaultMaxBloomFilterPlanSize),
+	p.MaxMembershipFilterPlanSize = ParamItem{
+		Key:          "proxy.maxMembershipFilterPlanSize",
+		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
+		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The maximum aggregate serialized byte size of bloom-bearing expression plans " +
-			"in one Search, HybridSearch, or Query request. The proxy checks the assembled plans " +
-			"before proto.Marshal, so repeated references to one bloom_match template value and " +
-			"Bloom filters across hybrid sub-searches cannot amplify past the configured budget " +
-			"before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.",
+		Doc: "The maximum aggregate serialized byte size of membership-filter-bearing expression plans " +
+			"in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans " +
+			"with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must " +
+			"be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
 			if n, err := strconv.Atoi(v); err != nil || n <= 0 {
-				return strconv.Itoa(DefaultMaxBloomFilterPlanSize)
+				return strconv.Itoa(DefaultMaxMembershipFilterPlanSize)
 			}
 			return v
 		},
 	}
-	p.MaxBloomFilterPlanSize.Init(base.mgr)
+	p.MaxMembershipFilterPlanSize.Init(base.mgr)
 
 	p.MaxDimension = ParamItem{
 		Key:          "proxy.maxDimension",
@@ -3308,9 +3314,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "60000",
+		DefaultValue: "120000",
 		PanicIfEmpty: true,
-		Doc:          "1 minute",
+		Doc:          "2 minutes",
 		Export:       true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
@@ -3318,9 +3324,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "120000",
+		DefaultValue: "300000",
 		PanicIfEmpty: true,
-		Doc:          "2 minute",
+		Doc:          "5 minutes",
 		Export:       true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
@@ -3750,24 +3756,25 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereFetchThreadPoolSize   ParamItem `refreshable:"true"`
-	KnowhereThreadPoolSize        ParamItem `refreshable:"true"`
-	ChunkRows                     ParamItem `refreshable:"false"`
-	FmindexCostRatio              ParamItem `refreshable:"false"`
-	EnableInterminSegmentIndex    ParamItem `refreshable:"false"`
-	InterimIndexNlist             ParamItem `refreshable:"false"`
-	InterimIndexNProbe            ParamItem `refreshable:"false"`
-	InterimIndexSubDim            ParamItem `refreshable:"false"`
-	InterimIndexRefineRatio       ParamItem `refreshable:"false"`
-	InterimIndexBuildRatio        ParamItem `refreshable:"false"`
-	InterimIndexRefineQuantType   ParamItem `refreshable:"false"`
-	InterimIndexRefineWithQuant   ParamItem `refreshable:"false"`
-	DenseVectorInterminIndexType  ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
-	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
-	EnableGeometryCache           ParamItem `refreshable:"false"`
-	EnableGISSplitFusion          ParamItem `refreshable:"false"`
+	KnowhereFetchThreadPoolSize    ParamItem `refreshable:"true"`
+	KnowhereThreadPoolSize         ParamItem `refreshable:"true"`
+	ChunkRows                      ParamItem `refreshable:"false"`
+	FmindexCostRatio               ParamItem `refreshable:"false"`
+	EnableInterminSegmentIndex     ParamItem `refreshable:"false"`
+	InterimIndexNlist              ParamItem `refreshable:"false"`
+	InterimIndexNProbe             ParamItem `refreshable:"false"`
+	InterimIndexSubDim             ParamItem `refreshable:"false"`
+	InterimIndexRefineRatio        ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio         ParamItem `refreshable:"false"`
+	InterimIndexRefineQuantType    ParamItem `refreshable:"false"`
+	InterimIndexRefineWithQuant    ParamItem `refreshable:"false"`
+	DenseVectorInterminIndexType   ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate      ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate  ParamItem `refreshable:"false"`
+	InterimIndexTargetIndexVersion ParamItem `refreshable:"false"`
+	MultipleChunkedEnable          ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache            ParamItem `refreshable:"false"`
+	EnableGISSplitFusion           ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -3941,6 +3948,7 @@ type queryNodeConfig struct {
 	// output fields take
 	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	TakeForOutputResultCountLimit      ParamItem `refreshable:"true"`
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
@@ -4480,6 +4488,16 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
+
+	p.InterimIndexTargetIndexVersion = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.targetIndexVersion",
+		Version:      "2.6.23",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc:          "Target index version for growing and sealed interim indexes. -1 uses Knowhere's current index version. At startup, Milvus rejects a version unsupported by the local Knowhere build.",
+		Export:       false,
+	}
+	p.InterimIndexTargetIndexVersion.Init(base.mgr)
 
 	p.MultipleChunkedEnable = ParamItem{
 		Key:          "queryNode.segcore.multipleChunkedEnable",
@@ -5389,6 +5407,25 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.TakeForOutputResultCountLimit = ParamItem{
+		Key:          "queryNode.takeForOutput.resultCountLimit",
+		Version:      "3.0.0",
+		DefaultValue: defaultTakeForOutputResultCountLimit,
+		Doc:          `Maximum search topK, unique search offset count, or retrieve result row count that can use take() for output fields. Set to 0 to disable the limit`,
+		Export:       false,
+		Formatter: func(v string) string {
+			limit, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || limit < 0 {
+				mlog.Warn(context.TODO(), "queryNode.takeForOutput.resultCountLimit must be non-negative, using default",
+					mlog.String("configured", v),
+					mlog.String("default", defaultTakeForOutputResultCountLimit))
+				return defaultTakeForOutputResultCountLimit
+			}
+			return v
+		},
+	}
+	p.TakeForOutputResultCountLimit.Init(base.mgr)
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",

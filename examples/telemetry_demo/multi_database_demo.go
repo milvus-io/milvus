@@ -13,6 +13,9 @@
 //   2. Database-targeted command push (push_config only to specific database)
 //   3. Verification that commands are received by the correct client only
 //   4. Database filtering in telemetry API
+
+//go:build ignore
+
 package main
 
 import (
@@ -30,9 +33,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
 )
 
 const (

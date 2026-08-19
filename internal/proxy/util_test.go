@@ -17,7 +17,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -58,33 +57,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type proxyLogBuffer struct {
-	bytes.Buffer
-}
-
-func (*proxyLogBuffer) Sync() error {
-	return nil
-}
-
-func captureProxyLogs(t *testing.T) *proxyLogBuffer {
+func captureProxyLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logs := &proxyLogBuffer{}
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
 		Level:             "debug",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, logs)
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, props)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
-	return logs
 }
 
 func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
@@ -1148,11 +1130,6 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() {
-		globalMetaCache = oldMetaCache
-	})
 	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	t.Cleanup(func() {
 		paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
@@ -1161,7 +1138,8 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 		util.HeaderAuthorize,
 		encodedToken,
 	))
-	_, err = AuthenticationInterceptor(ctx)
+	authInterceptor := AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() })
+	_, err = authInterceptor(ctx)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 	assert.NotContains(t, err.Error(), encodedToken)
@@ -2550,7 +2528,8 @@ func Test_GetPartitionProgressFailed(t *testing.T) {
 			Reason:    "Unexpected error",
 		},
 	}, nil)
-	_, _, err := getPartitionProgress(context.TODO(), qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
+	metaCache := NewMockCache(t)
+	_, _, err := getPartitionProgress(context.TODO(), metaCache, qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
 	assert.Error(t, err)
 }
 

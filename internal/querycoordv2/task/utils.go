@@ -51,24 +51,33 @@ func WrapIDSource(id int64) Source {
 	return idSource(id)
 }
 
-func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var err error
+// Wait blocks until every task in tasks has finished (succeeded, failed, or
+// been canceled) or ctx is done, whichever comes first. It does not impose
+// any timeout of its own: each task already carries its own real deadline
+// (armed on first dispatch, see Task.ActivateDeadline) and is guaranteed to
+// finish within it, so a second, independently-guessed timeout here would
+// only race against that real deadline instead of bounding anything new.
+// Callers that need to bound how long they'll wait should set a deadline on
+// ctx themselves.
+func Wait(ctx context.Context, tasks ...Task) error {
+	errCh := make(chan error, 1)
 	go func() {
+		var err error
 		for _, task := range tasks {
 			err = task.Wait()
 			if err != nil {
-				cancel()
 				break
 			}
 		}
-		cancel()
+		errCh <- err
 	}()
-	<-ctx.Done()
 
-	return err
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func SetPriority(priority Priority, tasks ...Task) {

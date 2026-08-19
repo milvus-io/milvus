@@ -22,6 +22,8 @@
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -68,6 +70,12 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
 
     auto uuid = boost::uuids::random_generator()();
     std::string dir = temp_dir.empty() ? "/tmp" : temp_dir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    AssertInfo(!ec,
+               "Failed to create encrypted index temp directory {}: {}",
+               dir,
+               ec.message());
     local_path_ = dir + "/milvus_enc_" + boost::uuids::to_string(uuid);
 
     local_fd_ = ::open(local_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
