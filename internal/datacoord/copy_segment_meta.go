@@ -849,6 +849,12 @@ func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int6
 	if updatePack != nil {
 		m.meta.applyUpdateSegmentsInfoLocked(updatePack)
 	}
+	// Completed is terminal, so the snapshot cache can never be read again.
+	// Clone() shares it by pointer and it holds the whole SnapshotData, so
+	// keeping it here would pin that memory on the finished job until checkGC
+	// collects it CopySegmentTaskRetention later. The sibling terminal path,
+	// UpdateJobStateAndReleaseRef, drops it for the same reason.
+	updatedJob.(*copySegmentJob).snapshotCache = nil
 	m.jobs[jobID] = updatedJob
 	m.meta.segMu.Unlock()
 	m.mu.Unlock()
