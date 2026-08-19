@@ -111,7 +111,7 @@ func (dt *deleteTask) OnEnqueue() error {
 }
 
 func (dt *deleteTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	collID, err := dt.getMetaCache().GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	if dt.req.Namespace == nil {
 		return nil
 	}
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	schema, err := dt.getMetaCache().GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -255,8 +255,9 @@ func repackDeleteMsgByHash(
 }
 
 type deleteRunner struct {
-	req    *milvuspb.DeleteRequest
-	result *milvuspb.MutationResult
+	req       *milvuspb.DeleteRequest
+	result    *milvuspb.MutationResult
+	metaCache Cache
 
 	// channel
 	chMgr     channelsMgr
@@ -289,6 +290,10 @@ type deleteRunner struct {
 	scannedTotalBytes  atomic.Int64
 }
 
+func (dr *deleteRunner) getMetaCache() Cache {
+	return dr.metaCache
+}
+
 func (dr *deleteRunner) Init(ctx context.Context) error {
 	var err error
 
@@ -301,18 +306,18 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Invalid collection name", err)
 	}
 
-	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
+	db, err := dr.getMetaCache().GetDatabaseInfo(ctx, dr.req.GetDbName())
 	if err != nil {
 		return err
 	}
 	dr.dbID = db.DBID
 
-	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
+	dr.collectionID, err = dr.getMetaCache().GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection id", err)
 	}
 
-	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
+	dr.schema, err = dr.getMetaCache().GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
@@ -327,7 +332,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		dr.req.PartitionName = partitionName
 	}
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
+	colInfo, err := dr.getMetaCache().GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
@@ -359,11 +364,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		if len(partName) > 0 {
 			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if namespace is used")
 		}
-		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.getMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.getMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -376,11 +381,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.getMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.getMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -391,7 +396,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		}
 
 		// dynamic validation
-		partID, err := globalMetaCache.GetPartitionID(ctx, dr.req.GetDbName(), collName, partName)
+		partID, err := dr.getMetaCache().GetPartitionID(ctx, dr.req.GetDbName(), collName, partName)
 		if err != nil {
 			return ErrWithLog(log, "Failed to get partition id", err)
 		}
@@ -436,6 +441,7 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 
 func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*deleteTask, error) {
 	dt := &deleteTask{
+		baseTask:     baseTask{metaCache: dr.getMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		req:          dr.req,

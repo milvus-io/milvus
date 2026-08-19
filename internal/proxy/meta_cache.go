@@ -60,22 +60,17 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 	return metacache.ParsePartitionsInfo(infos, hasPartitionKey)
 }
 
-// globalMetaCache is singleton instance of Cache.
-var globalMetaCache Cache
-
-// InitMetaCache initializes globalMetaCache.
-func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
+func initMetaCache(ctx context.Context, mixCoord types.MixCoordClient) (Cache, error) {
 	metaCache, err := metacache.NewMetaCache(mixCoord)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	globalMetaCache = metaCache
 
 	err = privilege.InitPrivilegeCache(ctx, mixCoord)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to init privilege cache", mlog.Err(err))
-		return err
+		return nil, err
 	}
 
-	return nil
+	return metaCache, nil
 }
