@@ -1810,7 +1810,8 @@ runDataSkewByMaxClusterSizeTestUnified(
     cfg["num_clusters"] = 8;
     cfg["min_cluster_ratio"] = 0.1;
     cfg["max_cluster_ratio"] = 10.0;
-    cfg["max_cluster_size"] = 50 * 1024;  // 50 KB (avg cluster ~160KB with nb=5000,dim=32,k=8)
+    cfg["max_cluster_size"] =
+        50 * 1024;  // 50 KB (avg cluster ~160KB with nb=5000,dim=32,k=8)
     std::cout << "\n[TEST] Running DataSkewByMaxClusterSize test ("
               << storage_version << ")...\n";
     auto job = std::make_unique<KmeansClustering>(prep.ctx);
