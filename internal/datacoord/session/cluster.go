@@ -90,7 +90,7 @@ type Cluster interface {
 	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
 
 	// CreateCopySegment creates a copy segment task
-	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error
+	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error
 	// QueryCopySegment queries the status of a copy segment task
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
 	// DropCopySegment drops a copy segment task
@@ -696,26 +696,18 @@ func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) 
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error {
+func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
-	properties.AppendType(copySegmentTaskType(in))
+	taskType := taskcommon.CopySegment
+	if external {
+		taskType = taskcommon.ExternalCopySegment
+	}
+	properties.AppendType(taskType)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendCollectionID(collectionID)
 	return c.createTask(nodeID, in, properties)
-}
-
-func copySegmentTaskType(in *datapb.CopySegmentRequest) taskcommon.Type {
-	if in.GetExternalSpec() != "" {
-		return taskcommon.ExternalCopySegment
-	}
-	for _, source := range in.GetSources() {
-		if source.GetSourceRootPath() != "" {
-			return taskcommon.ExternalCopySegment
-		}
-	}
-	return taskcommon.CopySegment
 }
 
 func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
