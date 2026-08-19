@@ -26,6 +26,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -33,6 +34,7 @@
 
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
+#include "local/io/File.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
 
@@ -230,6 +232,9 @@ class FileWriter {
     explicit FileWriter(std::string filename,
                         io::Priority priority = io::Priority::MIDDLE);
 
+    explicit FileWriter(local::io::WritableFile file,
+                        io::Priority priority = io::Priority::MIDDLE);
+
     ~FileWriter();
 
     void
@@ -272,8 +277,12 @@ class FileWriter {
     void
     Cleanup() noexcept;
 
+    void
+    Initialize();
+
     int fd_{-1};
     std::string filename_{""};
+    std::optional<local::io::WritableFile> file_;
     size_t file_size_{0};
 
     bool use_writer_pool_{false};
@@ -300,6 +309,10 @@ class PositionedFileWriter {
                                   size_t file_size,
                                   io::Priority priority = io::Priority::MIDDLE);
 
+    explicit PositionedFileWriter(local::io::WritableFile file,
+                                  size_t file_size,
+                                  io::Priority priority = io::Priority::MIDDLE);
+
     ~PositionedFileWriter();
 
     PositionedFileWriter(const PositionedFileWriter&) = delete;
@@ -322,8 +335,12 @@ class PositionedFileWriter {
     void
     Cleanup() noexcept;
 
+    void
+    WriteAllAt(size_t file_offset, const void* data, size_t size);
+
     int fd_{-1};
     std::string filename_{""};
+    std::optional<local::io::WritableFile> file_;
     size_t file_size_{0};
     FileWriter::WriteMode mode_{FileWriter::WriteMode::BUFFERED};
     bool use_direct_io_{false};

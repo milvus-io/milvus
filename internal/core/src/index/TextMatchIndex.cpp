@@ -90,7 +90,9 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
 
     path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
-    boost::filesystem::create_directories(path_);
+    auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+    auto path = disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+    disk_file_manager_->GetLocalFiles().CreateDirectories(path);
     d_type_ = TantivyDataType::Text;
     std::string field_name =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);

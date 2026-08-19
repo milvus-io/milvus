@@ -28,8 +28,6 @@
 #include "index/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -44,6 +42,10 @@ BsonInvertedIndex::BsonInvertedIndex(const std::string& path,
     disk_file_manager_ =
         std::make_shared<milvus::storage::DiskFileManagerImpl>(ctx);
     path_ = path;
+    auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+    auto local_path =
+        disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+    disk_file_manager_->GetLocalFiles().CreateDirectories(local_path);
     LOG_INFO("bson inverted index build path:{}", path_);
 }
 
@@ -59,13 +61,8 @@ BsonInvertedIndex::BsonInvertedIndex(
 BsonInvertedIndex::~BsonInvertedIndex() {
     if (wrapper_) {
         wrapper_->free();
+        wrapper_.reset();
     }
-    auto local_chunk_manager =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager();
-    auto prefix = path_;
-    LOG_INFO("bson inverted index remove path:{}", path_);
-    local_chunk_manager->RemoveDir(prefix);
 }
 
 void

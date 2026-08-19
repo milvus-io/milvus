@@ -318,6 +318,11 @@ ScalarIndexSort<T>::SetupMmapFromData(
                          ? disk_file_manager_->GetLocalIndexObjectPrefix() +
                                STLSORT_INDEX_FILE_NAME
                          : MMAP_PATH_FOR_TEST;
+    auto lease =
+        disk_file_manager_ != nullptr
+            ? std::optional(disk_file_manager_->AcquireLocalDirWriteLease(
+                  disk_file_manager_->GetLocalIndexObjectPrefix()))
+            : std::nullopt;
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
@@ -731,6 +736,11 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                              ? disk_file_manager_->GetLocalIndexObjectPrefix() +
                                    STLSORT_INDEX_FILE_NAME
                              : MMAP_PATH_FOR_TEST;
+        auto lease =
+            disk_file_manager_ != nullptr
+                ? std::optional(disk_file_manager_->AcquireLocalDirWriteLease(
+                      disk_file_manager_->GetLocalIndexObjectPrefix()))
+                : std::nullopt;
         std::filesystem::create_directories(
             std::filesystem::path(mmap_filepath_).parent_path());
 
@@ -824,6 +834,11 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                  ? disk_file_manager_->GetLocalIndexObjectPrefix()
                  : MMAP_PATH_FOR_TEST) +
             "stlsort-meta";
+        auto meta_lease =
+            disk_file_manager_ != nullptr
+                ? std::optional(disk_file_manager_->AcquireLocalDirWriteLease(
+                      disk_file_manager_->GetLocalIndexObjectPrefix()))
+                : std::nullopt;
         std::filesystem::create_directories(
             std::filesystem::path(mmap_meta_filepath_).parent_path());
 
