@@ -3260,21 +3260,26 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
 			return err
 		}
-		if collectionID != 0 {
-			if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
-				CollectionID: collectionID,
-				Segments:     loadableSegments,
-			}); err != nil {
-				mlog.Warn(ctx, "failed to publish DataView after import commit",
-					mlog.FieldJobID(jobID),
-					mlog.String("vchannel", vchannel),
-					mlog.Err(err))
-			}
-		}
 		return nil
 	})
 	if err != nil {
 		return merr.Status(err), nil
+	}
+	// HandleCommitVchannel holds importMeta's write lock while running the
+	// callback. Publish after it returns so the DataView catalog write does not
+	// block unrelated import metadata operations. This also runs on an
+	// idempotent retry whose vchannel was already committed.
+	if s.dataViewManager != nil && collectionID != 0 {
+		if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
+			CollectionID: collectionID,
+			Segments:     loadableSegments,
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after import commit",
+				mlog.FieldJobID(jobID),
+				mlog.String("vchannel", vchannel),
+				mlog.Err(err))
+			return merr.Status(err), nil
+		}
 	}
 	return merr.Success(), nil
 }

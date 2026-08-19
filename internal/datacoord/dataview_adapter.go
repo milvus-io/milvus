@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type (
@@ -39,7 +40,7 @@ type (
 
 func (s *Server) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) (*viewpb.DataVersion, error) {
 	if s.dataViewManager == nil {
-		return nil, nil
+		return nil, merr.WrapErrServiceInternalMsg("DataView manager is not initialized")
 	}
 	return s.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
 		CollectionID: collectionID,
@@ -49,7 +50,7 @@ func (s *Server) CreateCollectionDataView(ctx context.Context, collectionID int6
 
 func (s *Server) DropCollectionDataView(ctx context.Context, collectionID int64) error {
 	if s.dataViewManager == nil {
-		return nil
+		return merr.WrapErrServiceInternalMsg("DataView manager is not initialized")
 	}
 	_, err := s.dataViewManager.OnDropCollection(ctx, collectionID)
 	return err

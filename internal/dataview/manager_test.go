@@ -625,6 +625,85 @@ func TestManagerPersistenceFailuresDoNotAdvance(t *testing.T) {
 	require.Len(t, catalog.views, 2)
 }
 
+func TestManagerConcurrentCommitRefAndGarbageCollect(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{
+		CollectionID: 1,
+		VChannels:    []string{"ch-1"},
+	})
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	errCh := make(chan error, 10)
+	var wg sync.WaitGroup
+	run := func(work func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := work(); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+
+	for worker := range 4 {
+		worker := worker
+		run(func() error {
+			for iteration := range 25 {
+				segmentID := int64(worker*25 + iteration + 1)
+				if _, err := manager.OnFlush(ctx, FlushDataViewEvent{
+					CollectionID: 1,
+					Segments:     []LoadableSegment{segment(segmentID, "ch-1", 10)},
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	for range 4 {
+		run(func() error {
+			for range 100 {
+				ref, err := manager.Latest(ctx, 1)
+				if err != nil {
+					return err
+				}
+				if ref == nil || ref.DataView() == nil || ref.Version() == nil {
+					return errors.New("Latest returned an incomplete DataView Ref")
+				}
+				ref.Deref()
+				ref.Deref()
+			}
+			return nil
+		})
+	}
+	for range 2 {
+		run(func() error {
+			for range 100 {
+				if err := manager.GarbageCollect(ctx, 1, 1); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	require.Len(t, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds(), 100)
+}
+
 func TestManagerRecoveryValidation(t *testing.T) {
 	ctx := context.Background()
 

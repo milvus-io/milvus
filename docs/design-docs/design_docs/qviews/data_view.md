@@ -136,6 +136,12 @@ retry the same `On*` event safely because membership no-ops reuse the current
 version. Recovery never hides a missed event by scanning SegmentMeta; durable
 cross-catalog delivery is a separate integration concern.
 
+Removal events use a deliberate fail-safe ordering. Drop-partition and truncate
+first remove the affected membership from DataView and only then delete it from
+SegmentMeta. If the second operation fails, the data is hidden early and the
+event can retry idempotently; the inverse order could leave already-deleted data
+queryable after a DataView write failure.
+
 Event producers pass final membership facts to the manager. `OnImport` receives
 only the final loadable Segment IDs: when an imported Segment has been sorted,
 the sorted Segment replaces the original rather than being published alongside
@@ -151,6 +157,13 @@ it publishes exactly once after its final result Segments are visible and
 loadable. Non-clustering compaction serializes its SegmentMeta mutation and
 DataView commit under the SegmentMeta mutation lock so causal replacements on
 the same Segment chain cannot reach DataView out of order.
+
+Import commit keeps the DataView catalog write outside the ImportMeta write
+lock. `HandleCommitVchannel` first commits the per-vchannel ImportMeta state and
+releases that lock, then calls `OnImport` with the final loadable membership.
+An `OnImport` failure fails the RPC so StreamingNode retries; a retry republishes
+the same idempotent membership even when ImportMeta already records the
+vchannel as committed.
 
 ## Manager API
 

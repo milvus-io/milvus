@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types2 "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -6032,6 +6033,117 @@ func TestGetImportDataViewSegmentsUsesFinalSegments(t *testing.T) {
 		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
 		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
 	}, actual)
+}
+
+func TestHandleCommitVchannelRPCPublishesDataViewAfterImportMetaUnlock(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	manager := dataview.NewManager(catalog)
+	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100,
+		VChannels:    []string{"vchan-0"},
+	})
+	require.NoError(t, err)
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "vchan-0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+	}})
+
+	callbackActive := false
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
+		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+			callbackActive = true
+			defer func() { callbackActive = false }()
+			return callback()
+		})
+
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
+		Return([]int64{10}).Build()
+	defer getSegIDsMock.UnPatch()
+	updateSegsMock := mockey.Mock((*meta).UpdateSegmentsInfo).
+		Return(nil).Build()
+	defer updateSegsMock.UnPatch()
+
+	publishErr := merr.WrapErrServiceInternalMsg("mock DataView publish failure")
+	publishCalls := 0
+	saveDataViewMock := mockey.Mock((*datacoordkv.Catalog).SaveDataView).
+		To(func(_ *datacoordkv.Catalog, _ context.Context, _ *viewpb.DataViewOfCollection) error {
+			require.False(t, callbackActive, "OnImport must run after importMeta releases its write lock")
+			publishCalls++
+			return publishErr
+		}).Build()
+	defer saveDataViewMock.UnPatch()
+
+	server := &Server{
+		importMeta:      importMetaMock,
+		meta:            &meta{segments: segments},
+		dataViewManager: manager,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:    3001,
+		Vchannel: "vchan-0",
+	})
+	require.NoError(t, err)
+	require.False(t, merr.Ok(resp))
+	require.Equal(t, 1, publishCalls)
+}
+
+func TestHandleCommitVchannelRPCRepublishesDataViewForCommittedVchannel(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	manager := dataview.NewManager(catalog)
+	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100,
+		VChannels:    []string{"vchan-0"},
+	})
+	require.NoError(t, err)
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "vchan-0",
+		State:         commonpb.SegmentState_Flushed,
+	}})
+
+	importMetaMock := NewMockImportMeta(t)
+	// A committed vchannel is an ImportMeta no-op; DataView publication must
+	// still run outside the callback so an earlier failed publication can retry.
+	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
+		Return(nil)
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
+		Return([]int64{10}).Build()
+	defer getSegIDsMock.UnPatch()
+
+	server := &Server{
+		importMeta:      importMetaMock,
+		meta:            &meta{segments: segments},
+		dataViewManager: manager,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:    3001,
+		Vchannel: "vchan-0",
+	})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp))
+
+	ref, err := manager.Latest(ctx, 100)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	require.Equal(t, []int64{10}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
 }
 
 func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {

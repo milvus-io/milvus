@@ -137,10 +137,12 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 
 			// 4. delete all persisted DataView versions. The ack callback retries this
 			// step, and recovery also removes any versions left behind after a crash.
-			if dropper, ok := c.mixCoord.(collectionDataViewDropper); ok {
-				if err := dropper.DropCollectionDataView(ctx, collectionID); err != nil {
-					return merr.Wrap(err, "failed to drop collection data view")
-				}
+			dropper, ok := c.mixCoord.(collectionDataViewDropper)
+			if !ok {
+				mlog.Warn(ctx, "MixCoord does not support DataView collection deletion",
+					mlog.FieldCollectionID(collectionID))
+			} else if err := dropper.DropCollectionDataView(ctx, collectionID); err != nil {
+				return merr.Wrap(err, "failed to drop collection data view")
 			}
 			continue
 		}
