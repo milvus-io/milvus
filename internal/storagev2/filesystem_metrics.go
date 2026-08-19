@@ -27,18 +27,14 @@ package storagev2
 import "C"
 
 import (
-	"context"
 	"strconv"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// FilesystemMetrics holds the 8 filesystem metrics retrieved from the default filesystem
+// FilesystemMetrics holds a filesystem metrics snapshot.
 type FilesystemMetrics struct {
 	ReadCount               int64
 	WriteCount              int64
@@ -48,6 +44,12 @@ type FilesystemMetrics struct {
 	FailedCount             int64
 	MultiPartUploadCreated  int64
 	MultiPartUploadFinished int64
+}
+
+// FilesystemMetricsEntry identifies one cached filesystem and its metrics.
+type FilesystemMetricsEntry struct {
+	DisplayKey string
+	FilesystemMetrics
 }
 
 // getMetricsFromHandle retrieves metrics from a filesystem handle
@@ -72,6 +74,35 @@ func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, e
 
 	C.loon_filesystem_destroy(cFilesystem)
 	return fsMetrics, nil
+}
+
+// ListFilesystemMetrics returns metrics for every filesystem currently held by the cache.
+func ListFilesystemMetrics() ([]FilesystemMetricsEntry, error) {
+	var cMetricsList C.LoonFilesystemMetricsList
+	result := C.loon_filesystem_list_metrics(&cMetricsList)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, merr.Wrap(err, "failed to list filesystem metrics")
+	}
+	defer C.loon_filesystem_free_metrics_list(&cMetricsList)
+
+	entries := unsafe.Slice(cMetricsList.entries, int(cMetricsList.count))
+	metricsList := make([]FilesystemMetricsEntry, 0, len(entries))
+	for _, entry := range entries {
+		metricsList = append(metricsList, FilesystemMetricsEntry{
+			DisplayKey: C.GoString(entry.display_key),
+			FilesystemMetrics: FilesystemMetrics{
+				ReadCount:               int64(entry.metrics.read_count),
+				WriteCount:              int64(entry.metrics.write_count),
+				ReadBytes:               int64(entry.metrics.read_bytes),
+				WriteBytes:              int64(entry.metrics.write_bytes),
+				GetFileInfoCount:        int64(entry.metrics.get_file_info_count),
+				FailedCount:             int64(entry.metrics.failed_count),
+				MultiPartUploadCreated:  int64(entry.metrics.multi_part_upload_created),
+				MultiPartUploadFinished: int64(entry.metrics.multi_part_upload_finished),
+			},
+		})
+	}
+	return metricsList, nil
 }
 
 // Property keys exported by milvus-storage/ffi_c.h.
@@ -245,87 +276,4 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 		return merr.WrapErrStorageMsg("loon FFI error (code %d): %s", errCode, errStr)
 	}
 	return nil
-}
-
-// GetFilesystemKeyFromStorageConfig extracts filesystem cache key from StorageConfig.
-func GetFilesystemKeyFromStorageConfig(storageConfig *indexpb.StorageConfig) string {
-	if storageConfig == nil {
-		return ""
-	}
-
-	storageType := storageConfig.GetStorageType()
-	if storageType == "local" {
-		return storageConfig.GetRootPath()
-	}
-
-	address := storageConfig.GetAddress()
-	bucketName := storageConfig.GetBucketName()
-	if address == "" || bucketName == "" {
-		return ""
-	}
-	return address + "/" + bucketName
-}
-
-// PublishDefaultFilesystemMetrics retrieves and publishes metrics from the default filesystem.
-func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
-	params := paramtable.Get()
-	var storageConfig *indexpb.StorageConfig
-
-	if params.CommonCfg.StorageType.GetValue() == "local" {
-		storageConfig = &indexpb.StorageConfig{
-			RootPath:    params.LocalStorageCfg.Path.GetValue(),
-			StorageType: params.CommonCfg.StorageType.GetValue(),
-			// External collections may reference an s3:// source even when the
-			// primary storage is local, so the connection cap still applies.
-			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
-		}
-	} else {
-		storageConfig = &indexpb.StorageConfig{
-			Address:           params.MinioCfg.Address.GetValue(),
-			AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
-			SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
-			UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
-			SslCACert:         params.MinioCfg.SslCACert.GetValue(),
-			BucketName:        params.MinioCfg.BucketName.GetValue(),
-			RootPath:          params.MinioCfg.RootPath.GetValue(),
-			UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
-			IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
-			StorageType:       params.CommonCfg.StorageType.GetValue(),
-			Region:            params.MinioCfg.Region.GetValue(),
-			UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
-			CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
-			RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-			MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
-			GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
-			SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
-			UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
-		}
-	}
-	return PublishFilesystemMetricsWithConfig(storageConfig)
-}
-
-// PublishFilesystemMetricsWithConfig retrieves and publishes filesystem metrics using storage config.
-func PublishFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
-	metricSnapshot, err := GetFilesystemMetricsWithConfig(storageConfig)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to get filesystem metrics with config", mlog.Err(err))
-		return nil, err
-	}
-
-	fsKey := GetFilesystemKeyFromStorageConfig(storageConfig)
-	if fsKey == "" {
-		fsKey = "default"
-	}
-	metrics.PublishFilesystemMetrics(
-		fsKey,
-		metricSnapshot.ReadCount,
-		metricSnapshot.WriteCount,
-		metricSnapshot.ReadBytes,
-		metricSnapshot.WriteBytes,
-		metricSnapshot.GetFileInfoCount,
-		metricSnapshot.FailedCount,
-		metricSnapshot.MultiPartUploadCreated,
-		metricSnapshot.MultiPartUploadFinished,
-	)
-	return metricSnapshot, nil
 }

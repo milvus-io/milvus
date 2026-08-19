@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -207,7 +206,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		succeed, err := ex.Enqueue(mockC)
 		assert.True(t, succeed)
@@ -236,7 +234,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		succeed, err := ex.Enqueue(mockC)
 		assert.True(t, succeed)
@@ -424,7 +421,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(planID)
 		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(2)
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.Enqueue(mockC)
 		assert.Equal(t, slotUsage, ex.Slots())
@@ -449,7 +445,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC := NewMockCompactor(t)
 		mockC.EXPECT().GetSlotUsage().Return(int64(10))
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.tasks[1] = &taskState{
 			compactor: mockC,
@@ -473,14 +468,11 @@ func TestCompactionExecutor(t *testing.T) {
 		}
 		ex.usingSlots = slotUsage
 
-		callbackSlots := make(chan int64, 2)
+		callbackSlots := make(chan int64, 1)
 		mockC.EXPECT().GetSlotUsage().Return(slotUsage)
 		mockC.EXPECT().Complete().Run(func() {
 			callbackSlots <- ex.Slots()
 		}).Return()
-		mockC.EXPECT().GetStorageConfig().Run(func() {
-			callbackSlots <- ex.Slots()
-		}).Return(nil)
 
 		done := make(chan struct{})
 		go func() {
@@ -494,7 +486,6 @@ func TestCompactionExecutor(t *testing.T) {
 			t.Fatal("completeTask blocked while invoking compactor callbacks")
 		}
 
-		require.Equal(t, int64(0), <-callbackSlots)
 		require.Equal(t, int64(0), <-callbackSlots)
 		assert.Equal(t, int64(0), ex.Slots())
 	})
@@ -510,7 +501,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.Enqueue(mockC)
 		ex.mu.RLock()
@@ -544,7 +534,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, datapb.CompactionTaskState_executing, results[0].State)
 	})
 
-	t.Run("Test_Multiple_ExecuteTask_WithMetrics", func(t *testing.T) {
+	t.Run("Test_Multiple_ExecuteTask", func(t *testing.T) {
 		ex := NewExecutor()
 
 		planIDs := []int64{1, 2, 3}
@@ -556,7 +546,6 @@ func TestCompactionExecutor(t *testing.T) {
 			mockC.EXPECT().GetChannelName().Return("ch1")
 			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(2)
 			mockC.EXPECT().Complete().Return()
-			mockC.EXPECT().GetStorageConfig().Return(nil)
 
 			result := &datapb.CompactionPlanResult{
 				PlanID: planID,
@@ -589,36 +578,5 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, result := range results {
 			assert.Equal(t, datapb.CompactionTaskState_completed, result.State)
 		}
-	})
-
-	t.Run("Test_CompleteTask_WithStorageConfig", func(t *testing.T) {
-		ex := NewExecutor()
-		mockC := NewMockCompactor(t)
-
-		planID := int64(1)
-		storageConfig := &indexpb.StorageConfig{
-			StorageType: "minio",
-			Address:     "localhost:9000",
-			BucketName:  "test-bucket",
-		}
-
-		mockC.EXPECT().GetPlanID().Return(planID)
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
-		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(storageConfig)
-
-		ex.Enqueue(mockC)
-		assert.Equal(t, int64(8), ex.Slots())
-
-		result := &datapb.CompactionPlanResult{PlanID: planID}
-		ex.completeTask(planID, result)
-
-		assert.Equal(t, int64(0), ex.Slots())
-
-		ex.mu.RLock()
-		task := ex.tasks[planID]
-		ex.mu.RUnlock()
-		assert.Equal(t, datapb.CompactionTaskState_completed, task.state)
-		assert.Equal(t, result, task.result)
 	})
 }
