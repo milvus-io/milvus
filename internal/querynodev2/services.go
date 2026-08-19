@@ -555,6 +555,17 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
+		// A stale-schema rejection is a fenced no-op: node distribution is
+		// unchanged, so QueryCoord keeps its dist snapshot and retries from fresh
+		// metadata. Any other outcome (including a failed worker load) still
+		// reports the channel delta so QueryCoord reconciles with the actual
+		// distribution state.
+		staleRejected := false
+		defer func() {
+			if !staleRejected {
+				node.markDataDistributionLeaderSegmentLoad(req)
+			}
+		}()
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())
 		if !ok {
 			msg := "failed to load segments, delegator not found"
@@ -576,10 +587,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		err := delegator.LoadSegments(ctx, req)
 		if err != nil {
 			log.Warn(ctx, "delegator failed to load segments", mlog.Err(err))
+			if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+				staleRejected = true
+			}
 			return merr.Status(err), nil
 		}
 
-		node.markDataDistributionLeaderSegmentLoad(req)
 		return merr.Success(), nil
 	}
 
@@ -603,7 +616,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			}
 			return merr.Error(node.loadDeltaLogs(ctx, req))
 		})
-		if err == nil {
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
 			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		}
 		return merr.Status(err), nil
@@ -614,7 +627,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			}
 			return merr.Error(node.reopenSegments(ctx, req))
 		})
-		if err == nil {
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
 			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		}
 		return merr.Status(err), nil
@@ -625,7 +638,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			}
 			return merr.Error(node.reopenSegments(ctx, req))
 		})
-		if err == nil {
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
 			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		}
 		return merr.Status(err), nil
@@ -665,6 +678,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		req.GetInfos()...,
 	)
 	if err != nil {
+		// A stale-schema rejection inside the load commit leaves the segment
+		// manager unchanged; any other failure still reports the segments so
+		// QueryCoord reconciles with the actual distribution state.
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		}
 		return merr.Status(err), nil
 	}
 
@@ -1588,7 +1607,20 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 
 	log := mlog.With(mlog.Int64("collectionID", req.GetCollectionID()),
 		mlog.String("channel", req.GetChannel()), mlog.Int64("currentNodeID", node.GetNodeID()))
+	// A stale-schema rejection is a fenced no-op: node distribution is
+	// unchanged, so QueryCoord keeps its dist snapshot and retries from fresh
+	// metadata. Any other outcome (including a failed action) still reports the
+	// channel delta so QueryCoord reconciles with the actual distribution state.
+	staleRejected := false
+	defer func() {
+		if !staleRejected {
+			node.distDeltaTracker.markChannelUpsert(req.GetChannel())
+		}
+	}()
 	if err := node.manager.Collection.ValidateSchemaBarrier(req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs()); err != nil {
+		if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			staleRejected = true
+		}
 		return merr.Status(err), nil
 	}
 	// check node healthy
@@ -1608,6 +1640,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	// translate segment action
 	removeActions := make([]*querypb.SyncAction, 0)
 	metadataActions := make([]*querypb.SyncAction, 0)
+	// Preserve the caller context for the post-Wait fence: errgroup.WithContext
+	// cancels its derived context unconditionally once Wait returns (even when
+	// every action succeeds), so the metadata actions must not reuse it.
+	requestCtx := ctx
 	group, ctx := errgroup.WithContext(ctx)
 	for _, action := range req.GetActions() {
 		log := mlog.With(mlog.String("Action",
@@ -1707,12 +1743,12 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				shardDelegator.AddExcludedSegments(flushedInfo)
 				shardDelegator.SyncTargetVersion(action, req.GetLoadMeta().GetPartitionIDs())
 			case querypb.SyncType_UpdatePartitionStats:
-				shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)
+				shardDelegator.SyncPartitionStats(requestCtx, action.PartitionStatsVersions)
 			}
 		}
 
 		for _, action := range removeActions {
-			shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+			shardDelegator.ReleaseSegments(requestCtx, &querypb.ReleaseSegmentsRequest{
 				NodeID:       -1,
 				SegmentIDs:   []int64{action.GetSegmentID()},
 				Scope:        querypb.DataScope_Historical,
@@ -1722,9 +1758,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			staleRejected = true
+		}
 		return merr.Status(err), nil
 	}
-	node.distDeltaTracker.markChannelUpsert(req.GetChannel())
 
 	return merr.Success(), nil
 }

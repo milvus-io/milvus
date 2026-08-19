@@ -819,7 +819,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
-	// Process tasks and Release done
+	// Process tasks
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
@@ -1669,6 +1669,17 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 	}
 
 	// Expect
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).
+		RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Schema: &schemapb.CollectionSchema{
+					Name: "TestLeaderTaskRemove",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+					},
+				},
+			}, nil
+		})
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test remove segment task
@@ -1718,6 +1729,9 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, nil, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
@@ -1745,6 +1759,17 @@ func (suite *TaskSuite) TestLeaderTaskUsesLeaderExecutor() {
 	}
 
 	suite.scheduler.RemoveExecutor(workerID)
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).
+		RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Schema: &schemapb.CollectionSchema{
+					Name: "TestLeaderTaskUsesLeaderExecutor",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+					},
+				},
+			}, nil
+		})
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, leaderID, mock.MatchedBy(func(req *querypb.SyncDistributionRequest) bool {
 		return req.GetCollectionID() == suite.collection &&
 			req.GetChannel() == channel.GetChannelName() &&
@@ -1764,6 +1789,9 @@ func (suite *TaskSuite) TestLeaderTaskUsesLeaderExecutor() {
 		NewLeaderAction(leaderID, workerID, ActionTypeReduce, channel.GetChannelName(), segmentID, 0),
 	)
 	suite.NoError(suite.scheduler.Add(task))
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, nil, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
 
 	suite.dispatchAndWait(leaderID)
 

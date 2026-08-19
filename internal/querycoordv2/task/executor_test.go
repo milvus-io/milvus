@@ -188,7 +188,7 @@ func TestLeaderMetadataSyncRequestsCarrySchemaBarrier(t *testing.T) {
 			},
 			newTask: func() *LeaderTask {
 				action := NewLeaderAction(leaderID, workerID, ActionTypeReduce, "channel", 100, 0)
-				return NewLeaderSegmentTask(ctx, testSource("schema-gate-test"), collectionID, replica, leaderID, action)
+				return NewLeaderSegmentTask(ctx, 10*time.Second, testSource("schema-gate-test"), collectionID, replica, leaderID, action)
 			},
 		},
 		{
@@ -199,7 +199,7 @@ func TestLeaderMetadataSyncRequestsCarrySchemaBarrier(t *testing.T) {
 			},
 			newTask: func() *LeaderTask {
 				action := NewLeaderUpdatePartStatsAction(leaderID, workerID, ActionTypeStatsUpdate, "channel", map[int64]int64{20: 30})
-				return NewLeaderPartStatsTask(ctx, testSource("schema-gate-test"), collectionID, replica, leaderID, action)
+				return NewLeaderPartStatsTask(ctx, 10*time.Second, testSource("schema-gate-test"), collectionID, replica, leaderID, action)
 			},
 		},
 	} {

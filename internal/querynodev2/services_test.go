@@ -2442,6 +2442,11 @@ func (suite *ServiceSuite) TestSyncDistribution_RemoveFailureAfterLeaderViewUpda
 	partitionID := suite.partitionIDs[0]
 	partitionStatsVersion := int64(10001)
 	partitionStatsVersions := map[int64]int64{}
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	suite.Require().NoError(suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, &querypb.LoadMetaInfo{
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+	}))
 	mockDelegator := delegator.NewMockShardDelegator(suite.T())
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
@@ -2949,7 +2954,15 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		defer suite.node.delegators.GetAndRemove("schema-install-second")
 		defer suite.node.delegators.GetAndRemove("schema-install-other")
 
-		status, err := suite.node.UpdateSchema(ctx, req)
+		coordinatorReq := &querypb.UpdateSchemaRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AlterCollectionSchema,
+			},
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
+		}
+		status, err := suite.node.UpdateSchema(ctx, coordinatorReq)
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
@@ -2961,7 +2974,15 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		suite.node.delegators.Insert("schema-install-failure", shardDelegator)
 		defer suite.node.delegators.GetAndRemove("schema-install-failure")
 
-		status, err := suite.node.UpdateSchema(ctx, req)
+		failureReq := &querypb.UpdateSchemaRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AlterCollectionSchema,
+			},
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
+		}
+		status, err := suite.node.UpdateSchema(ctx, failureReq)
 		suite.ErrorIs(merr.CheckRPCCall(status, err), installErr)
 	})
 }

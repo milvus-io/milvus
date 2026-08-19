@@ -113,6 +113,9 @@ func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
 	} else {
 		panic(fmt.Sprintf("invalid getter type: %T", expirations))
 	}
+	if cacheExpirations == nil {
+		return nil
+	}
 	for _, cacheExpiration := range cacheExpirations.CacheExpirations {
 		if err := c.expireCache(ctx, cacheExpiration); err != nil {
 			return err

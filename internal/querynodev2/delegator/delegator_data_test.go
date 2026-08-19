@@ -747,6 +747,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
+			Schema:       proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema),
+			LoadMeta:     &querypb.LoadMetaInfo{SchemaBarrierTs: 0},
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:     100,
@@ -801,6 +803,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
 		LoadScope:    querypb.LoadScope_Reopen,
+		Schema:       proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema),
+		LoadMeta:     &querypb.LoadMetaInfo{SchemaBarrierTs: 0},
 		Infos: []*querypb.SegmentLoadInfo{
 			{
 				SegmentID:     100,
@@ -868,6 +872,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFail
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
 		LoadScope:    querypb.LoadScope_Reopen,
+		Schema:       proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema),
+		LoadMeta:     &querypb.LoadMetaInfo{SchemaBarrierTs: 0},
 		Infos: []*querypb.SegmentLoadInfo{
 			{
 				SegmentID:     100,
@@ -909,6 +915,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsDoesNotRetryPermanen
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
 		LoadScope:    querypb.LoadScope_Reopen,
+		Schema:       proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema),
+		LoadMeta:     &querypb.LoadMetaInfo{SchemaBarrierTs: 0},
 		Infos: []*querypb.SegmentLoadInfo{
 			{
 				SegmentID:     100,
@@ -964,6 +972,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegmen
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
 		LoadScope:    querypb.LoadScope_Reopen,
+		Schema:       proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema),
+		LoadMeta:     &querypb.LoadMetaInfo{SchemaBarrierTs: 0},
 		Infos: []*querypb.SegmentLoadInfo{
 			{
 				SegmentID:     100,
