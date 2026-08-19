@@ -455,7 +455,10 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				for i := 0; i < totalRows; i++ {
 					gpFieldBuilder.Add(iter(i))
 				}
-				gbv = gpFieldBuilder.Build()
+				gbv, err = gpFieldBuilder.Build()
+				if err != nil {
+					return nil, err
+				}
 				gbv.FieldId = fieldID
 				gbv.FieldName = fieldName
 			}

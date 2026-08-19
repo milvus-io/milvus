@@ -68,8 +68,9 @@ registerMin(const std::string& name) {
                 case DataType::VARCHAR:
                 case DataType::STRING:
                 case DataType::TEXT:
-                case DataType::UUID:
                     return std::make_unique<MinStringAggregate>(inputType);
+                case DataType::UUID:
+                    return std::make_unique<T<UUID, UUID, UUID>>(inputType);
                 default:
                     ThrowInfo(UnexpectedError,
                               "Unknown input type for {} aggregation {}",

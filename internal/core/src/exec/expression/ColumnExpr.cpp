@@ -67,9 +67,12 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = DoEval<double>(input);
             break;
         case DataType::VARCHAR:
-        case DataType::TEXT:
-        case DataType::UUID: {
+        case DataType::TEXT: {
             result = DoEval<std::string>(input);
+            break;
+        }
+        case DataType::UUID: {
+            result = DoEval<UUID>(input);
             break;
         }
         default:

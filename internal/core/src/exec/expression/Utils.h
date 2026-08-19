@@ -254,6 +254,10 @@ GetValueFromProtoInternal(const milvus::proto::plan::GenericValue& value_proto,
         Assert(value_proto.val_case() ==
                milvus::proto::plan::GenericValue::kStringVal);
         return static_cast<T>(value_proto.string_val());
+    } else if constexpr (std::is_same_v<T, milvus::UUID>) {
+        Assert(value_proto.val_case() ==
+               milvus::proto::plan::GenericValue::kStringVal);
+        return milvus::UUID::FromString(value_proto.string_val());
     } else if constexpr (std::is_same_v<T, proto::plan::Array>) {
         Assert(value_proto.val_case() ==
                milvus::proto::plan::GenericValue::kArrayVal);

@@ -570,6 +570,11 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			if err != nil {
 				return err
 			}
+		case *schemapb.ScalarField_BytesData:
+			sd.BytesData.Data, err = fillWithNullValueImpl(sd.BytesData.Data, validData)
+			if err != nil {
+				return err
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
@@ -758,6 +763,32 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 			}
 			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValueWkbBytes, validData)
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_BytesData:
+			if len(validData) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(validData), msg)
+			}
+			var defaultValue []byte
+			dv := fieldSchema.GetDefaultValue()
+			if b := dv.GetBytesData(); len(b) != 0 {
+				if len(b) != 16 {
+					return merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(b), field.GetFieldName())
+				}
+				defaultValue = b
+			} else if s := dv.GetStringData(); s != "" {
+				u, err := typeutil.ParseUUID(s)
+				if err != nil {
+					return err
+				}
+				defaultValue = u[:]
+			} else {
+				defaultValue = make([]byte, 16)
+			}
+			sd.BytesData.Data, err = fillWithDefaultValueImpl(sd.BytesData.Data, defaultValue, validData)
 			if err != nil {
 				return err
 			}
@@ -956,7 +987,10 @@ func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema
 		}
 		for i, b := range bytesArr.GetData() {
 			if len(b) == 0 {
-				continue
+				if fieldSchema.GetNullable() {
+					continue
+				}
+				return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at row %d: expected 16 bytes, got %d", fieldSchema.GetName(), i, len(b))
 			}
 			if len(b) != 16 {
 				return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at row %d: expected 16 bytes, got %d", fieldSchema.GetName(), i, len(b))

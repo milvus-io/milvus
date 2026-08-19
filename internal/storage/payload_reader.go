@@ -178,6 +178,9 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Geometry:
 		val, validData, err := r.GetGeometryFromPayload()
 		return val, validData, 0, err
+	case schemapb.DataType_UUID:
+		val, validData, err := r.GetUUIDFromPayload()
+		return val, validData, 0, err
 	default:
 		return nil, nil, 0, merr.WrapErrDataIntegrityMsg("unknown type")
 	}

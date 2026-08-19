@@ -480,7 +480,8 @@ using GroupByValueType = std::optional<std::variant<std::monostate,
                                                     int32_t,
                                                     int64_t,
                                                     bool,
-                                                    std::string>>;
+                                                    std::string,
+                                                    UUID>>;
 
 // Hash function for GroupByValueType
 struct GroupByValueHash {

@@ -105,6 +105,10 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::UUID: {
+            result = ExecRangeVisitorImpl<UUID>(context);
+            break;
+        }
         case DataType::JSON: {
             span.GetSpan()->SetAttribute("json_filter_expr_type",
                                          "binary_range");

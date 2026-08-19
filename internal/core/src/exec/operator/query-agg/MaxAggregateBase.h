@@ -73,8 +73,13 @@ class MaxAggregateBase
         char** groups, folly::Range<const vector_size_t*> indices) override {
         BaseAggregate::Aggregate::setAllNulls(groups, indices);
         for (auto i : indices) {
-            (*BaseAggregate::Aggregate::template value<TAccumulator>(
-                groups[i])) = std::numeric_limits<TAccumulator>::lowest();
+            if constexpr (std::is_same_v<TAccumulator, milvus::UUID>) {
+                (*BaseAggregate::Aggregate::template value<TAccumulator>(
+                    groups[i])) = milvus::UUID{};
+            } else {
+                (*BaseAggregate::Aggregate::template value<TAccumulator>(
+                    groups[i])) = std::numeric_limits<TAccumulator>::lowest();
+            }
         }
     }
 

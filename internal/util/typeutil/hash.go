@@ -83,9 +83,19 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 	case schemapb.DataType_UUID:
 		stringKeys := make([]string, 0, len(keys))
 		for _, key := range keys {
-			if stringVal, ok := key.GetVal().(*planpb.GenericValue_StringVal); ok {
-				stringKeys = append(stringKeys, stringVal.StringVal)
-			} else {
+			switch v := key.GetVal().(type) {
+			case *planpb.GenericValue_StringVal:
+				stringKeys = append(stringKeys, v.StringVal)
+			case *planpb.GenericValue_BytesVal:
+				if len(v.BytesVal) != 16 {
+					return nil, merr.WrapErrParameterInvalidMsg("invalid UUID length %d, expected 16", len(v.BytesVal))
+				}
+				u, err := typeutil.BytesToUUID(v.BytesVal)
+				if err != nil {
+					return nil, err
+				}
+				stringKeys = append(stringKeys, typeutil.UUIDToString(u))
+			default:
 				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
 			}
 		}

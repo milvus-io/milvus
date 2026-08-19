@@ -355,11 +355,15 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 		}
 		pkAt = func(i int) any { return stringArray.Value(i) }
 	case schemapb.DataType_UUID:
-		stringArray, ok := pkArray.(*array.String)
+		fbArr, ok := pkArray.(*array.FixedSizeBinary)
 		if !ok {
 			return nil, nil, merr.WrapErrServiceInternal("uuid primary key field not found in full schema rewrite record")
 		}
-		pkAt = func(i int) any { return stringArray.Value(i) }
+		pkAt = func(i int) any {
+			var u [16]byte
+			copy(u[:], fbArr.Value(i))
+			return u
+		}
 	default:
 		return nil, nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
 	}

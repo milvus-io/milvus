@@ -64,6 +64,7 @@ class SingleElement : public BaseElement {
                                    float,
                                    double,
                                    std::string,
+                                   milvus::UUID,
                                    proto::plan::Array>;
 
     SingleElement() = default;
@@ -84,7 +85,8 @@ class SingleElement : public BaseElement {
                       std::is_same_v<T, int32_t> ||
                       std::is_same_v<T, int64_t> || std::is_same_v<T, float> ||
                       std::is_same_v<T, double> ||
-                      std::is_same_v<T, std::string>) {
+                      std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, milvus::UUID>) {
             value_ = value;
         } else {
             static_assert(sizeof(T) == 0,

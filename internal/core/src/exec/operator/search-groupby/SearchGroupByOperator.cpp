@@ -88,9 +88,11 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                 getter = CreateFieldGetter<bool>(op_ctx, segment, field_id);
                 break;
             case DataType::VARCHAR:
-            case DataType::UUID:
                 getter =
                     CreateFieldGetter<std::string>(op_ctx, segment, field_id);
+                break;
+            case DataType::UUID:
+                getter = CreateFieldGetter<UUID>(op_ctx, segment, field_id);
                 break;
             case DataType::JSON:
                 if (json_type.has_value()) {

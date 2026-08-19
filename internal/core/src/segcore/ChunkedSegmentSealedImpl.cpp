@@ -460,8 +460,7 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
                     }
                     return false;
                 }
-                case DataType::VARCHAR:
-                case DataType::UUID: {
+                case DataType::VARCHAR: {
                     auto& target = std::get<std::string>(pk);
                     for (int64_t i = 0; i < num_chunks; ++i) {
                         auto* chunk =
@@ -469,6 +468,19 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
                         auto offset = chunk->binary_search_string(target);
                         if (offset != -1 && offset < chunk->RowNums() &&
                             chunk->operator[](offset) == target) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                case DataType::UUID: {
+                    auto target = std::get<UUID>(pk);
+                    for (int64_t i = 0; i < num_chunks; ++i) {
+                        auto* src = reinterpret_cast<const UUID*>(
+                            all_chunks[i].get()->Data());
+                        auto rows = pk_column->chunk_row_nums(i);
+                        auto it = std::lower_bound(src, src + rows, target);
+                        if (it != src + rows && *it == target) {
                             return true;
                         }
                     }
@@ -4249,8 +4261,11 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
                 bitset_view, pks, pk_column);
             break;
         case DataType::VARCHAR:
-        case DataType::UUID:
             search_pks_with_two_pointers_impl<std::string>(
+                bitset_view, pks, pk_column);
+            break;
+        case DataType::UUID:
+            search_pks_with_two_pointers_impl<UUID>(
                 bitset_view, pks, pk_column);
             break;
         default:
@@ -4418,8 +4433,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
 
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::UUID: {
+        case DataType::VARCHAR: {
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
@@ -4438,6 +4452,30 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                         auto insert_ts = read_ts(segment_offset);
                         if (timestamp_hit(insert_ts, timestamp)) {
                             callback(SegOffset(segment_offset), timestamp);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case DataType::UUID: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                const auto& pw = all_chunk_pins[i];
+                auto src = reinterpret_cast<const UUID*>(pw.get()->Data());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                for (size_t j = 0; j < pks.size(); ++j) {
+                    auto target = std::get<UUID>(pks[j]);
+                    auto timestamp = get_timestamp(j);
+                    auto it =
+                        std::lower_bound(src, src + chunk_row_num, target);
+                    auto num_rows_until = num_rows_until_chunk;
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until;
+                        auto insert_ts = read_ts(offset);
+                        if (timestamp_hit(insert_ts, timestamp)) {
+                            callback(SegOffset(offset), timestamp);
                         }
                     }
                 }
@@ -4500,9 +4538,12 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(
                 op, std::get<int64_t>(pk), pk_column, bitset);
             break;
         case DataType::VARCHAR:
-        case DataType::UUID:
             search_sorted_pk_range_impl<std::string>(
                 op, std::get<std::string>(pk), pk_column, bitset);
+            break;
+        case DataType::UUID:
+            search_sorted_pk_range_impl<UUID>(
+                op, std::get<UUID>(pk), pk_column, bitset);
             break;
         default:
             ThrowInfo(DataTypeInvalid,
@@ -4577,7 +4618,6 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
                 bitset);
             break;
         case DataType::VARCHAR:
-        case DataType::UUID:
             search_sorted_pk_binary_range_impl<std::string>(
                 std::get<std::string>(lower_pk),
                 lower_inclusive,
@@ -4585,6 +4625,14 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
                 upper_inclusive,
                 pk_column,
                 bitset);
+            break;
+        case DataType::UUID:
+            search_sorted_pk_binary_range_impl<UUID>(std::get<UUID>(lower_pk),
+                                                     lower_inclusive,
+                                                     std::get<UUID>(upper_pk),
+                                                     upper_inclusive,
+                                                     pk_column,
+                                                     bitset);
             break;
         default:
             ThrowInfo(DataTypeInvalid,
@@ -4683,9 +4731,12 @@ ChunkedSegmentSealedImpl::find_first_n_element(
                     std::get<int64_t>(cursor->last_pk), pk_column);
                 break;
             case DataType::VARCHAR:
-            case DataType::UUID:
                 cursor_doc_offset = find_sorted_pk_doc_offset<std::string>(
                     std::get<std::string>(cursor->last_pk), pk_column);
+                break;
+            case DataType::UUID:
+                cursor_doc_offset = find_sorted_pk_doc_offset<UUID>(
+                    std::get<UUID>(cursor->last_pk), pk_column);
                 break;
             default:
                 ThrowInfo(DataTypeInvalid,
@@ -4834,8 +4885,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                               }
                               break;
                           }
-                          case DataType::VARCHAR:
-                          case DataType::UUID: {
+                          case DataType::VARCHAR: {
                               auto num_chunk = pk_column->num_chunks();
                               for (int i = 0; i < num_chunk; ++i) {
                                   auto num_rows_until_chunk =
@@ -4861,6 +4911,35 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                                               SegOffset(offset +
                                                         num_rows_until_chunk),
                                               timestamps[j]);
+                                      }
+                                  }
+                              }
+                              break;
+                          }
+                          case DataType::UUID: {
+                              auto num_chunk = pk_column->num_chunks();
+                              for (int i = 0; i < num_chunk; ++i) {
+                                  auto num_rows_until_chunk =
+                                      pk_column->GetNumRowsUntilChunk(i);
+                                  const auto& pw = all_chunk_pins[i];
+                                  auto src = reinterpret_cast<const UUID*>(
+                                      pw.get()->Data());
+                                  auto chunk_row_num =
+                                      pk_column->chunk_row_nums(i);
+                                  for (size_t j = 0; j < pks.size(); ++j) {
+                                      if (!delete_is_after_insert(j)) {
+                                          continue;
+                                      }
+                                      auto target = std::get<UUID>(pks[j]);
+                                      auto it = std::lower_bound(
+                                          src, src + chunk_row_num, target);
+                                      for (; it != src + chunk_row_num &&
+                                             *it == target;
+                                           ++it) {
+                                          auto offset =
+                                              it - src + num_rows_until_chunk;
+                                          callback(SegOffset(offset),
+                                                   timestamps[j]);
                                       }
                                   }
                               }
@@ -5030,8 +5109,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT:
-        case DataType::UUID: {
+        case DataType::TEXT: {
             // dst must have at least count elements; the callback's offset
             // parameter is guaranteed to be in [0, count)
             bulk_subscript_ptr_impl<std::string>(
@@ -5040,6 +5118,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 seg_offsets,
                 count,
                 static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::UUID: {
+            auto* dst = static_cast<std::string*>(data);
+            column->BulkValueAt(
+                op_ctx,
+                [dst](const char* value, size_t i) {
+                    dst[i].assign(value, 16);
+                },
+                seg_offsets,
+                count);
             break;
         }
         case DataType::JSON: {
@@ -5940,14 +6029,25 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
 
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::UUID: {
+        case DataType::STRING: {
             bulk_subscript_ptr_impl<std::string>(
                 op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
                 ret->mutable_scalars()->mutable_string_data()->mutable_data());
+            break;
+        }
+        case DataType::UUID: {
+            auto* dst =
+                ret->mutable_scalars()->mutable_bytes_data()->mutable_data();
+            column->BulkValueAt(
+                op_ctx,
+                [dst](const char* value, size_t i) {
+                    dst->at(i).assign(value, 16);
+                },
+                seg_offsets,
+                count);
             break;
         }
 
@@ -9272,12 +9372,21 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             break;
         }
         case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::UUID: {
+        case DataType::STRING: {
             auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
             auto obj = data_array->mutable_scalars()->mutable_string_data();
             for (int64_t i = 0; i < size; i++) {
                 obj->add_data(typed->GetString(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::UUID: {
+            auto typed =
+                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
+            auto obj = data_array->mutable_scalars()->mutable_bytes_data();
+            for (int64_t i = 0; i < size; i++) {
+                auto val = typed->GetValue(result_mapping[i]);
+                obj->add_data(val.data(), val.size());
             }
             break;
         }
@@ -9827,12 +9936,19 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
                                                  src_data.data().end());
                     break;
                 }
-                case DataType::VARCHAR:
-                case DataType::UUID: {
+                case DataType::VARCHAR: {
                     auto str_ids = ids->mutable_str_id();
                     auto& src_data = data_array->scalars().string_data();
                     for (auto i = 0; i < src_data.data_size(); ++i) {
                         *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
+                    break;
+                }
+                case DataType::UUID: {
+                    auto uuid_ids = ids->mutable_uuid_id();
+                    auto& src_data = data_array->scalars().bytes_data();
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
+                        *(uuid_ids->mutable_data()->Add()) = src_data.data(i);
                     }
                     break;
                 }

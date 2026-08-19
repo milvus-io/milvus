@@ -277,7 +277,10 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		}
 	case schemapb.DataType_UUID:
 		predicate = func(r storage.Record, ri, i int) bool {
-			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
+			fbArr := r.Column(pkField.FieldID).(*array.FixedSizeBinary)
+			var u [16]byte
+			copy(u[:], fbArr.Value(i))
+			pk := u
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}

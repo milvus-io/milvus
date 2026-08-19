@@ -1184,6 +1184,21 @@ func CheckDuplicatePkExist(primaryFieldSchema *schemapb.FieldSchema, fieldsData 
 		case *schemapb.ScalarField_StringData:
 			strIDs := scalarField.GetStringData().GetData()
 			return hasDuplicates(strIDs), nil
+		case *schemapb.ScalarField_BytesData:
+			bytesIDs := scalarField.GetBytesData().GetData()
+			seen := make(map[[16]byte]struct{}, len(bytesIDs))
+			for _, b := range bytesIDs {
+				if len(b) != 16 {
+					return false, merr.WrapErrParameterInvalidMsg("invalid UUID length %d, expected 16", len(b))
+				}
+				var u [16]byte
+				copy(u[:], b)
+				if _, exists := seen[u]; exists {
+					return true, nil
+				}
+				seen[u] = struct{}{}
+			}
+			return false, nil
 		default:
 			return false, merr.WrapErrParameterInvalidMsg("unsupported primary key type")
 		}

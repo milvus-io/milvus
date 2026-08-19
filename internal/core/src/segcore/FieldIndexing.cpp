@@ -969,6 +969,9 @@ CreateIndex(const FieldMeta& field_meta,
         case DataType::VARCHAR:
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta, segcore_config);
+        case DataType::UUID:
+            return std::make_unique<ScalarFieldIndexing<UUID>>(field_meta,
+                                                               segcore_config);
         case DataType::GEOMETRY:
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta,
@@ -985,5 +988,6 @@ CreateIndex(const FieldMeta& field_meta,
 
 // Explicit template instantiation for ScalarFieldIndexing
 template class ScalarFieldIndexing<std::string>;
+template class ScalarFieldIndexing<UUID>;
 
 }  // namespace milvus::segcore

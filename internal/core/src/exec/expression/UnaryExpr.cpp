@@ -230,7 +230,6 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR:
-        case DataType::UUID:
         case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
@@ -240,6 +239,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             } else {
                 result = ExecRangeVisitorImpl<std::string_view>(context);
             }
+            break;
+        }
+        case DataType::UUID: {
+            result = ExecRangeVisitorImpl<UUID>(context);
             break;
         }
         case DataType::JSON: {
@@ -2173,10 +2176,13 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
             break;
         case DataType::VARCHAR:
-        case DataType::UUID:
         case DataType::TEXT: {
             can_use = SegmentExpr::CanUseIndexForOp<std::string>(
                 expr_->op_type_, StringLiteralForCostGuard());
+            break;
+        }
+        case DataType::UUID: {
+            can_use = SegmentExpr::CanUseIndexForOp<UUID>(expr_->op_type_);
             break;
         }
         case DataType::JSON: {
@@ -2496,7 +2502,7 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
             PrefetchRawData<double>();
             break;
         case DataType::VARCHAR:
-        case DataType::UUID:
+        case DataType::TEXT:
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
@@ -2505,6 +2511,9 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
             } else {
                 PrefetchRawData<std::string_view>();
             }
+            break;
+        case DataType::UUID:
+            PrefetchRawData<UUID>();
             break;
         default:
             SegmentExpr::PrefetchRawData(expr_->column_.field_id_);

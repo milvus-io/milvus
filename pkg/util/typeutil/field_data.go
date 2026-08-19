@@ -157,7 +157,7 @@ func (b *FieldDataBuilder) Add(data any) *FieldDataBuilder {
 	return b
 }
 
-func (b *FieldDataBuilder) Build() *schemapb.FieldData {
+func (b *FieldDataBuilder) Build() (*schemapb.FieldData, error) {
 	field := &schemapb.FieldData{
 		Type: b.dt,
 	}
@@ -274,11 +274,11 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 				case []byte:
 					val = append(val, d)
 				case string:
-					if u, err := ParseUUID(d); err == nil {
-						val = append(val, u[:])
-					} else {
-						val = append(val, []byte(d))
+					u, err := ParseUUID(d)
+					if err != nil {
+						return nil, err
 					}
+					val = append(val, u[:])
 				default:
 					val = append(val, nil)
 				}
@@ -297,10 +297,10 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 			},
 		}
 	default:
-		return nil
+		return nil, merr.WrapErrParameterInvalidMsg("not supported field type: %s", b.dt.String())
 	}
 	if b.hasInvalid {
 		SetFieldDataValidData(field, b.valid)
 	}
-	return field
+	return field, nil
 }
