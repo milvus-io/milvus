@@ -35,6 +35,7 @@
 #include "index/RTreeIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "index/VectorMemIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -52,6 +53,71 @@
 
 namespace milvus::segcore {
 using std::unique_ptr;
+
+namespace {
+
+struct NullableAppendInfo {
+    std::unique_ptr<bool[]> batch_valid_data;
+    int64_t logical_begin = 0;
+    int64_t logical_count = 0;
+    int64_t valid_before_new = 0;
+    int64_t add_count = 0;
+
+    bool
+    HasLogicalRange() const {
+        return logical_count > 0;
+    }
+
+    bool
+    HasPayload() const {
+        return add_count > 0;
+    }
+
+    const bool*
+    ValidDataForNewRange(int64_t reserved_offset) const {
+        return batch_valid_data.get() + (logical_begin - reserved_offset);
+    }
+};
+
+NullableAppendInfo
+PrepareNullableAppendInfo(const VectorBase* field_raw_data,
+                          int64_t reserved_offset,
+                          int64_t size,
+                          int64_t indexed_logical_count) {
+    AssertInfo(size >= 0, "nullable index append size is negative");
+    const auto logical_end = reserved_offset + size;
+    if (size == 0 || indexed_logical_count >= logical_end) {
+        NullableAppendInfo info;
+        info.logical_begin = logical_end;
+        return info;
+    }
+    AssertInfo(indexed_logical_count >= reserved_offset,
+               "nullable index id map lags behind append batch, indexed "
+               "logical count: {}, reserved offset: {}",
+               indexed_logical_count,
+               reserved_offset);
+
+    NullableAppendInfo info;
+    info.logical_begin = indexed_logical_count;
+    info.logical_count = logical_end - indexed_logical_count;
+    info.batch_valid_data = std::make_unique<bool[]>(static_cast<size_t>(size));
+    field_raw_data->bulk_is_valid_range(
+        reserved_offset, size, info.batch_valid_data.get());
+
+    for (int64_t i = 0; i < size; ++i) {
+        if (!info.batch_valid_data[i]) {
+            continue;
+        }
+        if (reserved_offset + i < info.logical_begin) {
+            ++info.valid_before_new;
+        } else {
+            ++info.add_count;
+        }
+    }
+    return info;
+}
+
+}  // namespace
 
 void
 IndexingRecord::AppendingIndex(int64_t reserved_offset,
@@ -165,6 +231,7 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
+      index_unavailable_(false),
       config_(std::make_unique<VecIndexConfig>(
           segment_max_row_count,
           field_index_meta,
@@ -189,7 +256,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             reinterpret_cast<const ConcurrentVector<FloatVector>*>(
                 field_raw_data);
         AssertInfo(concurrent_fp32_vec != nullptr,
-                   "Fail to generate a cocurrent vector when recreate_index in "
+                   "Fail to generate a concurrent vector when create_index in "
                    "growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp32_vec](size_t id) {
@@ -206,7 +273,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             reinterpret_cast<const ConcurrentVector<Float16Vector>*>(
                 field_raw_data);
         AssertInfo(concurrent_fp16_vec != nullptr,
-                   "Fail to generate a cocurrent vector when    recreate_index "
+                   "Fail to generate a concurrent vector when create_index "
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp16_vec](size_t id) {
@@ -223,7 +290,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             reinterpret_cast<const ConcurrentVector<BFloat16Vector>*>(
                 field_raw_data);
         AssertInfo(concurrent_bf16_vec != nullptr,
-                   "Fail to generate a cocurrent vector when    recreate_index "
+                   "Fail to generate a concurrent vector when create_index "
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_bf16_vec](size_t id) {
@@ -236,6 +303,18 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             index_version,
             view_data);
     }
+    built_.store(false);
+    sync_with_index_.store(false);
+    index_cur_.store(0);
+    index_unavailable_.store(false);
+}
+
+void
+VectorFieldIndexing::DisableIndexAfterBuildFailure() {
+    built_.store(false);
+    sync_with_index_.store(false);
+    index_cur_.store(0);
+    index_unavailable_.store(true);
 }
 
 // for sparse float vector:
@@ -273,6 +352,9 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
     using value_type = knowhere::sparse::SparseRow<SparseValueType>;
     AssertInfo(get_data_type() == DataType::VECTOR_SPARSE_U32_F32,
                "Data type of vector field is not VECTOR_SPARSE_U32_F32");
+    if (index_unavailable_.load()) {
+        return;
+    }
 
     auto conf = get_build_params(get_data_type());
     auto field_source =
@@ -287,7 +369,6 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto valid_data = field_raw_data->get_valid_data();
 
     if (!built_) {
         const void* data_ptr = nullptr;
@@ -324,19 +405,27 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
 
         auto dataset = knowhere::GenDataSet(build_threshold, dim, data_ptr);
         dataset->SetIsSparse(true);
+        std::unique_ptr<bool[]> id_map_valid_data;
+        if (is_mapping_storage) {
+            auto logical_offset =
+                field_raw_data->get_logical_offset(build_threshold - 1);
+            auto update_count = logical_offset + 1;
+            index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
+            // IdMapData only keeps a view of valid_data; keep this buffer
+            // alive until the synchronous Build call consumes the dataset.
+            id_map_valid_data = std::make_unique<bool[]>(update_count);
+            field_raw_data->bulk_is_valid_range(
+                0, update_count, id_map_valid_data.get());
+            dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                id_map_valid_data.get(), static_cast<size_t>(update_count)));
+        }
         try {
             index_->BuildWithDataset(dataset, conf);
-            if (is_mapping_storage) {
-                auto logical_offset =
-                    field_raw_data->get_logical_offset(build_threshold - 1);
-                auto update_count = logical_offset + 1;
-                index_->UpdateValidData(valid_data.data(), update_count);
-            }
             built_ = true;
             index_cur_.fetch_add(build_threshold);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing sparse index build error: {}", error.what());
-            recreate_index(get_data_type(), field_raw_data);
+            DisableIndexAfterBuildFailure();
             return;
         }
     }
@@ -344,7 +433,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
     // Append rest data when index has been built
     int64_t add_count = 0;
     int64_t total_count = 0;
-    if (valid_data.empty()) {
+    if (!is_mapping_storage) {
         // Non-nullable case: add all rows
         add_count = reserved_offset + size - index_cur_.load();
         total_count = size;
@@ -361,56 +450,37 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
             sync_with_index_.store(true);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing sparse index add error: {}", error.what());
-            // Known design defect: after a raw-data-owning interim index has
-            // synchronized, its source chunks may have been reclaimed and
-            // field_raw_data is no longer a complete recovery source. This
-            // catch is reachable when AddWithDataset fails, but recreating the
-            // index here is not a valid recovery path and must not exist under
-            // single-owner semantics. The failure should instead be propagated
-            // and the segment marked unrecoverable.
-            recreate_index(get_data_type(), field_raw_data);
+            throw;
         }
     } else {
-        // Nullable case: only add valid rows (matching dense vector approach)
-        auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
-        auto add_valid_data_count = reserved_offset + size - index_total_count;
-        for (auto i = reserved_offset; i < reserved_offset + size; i++) {
-            if (valid_data[i]) {
-                total_count++;
-                if (i >= index_total_count) {
-                    add_count++;
-                }
-            }
-        }
-        if (add_count <= 0 && add_valid_data_count <= 0) {
+        auto append_info = PrepareNullableAppendInfo(
+            field_raw_data,
+            reserved_offset,
+            size,
+            static_cast<int64_t>(index_->GetIdMap().OutCount()));
+        if (!append_info.HasLogicalRange()) {
             sync_with_index_.store(true);
             return;
         }
-        if (add_count > 0) {
-            auto data_ptr = source + (total_count - add_count);
-            auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
-            dataset->SetIsSparse(true);
-            try {
-                index_->AddWithDataset(dataset, conf);
-            } catch (SegcoreError& error) {
-                LOG_ERROR("growing sparse index add error: {}", error.what());
-                // Known design defect: after a raw-data-owning interim index
-                // has synchronized, its source chunks may have been reclaimed
-                // and field_raw_data is no longer a complete recovery source.
-                // This catch is reachable when AddWithDataset fails, but
-                // recreating the index here is not a valid recovery path and
-                // must not exist under single-owner semantics. The failure
-                // should instead be propagated and the segment marked
-                // unrecoverable.
-                recreate_index(get_data_type(), field_raw_data);
-            }
+        auto dataset =
+            append_info.HasPayload()
+                ? knowhere::GenDataSet(append_info.add_count,
+                                       dim,
+                                       source + append_info.valid_before_new)
+                : knowhere::GenDataSet(0, dim, nullptr);
+        dataset->SetIsSparse(true);
+        index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
+        dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+            append_info.ValidDataForNewRange(reserved_offset),
+            static_cast<size_t>(append_info.logical_count)));
+        try {
+            index_->AddWithDataset(dataset, conf);
+            index_cur_.fetch_add(append_info.add_count);
+            sync_with_index_.store(true);
+        } catch (SegcoreError& error) {
+            LOG_ERROR("growing sparse index add error: {}", error.what());
+            throw;
         }
-        if (add_valid_data_count > 0) {
-            index_->UpdateValidData(valid_data.data() + index_total_count,
-                                    add_valid_data_count);
-        }
-        index_cur_.fetch_add(add_count);
-        sync_with_index_.store(true);
     }
 }
 
@@ -424,12 +494,15 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                    get_data_type() == DataType::VECTOR_BFLOAT16,
                "Data type of vector field is not in (VECTOR_FLOAT, "
                "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
+    if (index_unavailable_.load()) {
+        return;
+    }
+
     auto dim = get_dim();
     auto conf = get_build_params(get_data_type());
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto valid_data = field_raw_data->get_valid_data();
 
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");
@@ -477,26 +550,34 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         }
 
         auto dataset = knowhere::GenDataSet(build_threshold, dim, data_ptr);
+        std::unique_ptr<bool[]> id_map_valid_data;
+        if (is_mapping_storage) {
+            auto logical_offset =
+                field_raw_data->get_logical_offset(build_threshold - 1);
+            auto update_count = logical_offset + 1;
+            index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
+            // IdMapData only keeps a view of valid_data; keep this buffer
+            // alive until the synchronous Build call consumes the dataset.
+            id_map_valid_data = std::make_unique<bool[]>(update_count);
+            field_raw_data->bulk_is_valid_range(
+                0, update_count, id_map_valid_data.get());
+            dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                id_map_valid_data.get(), static_cast<size_t>(update_count)));
+        }
         try {
             index_->BuildWithDataset(dataset, conf);
-            if (is_mapping_storage) {
-                auto logical_offset =
-                    field_raw_data->get_logical_offset(build_threshold - 1);
-                auto update_count = logical_offset + 1;
-                index_->UpdateValidData(valid_data.data(), update_count);
-            }
             built_ = true;
             index_cur_.fetch_add(build_threshold);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index build error: {}", error.what());
-            recreate_index(get_data_type(), field_raw_data);
+            DisableIndexAfterBuildFailure();
             return;
         }
     }
     //append rest data when index has built
     int64_t add_count = 0;
     int64_t total_count = 0;
-    if (valid_data.empty()) {
+    if (!is_mapping_storage) {
         add_count = reserved_offset + size - index_cur_.load();
         total_count = size;
         if (add_count <= 0) {
@@ -512,58 +593,36 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             sync_with_index_.store(true);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index add error: {}", error.what());
-            // Known design defect: after a raw-data-owning interim index has
-            // synchronized, its source chunks may have been reclaimed and
-            // field_raw_data is no longer a complete recovery source. This
-            // catch is reachable when AddWithDataset fails, but recreating the
-            // index here is not a valid recovery path and must not exist under
-            // single-owner semantics. The failure should instead be propagated
-            // and the segment marked unrecoverable.
-            recreate_index(get_data_type(), field_raw_data);
+            throw;
         }
     } else {
-        // Nullable dense vectors: data_source (proto) contains valid vectors compactly
-        auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
-        auto add_valid_data_count = reserved_offset + size - index_total_count;
-        // Count valid vectors in this batch range
-        for (auto i = reserved_offset; i < reserved_offset + size; i++) {
-            if (valid_data[i]) {
-                total_count++;
-                if (i >= index_total_count) {
-                    add_count++;
-                }
-            }
-        }
-        if (add_count <= 0 && add_valid_data_count <= 0) {
+        auto append_info = PrepareNullableAppendInfo(
+            field_raw_data,
+            reserved_offset,
+            size,
+            static_cast<int64_t>(index_->GetIdMap().OutCount()));
+        if (!append_info.HasLogicalRange()) {
             sync_with_index_.store(true);
             return;
         }
-        if (add_count > 0) {
-            // data_source contains valid vectors compactly, skip already indexed ones
-            auto data_ptr = static_cast<const char*>(data_source) +
-                            (total_count - add_count) * vec_length;
-            auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
-            try {
-                index_->AddWithDataset(dataset, conf);
-            } catch (SegcoreError& error) {
-                LOG_ERROR("growing index add error: {}", error.what());
-                // Known design defect: after a raw-data-owning interim index
-                // has synchronized, its source chunks may have been reclaimed
-                // and field_raw_data is no longer a complete recovery source.
-                // This catch is reachable when AddWithDataset fails, but
-                // recreating the index here is not a valid recovery path and
-                // must not exist under single-owner semantics. The failure
-                // should instead be propagated and the segment marked
-                // unrecoverable.
-                recreate_index(get_data_type(), field_raw_data);
-            }
+        auto data_ptr = append_info.HasPayload()
+                            ? static_cast<const char*>(data_source) +
+                                  append_info.valid_before_new * vec_length
+                            : nullptr;
+        auto dataset =
+            knowhere::GenDataSet(append_info.add_count, dim, data_ptr);
+        index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
+        dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+            append_info.ValidDataForNewRange(reserved_offset),
+            static_cast<size_t>(append_info.logical_count)));
+        try {
+            index_->AddWithDataset(dataset, conf);
+            index_cur_.fetch_add(append_info.add_count);
+            sync_with_index_.store(true);
+        } catch (SegcoreError& error) {
+            LOG_ERROR("growing index add error: {}", error.what());
+            throw;
         }
-        if (add_valid_data_count > 0) {
-            index_->UpdateValidData(valid_data.data() + index_total_count,
-                                    add_valid_data_count);
-        }
-        index_cur_.fetch_add(add_count);
-        sync_with_index_.store(true);
     }
 }
 
@@ -587,12 +646,12 @@ VectorFieldIndexing::get_search_params(const SearchInfo& searchInfo) const {
 
 bool
 VectorFieldIndexing::sync_data_with_index() const {
-    return sync_with_index_.load();
+    return !index_unavailable_.load() && sync_with_index_.load();
 }
 
 bool
 VectorFieldIndexing::has_raw_data() const {
-    return index_->HasRawData();
+    return !index_unavailable_.load() && index_->HasRawData();
 }
 
 template <typename T>
