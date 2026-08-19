@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -26,12 +27,12 @@ func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newBroadcastTaskManager(tasks), nil
+	return newBroadcastTaskManager(ctx, tasks), nil
 }
 
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
 // return the manager, the pending broadcast tasks and the pending ack callback tasks.
-func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
+func newBroadcastTaskManager(ctx context.Context, protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker()
@@ -76,8 +77,11 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		tasks[task.Header().BroadcastID] = task
 	}
 
+	managerCtx, cancel := context.WithCancel(ctx)
 	m := &broadcastTaskManager{
 		lifetime:           typeutil.NewLifetime(),
+		ctx:                managerCtx,
+		cancel:             cancel,
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
 		resourceKeyLocker:  rkLocker,
@@ -99,7 +103,10 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 type broadcastTaskManager struct {
 	mlog.Binder
 
-	lifetime           *typeutil.Lifetime
+	lifetime *typeutil.Lifetime
+	ctx      context.Context
+	cancel   context.CancelFunc
+	// mu only protects tasks. Never call a broadcastTask method while holding mu.
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
 	resourceKeyLocker  *resourceKeyLocker
@@ -251,6 +258,8 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 		return status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer bm.lifetime.Done()
+	ctx, cancel := bm.withLifecycleContext(ctx)
+	defer cancel()
 
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
@@ -285,6 +294,9 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 // Close closes the broadcast task manager.
 func (bm *broadcastTaskManager) Close() {
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
+	if bm.cancel != nil {
+		bm.cancel()
+	}
 	bm.lifetime.Wait()
 
 	bm.broadcastScheduler.Close()
@@ -308,14 +320,14 @@ func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMes
 // if the task is not found, it will create a new task.
 func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMessage) (*broadcastTask, bool) {
 	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
 	bh := msg.BroadcastHeader()
-	t, ok := bm.tasks[msg.BroadcastHeader().BroadcastID]
+	t, ok := bm.tasks[bh.BroadcastID]
 	if ok {
+		bm.mu.Unlock()
 		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 	}
 	if msg.ReplicateHeader() == nil {
+		bm.mu.Unlock()
 		bm.Logger().Warn(context.TODO(), "try to recover task from the wal from non-replicate message, ignore it")
 		return nil, false
 	}
@@ -323,6 +335,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
+	bm.mu.Unlock()
 	return newBroadcastTask, true
 }
 
@@ -346,18 +359,9 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 // getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
 // Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
 func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
 	var result []*broadcastTask
-	for _, task := range bm.tasks {
-		state := task.State()
-		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
-			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
-			continue
-		}
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) == 0 {
+	for _, task := range bm.snapshotBroadcastTasks() {
+		if !task.HasPendingMessagesInIncompleteState() {
 			continue
 		}
 		result = append(result, task)
@@ -369,36 +373,41 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 // for all non-tombstone schema broadcast tasks. Used during recovery to rebuild
 // file resource refCnt for resources referenced by pending schema changes.
 func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int64 {
+	result := make(map[int64][]int64)
+	for _, task := range bm.snapshotBroadcastTasks() {
+		typ := task.MessageTypeWithVersion()
+		if typ != message.MessageTypeCreateCollectionV1 && typ != message.MessageTypeAlterCollectionV2 {
+			continue
+		}
+		collectionID, ids, ok := task.PendingSchemaFileResourceSnapshot()
+		if !ok {
+			continue
+		}
+		appendPendingFileResourceIDs(result, collectionID, ids)
+	}
+	return result
+}
+
+// snapshotBroadcastTasks copies the task pointers while holding the manager
+// lock. Task-local inspection must happen after the manager lock is released.
+func (bm *broadcastTaskManager) snapshotBroadcastTasks() []*broadcastTask {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
-	result := make(map[int64][]int64)
+	tasks := make([]*broadcastTask, 0, len(bm.tasks))
 	for _, task := range bm.tasks {
-		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-			continue
-		}
-		switch task.msg.MessageTypeWithVersion() {
-		case message.MessageTypeCreateCollectionV1:
-			createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
-			if err != nil {
-				continue
-			}
-			body := createMsg.MustBody()
-			ids := body.CollectionSchema.GetFileResourceIds()
-			appendPendingFileResourceIDs(result, createMsg.Header().CollectionId, ids)
-		case message.MessageTypeAlterCollectionV2:
-			alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
-			if err != nil {
-				continue
-			}
-			schema := alterMsg.MustBody().GetUpdates().GetSchema()
-			ids := schema.GetFileResourceIds()
-			appendPendingFileResourceIDs(result, alterMsg.Header().CollectionId, ids)
-		default:
-			continue
-		}
+		tasks = append(tasks, task)
 	}
-	return result
+	return tasks
+}
+
+func (bm *broadcastTaskManager) withLifecycleContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if bm.ctx == nil {
+		// Some focused tests build the manager directly. Production managers
+		// always have a lifecycle context from newBroadcastTaskManager.
+		return context.WithCancel(ctx)
+	}
+	return contextutil.MergeContext(ctx, bm.ctx)
 }
 
 func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {
