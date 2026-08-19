@@ -520,6 +520,68 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
+// TestWatchDmChannels_CanceledContextRollsBack covers the commit-point check
+// added at services.go: WatchDmChannels checks ctx.Err() once, right before
+// pipeline.Start()/delegator.Start(), so a caller whose context is canceled
+// (e.g. the coordinator's task deadline expired while this call was in
+// flight) doesn't leave the node subscribed to a channel the coordinator has
+// already given up on. This asserts the rollback actually happens: the
+// delegator this call registers is not left behind on failure.
+func (suite *ServiceSuite) TestWatchDmChannels_CanceledContextRollsBack() {
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
+	infos := suite.genSegmentLoadInfos(schema, indexInfos)
+	segmentInfos := lo.SliceToMap(infos, func(info *querypb.SegmentLoadInfo) (int64, *datapb.SegmentInfo) {
+		return info.SegmentID, &datapb.SegmentInfo{
+			ID:            info.SegmentID,
+			CollectionID:  info.CollectionID,
+			PartitionID:   info.PartitionID,
+			InsertChannel: info.InsertChannel,
+			Binlogs:       info.BinlogPaths,
+			Statslogs:     info.Statslogs,
+			Deltalogs:     info.Deltalogs,
+			Level:         info.Level,
+		}
+	})
+
+	req := &querypb.WatchDmChannelsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_WatchDmChannels,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		NodeID:       suite.node.session.ServerID,
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+		Infos: []*datapb.VchannelInfo{
+			{
+				CollectionID:      suite.collectionID,
+				ChannelName:       suite.vchannel,
+				SeekPosition:      suite.position,
+				FlushedSegmentIds: suite.flushedSegmentIDs,
+				DroppedSegmentIds: suite.droppedSegmentIDs,
+			},
+		},
+		Schema: schema,
+		LoadMeta: &querypb.LoadMetaInfo{
+			MetricType: defaultMetricType,
+		},
+		SegmentInfos:  segmentInfos,
+		IndexInfoList: indexInfos,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	status, err := suite.node.WatchDmChannels(canceledCtx, req)
+	suite.NoError(err, "the RPC itself should return a Status, not a transport error")
+	suite.NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode(),
+		"watch must not succeed once its context is already canceled")
+
+	_, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.False(ok, "a canceled watch must not leave its delegator registered")
+}
+
 func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	ctx := context.Background()
 

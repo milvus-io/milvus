@@ -527,6 +527,13 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		plans = append(plans, shardPlans...)
 	}
 
+	// TODO: this assumes a single segment always finishes loading within
+	// SegmentTaskTimeout (5min default). If a segment's real load time is
+	// consistently longer (large disk-index segment, throttled cold storage),
+	// the task is killed by its deadline every round and rebuilt here with
+	// the same budget on the next check tick -- it never converges. Needs
+	// either backoff/a retry cap on repeated DeadlineExceeded rebuilds, or a
+	// no-progress timeout instead of a flat per-task wall-clock budget.
 	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 
