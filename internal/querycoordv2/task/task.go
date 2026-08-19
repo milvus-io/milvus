@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -88,6 +89,13 @@ type Task interface {
 	SetPriority(priority Priority)
 	Index() string // dedup indexing string
 
+	// ActivateDeadline arms a fresh execution timeout for the given step once
+	// it's actually dispatched to a QueryNode, so time spent waiting for a
+	// scheduler slot doesn't count against the RPC budget, and each step of a
+	// multi-action task gets its own full budget instead of sharing one
+	// deadline across the whole task lifetime. No-op if already armed for
+	// this step.
+	ActivateDeadline(step int)
 	// cancel the task as we don't need to continue it
 	Cancel(err error)
 	// fail the task as we encounter some error so be unable to continue,
@@ -111,8 +119,28 @@ type Task interface {
 }
 
 type baseTask struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
+	// ctxMu guards rootCtx/ctx/stepCancel/armedStep, which are read
+	// concurrently by Context()/Cancel()/Fail() from the scheduler loop and
+	// the executor's per-action goroutines, and swapped on every call to
+	// ActivateDeadline.
+	ctxMu sync.Mutex
+	// rootCtx/rootCancel are deadline-free (only canceled by Cancel/Fail/
+	// parent cancellation) and never replaced; every per-step deadline in ctx
+	// is derived from rootCtx, so canceling rootCtx always tears down
+	// whichever per-step deadline is currently active too.
+	rootCtx    context.Context
+	rootCancel context.CancelFunc
+	// ctx is the context task.Context() currently returns: rootCtx itself
+	// before the first ActivateDeadline call, or rootCtx wrapped in a fresh
+	// context.WithTimeout for the step ActivateDeadline was last called for.
+	ctx        context.Context
+	stepCancel context.CancelFunc
+	timeout    time.Duration
+	// armedStep is the step ActivateDeadline last armed a deadline for, or -1
+	// if never armed. Re-arming for the same step is a no-op so repeated
+	// dispatch attempts within one step don't reset the clock.
+	armedStep int
+
 	doneCh   chan struct{}
 	canceled *atomic.Bool
 
@@ -138,9 +166,15 @@ type baseTask struct {
 	startTs atomic.Time
 }
 
-func newBaseTask(ctx context.Context, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
-	ctx, cancel := context.WithCancel(ctx)
-	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
+func newBaseTask(ctx context.Context, timeout time.Duration, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
+	// The deadline is deliberately NOT applied here: at construction time the
+	// task hasn't been scheduled yet and may sit in the wait queue or be
+	// repeatedly rejected by the executor's admission cap. Starting the clock
+	// now would burn the RPC budget on queueing delay rather than on the
+	// action RPCs it's meant to bound. ActivateDeadline arms it on first
+	// dispatch instead.
+	rootCtx, rootCancel := context.WithCancel(ctx)
+	rootCtx, span := otel.Tracer(typeutil.QueryCoordRole).Start(rootCtx, taskTag)
 	startTs := atomic.Time{}
 	startTs.Store(time.Now())
 
@@ -150,18 +184,68 @@ func newBaseTask(ctx context.Context, source Source, collectionID typeutil.Uniqu
 		replica:      replica,
 		shard:        shard,
 
-		status:   atomic.NewString(TaskStatusStarted),
-		priority: TaskPriorityNormal,
-		ctx:      ctx,
-		cancel:   cancel,
-		doneCh:   make(chan struct{}),
-		canceled: atomic.NewBool(false),
-		span:     span,
-		startTs:  startTs,
+		status:     atomic.NewString(TaskStatusStarted),
+		priority:   TaskPriorityNormal,
+		rootCtx:    rootCtx,
+		rootCancel: rootCancel,
+		ctx:        rootCtx,
+		armedStep:  -1,
+		timeout:    timeout,
+		doneCh:     make(chan struct{}),
+		canceled:   atomic.NewBool(false),
+		span:       span,
+		startTs:    startTs,
 	}
 }
 
+// ActivateDeadline arms a fresh execution timeout for the given step,
+// bounding the action RPC issued with task.Context() for that step so a
+// stuck server-side operation cannot pin the scheduler slot forever. Called
+// by Executor.Execute once a step actually clears admission. It is a no-op
+// if the task was constructed with timeout <= 0, or if already armed for
+// this step (so repeated dispatch attempts within one step don't reset the
+// clock). Each step gets its own full budget rather than sharing one
+// deadline across the whole task lifetime, so an earlier step finishing
+// under budget doesn't eat into a later step's.
+//
+// TODO: the budget still covers the dist-confirmation wait between this
+// step's RPC returning and the step being marked finished (see
+// taskScheduler.checkActionFinish) -- a step whose RPC returns quickly but
+// whose distribution/leader-promotion confirmation is slow can still be
+// starved by a deadline armed for an earlier, already-returned RPC. Fully
+// isolating "wait for dist confirmation" from "RPC in flight" needs its own
+// design, in the same bucket as the no-backoff TODO below.
+//
+// TODO: this is still a flat wall-clock budget per step, on the assumption a
+// single action always finishes within its configured timeout
+// (segmentTaskTimeout defaults to 5min). A real operation that legitimately
+// runs longer never gets a chance to finish: the checker rebuilds it with the
+// same budget on every check tick, forever. See
+// SegmentChecker.createSegmentLoadTasks / ChannelChecker's equivalent.
+func (task *baseTask) ActivateDeadline(step int) {
+	if task.timeout <= 0 {
+		return
+	}
+	task.ctxMu.Lock()
+	defer task.ctxMu.Unlock()
+	if task.canceled.Load() || task.armedStep == step {
+		return
+	}
+	if task.stepCancel != nil {
+		// Release the previous step's timer now that a new step is starting;
+		// rootCtx being canceled would also propagate this, but there's no
+		// need to wait for that to happen.
+		task.stepCancel()
+	}
+	ctx, cancel := context.WithTimeout(task.rootCtx, task.timeout)
+	task.ctx = ctx
+	task.stepCancel = cancel
+	task.armedStep = step
+}
+
 func (task *baseTask) Context() context.Context {
+	task.ctxMu.Lock()
+	defer task.ctxMu.Unlock()
 	return task.ctx
 }
 
@@ -238,7 +322,10 @@ func (task *baseTask) Err() error {
 
 func (task *baseTask) Cancel(err error) {
 	if task.canceled.CompareAndSwap(false, true) {
-		task.cancel()
+		task.ctxMu.Lock()
+		rootCancel := task.rootCancel
+		task.ctxMu.Unlock()
+		rootCancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusCanceled)
 		}
@@ -252,12 +339,18 @@ func (task *baseTask) Cancel(err error) {
 
 func (task *baseTask) Fail(err error) {
 	if task.canceled.CompareAndSwap(false, true) {
-		task.cancel()
+		task.ctxMu.Lock()
+		rootCancel := task.rootCancel
+		task.ctxMu.Unlock()
+		rootCancel()
 		if task.Status() != TaskStatusSucceeded {
 			task.SetStatus(TaskStatusFailed)
 		}
 		task.err = err
 		close(task.doneCh)
+		if task.span != nil {
+			task.span.End()
+		}
 	}
 }
 
@@ -361,7 +454,7 @@ func NewSegmentTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
+	base := newBaseTask(ctx, timeout, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
 		baseTask:      base,
@@ -434,7 +527,7 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replica, channel, fmt.Sprintf("ChannelTask-%s-%s", actions[0].Type().String(), channel))
+	base := newBaseTask(ctx, timeout, source, collectionID, replica, channel, fmt.Sprintf("ChannelTask-%s-%s", actions[0].Type().String(), channel))
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,
@@ -470,6 +563,7 @@ type LeaderTask struct {
 }
 
 func NewLeaderSegmentTask(ctx context.Context,
+	timeout time.Duration,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
@@ -477,7 +571,7 @@ func NewLeaderSegmentTask(ctx context.Context,
 	action *LeaderAction,
 ) *LeaderTask {
 	segmentID := action.SegmentID()
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
+	base := newBaseTask(ctx, timeout, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,
@@ -488,13 +582,14 @@ func NewLeaderSegmentTask(ctx context.Context,
 }
 
 func NewLeaderPartStatsTask(ctx context.Context,
+	timeout time.Duration,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
 	leaderID int64,
 	action *LeaderAction,
 ) *LeaderTask {
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
+	base := newBaseTask(ctx, timeout, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,

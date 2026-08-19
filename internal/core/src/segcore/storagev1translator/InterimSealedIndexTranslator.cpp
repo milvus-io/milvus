@@ -20,7 +20,6 @@
 #include "knowhere/expected.h"
 #include "knowhere/object.h"
 #include "knowhere/operands.h"
-#include "knowhere/version.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "nlohmann/json.hpp"
 #include "segcore/Utils.h"
@@ -32,6 +31,7 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     int64_t field_id,
     knowhere::IndexType index_type,
     knowhere::MetricType metric_type,
+    IndexVersion index_version,
     knowhere::Json build_config,
     int64_t dim,
     bool is_sparse,
@@ -41,6 +41,7 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
       segment_id_(segment_id),
       index_type_(index_type),
       metric_type_(metric_type),
+      index_version_(index_version),
       build_config_(build_config),
       dim_(dim),
       is_sparse_(is_sparse),
@@ -159,19 +160,19 @@ InterimSealedIndexTranslator::get_cells(
         };
 
         if (vec_data_type_ == DataType::VECTOR_FLOAT) {
-            vec_index = std::make_unique<index::VectorMemIndex<float>>(
-                DataType::NONE,
-                index_type_,
-                metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
-                view_data,
-                false);
+            vec_index =
+                std::make_unique<index::VectorMemIndex<float>>(DataType::NONE,
+                                                               index_type_,
+                                                               metric_type_,
+                                                               index_version_,
+                                                               view_data,
+                                                               false);
         } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
                 DataType::NONE,
                 index_type_,
                 metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index_version_,
                 view_data,
                 false);
         } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
@@ -179,18 +180,14 @@ InterimSealedIndexTranslator::get_cells(
                 DataType::NONE,
                 index_type_,
                 metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index_version_,
                 view_data,
                 false);
         }
     } else {
         // sparse vector case
         vec_index = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
-            DataType::NONE,
-            index_type_,
-            metric_type_,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false);
+            DataType::NONE, index_type_, metric_type_, index_version_, false);
     }
 
     int64_t total_valid_count =

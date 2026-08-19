@@ -334,12 +334,12 @@ func TestUpsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		globalMetaCache = cache
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 		ut := upsertTask{
-			ctx: context.Background(),
+			baseTask: baseTask{metaCache: cache},
+			ctx:      context.Background(),
 			req: &milvuspb.UpsertRequest{
 				CollectionName: collectionName,
 			},
@@ -442,8 +442,6 @@ func TestUpsertTask_Function(t *testing.T) {
 
 	info := mustNewSchemaInfo(schema)
 	collectionID := UniqueID(0)
-	cache := NewMockCache(t)
-	globalMetaCache = cache
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -458,7 +456,8 @@ func TestUpsertTask_Function(t *testing.T) {
 	defer idAllocator.Close()
 	assert.NoError(t, err)
 	task := upsertTask{
-		ctx: context.Background(),
+		baseTask: baseTask{metaCache: &MetaCache{}},
+		ctx:      context.Background(),
 		req: &milvuspb.UpsertRequest{
 			CollectionName: collectionName,
 		},
@@ -497,15 +496,13 @@ func TestUpsertTask_Function(t *testing.T) {
 }
 
 func TestUpsertTaskForSchemaMismatch(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
-	globalMetaCache = mockCache
 	ctx := context.Background()
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
 		ut := upsertTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: mockCache},
+			ctx:      ctx,
 			req: &milvuspb.UpsertRequest{
 				CollectionName: "col-0",
 				NumRows:        10,
@@ -533,7 +530,7 @@ func createTestUpdateTask() *upsertTask {
 	mcClient := &grpcmixcoordclient.Client{}
 
 	upsertTask := &upsertTask{
-		baseTask:  baseTask{},
+		baseTask:  baseTask{metaCache: &MetaCache{}},
 		Condition: NewTaskCondition(context.Background()),
 		req: &milvuspb.UpsertRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -1062,9 +1059,7 @@ func partialUpdateCASRealPackTestTask(
 }
 
 func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
+	mockCache := &MetaCache{}
 	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
 	defer partitionPatch.UnPatch()
 
@@ -1082,6 +1077,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	task, vchannel, groups := newInput()
 	msgs, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1096,6 +1092,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1108,6 +1105,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1121,6 +1119,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	groups[vchannel].ReadTs = 0
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1132,9 +1131,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 }
 
 func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
+	mockCache := &MetaCache{}
 	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
 	defer partitionPatch.UnPatch()
 
@@ -1150,6 +1147,7 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 
 	unsplit, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1165,6 +1163,7 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 
 	msgs, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1189,9 +1188,7 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 }
 
 func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
+	mockCache := &MetaCache{}
 	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
 	defer partitionPatch.UnPatch()
 
@@ -1206,6 +1203,7 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing
 
 	baseline, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1220,6 +1218,7 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing
 
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1341,15 +1340,15 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
-	partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().
+		GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"_default_0": 200}, nil).
-		Build()
-	defer partitionsPatch.UnPatch()
-	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
+		Maybe()
+	mockCache.EXPECT().
+		GetPartitionID(mock.Anything, mock.Anything, mock.Anything, "_default_0").
+		Return(int64(200), nil).
+		Maybe()
 
 	newInput := func() (*upsertTask, string, map[string]*messagespb.PartialUpdateCAS) {
 		task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
@@ -1366,6 +1365,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	task, vchannel, groups := newInput()
 	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1382,6 +1382,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1396,6 +1397,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1411,6 +1413,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	groups[vchannel].ReadTs = 0
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1424,15 +1427,15 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMessage(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
-	partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().
+		GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"_default_0": 200}, nil).
-		Build()
-	defer partitionsPatch.UnPatch()
-	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
+		Maybe()
+	mockCache.EXPECT().
+		GetPartitionID(mock.Anything, mock.Anything, mock.Anything, "_default_0").
+		Return(int64(200), nil).
+		Maybe()
 
 	pks := []int64{10, 20}
 	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
@@ -1447,6 +1450,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 
 	unsplit, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1464,6 +1468,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 
 	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1492,9 +1497,6 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 	for _, partitionKey := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
-			oldMetaCache := globalMetaCache
-			globalMetaCache = &MetaCache{}
-			t.Cleanup(func() { globalMetaCache = oldMetaCache })
 			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			defer collectionPatch.UnPatch()
 
@@ -1513,7 +1515,8 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
 
 			task := &insertTask{
-				ctx: context.Background(),
+				baseTask: baseTask{metaCache: &MetaCache{}},
+				ctx:      context.Background(),
 				insertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
 					DbName:         "test_db",
@@ -1538,9 +1541,6 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
 	task.partitionKeys = partialUpdateCASPKFieldData([]int64{10})
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
 	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
@@ -1651,11 +1651,8 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 	task := partialUpdateCASRealPackTestTask(t, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
-	oldMetaCache := globalMetaCache
 	streaming.SetWALForTest(fakeWAL)
-	globalMetaCache = &MetaCache{}
 	defer streaming.SetWALForTest(oldWAL)
-	defer func() { globalMetaCache = oldMetaCache }()
 	preparePartialUpdateCASTestGroups(t, task)
 
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
@@ -2355,9 +2352,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			},
 		}, segcore.StorageCost{}, nil).Build()
 
-		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetPartitionID).Return(int64(1002), nil).Build()
-
 		// Execute test
 		task := createTestUpdateTask()
 		task.partitionKeyMode = false
@@ -2421,12 +2415,6 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 		},
 	).Build()
 	defer m.UnPatch()
-
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	defer func() {
-		globalMetaCache = oldMetaCache
-	}()
 
 	task := createTestUpdateTask()
 	task.SetTs(beginTS)
@@ -2739,9 +2727,6 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 
 func TestUpdateTask_PreExecute_Success(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_Success", t, func() {
-		// Setup mocks
-		globalMetaCache = &MetaCache{}
-
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 
 		schema := createTestSchema()
@@ -2798,12 +2783,6 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	defer func() {
-		globalMetaCache = oldMetaCache
-	}()
-
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 	defer m.UnPatch()
 	schema := createTestSchema()
@@ -2847,8 +2826,6 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 
 func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_GetCollectionIDError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		expectedErr := merr.WrapErrCollectionNotFound("test_collection")
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedErr).Build()
 
@@ -2862,8 +2839,6 @@ func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 
 func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -2886,8 +2861,6 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 
 func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -2913,8 +2886,6 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 
 func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_QueryPreExecuteError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -4268,8 +4239,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
-			globalMetaCache = &MetaCache{}
-
 			// Setup idAllocator
 			ctx := context.Background()
 			rc := mocks.NewMockRootCoordClient(t)
@@ -4284,8 +4253,9 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				ctx:    ctx,
-				schema: schema,
+				baseTask: baseTask{metaCache: &MetaCache{}},
+				ctx:      ctx,
+				schema:   schema,
 				req: &milvuspb.UpsertRequest{
 					CollectionName: "test_empty_data_array",
 					FieldsData:     upsertData,
@@ -4386,8 +4356,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
-			globalMetaCache = &MetaCache{}
-
 			// Setup idAllocator
 			ctx := context.Background()
 			rc := mocks.NewMockRootCoordClient(t)
@@ -4402,8 +4370,9 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				ctx:    ctx,
-				schema: schema,
+				baseTask: baseTask{metaCache: &MetaCache{}},
+				ctx:      ctx,
+				schema:   schema,
 				req: &milvuspb.UpsertRequest{
 					CollectionName: "test_empty_data_array_non_nullable",
 					FieldsData:     upsertData,

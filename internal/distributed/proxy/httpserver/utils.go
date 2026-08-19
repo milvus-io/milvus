@@ -32,6 +32,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
@@ -891,6 +892,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	// Escape hatch for clients that relied on the previous value handling.
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
+	nativeJSONResponse := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
@@ -1207,119 +1209,40 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 								fieldName, idx)
 						}
 					}
-					switch field.ElementType {
-					case schemapb.DataType_Bool:
-						arr := make([]bool, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
+					scalar, err := unmarshalScalarArray(field.ElementType, dataString)
+					if err != nil {
+						// An element can arrive in a form the plain decode does not
+						// take: an Int64 rendered as a string because the caller did
+						// not allow native Int64, or the quoted numbers and booleans
+						// a plain column of the same type has always accepted. Read
+						// those the way that column reads them, so a row this API
+						// emits can be sent back to it unchanged. Only a payload the
+						// decode already rejected reaches here, so nothing that was
+						// accepted before is read differently now.
+						//
+						// compatibilityMode is about values -- it restores the
+						// wrapping, truncating conversions of the releases before
+						// this validation work -- not about how a value is spelled.
+						// The element reader below keeps that split: it reads the
+						// quoted spelling in either mode, and leaves the number
+						// conversions of each mode alone. Reading a number through
+						// gjson here would be the escape hatch growing a new
+						// meaning, so this path never does.
+						if !gjson.Parse(dataString).IsArray() {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
 								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
 						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_BoolData{
-								BoolData: &schemapb.BoolArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_Int8:
-						arr := make([]int32, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
+						lenient, lenientErr := parseScalarArrayElements(field.ElementType, gjson.Parse(dataString).Array(), false)
+						if lenientErr != nil {
+							// The element reader says which element failed and why;
+							// the decode above only knows the whole value did.
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, lenientErr.Error())
 						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_IntData{
-								IntData: &schemapb.IntArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_Int16:
-						arr := make([]int32, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_IntData{
-								IntData: &schemapb.IntArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_Int32:
-						arr := make([]int32, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_IntData{
-								IntData: &schemapb.IntArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_Int64:
-						arr := make([]int64, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_Float:
-						arr := make([]float32, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_FloatData{
-								FloatData: &schemapb.FloatArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_Double:
-						arr := make([]float64, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_DoubleData{
-								DoubleData: &schemapb.DoubleArray{
-									Data: arr,
-								},
-							},
-						}
-					case schemapb.DataType_VarChar:
-						arr := make([]string, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
-						if err != nil {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_StringData{
-								StringData: &schemapb.StringArray{
-									Data: arr,
-								},
-							},
-						}
+						scalar = lenient
+					}
+					if scalar != nil {
+						reallyData[fieldName] = scalar
 					}
 				case schemapb.DataType_JSON:
 					// Store the original JSON token verbatim. gjson's String()
@@ -1334,13 +1257,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						reallyData[fieldName] = []byte(dataString)
 						break
 					}
-					// A JSON document supplied as a JSON string is unwrapped, as
-					// it always has been. The unwrapped token is then validated
-					// like any other: it used to be trusted, which let an
-					// oversized integer, a duplicate key or a lone surrogate in
-					// through the string form.
+					// What a JSON string means here depends on the shape this
+					// deployment serves. While a JSON field reads back as the text
+					// of its document, that text is the field's wire form, and
+					// decoding it is how a caller sends a document at all -- not a
+					// guess about what they meant. Once the field reads back as
+					// the document itself, a string is a string: unwrapping it
+					// would store a value the caller did not send, and would leave
+					// no way to store "123" or "true" as the text it is.
+					// The unwrapped token is validated like any other: it used to
+					// be trusted, which let an oversized integer, a duplicate key
+					// or a lone surrogate in through the string form.
 					document := fieldValue.Raw
-					if fieldValue.Type == gjson.String && json.Valid([]byte(dataString)) {
+					if !nativeJSONResponse && fieldValue.Type == gjson.String && json.Valid([]byte(dataString)) {
 						document = dataString
 					}
 					stored, err := jsonDocumentForStorage(fieldName, document)
@@ -1797,15 +1726,115 @@ func parseRESTInteger(value gjson.Result, bitSize int) (int64, string, bool) {
 	return parsed, actual, err == nil
 }
 
-func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, compatibilityMode bool) (*schemapb.ScalarField, error) {
-	switch sub.GetElementType() {
+// unmarshalScalarArray decodes an array column the way it has always been
+// decoded: straight into the Go slice the element type maps to. It answers a nil
+// field, and no error, for an element type this path never supported.
+func unmarshalScalarArray(elementType schemapb.DataType, dataString string) (*schemapb.ScalarField, error) {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		arr := make([]bool, 0)
+		if err := json.Unmarshal([]byte(dataString), &arr); err != nil {
+			return nil, err
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: arr}},
+		}, nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		arr := make([]int32, 0)
+		if err := json.Unmarshal([]byte(dataString), &arr); err != nil {
+			return nil, err
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: arr}},
+		}, nil
+	case schemapb.DataType_Int64:
+		arr := make([]int64, 0)
+		if err := json.Unmarshal([]byte(dataString), &arr); err != nil {
+			return nil, err
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: arr}},
+		}, nil
+	case schemapb.DataType_Float:
+		arr := make([]float32, 0)
+		if err := json.Unmarshal([]byte(dataString), &arr); err != nil {
+			return nil, err
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: arr}},
+		}, nil
+	case schemapb.DataType_Double:
+		arr := make([]float64, 0)
+		if err := json.Unmarshal([]byte(dataString), &arr); err != nil {
+			return nil, err
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: arr}},
+		}, nil
+	case schemapb.DataType_VarChar:
+		arr := make([]string, 0)
+		if err := json.Unmarshal([]byte(dataString), &arr); err != nil {
+			return nil, err
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: arr}},
+		}, nil
+	default:
+		return nil, nil
+	}
+}
+
+// arrayElementError says which element of an array could not be read and why,
+// without naming the field: the same element rules serve a top-level Array
+// column and a struct array's sub-field, and each caller words the failure the
+// way the rest of its own errors are worded.
+type arrayElementError struct {
+	index  int
+	value  gjson.Result
+	reason string
+}
+
+func (e *arrayElementError) Error() string {
+	return fmt.Sprintf("element %d: %s (value=%s)", e.index, e.reason, e.value.Raw)
+}
+
+func elementErr(index int, value gjson.Result, format string, args ...any) error {
+	return &arrayElementError{index: index, value: value, reason: fmt.Sprintf(format, args...)}
+}
+
+// parseScalarArrayElements turns the elements of one JSON array into a scalar
+// array. It is the only place that decides what an array element may look like,
+// so a top-level Array column and a struct array's sub-field cannot drift apart.
+//
+// The accepted spellings match what the same type accepts as a plain column: an
+// integer, float or boolean may arrive quoted, because that is how this API
+// renders an Int64 without Accept-Type-Allow-Int64 and how callers whose
+// language has no distinct numeric types send everything. A quoted integer is
+// read in base 10, so a zero-padded id keeps its value. A spelling carries the
+// same value either way, so it is read the same in every mode.
+//
+// legacyNumbers is a different question: whether a JSON number that does not
+// denote a value of this type -- a fraction for an integer, a magnitude past the
+// type's range -- is converted anyway, truncating or wrapping. Only the struct
+// sub-field path under compatibilityMode ever did that, and only it asks for it
+// here; nothing else grows that behavior by sharing this reader.
+func parseScalarArrayElements(elementType schemapb.DataType, vals []gjson.Result, legacyNumbers bool) (*schemapb.ScalarField, error) {
+	switch elementType {
 	case schemapb.DataType_Bool:
 		arr := make([]bool, 0, len(vals))
-		for _, v := range vals {
-			if v.Type != gjson.True && v.Type != gjson.False {
-				return nil, wrapStructSubParseError(sub, v, "expect bool")
+		for idx, v := range vals {
+			switch v.Type {
+			case gjson.True, gjson.False:
+				arr = append(arr, v.Bool())
+			case gjson.String:
+				parsed, err := cast.ToBoolE(v.String())
+				if err != nil {
+					return nil, elementErr(idx, v, "expect bool")
+				}
+				arr = append(arr, parsed)
+			default:
+				return nil, elementErr(idx, v, "expect bool")
 			}
-			arr = append(arr, v.Bool())
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: arr}},
@@ -1813,7 +1842,7 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		bitSize := 32
 		minValue, maxValue := int64(math.MinInt32), int64(math.MaxInt32)
-		switch sub.GetElementType() {
+		switch elementType {
 		case schemapb.DataType_Int8:
 			bitSize = 8
 			minValue, maxValue = math.MinInt8, math.MaxInt8
@@ -1822,18 +1851,19 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 			minValue, maxValue = math.MinInt16, math.MaxInt16
 		}
 		arr := make([]int32, 0, len(vals))
-		for _, v := range vals {
-			if v.Type != gjson.Number {
-				return nil, wrapStructSubParseError(sub, v, "expect integer")
-			}
-			if compatibilityMode {
+		for idx, v := range vals {
+			if legacyNumbers && v.Type == gjson.Number {
 				arr = append(arr, int32(v.Int()))
 				continue
 			}
-			value, ok := parseJSONInteger(v.Raw, bitSize)
+			if v.Type != gjson.Number && v.Type != gjson.String {
+				return nil, elementErr(idx, v, "expect integer")
+			}
+			// parseRESTInteger is what a plain Int8/Int16/Int32 column uses: the
+			// raw literal for a number, base 10 for a quoted one.
+			value, _, ok := parseRESTInteger(v, bitSize)
 			if !ok {
-				return nil, wrapStructSubParseError(sub, v,
-					fmt.Sprintf("expect integer in range [%d, %d]", minValue, maxValue))
+				return nil, elementErr(idx, v, "expect integer in range [%d, %d]", minValue, maxValue)
 			}
 			arr = append(arr, int32(value))
 		}
@@ -1842,18 +1872,18 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 		}, nil
 	case schemapb.DataType_Int64:
 		arr := make([]int64, 0, len(vals))
-		for _, v := range vals {
-			if v.Type != gjson.Number {
-				return nil, wrapStructSubParseError(sub, v, "expect integer")
-			}
-			if compatibilityMode {
+		for idx, v := range vals {
+			if legacyNumbers && v.Type == gjson.Number {
 				arr = append(arr, v.Int())
 				continue
 			}
-			value, ok := parseJSONInteger(v.Raw, 64)
+			if v.Type != gjson.Number && v.Type != gjson.String {
+				return nil, elementErr(idx, v, "expect integer")
+			}
+			value, _, ok := parseRESTInteger(v, 64)
 			if !ok {
-				return nil, wrapStructSubParseError(sub, v,
-					fmt.Sprintf("expect integer in range [%d, %d]", int64(math.MinInt64), int64(math.MaxInt64)))
+				return nil, elementErr(idx, v, "expect integer in range [%d, %d]",
+					int64(math.MinInt64), int64(math.MaxInt64))
 			}
 			arr = append(arr, value)
 		}
@@ -1862,42 +1892,78 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 		}, nil
 	case schemapb.DataType_Float:
 		arr := make([]float32, 0, len(vals))
-		for _, v := range vals {
-			if v.Type != gjson.Number {
-				return nil, wrapStructSubParseError(sub, v, "expect float")
-			}
-			if compatibilityMode {
+		for idx, v := range vals {
+			switch {
+			case v.Type == gjson.Number && legacyNumbers:
 				arr = append(arr, float32(v.Float()))
-				continue
+			case v.Type == gjson.Number:
+				// through float64 like every path this value will be compared
+				// against; see the Float case in checkAndSetData
+				parsed, err := strconv.ParseFloat(v.Raw, 64)
+				if err != nil {
+					return nil, elementErr(idx, v, "expect float in the float32 range")
+				}
+				// Verified after the cast, which is where a magnitude past the
+				// float32 range turns into an infinity.
+				value := float32(parsed)
+				if typeutil.VerifyFloat(float64(value)) != nil {
+					return nil, elementErr(idx, v, "expect float in the float32 range")
+				}
+				arr = append(arr, value)
+			case v.Type == gjson.String:
+				// cast.ToFloat32E is what a plain Float column falls back to, but
+				// it reads "NaN", "Inf" and "Infinity" -- case-insensitively --
+				// without an error, and an array element has no later check that
+				// would catch them: checkArrayElement compares the element's type
+				// and never calls VerifyFloats32 the way a plain column does. One
+				// of those stored is a row that cannot be served, since the
+				// encoder fails on it after the status and part of the body are
+				// already written.
+				parsed, err := cast.ToFloat32E(v.String())
+				if err != nil || typeutil.VerifyFloat(float64(parsed)) != nil {
+					return nil, elementErr(idx, v, "expect float in the float32 range")
+				}
+				arr = append(arr, parsed)
+			default:
+				return nil, elementErr(idx, v, "expect float")
 			}
-			// through float64 like every path this value will be compared
-			// against, with the range checked before the cast; see the Float
-			// case in checkAndSetData
-			parsed, err := strconv.ParseFloat(v.Raw, 64)
-			if err != nil || math.IsInf(parsed, 0) || math.Abs(parsed) > math.MaxFloat32 {
-				return nil, wrapStructSubParseError(sub, v, "expect float in the float32 range")
-			}
-			arr = append(arr, float32(parsed))
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: arr}},
 		}, nil
 	case schemapb.DataType_Double:
 		arr := make([]float64, 0, len(vals))
-		for _, v := range vals {
-			if v.Type != gjson.Number {
-				return nil, wrapStructSubParseError(sub, v, "expect double")
+		for idx, v := range vals {
+			switch {
+			case v.Type == gjson.Number && legacyNumbers:
+				arr = append(arr, v.Float())
+			case v.Type == gjson.Number:
+				// gjson reads a magnitude past float64 as +Inf, a value no
+				// caller sent and one the decode this falls back from refuses.
+				parsed, err := strconv.ParseFloat(v.Raw, 64)
+				if err != nil || typeutil.VerifyFloat(parsed) != nil {
+					return nil, elementErr(idx, v, "expect double in the float64 range")
+				}
+				arr = append(arr, parsed)
+			case v.Type == gjson.String:
+				// strconv reads NaN, Inf and Infinity without an error.
+				parsed, err := cast.ToFloat64E(v.String())
+				if err != nil || typeutil.VerifyFloat(parsed) != nil {
+					return nil, elementErr(idx, v, "expect double in the float64 range")
+				}
+				arr = append(arr, parsed)
+			default:
+				return nil, elementErr(idx, v, "expect double")
 			}
-			arr = append(arr, v.Float())
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: arr}},
 		}, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		arr := make([]string, 0, len(vals))
-		for _, v := range vals {
+		for idx, v := range vals {
 			if v.Type != gjson.String {
-				return nil, wrapStructSubParseError(sub, v, "expect string")
+				return nil, elementErr(idx, v, "expect string")
 			}
 			arr = append(arr, v.String())
 		}
@@ -1905,10 +1971,22 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: arr}},
 		}, nil
 	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported array element type %s", elementType)
+	}
+}
+
+func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, compatibilityMode bool) (*schemapb.ScalarField, error) {
+	scalar, err := parseScalarArrayElements(sub.GetElementType(), vals, compatibilityMode)
+	if err != nil {
+		var elemErr *arrayElementError
+		if errors.As(err, &elemErr) {
+			return nil, wrapStructSubParseError(sub, elemErr.value, elemErr.reason)
+		}
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"sub-field %s has unsupported array element type %s",
 			sub.GetName(), sub.GetElementType())
 	}
+	return scalar, nil
 }
 
 func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.VectorField, error) {
@@ -2385,7 +2463,7 @@ func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.Collecti
 	return accessor, nil
 }
 
-func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{}, error) {
+func (accessor *structArrayRowAccessor) row(rowIdx int, enableInt64 bool) ([]map[string]interface{}, error) {
 	fd := accessor.fieldData
 	subs := accessor.subFields
 	if len(subs) == 0 {
@@ -2429,7 +2507,7 @@ func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{
 			if dataIdx >= len(rowData) {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
-			values := scalarArrayToInterfaces(rowData[dataIdx])
+			values := scalarArrayToInterfaces(rowData[dataIdx], enableInt64)
 			if len(values) != elemCount {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
@@ -2495,7 +2573,9 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]
 		if rowIdx >= len(rowData) {
 			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
-		return len(scalarArrayToInterfaces(rowData[rowIdx])), nil
+		// Element count is independent of the Int64 response mode; pass true to
+		// skip the per-element string conversion.
+		return len(scalarArrayToInterfaces(rowData[rowIdx], true)), nil
 	case schemapb.DataType_ArrayOfVector:
 		va := sub.GetVectors().GetVectorArray()
 		if va == nil || rowIdx >= len(va.GetData()) {
@@ -2512,7 +2592,11 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]
 	}
 }
 
-func scalarArrayToInterfaces(sf *schemapb.ScalarField) []interface{} {
+// scalarArrayToInterfaces flattens one array row into per-element values so the
+// caller can zip them into the struct's per-element maps. enableInt64 carries the
+// Accept-Type-Allow-Int64 semantics down to Int64 elements, matching what
+// scalarFieldToRESTAny does for top-level Array fields.
+func scalarArrayToInterfaces(sf *schemapb.ScalarField, enableInt64 bool) []interface{} {
 	switch sf.GetData().(type) {
 	case *schemapb.ScalarField_BoolData:
 		src := sf.GetBoolData().GetData()
@@ -2532,7 +2616,11 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField) []interface{} {
 		src := sf.GetLongData().GetData()
 		out := make([]interface{}, len(src))
 		for i, v := range src {
-			out[i] = v
+			if enableInt64 {
+				out[i] = v
+			} else {
+				out[i] = strconv.FormatInt(v, 10)
+			}
 		}
 		return out
 	case *schemapb.ScalarField_FloatData:
@@ -3590,7 +3678,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 			return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s for field %s", subs[0].GetType(), fieldData.GetFieldName())
 		}
 	default:
-		return 0, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
+		return 0, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName()))
 	}
 }
 
@@ -3662,6 +3750,200 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 	return rowIdx, true, nil
 }
 
+// safeMessageError marks an error whose message was written for the caller and is
+// therefore safe to echo in an HTTP response. Errors are not safe by default: most
+// of the ParameterInvalid errors on the response path report a server-side shape
+// mismatch (row counts, valid-data bitmap lengths, element counts) whose wording
+// leaks internal layout, so classification alone cannot decide what to echo.
+type safeMessageError struct{ error }
+
+func (e *safeMessageError) Unwrap() error { return e.error }
+
+// asSafeMessage marks err as caller-facing. Apply it only where the message tells
+// the caller what to do about their own request.
+func asSafeMessage(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &safeMessageError{err}
+}
+
+// outputFieldError attributes a response-serialization failure to the output field
+// that caused it. The name comes from the caller's own outputFields, so echoing it
+// back tells them which column to drop or report without exposing anything internal.
+// The wrapped cause is not safe to echo and is only unwrapped for classification.
+type outputFieldError struct {
+	field string
+	inner error
+}
+
+func (e *outputFieldError) Error() string {
+	return fmt.Sprintf("failed to serialize output field %s: %s", e.field, e.inner.Error())
+}
+
+func (e *outputFieldError) Unwrap() error { return e.inner }
+
+func wrapOutputFieldErr(fieldName string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &outputFieldError{field: fieldName, inner: err}
+}
+
+// resultStageError names the part of the response build that failed, for faults
+// that cannot be attributed to an output field at all. Its detail describes a
+// server-side contract (reduce shapes, bucket counts) and stays in the log; the
+// stage name is all the caller gets, but it is enough to say which part of the
+// response broke when reporting the failure.
+type resultStageError struct {
+	stage string
+	inner error
+}
+
+func (e *resultStageError) Error() string {
+	return fmt.Sprintf("failed to build %s: %s", e.stage, e.inner.Error())
+}
+
+func (e *resultStageError) Unwrap() error { return e.inner }
+
+func wrapResultStageErr(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &resultStageError{stage: stage, inner: err}
+}
+
+// resultErrMessage builds the client-facing message for a response-serialization
+// failure. Input errors carry guidance the caller can act on (e.g. an output field
+// type the REST layer cannot render — "use other sdk please") and are passed through
+// whole. A server-side fault only yields the offending output field: the rest of its
+// detail names internal structures and row offsets that mean nothing to the caller,
+// and stays in the log line the caller of this function already emits.
+func resultErrMessage(err error) string {
+	base := merr.ErrInvalidSearchResult.Error()
+	// Explicitly marked messages are echoed whole; the mark, not the error type,
+	// is what makes a message safe.
+	var safeErr *safeMessageError
+	if errors.As(err, &safeErr) {
+		return base + ", error: " + safeErr.Error()
+	}
+	var fieldErr *outputFieldError
+	if errors.As(err, &fieldErr) {
+		return base + ", error: failed to serialize output field " + fieldErr.field
+	}
+	var stageErr *resultStageError
+	if errors.As(err, &stageErr) {
+		return base + ", error: failed to build " + stageErr.stage
+	}
+	return base
+}
+
+// legacyArrayValue renders one array row in the protobuf wrapper shape that
+// proxy.http.legacyArrayResponse restores. The shape is reproduced by handing
+// the ScalarField itself to the encoder, which is what the clients this switch
+// exists for parse. An Int64 the caller cannot hold natively is the exception:
+// its slice has no room for the string form, so the wrapper around it is spelled
+// out instead. Everything else, and every row once the caller allows Int64, is
+// the message as it stands, byte for byte.
+func legacyArrayValue(row *schemapb.ScalarField, enableInt64 bool) any {
+	if enableInt64 || !holdsInt64(row) {
+		return row
+	}
+
+	switch data := row.GetData().(type) {
+	case *schemapb.ScalarField_LongData:
+		inner := map[string]any{}
+		if values := data.LongData.GetData(); len(values) > 0 {
+			inner["data"] = formatInt64(values)
+		}
+		return map[string]any{"Data": map[string]any{"LongData": inner}}
+	case *schemapb.ScalarField_ArrayData:
+		inner := map[string]any{}
+		if elements := data.ArrayData.GetData(); len(elements) > 0 {
+			rendered := make([]any, 0, len(elements))
+			for _, element := range elements {
+				rendered = append(rendered, legacyArrayValue(element, enableInt64))
+			}
+			inner["data"] = rendered
+		}
+		if elementType := data.ArrayData.GetElementType(); elementType != schemapb.DataType_None {
+			inner["element_type"] = elementType
+		}
+		return map[string]any{"Data": map[string]any{"ArrayData": inner}}
+	default:
+		return row
+	}
+}
+
+// holdsInt64 reports whether a row renders any Int64, directly or nested.
+func holdsInt64(row *schemapb.ScalarField) bool {
+	switch data := row.GetData().(type) {
+	case *schemapb.ScalarField_LongData:
+		return true
+	case *schemapb.ScalarField_ArrayData:
+		for _, element := range data.ArrayData.GetData() {
+			if holdsInt64(element) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func nonNilSlice[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
+}
+
+func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, error) {
+	// A missing row renders as null and an unset oneof as [], matching what the
+	// previous implementation produced. Turning either into a request-level
+	// failure would widen this change beyond the serialization format it fixes.
+	if field == nil {
+		return nil, nil
+	}
+
+	switch data := field.GetData().(type) {
+	case nil:
+		// segcore emits a default-constructed ScalarField for an empty array whose
+		// element type it could not determine (Array.h: `default: { // empty array }`).
+		return []any{}, nil
+	case *schemapb.ScalarField_BoolData:
+		return nonNilSlice(data.BoolData.GetData()), nil
+	case *schemapb.ScalarField_IntData:
+		return nonNilSlice(data.IntData.GetData()), nil
+	case *schemapb.ScalarField_LongData:
+		values := nonNilSlice(data.LongData.GetData())
+		if enableInt64 {
+			return values, nil
+		}
+		return formatInt64(values), nil
+	case *schemapb.ScalarField_FloatData:
+		return nonNilSlice(data.FloatData.GetData()), nil
+	case *schemapb.ScalarField_DoubleData:
+		return nonNilSlice(data.DoubleData.GetData()), nil
+	case *schemapb.ScalarField_StringData:
+		return nonNilSlice(data.StringData.GetData()), nil
+	case *schemapb.ScalarField_ArrayData:
+		elements := data.ArrayData.GetData()
+		values := make([]any, 0, len(elements))
+		for _, element := range elements {
+			value, err := scalarFieldToRESTAny(element, enableInt64)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported array row scalar field type %T", data)
+	}
+}
+
 //nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
@@ -3676,7 +3958,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			var err error
 			rowsNum, err = fieldDataRowCount(fieldDataList[0])
 			if err != nil {
-				return nil, err
+				return nil, wrapOutputFieldErr(fieldDataList[0].GetFieldName(), err)
 			}
 		} else if ids != nil {
 			switch ids.GetIdField().(type) {
@@ -3687,7 +3969,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
 			default:
-				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
+				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
 		}
 	}
@@ -3699,19 +3981,20 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	for idx, fieldData := range fieldDataList {
 		accessor, err := newFieldDataRowAccessor(fieldData)
 		if err != nil {
-			return nil, err
+			return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 		}
 		fieldDataAccessors = append(fieldDataAccessors, accessor)
 		if fieldData.GetType() == schemapb.DataType_ArrayOfStruct {
 			structAccessor, err := newStructArrayRowAccessor(fieldData, collectionSchema)
 			if err != nil {
-				return nil, err
+				return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 			}
 			structArrayAccessors[idx] = structAccessor
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+	legacyArrayResponse := paramtable.Get().HTTPCfg.LegacyArrayResponse.GetAsBool()
 
 	pkFieldName := DefaultPrimaryFieldName
 	if collectionSchema != nil {
@@ -3730,7 +4013,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				fieldData := fieldDataList[j]
 				dataIdx, valid, err := fieldDataAccessors[j].rowIndex(i)
 				if err != nil {
-					return nil, err
+					return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 				}
 				if !valid {
 					if !fieldData.GetIsDynamic() {
@@ -3778,7 +4061,21 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_Int8Vector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetInt8Vector()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
 				case schemapb.DataType_Array:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
+					arrayRow := fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
+					if legacyArrayResponse {
+						// Escape hatch: emit the raw ScalarField so it serializes back into
+						// the protobuf wrapper shape clients may have parsed before the fix.
+						// The shape is what those clients read; Accept-Type-Allow-Int64 is
+						// about what their JSON parser can hold, which the shape does not
+						// change, so an Int64 is still rendered the way the header asks.
+						row[fieldDataList[j].GetFieldName()] = legacyArrayValue(arrayRow, enableInt64)
+						continue
+					}
+					value, err := scalarFieldToRESTAny(arrayRow, enableInt64)
+					if err != nil {
+						return nil, wrapOutputFieldErr(fieldData.GetFieldName(), merr.Wrapf(err, "row %d", i))
+					}
+					row[fieldDataList[j].GetFieldName()] = value
 				case schemapb.DataType_JSON:
 					data, ok := fieldDataList[j].GetScalars().GetData().(*schemapb.ScalarField_JsonData)
 					if ok && !fieldDataList[j].GetIsDynamic() {
@@ -3836,7 +4133,17 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						if err != nil {
 							mlog.Error(context.TODO(),
 								fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
-							return nil, err
+							// This branch is only entered for the dynamic field, so the
+							// name here is always the internal $meta -- never one of the
+							// caller's outputFields -- which makes wrapOutputFieldErr's
+							// contract not hold and would report a column the caller
+							// cannot drop. What it can act on is the cause: the stored
+							// bytes are not one JSON document. That describes its own
+							// data, not our layout, so echo it and keep the decoder's
+							// text (which can quote the bytes and an offset into them)
+							// in the log line above.
+							return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg(
+								"dynamic field does not hold a single JSON document"))
 						}
 
 						if containsString(dynamicOutputFields, fieldDataList[j].GetFieldName()) {
@@ -3858,9 +4165,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
 					}
 				case schemapb.DataType_ArrayOfStruct:
-					structRow, err := structArrayAccessors[j].row(int(dataIdx))
+					structRow, err := structArrayAccessors[j].row(int(dataIdx), enableInt64)
 					if err != nil {
-						return nil, err
+						return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 					}
 					row[fieldDataList[j].GetFieldName()] = structRow
 				default:
@@ -3881,7 +4188,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				row[pkFieldName] = stringPks[i]
 			default:
-				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
+				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
@@ -3921,7 +4228,20 @@ func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
 	return results != nil && (len(results.GetAggTopks()) > 0 || len(results.GetAggBuckets()) > 0)
 }
 
+// buildSearchAggregationResp renders the aggregation payload. Every failure below
+// it is a server-side reduce contract violation with no output field to blame, so
+// it would otherwise reach the caller as a bare "fail to parse search result".
+// Naming the stage keeps the response actionable enough to report while the
+// contract detail stays in the log.
 func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
+	output, err := buildSearchAggregationRespData(results, enableInt64, collectionSchema)
+	if err != nil {
+		return nil, wrapResultStageErr("search aggregation result", err)
+	}
+	return output, nil
+}
+
+func buildSearchAggregationRespData(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
 	if results == nil {
 		// The aggregation payload is produced by the server-side reduce, never
 		// by the request: a malformed shape is an internal contract violation.
@@ -4158,7 +4478,8 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 	}
 
-	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, request)
+	metaCache := getProxyMetaCache(pxy)
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
 		return nil, err
 	}

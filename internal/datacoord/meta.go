@@ -25,7 +25,6 @@ import (
 	"path"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -191,15 +190,7 @@ func segmentMetricFormatLabel(segment *SegmentInfo) string {
 	if segment == nil {
 		return segmentMetricFormatUnknown
 	}
-
-	formats := make(map[string]struct{})
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		format := strings.TrimSpace(fieldBinlog.GetFormat())
-		if format == "" {
-			continue
-		}
-		formats[format] = struct{}{}
-	}
+	formats := segment.EnsureStats().GetFormats()
 	if len(formats) == 0 {
 		if segment.GetStorageVersion() < storage.StorageV2 {
 			return segmentMetricFormatLegacy
@@ -209,10 +200,7 @@ func segmentMetricFormatLabel(segment *SegmentInfo) string {
 	if len(formats) > 1 {
 		return segmentMetricFormatMixed
 	}
-	for format := range formats {
-		return format
-	}
-	return segmentMetricFormatUnknown
+	return formats[0]
 }
 
 func segmentMetricLabelValues(segment *SegmentInfo) []string {
@@ -419,11 +407,8 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 			if segment.State == commonpb.SegmentState_Flushed {
 				numStoredRows += segment.NumOfRows
 
-				insertFileNum := 0
-				for _, fieldBinlog := range segment.GetBinlogs() {
-					insertFileNum += len(fieldBinlog.GetBinlogs())
-				}
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
+				stats := segment.GetStats()
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
 
 				statFileNum := 0
 				for _, fieldBinlog := range segment.GetStatslogs() {
@@ -431,11 +416,7 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 				}
 				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
 
-				deleteFileNum := 0
-				for _, filedBinlog := range segment.GetDeltalogs() {
-					deleteFileNum += len(filedBinlog.GetBinlogs())
-				}
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 			}
 		}
 	}
@@ -594,18 +575,13 @@ func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
-	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
-		cnt := 0
-		for _, fbs := range fieldBinlogs {
-			cnt += len(fbs.Binlogs)
-		}
-		return cnt
+	stats := s.GetStats()
+	cnt := int(stats.GetInsertBinlogCount() + stats.GetDeltaBinlogCount())
+	// Statistics has no stat-file count; V3's empty statslogs array = 0
+	// matches the manifest-driven layout, so the array path is correct.
+	for _, fbs := range s.GetStatslogs() {
+		cnt += len(fbs.Binlogs)
 	}
-
-	cnt := 0
-	cnt += statsFieldFn(s.GetBinlogs())
-	cnt += statsFieldFn(s.GetStatslogs())
-	cnt += statsFieldFn(s.GetDeltalogs())
 	return cnt
 }
 

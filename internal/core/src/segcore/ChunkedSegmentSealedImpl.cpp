@@ -97,7 +97,6 @@
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_static.h"
 #include "knowhere/sparse_utils.h"
-#include "knowhere/version.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
@@ -6889,6 +6888,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(
         auto index_metric = field_binlog_config->GetMetricType();
 
         if (enable_binlog_index()) {
+            const auto index_version =
+                segcore_config_.get_interim_index_version();
             std::unique_ptr<
                 milvus::cachinglayer::Translator<milvus::index::IndexBase>>
                 translator =
@@ -6899,6 +6900,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                         field_id.get(),
                         interim_index_type,
                         index_metric,
+                        index_version,
                         build_config,
                         dim,
                         is_sparse,
@@ -6907,8 +6909,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
                     std::move(translator));
-            auto index_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
             bool has_raw_data = false;
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -9518,6 +9518,17 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     if (size == 0 || !snapshot->use_take_for_output) {
         return false;
     }
+    auto result_count_limit = SegcoreConfig::default_config()
+                                  .get_take_for_output_result_count_limit();
+    if (result_count_limit > 0 && size > result_count_limit) {
+        LOG_DEBUG(
+            "[TakeAPI] retrieve skipped take() for segment {} because "
+            "result count {} exceeds limit {}",
+            id_,
+            size,
+            result_count_limit);
+        return false;
+    }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
 
@@ -9808,6 +9819,20 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     if (size == 0 || !snapshot->use_take_for_output) {
         return false;
     }
+    auto result_count_limit = SegcoreConfig::default_config()
+                                  .get_take_for_output_result_count_limit();
+    if (plan->plan_node_ != nullptr) {
+        auto topk = plan->plan_node_->search_info_.topk_;
+        if (result_count_limit > 0 && topk > result_count_limit) {
+            LOG_DEBUG(
+                "[TakeAPI] search skipped take() for segment {} because "
+                "topk {} exceeds limit {}",
+                id_,
+                topk,
+                result_count_limit);
+            return false;
+        }
+    }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
 
@@ -9838,6 +9863,16 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
 
     auto ctx = BuildTakeContext(seg_offsets, size);
+    if (result_count_limit > 0 &&
+        ctx.unique_offsets.size() > static_cast<size_t>(result_count_limit)) {
+        LOG_DEBUG(
+            "[TakeAPI] search skipped take() for segment {} because "
+            "unique offset count {} exceeds limit {}",
+            id_,
+            ctx.unique_offsets.size(),
+            result_count_limit);
+        return false;
+    }
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
         has_vector_output) {
         LogTakeFallback("search",

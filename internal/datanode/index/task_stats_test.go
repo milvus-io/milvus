@@ -17,7 +17,6 @@
 package index
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -48,33 +47,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type statsTaskLogBuffer struct {
-	bytes.Buffer
-}
-
-func (*statsTaskLogBuffer) Sync() error {
-	return nil
-}
-
-func captureStatsTaskLogs(t *testing.T) *statsTaskLogBuffer {
+func captureStatsTaskLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logs := &statsTaskLogBuffer{}
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
 		Level:             "debug",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, logs)
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, props)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
-	return logs
 }
 
 func statsLogSentinel(parts ...string) string {

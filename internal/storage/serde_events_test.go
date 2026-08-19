@@ -618,6 +618,7 @@ func TestDeltalogReaderExternalContext(t *testing.T) {
 	defer mock.UnPatch()
 
 	reader, err := NewDeltalogReader(
+		context.Background(),
 		schemapb.DataType_Int64,
 		[]string{sourcePath},
 		WithVersion(StorageV3),

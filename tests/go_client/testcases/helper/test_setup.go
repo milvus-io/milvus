@@ -24,8 +24,10 @@ import (
 
 var (
 	addr                = flag.String("addr", "http://localhost:19530", "server host and port")
+	uri                 = flag.String("uri", "", "Milvus server URI; overrides addr when set")
 	user                = flag.String("user", "root", "user")
 	password            = flag.String("password", "Milvus", "password")
+	token               = flag.String("token", "", "API key or username:password token")
 	logLevel            = flag.String("log.level", "info", "log level for test")
 	teiEndpoint         = flag.String("tei_endpoint", "http://text-embeddings-service.milvus-ci.svc.cluster.local:80", "TEI service endpoint for text embedding tests")
 	teiRerankerEndpoint = flag.String("tei_reranker_uri", "http://text-rerank-service.milvus-ci.svc.cluster.local:80", "TEI reranker service endpoint")
@@ -38,15 +40,18 @@ func setDefaultClientConfig(cfg *client.ClientConfig) {
 }
 
 func GetDefaultClientConfig() *client.ClientConfig {
-	newCfg := *defaultClientConfig
-	dialOptions := newCfg.DialOptions
-	newDialOptions := make([]grpc.DialOption, len(dialOptions))
-	copy(newDialOptions, dialOptions)
-	newCfg.DialOptions = newDialOptions
+	newCfg := cloneClientConfig(defaultClientConfig)
 	return &newCfg
 }
 
 func GetAddr() string {
+	return GetURI()
+}
+
+func GetURI() string {
+	if strings.TrimSpace(*uri) != "" {
+		return *uri
+	}
 	return *addr
 }
 
@@ -56,6 +61,71 @@ func GetUser() string {
 
 func GetPassword() string {
 	return *password
+}
+
+func GetToken() string {
+	return *token
+}
+
+// URIFromTestArgs returns the URI flag when present and otherwise falls back to addr.
+// It is used before flag.Parse by TestMain dependency setup.
+func URIFromTestArgs(args []string) string {
+	var addrValue, uriValue string
+	for i, arg := range args {
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if name != "addr" && name != "uri" {
+			continue
+		}
+		if !hasValue && i+1 < len(args) {
+			value = args[i+1]
+		}
+		if name == "uri" {
+			uriValue = value
+		} else {
+			addrValue = value
+		}
+	}
+	if strings.TrimSpace(uriValue) != "" {
+		return uriValue
+	}
+	return addrValue
+}
+
+func cloneClientConfig(cfg *client.ClientConfig) client.ClientConfig {
+	newCfg := *cfg
+	newCfg.DialOptions = append([]grpc.DialOption(nil), cfg.DialOptions...)
+	return newCfg
+}
+
+func newDefaultClientConfig() *client.ClientConfig {
+	return &client.ClientConfig{
+		Address:  GetURI(),
+		Username: GetUser(),
+		Password: GetPassword(),
+		APIKey:   GetToken(),
+	}
+}
+
+func inheritDefaultConnectionConfig(cfg *client.ClientConfig) *client.ClientConfig {
+	newCfg := cloneClientConfig(cfg)
+	defaultCfg := GetDefaultClientConfig()
+	if newCfg.Address == "" {
+		newCfg.Address = defaultCfg.Address
+	}
+	if newCfg.APIKey != "" {
+		return &newCfg
+	}
+
+	usesDefaultCredentials := newCfg.Username == defaultCfg.Username && newCfg.Password == defaultCfg.Password
+	if newCfg.Username == "" && newCfg.Password == "" {
+		newCfg.Username = defaultCfg.Username
+		newCfg.Password = defaultCfg.Password
+		usesDefaultCredentials = true
+	}
+	if usesDefaultCredentials {
+		newCfg.APIKey = defaultCfg.APIKey
+	}
+	return &newCfg
 }
 
 func GetTEIEndpoint() string {
@@ -90,10 +160,10 @@ func setup() {
 	mlog.Info(context.TODO(), "Start to setup all......")
 	flag.Parse()
 	parseLogConfig()
-	mlog.Info(context.TODO(), "Parser Milvus address", mlog.String("address", *addr))
+	mlog.Info(context.TODO(), "Parser Milvus address", mlog.String("address", GetURI()))
 
 	// set default milvus client config
-	setDefaultClientConfig(&client.ClientConfig{Address: *addr})
+	setDefaultClientConfig(newDefaultClientConfig())
 }
 
 // Teardown teardown
@@ -101,7 +171,7 @@ func teardown() {
 	mlog.Info(context.TODO(), "Start to tear down all.....")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*common.DefaultTimeout)
 	defer cancel()
-	mc, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: GetAddr(), Username: GetUser(), Password: GetPassword()})
+	mc, err := base.NewMilvusClient(ctx, GetDefaultClientConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "teardown failed to connect milvus with error", mlog.Err(err))
 		return
@@ -123,10 +193,10 @@ func teardown() {
 }
 
 // managementBaseURL returns the Milvus management API base URL (port 9091)
-// derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
+// derived from the configured URI (e.g. http://host:19530 -> http://host:9091).
 func managementBaseURL() string {
 	host := ""
-	rawAddr := strings.TrimSpace(*addr)
+	rawAddr := strings.TrimSpace(GetURI())
 	if rawAddr != "" {
 		parseAddr := rawAddr
 		if !strings.Contains(rawAddr, "://") {
