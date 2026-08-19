@@ -1,15 +1,26 @@
 use icu_segmenter::options::WordBreakOptions;
 use icu_segmenter::WordSegmenter;
+use serde_json as json;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+
+use crate::error::{Result, TantivyBindingError};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IcuPositionMode {
+    Char,
+    Token,
+}
 
 pub struct IcuTokenizer {
     segmenter: WordSegmenter,
+    position_mode: IcuPositionMode,
 }
 
 impl Clone for IcuTokenizer {
     fn clone(&self) -> Self {
         IcuTokenizer {
             segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
+            position_mode: self.position_mode,
         }
     }
 }
@@ -43,7 +54,34 @@ impl IcuTokenizer {
     pub fn new() -> IcuTokenizer {
         IcuTokenizer {
             segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
+            position_mode: IcuPositionMode::Char,
         }
+    }
+
+    pub(crate) fn from_json(params: &json::Map<String, json::Value>) -> Result<IcuTokenizer> {
+        let position_mode = match params.get("position_mode") {
+            None => IcuPositionMode::Char,
+            Some(value) => match value.as_str() {
+                Some("char") => IcuPositionMode::Char,
+                Some("token") => IcuPositionMode::Token,
+                Some(other) => {
+                    return Err(TantivyBindingError::InvalidArgument(format!(
+                        "unsupported ICU tokenizer position_mode: {}",
+                        other
+                    )))
+                }
+                None => {
+                    return Err(TantivyBindingError::InvalidArgument(
+                        "ICU tokenizer position_mode must be a string".to_string(),
+                    ))
+                }
+            },
+        };
+
+        Ok(IcuTokenizer {
+            segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
+            position_mode,
+        })
     }
 
     fn tokenize(&self, text: &str) -> Vec<Token> {
@@ -59,17 +97,21 @@ impl IcuTokenizer {
                 continue;
             }
             let token_str = &text[offset..breakpoint];
+            let token_length = match self.position_mode {
+                IcuPositionMode::Char => token_str.chars().count(),
+                IcuPositionMode::Token => 1,
+            };
             let token = Token {
                 text: token_str.to_string(),
                 offset_from: offset,
                 offset_to: breakpoint,
                 position,
-                position_length: token_str.chars().count(),
+                position_length: token_length,
             };
 
             tokens.push(token);
             offset = breakpoint;
-            position += token_str.chars().count();
+            position += token_length;
         }
 
         tokens
@@ -87,11 +129,23 @@ impl Tokenizer for IcuTokenizer {
 
 #[cfg(test)]
 mod tests {
-    use tantivy::tokenizer::{TokenStream, Tokenizer};
+    use serde_json as json;
+    use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+
+    use super::IcuTokenizer;
+
+    fn collect(tokenizer: &mut IcuTokenizer, text: &str) -> Vec<Token> {
+        let mut stream = tokenizer.token_stream(text);
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push(stream.token().clone());
+        }
+        tokens
+    }
 
     #[test]
     fn test_icu_tokenizer() {
-        let mut tokenizer = super::IcuTokenizer::new();
+        let mut tokenizer = IcuTokenizer::new();
         let text =
             "tokenizer for global doc, 中文分词测试, 東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です";
         let mut stream = tokenizer.token_stream(text);
@@ -104,5 +158,58 @@ mod tests {
 
         println!("test tokens: {:?}", results);
         assert_eq!(results.len(), 24);
+    }
+
+    #[test]
+    fn test_icu_tokenizer_defaults_to_character_positions() {
+        let tokens = collect(&mut IcuTokenizer::new(), "hello world");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["hello", " ", "world"]
+        );
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.position)
+                .collect::<Vec<_>>(),
+            vec![0, 5, 6]
+        );
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.position_length)
+                .collect::<Vec<_>>(),
+            vec![5, 1, 5]
+        );
+    }
+
+    #[test]
+    fn test_icu_tokenizer_supports_token_positions() {
+        let params = json::json!({"position_mode": "token"});
+        let mut tokenizer = IcuTokenizer::from_json(params.as_object().unwrap()).unwrap();
+        let tokens = collect(&mut tokenizer, "hello world");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.position)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert!(tokens.iter().all(|token| token.position_length == 1));
+    }
+
+    #[test]
+    fn test_icu_tokenizer_rejects_invalid_position_mode() {
+        for params in [
+            json::json!({"position_mode": "word"}),
+            json::json!({"position_mode": 1}),
+        ] {
+            assert!(IcuTokenizer::from_json(params.as_object().unwrap()).is_err());
+        }
     }
 }
