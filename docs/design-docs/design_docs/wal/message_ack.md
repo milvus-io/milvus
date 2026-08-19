@@ -50,7 +50,7 @@ iteration never creates independent ownership.
 
 ```go
 type trackedEntry struct {
-    point             WALConsumeCheckpoint
+    point             WALCheckpoint
     logicalEndOffset  uint64
     firstObservedAt   time.Time
     affectedVChannels []string
@@ -128,7 +128,7 @@ TimeTick filtering and never owns a persistence handle.
 Tracker exposes:
 
 ```go
-CompletedPoint() WALConsumeCheckpoint
+CompletedPoint() WALCheckpoint
 CompletedLogicalOffset() uint64
 ```
 
