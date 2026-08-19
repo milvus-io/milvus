@@ -29,6 +29,7 @@
 #include "nlohmann/json.hpp"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
+#include "query/Utils.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
 
@@ -77,6 +78,28 @@ CachedSearchIterator::CachedSearchIterator(
 }
 
 void
+CachedSearchIterator::AppendChunkIterators(
+    const dataset::SearchDataset& query_ds,
+    const SearchInfo& search_info,
+    const std::map<std::string, std::string>& index_info,
+    const dataset::RawDataset& raw_data,
+    const BitsetView& bitset,
+    const milvus::DataType& data_type) {
+    auto expected_iterators = GetBruteForceSearchIterators(
+        query_ds, raw_data, search_info, index_info, bitset, data_type);
+    if (expected_iterators.has_value()) {
+        auto& chunk_iterators = expected_iterators.value();
+        iterators_.insert(iterators_.end(),
+                          std::make_move_iterator(chunk_iterators.begin()),
+                          std::make_move_iterator(chunk_iterators.end()));
+        ++num_chunks_;
+        return;
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "Failed to create iterators from index");
+}
+
+void
 CachedSearchIterator::InitializeChunkedIterators(
     const dataset::SearchDataset& query_ds,
     const SearchInfo& search_info,
@@ -86,23 +109,18 @@ CachedSearchIterator::InitializeChunkedIterators(
     const GetChunkDataFunc& get_chunk_data) {
     int64_t offset = 0;
     chunked_heaps_.resize(nq_);
-    for (int64_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
-        auto [chunk_data, chunk_size] = get_chunk_data(chunk_id);
-        auto sub_data = query::dataset::RawDataset{
-            offset, query_ds.dim, chunk_size, chunk_data};
-
-        auto expected_iterators = GetBruteForceSearchIterators(
-            query_ds, sub_data, search_info, index_info, bitset, data_type);
-        if (expected_iterators.has_value()) {
-            auto& chunk_iterators = expected_iterators.value();
-            iterators_.insert(iterators_.end(),
-                              std::make_move_iterator(chunk_iterators.begin()),
-                              std::make_move_iterator(chunk_iterators.end()));
-        } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "Failed to create iterators from index");
-        }
-        offset += chunk_size;
+    const auto source_chunks = num_chunks_;
+    num_chunks_ = 0;
+    for (int64_t chunk_id = 0; chunk_id < static_cast<int64_t>(source_chunks);
+         ++chunk_id) {
+        auto chunk = get_chunk_data(chunk_id, offset);
+        AppendChunkIterators(query_ds,
+                             search_info,
+                             index_info,
+                             chunk.raw_data,
+                             chunk.bitset,
+                             data_type);
+        offset += chunk.raw_data.num_raw_data;
     }
 }
 
@@ -127,7 +145,7 @@ CachedSearchIterator::CachedSearchIterator(
     }
 
     const int64_t vec_size_per_chunk = vec_data->get_size_per_chunk();
-    num_chunks_ = upper_div(row_count, vec_size_per_chunk);
+    const int64_t source_chunks = upper_div(row_count, vec_size_per_chunk);
     nq_ = query_ds.num_queries;
     Init(search_info);
 
@@ -139,52 +157,79 @@ CachedSearchIterator::CachedSearchIterator(
     // it here).
     const bool is_element_level = search_info.array_offsets_ != nullptr;
     if (is_element_level) {
-        chunk_buffers_.reserve(num_chunks_);
+        chunk_buffers_.reserve(source_chunks);
     }
 
-    iterators_.reserve(nq_ * num_chunks_);
-    InitializeChunkedIterators(
-        query_ds,
-        search_info,
-        index_info,
-        bitset,
-        data_type,
-        [this,
-         &vec_data,
-         &chunks,
-         vec_size_per_chunk,
-         row_count,
-         is_element_level](int64_t chunk_id) {
-            // Read through the caller's snapshot, not the live container: the
-            // generation behind `chunks` is pinned and cannot be reclaimed
-            // under us. There is no PinWrapper here (unlike the sealed path)
-            // because the snapshot itself is the pin, and the caller holds it
-            // for at least as long as this iterator lives.
-            const void* chunk_data = vec_data->get_chunk_data(chunks, chunk_id);
-            int64_t chunk_size = std::min(
-                vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
-            if (!is_element_level) {
-                return std::make_pair(chunk_data, chunk_size);
-            }
+    iterators_.reserve(nq_ * source_chunks);
+    chunked_heaps_.resize(nq_);
+    num_chunks_ = 0;
+    const auto& offset_mapping = vec_data->get_offset_mapping();
+    const bool has_offset_mapping = offset_mapping.IsEnabled() &&
+                                    !is_element_level &&
+                                    data_type != DataType::VECTOR_ARRAY;
+    int64_t element_offset = 0;
 
-            auto va_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
-            int64_t total_bytes = 0;
-            int64_t total_elements = 0;
-            for (int64_t i = 0; i < chunk_size; ++i) {
-                total_bytes += va_ptr[i].byte_size();
-                total_elements += va_ptr[i].length();
+    for (int64_t chunk_id = 0; chunk_id < source_chunks; ++chunk_id) {
+        // Read through the caller's snapshot, not the live container: the
+        // generation behind `chunks` is pinned and cannot be reclaimed under
+        // us. There is no PinWrapper here (unlike the sealed path) because the
+        // snapshot itself is the pin, and the caller holds it for at least as
+        // long as this iterator lives.
+        const void* chunk_data = vec_data->get_chunk_data(chunks, chunk_id);
+        const int64_t row_begin = chunk_id * vec_size_per_chunk;
+        const int64_t row_end =
+            std::min(row_count, (chunk_id + 1) * vec_size_per_chunk);
+        auto range_begin = row_begin;
+        while (range_begin < row_end) {
+            int64_t chunk_size = row_end - range_begin;
+            const void* range_data = chunk_data;
+            OffsetMappingIdView id_view;
+            if (has_offset_mapping) {
+                id_view = offset_mapping.GetPhysicalToLogicalIds(range_begin,
+                                                                 chunk_size);
+                AssertInfo(!id_view.empty(),
+                           "empty id map view for non-empty BF iterator range");
+                chunk_size = id_view.count;
+                range_data = AdvanceVectorDataPointer(chunk_data,
+                                                      data_type,
+                                                      query_ds.dim,
+                                                      range_begin - row_begin);
             }
-            auto buf = std::make_unique<uint8_t[]>(total_bytes);
-            auto* ptr = buf.get();
-            for (int64_t i = 0; i < chunk_size; ++i) {
-                milvus::fastmem::FastMemcpy(
-                    ptr, va_ptr[i].data(), va_ptr[i].byte_size());
-                ptr += va_ptr[i].byte_size();
+            auto chunk_bitset = AttachOffsetMappingIds(bitset, id_view);
+
+            dataset::RawDataset raw_data;
+            if (!is_element_level) {
+                raw_data = {range_begin, query_ds.dim, chunk_size, range_data};
+            } else {
+                auto va_ptr = reinterpret_cast<const VectorArray*>(range_data);
+                int64_t total_bytes = 0;
+                int64_t total_elements = 0;
+                for (int64_t i = 0; i < chunk_size; ++i) {
+                    total_bytes += va_ptr[i].byte_size();
+                    total_elements += va_ptr[i].length();
+                }
+                auto buf = std::make_unique<uint8_t[]>(total_bytes);
+                auto* ptr = buf.get();
+                for (int64_t i = 0; i < chunk_size; ++i) {
+                    milvus::fastmem::FastMemcpy(
+                        ptr, va_ptr[i].data(), va_ptr[i].byte_size());
+                    ptr += va_ptr[i].byte_size();
+                }
+                const void* flat_data = buf.get();
+                chunk_buffers_.emplace_back(std::move(buf));
+                raw_data = {
+                    element_offset, query_ds.dim, total_elements, flat_data};
+                element_offset += total_elements;
             }
-            const void* flat_data = buf.get();
-            chunk_buffers_.emplace_back(std::move(buf));
-            return std::make_pair(flat_data, total_elements);
-        });
+            AppendChunkIterators(query_ds,
+                                 search_info,
+                                 index_info,
+                                 raw_data,
+                                 chunk_bitset,
+                                 data_type);
+            range_begin += chunk_size;
+        }
+    }
 }
 
 // For sealed segment with chunked data, BF
@@ -213,14 +258,18 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column, &search_info](int64_t chunk_id) {
+        [this, column, &query_ds, &search_info, &bitset](
+            int64_t chunk_id, int64_t physical_begin) {
             auto pw = column->DataOfChunk(nullptr, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
             const auto& offset_mapping = column->GetOffsetMapping();
-            if (offset_mapping.IsEnabled()) {
+            const bool has_offset_mapping =
+                offset_mapping.IsEnabled() &&
+                search_info.array_offsets_ == nullptr;
+            if (has_offset_mapping) {
                 chunk_size = column->GetValidCountInChunk(chunk_id);
             }
             // For element-level search on vector array field, chunk_size
@@ -233,7 +282,16 @@ CachedSearchIterator::CachedSearchIterator(
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
             pin_wrappers_.emplace_back(std::move(pw));
-            return std::make_pair(chunk_data, chunk_size);
+            BitsetView chunk_bitset = bitset;
+            if (has_offset_mapping) {
+                chunk_bitset = AttachOffsetMappingIds(
+                    bitset,
+                    offset_mapping.GetPhysicalToLogicalIds(physical_begin,
+                                                           chunk_size));
+            }
+            return ChunkSearchData{
+                {physical_begin, query_ds.dim, chunk_size, chunk_data},
+                chunk_bitset};
         });
 }
 
