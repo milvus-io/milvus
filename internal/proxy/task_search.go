@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -125,7 +126,7 @@ type searchTask struct {
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
 
-	chMgr channelsMgr
+	chMgr channelmgr.ChannelsMgr
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -1240,7 +1241,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err

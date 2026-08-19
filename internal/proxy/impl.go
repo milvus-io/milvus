@@ -236,7 +236,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
-		node.chMgr.removeDMLStream(request.GetCollectionID())
+		node.chMgr.RemoveStream(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {

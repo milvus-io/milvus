@@ -42,8 +42,10 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -64,6 +66,28 @@ import (
 )
 
 // TODO(dragondriver): add more test cases
+
+// newTestChannelsMgr builds a channels manager backed by the coordinator's
+// DescribeCollection, mirroring the production provider wiring in Proxy.Init.
+func newTestChannelsMgr(ctx context.Context, mixCoord types.MixCoordClient) channelmgr.ChannelsMgr {
+	return channelmgr.NewChannelsMgr(
+		func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+			req := &milvuspb.DescribeCollectionRequest{
+				Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
+				CollectionID: collectionID,
+			}
+			resp, err := mixCoord.DescribeCollection(ctx, req)
+			if err != nil {
+				return channelmgr.ChannelInfo{}, err
+			}
+			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				return channelmgr.ChannelInfo{}, merr.Error(resp.GetStatus())
+			}
+			return channelmgr.ChannelInfo{VChans: resp.GetVirtualChannelNames(), PChans: resp.GetPhysicalChannelNames()}, nil
+		},
+		channelmgr.DefaultInsertRepackFunc,
+	)
+}
 
 const (
 	maxTestStringLen     = 100
@@ -3080,17 +3104,9 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	collectionID, err := cache.GetCollectionID(ctx, dbName, collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
-	pchans, err := chMgr.getChannels(collectionID)
+	chMgr := newTestChannelsMgr(ctx, qc)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -3164,7 +3180,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
 			chMgr:        chMgr,
-			chTicker:     ticker,
 			collectionID: collectionID,
 			vChannels:    []string{"test-ch"},
 		}
@@ -3311,17 +3326,9 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	collectionID, err := cache.GetCollectionID(ctx, dbName, collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, mixc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
-	pchans, err := chMgr.getChannels(collectionID)
+	chMgr := newTestChannelsMgr(ctx, mixc)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mixc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -3449,7 +3456,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 			vChannels:   nil,
 			pChannels:   nil,
 			schema:      nil,
@@ -3479,7 +3485,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 			vChannels:   []string{"test-channel"},
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"milvus", "test"}}},
@@ -4894,17 +4899,9 @@ func TestPartitionKey(t *testing.T) {
 	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
-	pchans, err := chMgr.getChannels(collectionID)
+	chMgr := newTestChannelsMgr(ctx, qc)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -5001,7 +4998,6 @@ func TestPartitionKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 		}
 
 		// don't support specify partition name if use partition key
@@ -5029,7 +5025,6 @@ func TestPartitionKey(t *testing.T) {
 			},
 			idAllocator:  idAllocator,
 			chMgr:        chMgr,
-			chTicker:     ticker,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}
@@ -5128,18 +5123,11 @@ func TestDefaultPartition(t *testing.T) {
 	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
+	chMgr := newTestChannelsMgr(ctx, qc)
 
-	pchans, err := chMgr.getChannels(collectionID)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
 
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -5228,7 +5216,6 @@ func TestDefaultPartition(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 		}
 
 		ut.req.PartitionName = ""
@@ -5252,7 +5239,6 @@ func TestDefaultPartition(t *testing.T) {
 			},
 			idAllocator:  idAllocator,
 			chMgr:        chMgr,
-			chTicker:     ticker,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}

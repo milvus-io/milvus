@@ -14,46 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package channelmgr
 
 import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// insertRepackFunc deprecated, use defaultInsertRepackFunc instead.
-func insertRepackFunc(
-	tsMsgs []msgstream.TsMsg,
-	hashKeys [][]int32,
-) (map[int32]*msgstream.MsgPack, error) {
-	if len(hashKeys) < len(tsMsgs) {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"the length of hash keys (%d) is less than the length of messages (%d)",
-			len(hashKeys),
-			len(tsMsgs),
-		)
-	}
-
-	result := make(map[int32]*msgstream.MsgPack)
-	for i, request := range tsMsgs {
-		keys := hashKeys[i]
-		if len(keys) > 0 {
-			key := keys[0]
-			_, ok := result[key]
-			if !ok {
-				result[key] = &msgstream.MsgPack{}
-			}
-			result[key].Msgs = append(result[key].Msgs, request)
-		} else {
-			return nil, merr.WrapErrParameterInvalidMsg("no hash key for %dth message", i)
-		}
-	}
-
-	return result, nil
-}
-
-// defaultInsertRepackFunc repacks the dml messages.
-func defaultInsertRepackFunc(
+// DefaultInsertRepackFunc repacks the dml messages.
+func DefaultInsertRepackFunc(
 	tsMsgs []msgstream.TsMsg,
 	hashKeys [][]int32,
 ) (map[int32]*msgstream.MsgPack, error) {
