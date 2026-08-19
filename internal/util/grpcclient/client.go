@@ -289,11 +289,13 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				mlog.UnaryClientInterceptor(),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.NewObservabilityClientUnaryInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				mlog.StreamClientInterceptor(),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				interceptor.NewObservabilityClientStreamInterceptor(),
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -329,11 +331,13 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				mlog.UnaryClientInterceptor(),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.NewObservabilityClientUnaryInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				mlog.StreamClientInterceptor(),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				interceptor.NewObservabilityClientStreamInterceptor(),
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,

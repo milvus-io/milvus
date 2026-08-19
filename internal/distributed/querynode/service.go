@@ -243,6 +243,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			// otelgrpc.UnaryServerInterceptor(opts...),
 			mlog.UnaryServerInterceptor(typeutil.QueryNodeRole),
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -254,6 +255,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			// otelgrpc.StreamServerInterceptor(opts...),
 			mlog.StreamServerInterceptor(typeutil.QueryNodeRole),
+			interceptor.NewObservabilityServerStreamInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
