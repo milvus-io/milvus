@@ -836,7 +836,7 @@ func TestCluster_CreateProperties_CollectionID(t *testing.T) {
 		err := cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
 			TaskID:   1,
 			TaskSlot: 1,
-		}, expectedCollectionID)
+		}, expectedCollectionID, false)
 		assert.NoError(t, err)
 	})
 
@@ -1019,14 +1019,34 @@ func TestCluster_CopySegment(t *testing.T) {
 		// Mock client
 		mockClient := mocks.NewMockDataNodeClient(t)
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
-		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+			return req.GetProperties()[taskcommon.TypeKey] == taskcommon.CopySegment
+		})).Return(merr.Success(), nil)
 
 		// Test
 		req := &datapb.CopySegmentRequest{
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100)
+		err := cluster.CreateCopySegment(1, req, 100, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create external copy segment", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+			return req.GetProperties()[taskcommon.TypeKey] == taskcommon.ExternalCopySegment
+		})).Return(merr.Success(), nil)
+
+		req := &datapb.CopySegmentRequest{
+			TaskID:   123,
+			TaskSlot: 1,
+		}
+		err := cluster.CreateCopySegment(1, req, 100, true)
 		assert.NoError(t, err)
 	})
 
@@ -1042,7 +1062,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100)
+		err := cluster.CreateCopySegment(1, req, 100, false)
 		assert.Error(t, err)
 	})
 
@@ -1206,48 +1226,4 @@ func TestCluster_CopySegment(t *testing.T) {
 		err := cluster.DropCopySegment(1, 123)
 		assert.Error(t, err)
 	})
-}
-
-func TestCopySegmentTaskType(t *testing.T) {
-	tests := []struct {
-		name     string
-		request  *datapb.CopySegmentRequest
-		expected taskcommon.Type
-	}{
-		{
-			name:     "nil request",
-			request:  nil,
-			expected: taskcommon.CopySegment,
-		},
-		{
-			name: "local restore",
-			request: &datapb.CopySegmentRequest{
-				Sources: []*datapb.CopySegmentSource{{}},
-			},
-			expected: taskcommon.CopySegment,
-		},
-		{
-			name: "external spec",
-			request: &datapb.CopySegmentRequest{
-				ExternalSpec: `{"extfs":{"region":"us-west-2"}}`,
-			},
-			expected: taskcommon.ExternalCopySegment,
-		},
-		{
-			name: "external source root",
-			request: &datapb.CopySegmentRequest{
-				Sources: []*datapb.CopySegmentSource{
-					{},
-					{SourceRootPath: "s3://source-bucket/root"},
-				},
-			},
-			expected: taskcommon.ExternalCopySegment,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.expected, copySegmentTaskType(test.request))
-		})
-	}
 }
