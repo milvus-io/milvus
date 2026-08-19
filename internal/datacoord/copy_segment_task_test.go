@@ -492,7 +492,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerUsesJobExternalFlag() {
 			task.copyMeta = copyMeta
 
 			job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
-			job.CopySegmentJob.External = test.external
+			job.External = test.external
 			s.NoError(copyMeta.AddJob(context.Background(), job))
 
 			req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
