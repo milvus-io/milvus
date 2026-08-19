@@ -2449,7 +2449,8 @@ func Test_GetPartitionProgressFailed(t *testing.T) {
 			Reason:    "Unexpected error",
 		},
 	}, nil)
-	_, _, err := getPartitionProgress(context.TODO(), qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
+	metaCache := NewMockCache(t)
+	_, _, err := getPartitionProgress(context.TODO(), metaCache, qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
 	assert.Error(t, err)
 }
 
