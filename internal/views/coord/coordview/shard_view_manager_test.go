@@ -790,6 +790,30 @@ func TestRequestRelease_MixedViews(t *testing.T) {
 	assert.Equal(t, 1, catalog.numSaveCalls())
 }
 
+func TestAddPreparing_RejectedAfterRequestRelease(t *testing.T) {
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManager(t, catalog, s)
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	require.NoError(t, mgr.RequestRelease(context.Background()))
+
+	// A prepare arriving after release started must be rejected: resurrecting
+	// a Preparing view would fight the teardown already in flight.
+	catalog.reset()
+	s.reset()
+	err := mgr.AddPreparing(context.Background(), testBuilder(2, 1, 1))
+	require.Error(t, err)
+
+	// No new view, persist, or sync effects from the rejected prepare.
+	assert.Equal(t, 0, catalog.numSaveCalls())
+	assert.Zero(t, s.syncViewCount())
+	mgr.mu.Lock()
+	require.Len(t, mgr.views, 1)
+	assert.Equal(t, qviews.QueryViewStateDropping, mgr.views[testVersion(1, 1, 1)].State())
+	mgr.mu.Unlock()
+}
+
 // ===========================================================================
 // Recovery tests
 // ===========================================================================

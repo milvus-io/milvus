@@ -162,6 +162,32 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	assert.Same(t, replacement, reg.Get(shardID))
 }
 
+func TestRegistry_IgnoresStatsFromEvictedManager(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	oldManager := reg.Ensure(shardID)
+	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
+	replacement.SetStatsObserver(reg.onShardStatsChanged)
+	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
+
+	reg.mu.Lock()
+	reg.shards[shardID] = replacement
+	reg.mu.Unlock()
+
+	// A late stats publication from the evicted manager must not install its
+	// stale placements into the slot now owned by the replacement.
+	versionBefore := reg.version
+	reg.onShardStatsChanged(shardID, oldManager, shardStatsForNodes(map[int64][]int64{101: {1}}))
+	assert.Empty(t, reg.NodeShards(1))
+	assert.Equal(t, versionBefore, reg.version)
+	require.NotNil(t, reg.stats[shardID])
+	assert.Empty(t, reg.stats[shardID].Segments)
+
+	// The current manager's stats are still adopted.
+	reg.onShardStatsChanged(shardID, replacement, shardStatsForNodes(map[int64][]int64{101: {1}}))
+	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(1))
+}
+
 func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	catalog := newMockCatalog()
 
@@ -253,7 +279,7 @@ func TestRegistry_EnsureIndexesCollection(t *testing.T) {
 func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
-	reg.Ensure(shardID)
+	mgr := reg.Ensure(shardID)
 
 	observed := make(chan struct{}, 1)
 	reg.RegisterStatsObserver(func(_ qviews.ShardID, _ *ShardStats) {
@@ -261,7 +287,7 @@ func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 		observed <- struct{}{}
 	})
 
-	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{
+	reg.onShardStatsChanged(shardID, mgr, shardStatsForNodes(map[int64][]int64{
 		101: {1, 2},
 		102: {1},
 	}))
@@ -270,18 +296,18 @@ func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 	assert.Len(t, reg.NodeShards(1), 1)
 	<-observed
 
-	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{103: {3}}))
+	reg.onShardStatsChanged(shardID, mgr, shardStatsForNodes(map[int64][]int64{103: {3}}))
 	assert.Empty(t, reg.NodeShards(1))
 	assert.Empty(t, reg.NodeShards(2))
 	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(3))
 	<-observed
 
-	reg.onShardStatsChanged(shardID, emptyShardStats())
+	reg.onShardStatsChanged(shardID, mgr, emptyShardStats())
 	assert.Empty(t, reg.NodeShards(3))
 	<-observed
 
 	assert.NotPanics(t, func() {
-		reg.onShardStatsChanged(shardID, nil)
+		reg.onShardStatsChanged(shardID, mgr, nil)
 	})
 	assert.Empty(t, reg.NodeShards(3))
 	<-observed
@@ -292,16 +318,16 @@ func TestRegistry_SnapshotForShards(t *testing.T) {
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 2, VChannel: "by-dev-rootcoord-dml_200v0"}
 	missing := qviews.ShardID{ReplicaID: 3, VChannel: "by-dev-rootcoord-dml_300v0"}
-	reg.Ensure(shardA)
-	reg.Ensure(shardB)
+	mgrA := reg.Ensure(shardA)
+	mgrB := reg.Ensure(shardB)
 	statsA := shardStatsForNodes(map[int64][]int64{101: {1}})
 	statsB := shardStatsForNodes(map[int64][]int64{201: {2}})
-	reg.onShardStatsChanged(shardA, statsA)
-	reg.onShardStatsChanged(shardB, statsB)
+	reg.onShardStatsChanged(shardA, mgrA, statsA)
+	reg.onShardStatsChanged(shardB, mgrB, statsB)
 
 	resident := reg.Snapshot()
 	updatedStatsA := shardStatsForNodes(map[int64][]int64{102: {3}})
-	reg.onShardStatsChanged(shardA, updatedStatsA)
+	reg.onShardStatsChanged(shardA, mgrA, updatedStatsA)
 	require.Same(t, resident, reg.snapshot)
 
 	scoped := reg.SnapshotForShards([]qviews.ShardID{shardA, missing, shardA})

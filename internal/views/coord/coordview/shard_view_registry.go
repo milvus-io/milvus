@@ -278,9 +278,13 @@ func (s *ShardViewSnapshot) StatsMap() map[qviews.ShardID]*ShardStats {
 	return s.stats
 }
 
-func (r *ShardViewRegistry) onShardStatsChanged(shardID qviews.ShardID, stats *ShardStats) {
+// onShardStatsChanged applies a manager's stats publication. Only stats from
+// the manager currently resident in the registry are accepted: an evicted
+// manager (or a late callback from a replaced one) must not install its stale
+// placements into a shard slot now owned by a different manager.
+func (r *ShardViewRegistry) onShardStatsChanged(shardID qviews.ShardID, mgr *ShardViewManager, stats *ShardStats) {
 	r.mu.Lock()
-	if _, ok := r.shards[shardID]; !ok {
+	if r.shards[shardID] != mgr {
 		r.mu.Unlock()
 		return
 	}

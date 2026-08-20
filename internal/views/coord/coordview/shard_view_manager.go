@@ -28,7 +28,7 @@ type ShardViewManager struct {
 	mu               sync.Mutex
 	shardID          qviews.ShardID
 	eventSubmitter   dirtyViewEventSubmitter
-	observe          func(qviews.ShardID, *ShardStats)
+	observe          func(qviews.ShardID, *ShardViewManager, *ShardStats)
 	onReleasedEmpty  func(qviews.ShardID, *ShardViewManager)
 	releaseRequested bool
 
@@ -100,7 +100,7 @@ func newShardViewManager(
 	return m
 }
 
-func (m *ShardViewManager) SetStatsObserver(observer func(qviews.ShardID, *ShardStats)) {
+func (m *ShardViewManager) SetStatsObserver(observer func(qviews.ShardID, *ShardViewManager, *ShardStats)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.observe = observer
@@ -235,6 +235,15 @@ func segmentSet(segments []int64) map[int64]bool {
 // Validation: The new DataVersion must not be lower than any existing view's DataVersion.
 func (m *ShardViewManager) AddPreparing(_ context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
 	m.mu.Lock()
+
+	// A shard whose release has started must not be re-prepared: RequestRelease
+	// has already torn down its views, and resurrecting a Preparing view would
+	// fight the teardown. The balancer retries next round after the release
+	// completes and the registry has evicted this manager.
+	if m.releaseRequested {
+		m.mu.Unlock()
+		return merr.WrapErrServiceInternalMsg("shard %s is being released, cannot add preparing view", m.shardID.String())
+	}
 
 	newDV := builder.DataVersion()
 
@@ -508,7 +517,7 @@ func (m *ShardViewManager) submitDirtyEvent(event dirtyViewEvent) {
 
 func (m *ShardViewManager) publishStatsLocked() {
 	if m.observe != nil {
-		m.observe(m.shardID, m.statsLocked())
+		m.observe(m.shardID, m, m.statsLocked())
 	}
 }
 

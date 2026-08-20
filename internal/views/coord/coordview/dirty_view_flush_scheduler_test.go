@@ -465,33 +465,39 @@ func TestShardViewManagerDoesNotReuseQueryVersionBeforeDroppedPersist(t *testing
 
 	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	flush()
-	simulateNodeResponse(t, s, testQN1, version1, qviews.QueryViewStateReady)
-	flush()
-	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateReady)
-	flush()
-	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateUp)
-	flush()
-	require.NoError(t, manager.RequestRelease(context.Background()))
-	flush()
-	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateDown)
-	flush()
-	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateDropped)
 
-	persistStarted, releasePersist := catalog.blockNext()
-	simulateNodeResponse(t, s, testQN1, version1, qviews.QueryViewStateDropped)
-	select {
-	case <-persistStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Dropped persist did not start")
-	}
+	// QN lost → v1 Unrecoverable, retained without a successor.
+	onQueryNodeLost := s.findOnQueryNodeLost(testQN1, version1)
+	require.NotNil(t, onQueryNodeLost)
+	onQueryNodeLost(testQN1)
+	flush()
 
+	// Re-prepare the same DV while v1 (1,1,1) is still retained mid-teardown:
+	// the manager must not reuse QueryVersion (1,1,1).
 	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	flush()
 	manager.mu.Lock()
 	_, oldViewRetained := manager.views[version1]
 	_, newViewCreated := manager.views[testVersion(1, 1, 2)]
 	manager.mu.Unlock()
 	assert.True(t, oldViewRetained)
 	assert.True(t, newViewCreated)
+
+	// v1's Dropped persist is pending: it must stay retained until the persist
+	// completes, and only then be removed.
+	persistStarted, releasePersist := catalog.blockNext()
+	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateDropped)
+	flush()
+	simulateNodeResponse(t, s, testQN1, version1, qviews.QueryViewStateDropped)
+	select {
+	case <-persistStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dropped persist did not start")
+	}
+	manager.mu.Lock()
+	_, oldViewRetained = manager.views[version1]
+	manager.mu.Unlock()
+	assert.True(t, oldViewRetained)
 
 	releasePersist()
 	flush()
