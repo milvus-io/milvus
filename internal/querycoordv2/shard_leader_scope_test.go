@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // scopedServer builds a healthy Server over the shard-leader fixture. The
@@ -147,6 +148,13 @@ func TestGetShardLeadersStrictScopeRefusesAnUnheldResourceGroupByName(t *testing
 	})
 	require.NoError(t, err)
 	require.NotEqual(t, int32(0), resp.GetStatus().GetCode())
-	assert.Contains(t, resp.GetStatus().GetReason(), "rg-nowhere",
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrReplicaNotFound,
+		"the refusal must keep the replica-not-found code so callers can branch on it")
+	reason := resp.GetStatus().GetReason()
+	assert.Contains(t, reason, "rg-nowhere",
 		"the refusal must name the resource group, not blame the channel")
+	assert.Contains(t, reason, "collection 100",
+		"the refusal must name the collection as a collection")
+	assert.NotContains(t, reason, "replica=100",
+		"the collection id must not masquerade as a replica id in the message")
 }
