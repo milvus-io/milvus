@@ -47,10 +47,14 @@ func UnaryAccessLogInterceptor(ctx context.Context, req any, rpcInfo *grpc.Unary
 }
 
 // StreamAccessLogInterceptor records access-log entries for streaming RPCs
-// (e.g. CreateReplicateStream, DumpMessages). Streaming calls carry no request
-// object at the interceptor layer, so request-derived fields are left Unknown;
-// the audit-relevant fields (method, user, address, time, status, error) are
-// recorded, giving an audit trail for the security-sensitive WAL data plane.
+// (e.g. CreateReplicateStream, DumpMessages). It runs FIRST in the stream chain
+// (before authentication/RBAC), mirroring the unary path, so denied stream
+// attempts are also audited — the deny events are the most audit-worthy for the
+// security-sensitive WAL data plane. The user field is enriched by
+// StreamUpdateAccessInfoInterceptor after authentication. Streaming calls carry
+// no request object at the interceptor layer, so request-derived fields are left
+// Unknown; the audit-relevant fields (method, address, time, status, error) are
+// recorded.
 func StreamAccessLogInterceptor(srv any, ss grpc.ServerStream, rpcInfo *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	accessInfo := info.NewGrpcStreamAccessInfo(ss.Context(), rpcInfo)
 	newCtx := context.WithValue(ss.Context(), AccessKey{}, accessInfo)
@@ -60,6 +64,17 @@ func StreamAccessLogInterceptor(srv any, ss grpc.ServerStream, rpcInfo *grpc.Str
 	accessInfo.SetResult(nil, err)
 	_globalL.Write(accessInfo)
 	return err
+}
+
+// StreamUpdateAccessInfoInterceptor enriches the stream access info with the
+// authenticated user after authentication has run, mirroring
+// UnaryUpdateAccessInfoInterceptor. It is a no-op when the stream was rejected
+// before authentication (no access info was created by the chain).
+func StreamUpdateAccessInfoInterceptor(srv any, ss grpc.ServerStream, rpcInfo *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if accessInfo, ok := ss.Context().Value(AccessKey{}).(*info.GrpcStreamAccessInfo); ok {
+		accessInfo.UpdateCtx(ss.Context())
+	}
+	return handler(srv, ss)
 }
 
 func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {

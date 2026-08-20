@@ -41,20 +41,26 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 }
 
 // streamMethodRateTypes maps a streaming RPC's full method name to the cluster
-// rate-limit bucket it is charged against. CreateReplicateStream (writes into
-// the WAL) and DumpMessages (streams raw WAL out) are cluster-scoped data-plane
-// operations, so they are checked against the cluster-level collection bucket.
+// rate-limit bucket charged at stream establishment. CreateReplicateStream
+// (writes into the WAL) and DumpMessages (streams raw WAL out) are cluster-scoped
+// data-plane operations, so a stream open is charged once against the
+// cluster-level DDLCollection bucket.
 var streamMethodRateTypes = map[string]internalpb.RateType{
 	milvuspb.MilvusService_CreateReplicateStream_FullMethodName: internalpb.RateType_DDLCollection,
 	milvuspb.MilvusService_DumpMessages_FullMethodName:          internalpb.RateType_DDLCollection,
 }
 
 // RateLimitStreamInterceptor returns a new stream server interceptor that
-// performs cluster-level rate limiting at stream establishment. Streaming RPCs
-// carry no request object at the interceptor layer, so the check is made against
-// the cluster bucket (InvalidDBID) — consistent with how cluster-scoped unary
-// operations (e.g. snapshot ops) are charged. This ensures the WAL data plane is
-// throttled like the unary data path.
+// performs a rate-limit check at stream establishment. Streaming RPCs carry no
+// request object at the interceptor layer and flow arbitrary data after the
+// stream opens, so this is an ESTABLISHMENT GATE only: it throttles how many
+// concurrent WAL data-plane streams can be opened (charged once against the
+// cluster bucket, InvalidDBID), it does NOT throttle the per-message data flow
+// inside an open stream the way the unary path throttles per request. It also
+// shares the DDLCollection bucket with cluster DDL operations, so a configured
+// DDLCollection limit gates stream opens alongside CreateCollection/DropCollection.
+// Per-message flow throttling for these streams would require a dedicated rate
+// type and is left as a follow-up.
 func RateLimitStreamInterceptor(limiter types.Limiter) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		rt, ok := streamMethodRateTypes[info.FullMethod]

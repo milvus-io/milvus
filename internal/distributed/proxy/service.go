@@ -426,10 +426,11 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 // (#52387), so the chain is covered by a dedicated test.
 func newStreamInterceptorOption(getMetaCache func() proxy.Cache, limiter types.Limiter) grpc.ServerOption {
 	return grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+		accesslog.StreamAccessLogInterceptor,
 		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
+		accesslog.StreamUpdateAccessInfoInterceptor,
 		proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
 		proxy.RateLimitStreamInterceptor(limiter),
-		accesslog.StreamAccessLogInterceptor,
 		mlog.StreamServerInterceptor(typeutil.ProxyRole),
 	))
 }

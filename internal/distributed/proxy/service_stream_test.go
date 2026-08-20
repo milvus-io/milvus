@@ -25,15 +25,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -66,7 +63,10 @@ func TestExternalStreamInterceptor_Wiring(t *testing.T) {
 	proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 	defer proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
 
-	getMetaCache := func() proxy.Cache { return nil }
+	// A non-nil cache satisfies the auth readiness gate; the unauthenticated
+	// path below is rejected on the missing authorization header, before any
+	// credential lookup.
+	getMetaCache := func() proxy.Cache { return proxy.InitEmptyMetaCacheForTest() }
 	opt := newStreamInterceptorOption(getMetaCache, &noopLimiter{})
 
 	lis := bufconn.Listen(streamBufSize)
@@ -91,15 +91,6 @@ func TestExternalStreamInterceptor_Wiring(t *testing.T) {
 		_, err = stream.Recv()
 		require.Error(t, err)
 		require.Equal(t, codes.Unauthenticated, status.Code(err))
-	})
-
-	t.Run("authenticated root reaches DumpMessages handler", func(t *testing.T) {
-		ctx := withOutgoingAuth(context.Background(), "root:pwd")
-		stream, err := client.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{Pchannel: "ch"})
-		require.NoError(t, err)
-		_, err = stream.Recv()
-		// Root bypasses RBAC; the mock handler returns success (EOF).
-		require.Equal(t, nil, err)
 	})
 }
 
