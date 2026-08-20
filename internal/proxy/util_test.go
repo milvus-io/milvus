@@ -1148,11 +1148,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() {
-		globalMetaCache = oldMetaCache
-	})
+	metaCache := InitEmptyMetaCacheForTest()
 	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	t.Cleanup(func() {
 		paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
@@ -1161,7 +1157,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 		util.HeaderAuthorize,
 		encodedToken,
 	))
-	_, err = AuthenticationInterceptor(ctx)
+	_, err = AuthenticationInterceptorWithMetaCache(func() Cache { return metaCache })(ctx)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 	assert.NotContains(t, err.Error(), encodedToken)
