@@ -327,10 +327,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		// would accept unauthenticated/unauthorized streaming calls on the
 		// client port. The order mirrors the unary chain: first authenticate
 		// (resolve the user into ctx), then enforce authorization on that user.
-		streamServerOption = grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
-			proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
-		))
+		streamServerOption = newStreamInterceptorOption(getMetaCache, limiter)
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
 		streamServerOption = grpc.EmptyServerOption{}
@@ -419,6 +416,22 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return
 	}
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
+}
+
+// newStreamInterceptorOption builds the security-critical stream interceptor
+// chain for the external gRPC server: authentication, RBAC (fail-closed),
+// cluster-level rate limiting, access logging, and mlog context enrichment.
+// It is extracted so the wiring is testable independently of the full Server
+// lifecycle — a regression here would silently reopen the stream auth bypass
+// (#52387), so the chain is covered by a dedicated test.
+func newStreamInterceptorOption(getMetaCache func() proxy.Cache, limiter types.Limiter) grpc.ServerOption {
+	return grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
+		proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
+		proxy.RateLimitStreamInterceptor(limiter),
+		accesslog.StreamAccessLogInterceptor,
+		mlog.StreamServerInterceptor(typeutil.ProxyRole),
+	))
 }
 
 func (s *Server) startInternalGrpc(errChan chan error) {
