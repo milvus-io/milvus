@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <any>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -80,11 +81,13 @@ struct BaseEventData {
     Timestamp end_timestamp;
     std::shared_ptr<PayloadReader> payload_reader;
     BaseEventData() = default;
-    explicit BaseEventData(BinlogReaderPtr reader,
-                           int event_length,
-                           DataType data_type,
-                           bool nullable,
-                           bool is_field_data = true);
+    explicit BaseEventData(
+        BinlogReaderPtr reader,
+        int event_length,
+        DataType data_type,
+        bool nullable,
+        bool is_field_data = true,
+        std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
     std::vector<uint8_t>
     Serialize();

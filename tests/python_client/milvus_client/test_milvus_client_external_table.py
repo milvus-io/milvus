@@ -2957,7 +2957,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
     def test_milvus_client_external_table_drop_function_rejected(self, minio_env, external_prefix):
         """
         target: test external table drop function rejected
-        method: call drop_collection_function on an external collection
+        method: call drop_function_field on an external collection
         expected: function schema mutation is rejected for external collections
         """
         client = self._client()
@@ -2967,7 +2967,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             ct.err_code: 1100,
             ct.err_msg: "alter collection schema operation is not supported for external collection",
         }
-        self.drop_collection_function(
+        self.drop_function_field(
             client,
             coll,
             "bm25_func",

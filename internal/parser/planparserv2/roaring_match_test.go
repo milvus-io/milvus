@@ -17,18 +17,21 @@
 package planparserv2
 
 import (
+	"bytes"
 	"math"
 	"math/rand"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
+	clientroaring "github.com/milvus-io/milvus/client/v3/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -37,18 +40,32 @@ import (
 )
 
 func roaringBytesTemplate(t *testing.T, members ...int64) (*schemapb.TemplateValue, []byte) {
-	blob, err := roaringfilter.Build(members)
+	blob, err := clientroaring.Build(members)
 	require.NoError(t, err)
 	return bytesTemplate(blob), blob
 }
 
-func requireRoaringFilterExpr(t *testing.T, expr *planpb.Expr) *roaringfilter.Filter {
+// requireRoaringFilterExpr asserts the node shape and returns the materialized
+// blob decoded. It runs the blob through the proxy validator first, so a test
+// asserting on membership also asserts the plan carries something the proxy
+// would have accepted.
+func requireRoaringFilterExpr(t *testing.T, expr *planpb.Expr) *roaring64.Bitmap {
 	rfe := expr.GetRoaringFilterExpr()
 	require.NotNil(t, rfe, "expected a RoaringFilterExpr node, got: %s", expr.String())
 	require.NotNil(t, rfe.GetColumnInfo())
-	filter, err := roaringfilter.Parse(rfe.GetBitmapBlob())
+	blob := rfe.GetBitmapBlob()
+	_, err := serverroaring.Validate(blob)
 	require.NoError(t, err)
-	return filter
+	bitmap := roaring64.New()
+	_, err = bitmap.ReadFrom(bytes.NewReader(blob[serverroaring.HeaderSize:]))
+	require.NoError(t, err)
+	return bitmap
+}
+
+// containsSigned probes the bitmap with the normative mapping: sign-extend to
+// int64, keep the two's-complement bits as the uint64 key.
+func containsSigned(bitmap *roaring64.Bitmap, member int64) bool {
+	return bitmap.Contains(uint64(member))
 }
 
 func TestExpr_RoaringMatch(t *testing.T) {
@@ -60,11 +77,11 @@ func TestExpr_RoaringMatch(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			expr, err := ParseExpr(helper, "roaring_match("+field+", {ids})", values)
 			require.NoError(t, err)
-			filter := requireRoaringFilterExpr(t, expr)
+			bitmap := requireRoaringFilterExpr(t, expr)
 			assert.Equal(t, blob, expr.GetRoaringFilterExpr().GetBitmapBlob())
-			assert.True(t, filter.ContainsInt64(-42))
-			assert.True(t, filter.ContainsInt64(7))
-			assert.False(t, filter.ContainsInt64(8))
+			assert.True(t, containsSigned(bitmap, -42))
+			assert.True(t, containsSigned(bitmap, 7))
+			assert.False(t, containsSigned(bitmap, 8))
 		})
 	}
 
@@ -247,7 +264,7 @@ func TestRedactPlanForLogRedactsRoaringMembershipBlobs(t *testing.T) {
 }
 
 func TestFillRoaringMatchExpressionValueRejectsMalformedCall(t *testing.T) {
-	blob, err := roaringfilter.Build([]int64{1, 2, 3})
+	blob, err := clientroaring.Build([]int64{1, 2, 3})
 	require.NoError(t, err)
 	templateValues := map[string]*planpb.GenericValue{
 		"ids": {Val: &planpb.GenericValue_BytesVal{BytesVal: blob}},
@@ -366,15 +383,9 @@ func TestRoaringMatchRepeatedFilters(t *testing.T) {
 	require.Equal(t, blob, expr.GetBinaryExpr().GetRight().GetRoaringFilterExpr().GetBitmapBlob())
 }
 
-func roaringPlanSizeTestExpr(blob []byte) *planpb.Expr {
-	return &planpb.Expr{Expr: &planpb.Expr_RoaringFilterExpr{
-		RoaringFilterExpr: &planpb.RoaringFilterExpr{BitmapBlob: blob},
-	}}
-}
-
 // TestPlanContainsRoaringFilter pins the accounting predicate that charges a
-// roaring plan against the shared membership-filter plan budget. A miss here would let a
-// bitmap blob skip the budget entirely.
+// roaring plan against the shared membership-filter plan budget, across every
+// PlanNode variant and in scorer filters.
 func TestPlanContainsRoaringFilter(t *testing.T) {
 	helper := newTestSchemaHelper(t)
 	tv, blob := roaringBytesTemplate(t, 1, 2, 3)
@@ -412,79 +423,198 @@ func TestPlanContainsRoaringFilter(t *testing.T) {
 	require.True(t, PlanContainsMembershipFilter(scorerPlan))
 }
 
-// TestClientAndServerRoaringBuildAgree pins the two copies of the MRB1 codec
-// together. client/v3/roaringfilter is what SDK users build with;
-// pkg/v3/util/roaringfilter is what the proxy validates with. They are separate
-// packages because the plan parser is compiled into a c-shared library that
-// must not depend on the standalone client module, so nothing but a test can
-// catch them drifting — and a drift here means blobs a client can build and the
-// proxy will reject, or worse, accept differently.
+// TestClientBuiltBlobsPassProxyValidation pins the two halves of the MRB1 codec
+// together: client/v3/roaringfilter is the only builder, pkg/v3/util/roaringfilter
+// is the only Go validator, and they are separate packages because the plan
+// parser is compiled into a c-shared library that must not depend on the
+// standalone client module. Nothing but a test can catch them drifting, and a
+// drift means blobs an SDK can build and the proxy rejects.
 //
 // This test is the only place in the tree that imports both.
-func TestClientAndServerRoaringBuildAgree(t *testing.T) {
-	require.Equal(t, roaringfilter.MaxHighContainerCount, serverroaring.MaxHighContainerCount)
-	require.Equal(t, roaringfilter.MaxEstimatedDecodedBytes, serverroaring.MaxEstimatedDecodedBytes)
-	require.Equal(t, roaringfilter.EstimatedHighContainerOverheadBytes,
+func TestClientBuiltBlobsPassProxyValidation(t *testing.T) {
+	require.Equal(t, clientroaring.Magic, serverroaring.Magic)
+	require.Equal(t, clientroaring.Version, serverroaring.Version)
+	require.Equal(t, clientroaring.FormatPortableRoaring64, serverroaring.FormatPortableRoaring64)
+	require.Equal(t, clientroaring.HeaderSize, serverroaring.HeaderSize)
+	require.Equal(t, clientroaring.MaxBodyBytes, serverroaring.MaxBodyBytes)
+	require.Equal(t, clientroaring.MaxHighContainerCount, serverroaring.MaxHighContainerCount)
+	require.Equal(t, clientroaring.MaxEstimatedDecodedBytes, serverroaring.MaxEstimatedDecodedBytes)
+	require.Equal(t, clientroaring.EstimatedHighContainerOverheadBytes,
 		serverroaring.EstimatedHighContainerOverheadBytes)
-	require.Equal(t, roaringfilter.EstimatedLowContainerOverheadBytes,
+	require.Equal(t, clientroaring.EstimatedLowContainerOverheadBytes,
 		serverroaring.EstimatedLowContainerOverheadBytes)
 
-	rng := rand.New(rand.NewSource(20260728))
-	shapes := map[string]func(n int) []int64{
-		"contiguous": func(n int) []int64 {
+	shapes := map[string]func(rng *rand.Rand, n int) []int64{
+		"contiguous": func(rng *rand.Rand, n int) []int64 {
 			s := make([]int64, n)
 			for i := range s {
 				s[i] = int64(i)
 			}
 			return s
 		},
-		"descending": func(n int) []int64 {
+		"descending": func(rng *rand.Rand, n int) []int64 {
 			s := make([]int64, n)
 			for i := range s {
 				s[i] = int64(n - i)
 			}
 			return s
 		},
-		"negative": func(n int) []int64 {
+		"negative": func(rng *rand.Rand, n int) []int64 {
 			s := make([]int64, n)
 			for i := range s {
 				s[i] = int64(-i - 1)
 			}
 			return s
 		},
-		"int32 shuffled": func(n int) []int64 {
+		"int32 shuffled": func(rng *rand.Rand, n int) []int64 {
 			s := make([]int64, n)
 			for i := range s {
 				s[i] = int64(rng.Uint32())
 			}
 			return s
 		},
-		"int64 shuffled": func(n int) []int64 {
+		"int64 shuffled": func(rng *rand.Rand, n int) []int64 {
 			s := make([]int64, n)
 			for i := range s {
 				s[i] = int64(rng.Uint64())
 			}
 			return s
 		},
-		"boundaries": func(n int) []int64 {
+		"boundaries": func(rng *rand.Rand, n int) []int64 {
 			return []int64{0, -1, 1, math.MaxInt64, math.MinInt64, math.MaxInt32, math.MinInt32, -1 << 40, 1 << 40}
 		},
+		// The shapes above only ever produce array and run containers, and their
+		// run-cookie children stay under the offset-table threshold, so without
+		// this one the bitmap-container and offset-table branches of the
+		// validator would be reached by fixture bytes only -- never by bytes an
+		// SDK actually built. Mirrors TestBuildPortableContainerEncodings.
+		"container encodings": func(rng *rand.Rand, n int) []int64 {
+			members := make([]int64, 0, 5200)
+			for value := int64(0); value < 1000; value++ {
+				members = append(members, value) // run container
+			}
+			for value := int64(0); value < 4097; value++ {
+				members = append(members, (1<<16)+value*2) // bitmap container
+			}
+			for key := int64(2); key <= 4; key++ {
+				members = append(members, (key<<16)+1) // pushes past the offset threshold
+			}
+			return append(members, (1<<32)+7) // second high-32 key
+		},
 	}
-	for name, gen := range shapes {
-		for _, n := range []int{0, 1, 2, 1000, 50_000} {
-			members := gen(n)
-			clientBlob, err := roaringfilter.Build(members)
-			require.NoErrorf(t, err, "%s n=%d", name, n)
-			serverBlob, err := serverroaring.Build(members)
-			require.NoErrorf(t, err, "%s n=%d", name, n)
-			require.Equalf(t, clientBlob, serverBlob,
-				"client and server MRB1 builders diverged for %s n=%d", name, n)
+	// Sorted names, and a freshly seeded rng for every member set: map iteration
+	// order is randomized, so a single shared rng would make the fixed seed pin
+	// nothing and a CI failure would not reproduce on a re-run. The cost is that
+	// the smaller shuffled sets are prefixes of the larger ones rather than
+	// independent draws, which is a fair trade for reproducibility.
+	names := make([]string, 0, len(shapes))
+	for name := range shapes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 
-			// And each side must accept the other's bytes.
-			_, err = serverroaring.Parse(clientBlob)
-			require.NoErrorf(t, err, "server rejected a client blob: %s n=%d", name, n)
-			_, err = roaringfilter.Parse(serverBlob)
-			require.NoErrorf(t, err, "client rejected a server blob: %s n=%d", name, n)
+	// The fixed-set shapes exist to reach specific validator branches, so pin
+	// what they must encode to. "container encodings" is a copy of the set in
+	// pkg/util/roaringfilter (nothing can share it across the module boundary);
+	// these counts are what make it reach the bitmap-container and run-cookie
+	// offset-table branches, so an edit that drifts them fails here rather than
+	// quietly stopping the coverage.
+	//
+	// The container counts alone are not enough: swapping the 4097 for 4096
+	// keeps high=2/low=6 and produces a 4096-entry array container, which is
+	// 8192 bytes -- exactly a bitmap container's size -- so the shape and the
+	// body length both survive. The member count is what separates them, and it
+	// is the same number the other two copies assert about their own sets, so an
+	// edit to any one of them fails in its own package. None of this proves the
+	// three copies are equal; pkg/util/roaringfilter is the one that classifies
+	// the containers directly.
+	fixedShapes := map[string]struct {
+		high, low, cardinality uint64
+	}{
+		"container encodings": {high: 2, low: 6, cardinality: 5101},
+	}
+
+	pinned := 0
+	for _, name := range names {
+		gen := shapes[name]
+		sizes := []int{0, 1, 2, 1000, 50_000}
+		if len(gen(rand.New(rand.NewSource(20260728)), 0)) != 0 {
+			// A shape that ignores n has one fixed member set; running it once
+			// per size would repeat the same case five times.
+			sizes = []int{0}
+		}
+		for _, n := range sizes {
+			members := gen(rand.New(rand.NewSource(20260728)), n)
+			blob, err := clientroaring.Build(members)
+			require.NoErrorf(t, err, "%s n=%d", name, n)
+
+			summary, err := serverroaring.Validate(blob)
+			require.NoErrorf(t, err, "proxy rejected a client blob: %s n=%d", name, n)
+
+			// The validator's structural scan must agree with what the builder
+			// actually encoded, not merely accept the bytes.
+			distinct := roaring64.New()
+			for _, member := range members {
+				distinct.Add(uint64(member))
+			}
+			require.Equalf(t, distinct.GetCardinality(), summary.Cardinality,
+				"declared cardinality diverged for %s n=%d", name, n)
+
+			// The container counts are the admission inputs: the SDK derives
+			// them from the member slice to pre-reject against
+			// MaxHighContainerCount and MaxEstimatedDecodedBytes, and the
+			// validator recomputes them from the wire. Recompute a third time
+			// from the key set so neither side is graded against itself.
+			high, low := map[uint32]struct{}{}, map[uint64]struct{}{}
+			for iter := distinct.Iterator(); iter.HasNext(); {
+				key := iter.Next()
+				high[uint32(key>>32)] = struct{}{}
+				low[key>>16] = struct{}{}
+			}
+			require.Equalf(t, uint64(len(high)), summary.HighContainerCount,
+				"high-container count diverged for %s n=%d", name, n)
+			require.Equalf(t, uint64(len(low)), summary.LowContainerCount,
+				"low-container count diverged for %s n=%d", name, n)
+
+			// The decoded-memory estimate is duplicated across the module and
+			// language boundaries, so pin the proxy's copy against the constants
+			// it is built from. The SDK's copy is pinned the same way inside its
+			// own module (TestDecodedEstimateFormula) -- an unexported function
+			// cannot be reached from here, and exporting one so a test in another
+			// module could read it would add public SDK surface for a test, which
+			// is the thing this change is removing.
+			wantEstimate := summary.BodyBytes +
+				summary.HighContainerCount*serverroaring.EstimatedHighContainerOverheadBytes +
+				summary.LowContainerCount*serverroaring.EstimatedLowContainerOverheadBytes
+			require.Equalf(t, wantEstimate, summary.EstimatedDecodedBytes,
+				"decoded-size estimate diverged for %s n=%d", name, n)
+			if want, isPinned := fixedShapes[name]; isPinned {
+				pinned++
+				require.Equalf(t, want.high, summary.HighContainerCount,
+					"%s no longer has the container shape it exists for", name)
+				require.Equalf(t, want.low, summary.LowContainerCount,
+					"%s no longer has the container shape it exists for", name)
+				require.Equalf(t, want.cardinality, summary.Cardinality,
+					"%s no longer has the member count it exists for: one value fewer "+
+						"in the dense block encodes as an array rather than the bitmap "+
+						"container this shape reaches, without changing the container "+
+						"counts or the body length", name)
+			}
+
+			decoded := roaring64.New()
+			consumed, err := decoded.ReadFrom(bytes.NewReader(blob[serverroaring.HeaderSize:]))
+			require.NoErrorf(t, err, "%s n=%d", name, n)
+			require.Equalf(t, int64(summary.BodyBytes), consumed, "%s n=%d", name, n)
+			require.Truef(t, decoded.Equals(distinct),
+				"decoded membership diverged for %s n=%d", name, n)
 		}
 	}
+
+	// Without this, renaming or deleting a pinned shape makes the lookup miss and
+	// takes the digest and container-shape assertions with it, silently, while
+	// `go test` prints ok -- the failure mode the rest of this change exists to
+	// remove. Each fixed-set shape runs exactly once, so the counts must match.
+	require.Len(t, fixedShapes, pinned,
+		"a shape named in fixedShapes no longer exists; renaming one must not "+
+			"quietly drop its pin")
 }
