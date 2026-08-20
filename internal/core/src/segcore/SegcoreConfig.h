@@ -240,6 +240,7 @@ class SegcoreConfig {
     get_take_for_output_result_count_limit() const {
         return take_for_output_result_count_limit_.load(
             std::memory_order_relaxed);
+    }
 
     void
     set_evictable_defaults(bool scalar_field,
