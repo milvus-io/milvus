@@ -23,12 +23,14 @@ knowhere	internal/core/src/exec/operator/RescoresNode.cpp
 knowhere	internal/core/src/exec/operator/Utils.h
 knowhere	internal/core/src/exec/QueryContext.h
 knowhere	internal/core/src/indexbuilder/index_c.cpp
+knowhere	internal/core/src/indexbuilder/VecIndexCreator.cpp
 knowhere	internal/core/src/index/IndexFactory.cpp
 knowhere	internal/core/src/index/Utils.cpp
 knowhere	internal/core/src/index/Utils.h
 knowhere	internal/core/src/index/VectorDiskIndex.cpp
 knowhere	internal/core/src/index/VectorDiskIndex.h
 knowhere	internal/core/src/index/VectorIndex.h
+knowhere	internal/core/src/index/VectorIndexValidDataUtils.h
 knowhere	internal/core/src/index/VectorMemIndex.cpp
 knowhere	internal/core/src/index/VectorMemIndex.h
 knowhere	internal/core/src/mmap/ChunkData.h
@@ -44,6 +46,7 @@ knowhere	internal/core/src/query/SearchOnGrowing.cpp
 knowhere	internal/core/src/query/SearchOnIndex.cpp
 knowhere	internal/core/src/query/SearchOnSealed.cpp
 knowhere	internal/core/src/query/SubSearchResult.h
+knowhere	internal/core/src/query/Utils.h
 knowhere	internal/core/src/segcore/check_vec_index_c.cpp
 knowhere	internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
 knowhere	internal/core/src/segcore/ChunkedSegmentSealedImpl.h
@@ -57,6 +60,7 @@ knowhere	internal/core/src/segcore/load_index_c.cpp
 knowhere	internal/core/src/segcore/metrics_c.cpp
 knowhere	internal/core/src/segcore/reduce/Reduce.cpp
 knowhere	internal/core/src/segcore/SegcoreConfig.h
+knowhere	internal/core/src/segcore/segcore_init_c.cpp
 knowhere	internal/core/src/segcore/segment_c.cpp
 knowhere	internal/core/src/segcore/SegmentGrowingImpl.cpp
 knowhere	internal/core/src/segcore/SegmentInterface.h
