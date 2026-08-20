@@ -2,11 +2,11 @@ package coordview
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
