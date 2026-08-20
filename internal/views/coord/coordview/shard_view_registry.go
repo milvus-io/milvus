@@ -239,6 +239,12 @@ func (r *ShardViewRegistry) ShardIDs() []qviews.ShardID {
 // RegisterStatsObserver registers an observer for future per-shard stats
 // updates. The current snapshot is not replayed; callers that need recovery
 // state should read Snapshot explicitly.
+//
+// Precondition: the observer MUST be a lightweight, non-blocking operation.
+// Publications originate from the shard manager while its lock is held (the
+// registry releases only its own lock before fan-out, so the manager lock is
+// still held during the callback), so the observer must not call back into a
+// manager or the registry (deadlock), perform metadata I/O, or block.
 func (r *ShardViewRegistry) RegisterStatsObserver(observer func(qviews.ShardID, *ShardStats)) {
 	if observer == nil {
 		return

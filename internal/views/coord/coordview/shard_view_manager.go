@@ -100,6 +100,12 @@ func newShardViewManager(
 	return m
 }
 
+// SetStatsObserver installs the per-shard stats observer.
+//
+// Precondition: the observer MUST be a lightweight, non-blocking operation.
+// It is invoked synchronously while the manager lock (m.mu) is held, so it
+// must not call back into this manager or the registry (deadlock), perform
+// metadata I/O, or block on other goroutines.
 func (m *ShardViewManager) SetStatsObserver(observer func(qviews.ShardID, *ShardViewManager, *ShardStats)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
