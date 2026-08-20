@@ -97,6 +97,13 @@ type externalCollectionRefreshChecker struct {
 	// checker tick and on the eager per-task path (processJobByID), which are
 	// different goroutines. Lost on restart, which merely restarts the wait
 	// clock.
+	//
+	// An entry is released only AFTER the job's terminal transition has
+	// PERSISTED (releaseIndexGate at every persist site, with GC as the
+	// backstop) - never when the debt merely clears. Releasing early opens a
+	// window where a transiently failed finish write leaves the job
+	// InProgress with no gate clock, and the next timeout check falls back
+	// to the ingest clock and fails a completed, fully indexed refresh.
 	indexGateMu      sync.Mutex
 	indexGateEntered map[int64]time.Time
 }
@@ -226,6 +233,16 @@ func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 	c.processJob(job)
 }
 
+// releaseIndexGate drops a job's index-gate clock. Called only after a
+// terminal state (Finished/Failed) has PERSISTED, plus GC as the backstop;
+// releasing before the persist would hand a transiently failed finish write
+// back to the ingest clock (see the indexGateEntered field comment).
+func (c *externalCollectionRefreshChecker) releaseIndexGate(jobID int64) {
+	c.indexGateMu.Lock()
+	delete(c.indexGateEntered, jobID)
+	c.indexGateMu.Unlock()
+}
+
 // aggregateJobState updates job state based on its tasks.
 func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.ExternalCollectionRefreshJob) {
 	// Skip if job is already in terminal state
@@ -248,8 +265,11 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 				mlog.Err(updateErr))
 			return
 		}
-		if applied && c.onJobFailed != nil {
-			c.onJobFailed(job.GetJobId())
+		if applied {
+			c.releaseIndexGate(job.GetJobId())
+			if c.onJobFailed != nil {
+				c.onJobFailed(job.GetJobId())
+			}
 		}
 		return
 	}
@@ -310,9 +330,11 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			}
 			return
 		}
-		c.indexGateMu.Lock()
-		delete(c.indexGateEntered, job.GetJobId())
-		c.indexGateMu.Unlock()
+		// Debt cleared: fall through to the Finished transition WITHOUT
+		// releasing the gate clock. The release happens only after the
+		// transition persists; if the finish write fails transiently, the
+		// retained clock keeps the next timeout check on the gate's clock
+		// instead of the (likely exhausted) ingest clock.
 	}
 
 	// Update job if state or progress changed
@@ -354,8 +376,13 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 				mlog.Warn(c.ctx, "failed to apply external collection refresh result",
 					mlog.FieldJobID(job.GetJobId()),
 					mlog.Err(err))
-				if applied && c.onJobFailed != nil {
-					c.onJobFailed(job.GetJobId())
+				// applied here means the pre-apply failure was persisted as a
+				// Failed terminal state - release the gate clock with it.
+				if applied {
+					c.releaseIndexGate(job.GetJobId())
+					if c.onJobFailed != nil {
+						c.onJobFailed(job.GetJobId())
+					}
 				}
 				return
 			}
@@ -364,6 +391,8 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 				// and owns the one-time segment apply / callback side effects.
 				return
 			}
+			// Terminal state persisted: the gate clock (if any) may go now.
+			c.releaseIndexGate(job.GetJobId())
 
 			if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
 				mlog.Warn(c.ctx, "failed to clear external collection refresh task results",
@@ -389,6 +418,12 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			// per-job side effects here; the path that actually persisted
 			// the transition owns the follow-up (onJobFinished or onJobFailed).
 			return
+		}
+
+		// Terminal state persisted through the plain path (Finished without
+		// an applyJobInfo hook, or Failed): release the gate clock with it.
+		if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
+			c.releaseIndexGate(job.GetJobId())
 		}
 
 		// Fire onJobFailed right after the state transition persists, so
@@ -515,6 +550,8 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 				mlog.FieldJobID(job.GetJobId()))
 			return
 		}
+		// Failed state persisted: release the gate clock with it.
+		c.releaseIndexGate(job.GetJobId())
 
 		// Also mark all active tasks as failed
 		tasks, err := c.refreshMeta.GetCommittedTasksByJobID(job.GetJobId())
@@ -577,12 +614,10 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			return
 		}
 		mlog.Info(c.ctx, "external collection job removed", mlog.FieldJobID(job.GetJobId()))
-		// Release the index-gate clock too: a job that failed (rather than
-		// passed the gate) never reaches the delete in aggregateJobState, and
-		// without this the entry would outlive the job.
-		c.indexGateMu.Lock()
-		delete(c.indexGateEntered, job.GetJobId())
-		c.indexGateMu.Unlock()
+		// Backstop release of the index-gate clock: every terminal persist
+		// site releases it already, but a terminal state written by a path
+		// that bypasses the checker would otherwise leak the entry.
+		c.releaseIndexGate(job.GetJobId())
 		// Release per-job bookkeeping in the manager (notifiedJobs dedup map)
 		// so it stays bounded across DataCoord lifetime.
 		if c.onJobGC != nil {
