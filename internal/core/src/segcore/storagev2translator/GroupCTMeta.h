@@ -40,7 +40,8 @@ EstimateGroupChunkLoadingUsage(
     const std::vector<int64_t>& cell_sizes,
     const std::vector<milvus::cachinglayer::cid_t>& cids,
     bool use_mmap,
-    size_t queue_capacity) {
+    size_t worker_count,
+    int64_t batch_target_bytes) {
     if (cids.empty()) {
         return {};
     }
@@ -54,23 +55,29 @@ EstimateGroupChunkLoadingUsage(
 
     const auto loaded_size =
         std::accumulate(requested_sizes.begin(), requested_sizes.end(), 0LL);
-    // All requested cells remain loaded. Use the bounded result channel as the
-    // pipeline's temporary-loading concurrency limit, and choose the largest
-    // cells for a conservative peak estimate.
-    const auto concurrent_cells =
-        std::min(requested_sizes.size(), std::max<size_t>(queue_capacity, 1));
+    // All requested cells remain loaded. A load-pool worker owns at most one
+    // batch at a time, including both Arrow reads and finalization. Bound the
+    // temporary memory by one batch target per worker, while allowing a single
+    // oversized cell to exceed the target.
+    const auto concurrent_batches =
+        std::min(requested_sizes.size(), std::max<size_t>(worker_count, 1));
     std::partial_sort(requested_sizes.begin(),
-                      requested_sizes.begin() + concurrent_cells,
+                      requested_sizes.begin() + concurrent_batches,
                       requested_sizes.end(),
                       std::greater<int64_t>());
-    const auto temporary_size =
-        std::accumulate(requested_sizes.begin(),
-                        requested_sizes.begin() + concurrent_cells,
-                        0LL);
+    const auto batch_target = std::max<int64_t>(batch_target_bytes, 1);
+    int64_t temporary_size = 0;
+    for (size_t i = 0; i < concurrent_batches; ++i) {
+        const auto batch_size = std::max(batch_target, requested_sizes[i]);
+        if (batch_size >= loaded_size - temporary_size) {
+            temporary_size = loaded_size;
+            break;
+        }
+        temporary_size += batch_size;
+    }
 
     if (use_mmap) {
-        return {{0, loaded_size},
-                {2 * temporary_size, loaded_size + temporary_size}};
+        return {{0, loaded_size}, {temporary_size, loaded_size}};
     }
     return {{loaded_size, 0}, {loaded_size + temporary_size, 0}};
 }
