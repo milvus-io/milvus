@@ -130,6 +130,12 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
 	map[int64]stats.SegmentBelongs,
 ) {
+	if recoverInfos == nil || recoverInfos.WritePathRecovery == nil {
+		// An absent write-path snapshot means there is no write-path state to
+		// restore; degrade to an empty allocation set instead of panicking on
+		// a nil dereference at the recovery boundary.
+		return make(map[PartitionUniqueKey]map[int64]*segmentAllocManager), make(map[int64]stats.SegmentBelongs)
+	}
 	return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections)
 }
 
@@ -166,6 +172,9 @@ func newSegmentAllocManagersFromWritePathRecovery(
 
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
 func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*CollectionInfo {
+	if recoverInfos == nil || recoverInfos.WritePathRecovery == nil {
+		return make(map[int64]*CollectionInfo)
+	}
 	return newCollectionInfosFromWritePathRecovery(recoverInfos.WritePathRecovery.VChannels)
 }
 

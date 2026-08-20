@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"go.uber.org/atomic"
 )
 
 func NewSegmentViewFromMeta(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
@@ -56,7 +57,8 @@ func NewSegmentView(
 		pending:                     pending,
 		flushPolicy:                 flushPolicy,
 		schema:                      schema,
-		finalCommitDone:             finalCommitDoneFromMeta(meta),
+		finalCommitDone:             *atomic.NewBool(finalCommitDoneFromMeta(meta)),
+		createSegmentTimeTick:       meta.GetStat().GetCreateSegmentTimeTick(),
 		commitL1Limiter:             config.commitL1Limiter,
 		owner:                       config.owner,
 	}
@@ -151,9 +153,15 @@ type SegmentView struct {
 	pendingFinalCommit segmentTask
 	// finalCommitDone is process-local task state. Recovery restores it from the
 	// persisted L1 commit marker; object durability alone does not prove that the
-	// coordinator accepted the final commit.
-	finalCommitDone bool
-	pending         writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
+	// coordinator accepted the final commit. It is published atomically so the
+	// vchannel module can scan views without taking the per-view lock on the WAL
+	// observation hot path.
+	finalCommitDone atomic.Bool
+	// createSegmentTimeTick mirrors meta.Stat.CreateSegmentTimeTick and is
+	// immutable after construction; the module reads it lock-free when
+	// recomputing the L1 materialization bound.
+	createSegmentTimeTick uint64
+	pending               writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
 	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks,
 	// ordered by toTimeTick. Chunks stay here until the segment checkpoint
 	// advances over them.
@@ -241,7 +249,7 @@ func (s *SegmentView) Flush(
 	if !closed || flushTimeTick <= s.durableMeta.GetCheckpointTimeTick() {
 		return metaChanged
 	}
-	if s.finalCommitDone {
+	if s.finalCommitDone.Load() {
 		return metaChanged
 	}
 	s.retainDataHandleLocked(flushTimeTick, owned.Clone())
@@ -357,7 +365,7 @@ func (info *SegmentView) hasPendingDataWorkLocked() bool {
 		return true
 	}
 	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-		if !info.finalCommitDone || info.durableMeta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+		if !info.finalCommitDone.Load() || info.durableMeta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
 			return true
 		}
 	}
@@ -380,14 +388,16 @@ func (info *SegmentView) CreateTimeTick() uint64 {
 
 // L1MaterializationBlockerTimeTick reports the inclusive TransformLog
 // materialization frontier imposed by an L1 segment whose final commit has not
-// completed yet.
+// completed yet. Lock-free by design: finalCommitDone is published atomically
+// and createSegmentTimeTick is immutable, so the vchannel module may scan every
+// view on the WAL observation hot path without acquiring the per-view lock.
+// The level is not re-checked here because the vchannel recovery module only
+// tracks L1 segments.
 func (info *SegmentView) L1MaterializationBlockerTimeTick() (uint64, bool) {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	if info.finalCommitDone {
+	if info.finalCommitDone.Load() {
 		return 0, false
 	}
-	return info.meta.GetStat().GetCreateSegmentTimeTick(), true
+	return info.createSegmentTimeTick, true
 }
 
 func (info *SegmentView) markCheckpointPersistedLocked(timetick uint64) {
@@ -406,6 +416,9 @@ func (info *SegmentView) MarkSnapshotPersisted(snapshot *streamingpb.SegmentAssi
 	info.dirty = !proto.Equal(info.durableMeta, snapshot)
 }
 
+// NotifyDataUpdated reports data changes to the owning module. Must not be
+// called with the view's lock held: the module takes its own lock and may
+// re-enter the view.
 func (info *SegmentView) NotifyDataUpdated() {
 	info.owner.SegmentDataUpdated(info.ID(), info)
 }
@@ -437,7 +450,7 @@ func (info *SegmentView) HasReadyTombstoneFinalize() bool {
 func (info *SegmentView) EnsureFinalCommit() bool {
 	info.mu.Lock()
 	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED ||
-		info.finalCommitDone {
+		info.finalCommitDone.Load() {
 		info.mu.Unlock()
 		return true
 	}
@@ -495,7 +508,7 @@ func (info *SegmentView) canReplayInsertLocked(timetick uint64) bool {
 		// ever cover pending data again, so accept nothing: a late out-of-order
 		// insert would otherwise sit in the buffer forever (handle never
 		// released, checkpoint stalled) or be released without being persisted.
-		return !info.finalCommitDone && timetick <= info.meta.GetCheckpointTimeTick()
+		return !info.finalCommitDone.Load() && timetick <= info.meta.GetCheckpointTimeTick()
 	default:
 		return false
 	}
@@ -629,7 +642,7 @@ func (s *SegmentView) tombstoneFinalizeReadyLocked() bool {
 	tombstoneTimeTick := s.meta.GetCheckpointTimeTick()
 	return s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
 		tombstoneTimeTick > 0 &&
-		s.finalCommitDone &&
+		s.finalCommitDone.Load() &&
 		s.durableMeta.GetCheckpointTimeTick() >= tombstoneTimeTick
 }
 

@@ -313,8 +313,22 @@ func (t *TransformLog) materialize(ctx context.Context, opt materializeOption) (
 	}
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.commitMaterializeLocked(work), nil
+	result := t.commitMaterializeLocked(work)
+	var nextTask *transformMaterializeTask
+	if work.TargetTimeTick < targetTimeTick && t.runtime.Scheduler != nil {
+		// The batch was capped: schedule the continuation while the retained
+		// request is still pending. The current task has not completed yet, so
+		// it becomes a predecessor of the continuation and the batches stay
+		// strictly sequential.
+		if target := t.materializeTargetLocked(); target > t.meta.GetMaterializedTimeTick() {
+			nextTask = t.newMaterializeTaskLocked(target)
+		}
+	}
+	t.mu.Unlock()
+	if nextTask != nil {
+		t.runtime.Scheduler.Submit(nextTask)
+	}
+	return result, nil
 }
 
 func (t *TransformLog) truncate(opt truncateOption) truncateResult {
@@ -455,6 +469,16 @@ func (t *TransformLog) hasFlushWork() bool {
 func (t *TransformLog) shouldMaterialize(ctx context.Context) bool {
 	t.mu.Lock()
 	targetTimeTick := t.meta.GetCheckpointTimeTick()
+	if t.materializeUpperBound < targetTimeTick {
+		targetTimeTick = t.materializeUpperBound
+	}
+	// A frontier at or below the already-materialized tick means the L1 bound
+	// is currently blocking all progress; scanning the backlog would be a
+	// guaranteed no-op on every flush task, so report false without walking it.
+	if targetTimeTick <= t.meta.GetMaterializedTimeTick() {
+		t.mu.Unlock()
+		return false
+	}
 	t.mu.Unlock()
 	rows, bytes, err := t.pendingMaterializeStats(ctx, targetTimeTick)
 	if err != nil {
@@ -583,7 +607,16 @@ func (t *TransformLog) prepareMaterialize(ctx context.Context, targetTimeTick ui
 	work := materializeWork{TargetTimeTick: targetTimeTick}
 	t.mu.Lock()
 	cursor := t.meta.GetMaterializedTimeTick()
+	maxRows := t.materializeMaxRows
+	maxBytes := t.materializeMaxBytes
 	t.mu.Unlock()
+	if maxRows == 0 {
+		maxRows = defaultMaterializeMaxRows
+	}
+	if maxBytes == 0 {
+		maxBytes = defaultMaterializeMaxBytes
+	}
+	lastIncluded := cursor
 	for {
 		entry, ok, err := t.nextEntryAfter(ctx, cursor)
 		if err != nil {
@@ -596,9 +629,19 @@ func (t *TransformLog) prepareMaterialize(ctx context.Context, targetTimeTick ui
 		if !isTransformDeleteEntry(entry) {
 			continue
 		}
+		rows := transformLogEntryRows(entry)
+		bytes := uint64(proto.Size(entry))
+		if work.Rows > 0 && (work.Rows+rows > maxRows || work.Bytes+bytes > maxBytes) {
+			// Cap the batch below this entry. The retained materialize request
+			// continues from the capped frontier in a follow-up task, so a
+			// whole backlog is never built into a single Materialize call.
+			work.TargetTimeTick = lastIncluded
+			return work, nil
+		}
 		work.Entries = append(work.Entries, entry)
-		work.Rows += transformLogEntryRows(entry)
-		work.Bytes += uint64(proto.Size(entry))
+		work.Rows += rows
+		work.Bytes += bytes
+		lastIncluded = cursor
 	}
 }
 

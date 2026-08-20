@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -16,6 +17,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// materializeBoundStallWarnInterval is how long the L1 materialization bound
+// may stay unchanged (blocked by an uncommitted L1 segment) before the module
+// starts warning with the blocking segment's identity.
+const materializeBoundStallWarnInterval = 1 * time.Minute
 
 // ModuleConfig contains the initial state and dependencies for one vchannel
 // recovery module.
@@ -45,6 +51,11 @@ type VChannelRecoveryModule struct {
 	// mu serializes WAL observation with snapshot state transitions. In
 	// particular, segments may grow when CreateSegment is observed while the
 	// recovery background task is collecting dirty snapshots.
+	//
+	// Lock order is m.mu -> SegmentView.mu -> TransformLog.mu. Never take a
+	// SegmentView lock (directly or via a Locked helper) while holding another
+	// module's mu, and never call SegmentView.NotifyDataUpdated with a view
+	// lock held (it re-enters the module).
 	mu       sync.Mutex
 	pchannel string
 	vchannel string
@@ -60,6 +71,14 @@ type VChannelRecoveryModule struct {
 	pendingCleanup  map[int64]*segment.SegmentView
 
 	transformLog *transformlog.TransformLog
+
+	// materializeUpperBound mirrors the last bound published to the transform
+	// log, so refreshTransformMaterializeUpperBoundLocked can skip unchanged
+	// publishes on the WAL observation hot path. The stall bookkeeping drives
+	// the stuck-L1 warning.
+	materializeUpperBound     uint64
+	materializeBoundChangedAt time.Time
+	materializeBoundWarnedAt  time.Time
 
 	segmentLifecycle  segment.Lifecycle
 	segmentPackWriter segment.PackWriter
@@ -85,14 +104,16 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
 	}
 	module := &VChannelRecoveryModule{
-		pchannel:          config.PChannel,
-		vchannel:          config.VChannel,
-		runtime:           config.Runtime,
-		logger:            config.Logger,
-		segments:          make(map[int64]*segment.SegmentView),
-		segmentLifecycle:  config.SegmentLifecycle,
-		segmentPackWriter: config.SegmentPackWriter,
-		onCleanup:         config.OnCleanup,
+		pchannel:                  config.PChannel,
+		vchannel:                  config.VChannel,
+		runtime:                   config.Runtime,
+		logger:                    config.Logger,
+		segments:                  make(map[int64]*segment.SegmentView),
+		segmentLifecycle:          config.SegmentLifecycle,
+		segmentPackWriter:         config.SegmentPackWriter,
+		onCleanup:                 config.OnCleanup,
+		materializeUpperBound:     math.MaxUint64,
+		materializeBoundChangedAt: time.Now(),
 	}
 	if config.VChannelMeta != nil {
 		if adoptVChannelMeta {
@@ -128,7 +149,9 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		Materializer:        config.TransformLogMaterializer,
 		Runtime:             config.Runtime,
 	})
+	module.mu.Lock()
 	module.refreshTransformMaterializeUpperBoundLocked()
+	module.mu.Unlock()
 	return module, nil
 }
 
@@ -543,12 +566,48 @@ func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, v
 
 func (m *VChannelRecoveryModule) refreshTransformMaterializeUpperBoundLocked() {
 	upperBound := uint64(math.MaxUint64)
+	blockerSegmentID := int64(0)
 	for _, view := range m.segments {
+		// Lock-free: L1MaterializationBlockerTimeTick reads an immutable tick
+		// and an atomically published commit flag, so the scan stays cheap on
+		// the WAL observation hot path.
 		if timetick, blocks := view.L1MaterializationBlockerTimeTick(); blocks && timetick < upperBound {
 			upperBound = timetick
+			blockerSegmentID = view.ID()
 		}
 	}
+	now := time.Now()
+	if upperBound == m.materializeUpperBound {
+		// Bound unchanged: skip the publish. Warn if the same uncommitted L1
+		// segment has pinned materialization (and therefore drop cleanup) for
+		// a while — previously this stalled silently.
+		m.warnIfMaterializeBoundStalledLocked(now, blockerSegmentID)
+		return
+	}
+	m.materializeUpperBound = upperBound
+	m.materializeBoundChangedAt = now
+	m.materializeBoundWarnedAt = time.Time{}
 	m.transformLog.SetMaterializeUpperBound(upperBound)
+}
+
+// warnIfMaterializeBoundStalledLocked emits at most one warning per interval
+// while the materialization bound stays pinned by an uncommitted L1 segment.
+func (m *VChannelRecoveryModule) warnIfMaterializeBoundStalledLocked(now time.Time, blockerSegmentID int64) {
+	if blockerSegmentID == 0 || m.materializeBoundChangedAt.IsZero() ||
+		now.Sub(m.materializeBoundChangedAt) < materializeBoundStallWarnInterval {
+		return
+	}
+	if !m.materializeBoundWarnedAt.IsZero() && now.Sub(m.materializeBoundWarnedAt) < materializeBoundStallWarnInterval {
+		return
+	}
+	m.materializeBoundWarnedAt = now
+	mlog.Warn(context.TODO(), "L1 materialization bound stalled by uncommitted segment",
+		mlog.String("pchannel", m.pchannel),
+		mlog.String("vchannel", m.vchannel),
+		mlog.Int64("segmentID", blockerSegmentID),
+		mlog.Uint64("boundTimeTick", m.materializeUpperBound),
+		mlog.Duration("stalledFor", now.Sub(m.materializeBoundChangedAt)),
+	)
 }
 
 func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view *segment.SegmentView) bool {

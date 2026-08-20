@@ -55,7 +55,7 @@ func TestFinalCommitPersistsStorageOwnedCompletionMarker(t *testing.T) {
 	require.True(t, view.HasDirty())
 
 	recovered := NewSegmentViewFromMeta(view.AssignmentMeta(), nil)
-	require.True(t, recovered.finalCommitDone)
+	require.True(t, recovered.finalCommitDone.Load())
 	require.True(t, recovered.EnsureFinalCommit())
 }
 
@@ -80,11 +80,11 @@ func TestFinalCommitRejectsReplayInsert(t *testing.T) {
 
 	view.mu.Lock()
 	defer view.mu.Unlock()
-	assert.False(t, view.finalCommitDone)
+	assert.False(t, view.finalCommitDone.Load())
 	assert.True(t, view.canReplayInsertLocked(5), "pre-commit re-delivery within flushed window should be accepted")
 	assert.False(t, view.canReplayInsertLocked(11), "data beyond the flushed window should never be accepted")
 
-	view.finalCommitDone = true
+	view.finalCommitDone.Store(true)
 	assert.False(t, view.canReplayInsertLocked(5), "post-commit nothing may be accepted into the buffer")
 }
 
@@ -109,7 +109,7 @@ func TestFinalCommitFailureKeepsMessageDurabilityPending(t *testing.T) {
 	err := task.Execute(context.Background())
 	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
 	require.False(t, view.AssignmentMeta().GetL1CommitDone())
-	require.False(t, view.finalCommitDone)
+	require.False(t, view.finalCommitDone.Load())
 }
 
 func TestBuildCommitL1SegmentRequestPreservesDurableStorageState(t *testing.T) {

@@ -82,7 +82,7 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 	return t.execute(ctx, func(ctx context.Context) error {
 		segment := t.segment
 		segment.mu.Lock()
-		finalCommitDone := segment.finalCommitDone
+		finalCommitDone := segment.finalCommitDone.Load()
 		segment.mu.Unlock()
 		if finalCommitDone {
 			return nil
@@ -104,7 +104,7 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 
 		segment.mu.Lock()
 		handles := segment.markPendingDataDurableLocked(t.timetick)
-		segment.finalCommitDone = true
+		segment.finalCommitDone.Store(true)
 		segment.meta.L1CommitDone = true
 		segment.durableMeta.State = segment.meta.State
 		segment.durableMeta.L1CommitDone = true
@@ -164,7 +164,7 @@ func (s *SegmentView) newRecoveredCommitL1SegmentTaskLocked(timetick uint64) seg
 }
 
 func (s *SegmentView) canScheduleFinalCommitLocked() bool {
-	return !s.finalCommitDone && (s.pendingFinalCommit == nil || s.pendingFinalCommit.Done())
+	return !s.finalCommitDone.Load() && (s.pendingFinalCommit == nil || s.pendingFinalCommit.Done())
 }
 
 func (s *SegmentView) newCommitL1SegmentTaskWithFlushTimeTickLocked(timetick, flushTimeTick uint64) segmentTask {

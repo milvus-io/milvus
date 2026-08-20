@@ -130,11 +130,19 @@ func (t *TransformLog) RequestMaterializeThrough(timetick uint64) bool {
 
 // SetMaterializeUpperBound updates the VChannel-wide L1 safety frontier and
 // retries any previously requested materialization that can now make progress.
+// Publishing the same bound again is a no-op: the bound only changes on segment
+// create / cleanup / final-commit transitions, and skipping unchanged publishes
+// keeps the WAL observation hot path from rescheduling materialize tasks on
+// every accepted insert.
 func (t *TransformLog) SetMaterializeUpperBound(timetick uint64) bool {
 	if t == nil {
 		return false
 	}
 	t.mu.Lock()
+	if timetick == t.materializeUpperBound {
+		t.mu.Unlock()
+		return false
+	}
 	t.materializeUpperBound = timetick
 	if t.runtime.Scheduler == nil {
 		t.mu.Unlock()
@@ -149,14 +157,29 @@ func (t *TransformLog) SetMaterializeUpperBound(timetick uint64) bool {
 	return true
 }
 
-func (t *TransformLog) newRequestedMaterializeTaskLocked() *transformMaterializeTask {
+// materializeTargetLocked returns the largest materialization frontier that is
+// both requested and allowed by the current L1 upper bound.
+func (t *TransformLog) materializeTargetLocked() uint64 {
 	target := t.requestedMaterializeTimeTick
 	if target > t.materializeUpperBound {
 		target = t.materializeUpperBound
 	}
+	return target
+}
+
+func (t *TransformLog) newRequestedMaterializeTaskLocked() *transformMaterializeTask {
+	target := t.materializeTargetLocked()
 	if target <= t.meta.GetMaterializedTimeTick() || t.pendingMaterializeTargetLocked() >= target {
 		return nil
 	}
+	return t.newMaterializeTaskLocked(target)
+}
+
+// newMaterializeTaskLocked appends a materialize task for target without the
+// pending-target dedup of newRequestedMaterializeTaskLocked. It continues a
+// capped batch: the current task is still pending (and becomes a predecessor of
+// the new one), so execution order keeps the batches sequential.
+func (t *TransformLog) newMaterializeTaskLocked(target uint64) *transformMaterializeTask {
 	task := &transformMaterializeTask{
 		transformTaskBase: transformTaskBase{
 			log:          t,
@@ -236,6 +259,7 @@ func compactTransformFlushTasks(tasks []*transformFlushTask) []*transformFlushTa
 		}
 		pending = append(pending, task)
 	}
+	clear(pending[len(pending):])
 	return pending
 }
 
@@ -247,6 +271,7 @@ func compactTransformMaterializeTasks(tasks []*transformMaterializeTask) []*tran
 		}
 		pending = append(pending, task)
 	}
+	clear(pending[len(pending):])
 	return pending
 }
 

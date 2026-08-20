@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,4 +71,102 @@ func newMaterializationBlockerMeta(segmentID int64, createTimeTick uint64, l1Com
 			CreateSegmentTimeTick: createTimeTick,
 		},
 	}
+}
+
+func TestVChannelMaterializeBoundAdvancesAfterSegmentCleanup(t *testing.T) {
+	ctx := context.Background()
+	scheduler := &recordingVChannelScheduler{}
+	segmentMetas := map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: newMaterializationBlockerMeta(1, 100, false),
+		2: newMaterializationBlockerMeta(2, 200, false),
+	}
+	module, err := NewModule(ModuleConfig{
+		PChannel:         "p1",
+		VChannel:         "v1",
+		Segments:         segmentMetas,
+		TransformLogMeta: &streamingpb.VChannelTransformLogMeta{CheckpointTimeTick: 300},
+		Runtime:          moduleapi.Runtime{Scheduler: scheduler},
+	})
+	require.NoError(t, err)
+
+	require.True(t, module.transformLog.RequestMaterializeThrough(300))
+	require.Len(t, scheduler.tasks, 1)
+	require.NoError(t, scheduler.tasks[0].Execute(ctx))
+	assert.Equal(t, uint64(100), module.transformLog.SnapshotMeta().GetMaterializedTimeTick())
+
+	// Segment 1 is cleaned up (snapshot persisted and completeSegmentCleanup
+	// invoked); its create tick must stop pinning the bound.
+	first := module.segments[1]
+	module.mu.Lock()
+	if module.pendingCleanup == nil {
+		module.pendingCleanup = make(map[int64]*segment.SegmentView)
+	}
+	module.pendingCleanup[1] = first
+	module.mu.Unlock()
+	module.completeSegmentCleanup(1, first)
+	require.Equal(t, uint64(200), module.materializeUpperBound)
+
+	// The advance releases a new materialize task up to the next blocker.
+	require.Len(t, scheduler.tasks, 2)
+	require.NoError(t, scheduler.tasks[1].Execute(ctx))
+	assert.Equal(t, uint64(200), module.transformLog.SnapshotMeta().GetMaterializedTimeTick())
+}
+
+func TestVChannelMaterializeBoundRetractsOnNewBlocker(t *testing.T) {
+	segmentMetas := map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: newMaterializationBlockerMeta(1, 100, false),
+	}
+	module, err := NewModule(ModuleConfig{
+		PChannel:         "p1",
+		VChannel:         "v1",
+		Segments:         segmentMetas,
+		TransformLogMeta: &streamingpb.VChannelTransformLogMeta{CheckpointTimeTick: 300},
+		Runtime:          moduleapi.Runtime{},
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), module.materializeUpperBound)
+
+	// A new L1 segment with an earlier create tick retracts the bound.
+	blocker := segment.NewSegmentViewFromMetaWithConfig(
+		newMaterializationBlockerMeta(3, 50, false),
+		nil,
+		module.segmentViewConfig(),
+	)
+	module.mu.Lock()
+	module.segments[3] = blocker
+	module.mu.Unlock()
+	module.SegmentDataUpdated(3, blocker)
+	require.Equal(t, uint64(50), module.materializeUpperBound)
+}
+
+func TestVChannelConcurrentDataUpdateAndBlockerScan(t *testing.T) {
+	segmentMetas := map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: newMaterializationBlockerMeta(1, 100, false),
+		2: newMaterializationBlockerMeta(2, 200, false),
+	}
+	module, err := NewModule(ModuleConfig{
+		PChannel:         "p1",
+		VChannel:         "v1",
+		Segments:         segmentMetas,
+		TransformLogMeta: &streamingpb.VChannelTransformLogMeta{CheckpointTimeTick: 300},
+		Runtime:          moduleapi.Runtime{},
+	})
+	require.NoError(t, err)
+	view := module.segments[1]
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			module.SegmentDataUpdated(1, view)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			view.L1MaterializationBlockerTimeTick()
+		}
+	}()
+	wg.Wait()
 }
