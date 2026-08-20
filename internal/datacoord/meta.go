@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -1748,6 +1749,74 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 	}
 }
 
+// errIndexManifestPublicationStale is an in-process control-flow signal. It
+// never crosses an RPC boundary: indexBuildTask catches it and schedules a
+// rebuild against the segment's current manifest.
+var errIndexManifestPublicationStale = errors.New("index manifest publication is stale")
+
+// UpdateManifestPathForIndex advances to the exact manifest reference returned
+// by index publication.
+// Index publication must use the returned path rather than only its revision:
+// a concurrent compaction can replace the manifest base path, and combining the
+// old base with an index transaction's revision would point at unrelated data.
+func UpdateManifestPathForIndex(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			return modPack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if segment.GetManifestPath() == "" || manifestPath == "" {
+			return modPack.fail(merr.WrapErrServiceInternalMsg("cannot update index manifest for segment %d without both manifest paths", segmentID))
+		}
+
+		currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse current manifest path"))
+		}
+		incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse index result manifest path"))
+		}
+		if incomingBase != currentBase {
+			return modPack.fail(merr.Wrapf(errIndexManifestPublicationStale,
+				"index manifest base path mismatch for segment %d: current %s, incoming %s", segmentID, currentBase, incomingBase))
+		}
+		if incomingVersion != currentVersion+1 {
+			return modPack.fail(merr.Wrapf(errIndexManifestPublicationStale,
+				"index manifest revision does not immediately follow the source revision for segment %d: current %d, incoming %d", segmentID, currentVersion, incomingVersion))
+		}
+
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
+// UpdateManifestPathForGC advances a segment to the exact next revision
+// returned by the source-based drop-index transaction.
+func UpdateManifestPathForGC(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			return modPack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse current manifest path"))
+		}
+		incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse GC manifest path"))
+		}
+		if incomingBase != currentBase || incomingVersion != currentVersion+1 {
+			return modPack.fail(merr.Wrapf(errIndexManifestPublicationStale,
+				"GC manifest revision is stale for segment %d: current=%s incoming=%s",
+				segmentID, segment.GetManifestPath(), manifestPath))
+		}
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -1974,10 +2043,11 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
 	increments := lo.Values(updatePack.increments)
 
-	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
+	persistErr := m.catalog.AlterSegments(ctx, segments, increments...)
+	if persistErr != nil {
 		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
-			mlog.Err(err))
-		return err
+			mlog.Err(persistErr))
+		return persistErr
 	}
 	// Apply metric mutation after a successful meta update.
 	updatePack.metricMutation.commit()
@@ -1986,6 +2056,55 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 		m.segments.SetSegment(id, s)
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
+	return nil
+}
+
+// FinishIndexTaskWithManifest atomically publishes an index task result and
+// the manifest revision that contains the published index. Both metadata
+// records are staged in one catalog transaction; in-memory state is changed
+// only after that transaction succeeds.
+func (m *meta) FinishIndexTaskWithManifest(ctx context.Context, taskInfo *workerpb.IndexTaskInfo, segmentID int64, manifestPath string) error {
+	if taskInfo == nil {
+		return merr.WrapErrServiceInternalMsg("nil index task result")
+	}
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	seg := m.segments.GetSegment(segmentID)
+	if seg == nil {
+		return merr.WrapErrSegmentNotFound(segmentID)
+	}
+	segUpdated := seg.Clone()
+	pack := &updateSegmentPack{meta: m, segments: map[int64]*SegmentInfo{segmentID: segUpdated}, increments: make(map[int64]metastore.BinlogsIncrement), metricMutation: &segMetricMutation{stateChange: make(segmentMetricStateChange), deferSegmentLabelChange: true}}
+	if !UpdateManifestPathForIndex(segmentID, manifestPath)(pack) {
+		if pack.err != nil {
+			return pack.err
+		}
+		return nil
+	}
+
+	m.indexMeta.keyLock.Lock(taskInfo.GetBuildID())
+	defer m.indexMeta.keyLock.Unlock(taskInfo.GetBuildID())
+	segIdx, ok := m.indexMeta.segmentBuildInfo.Get(taskInfo.GetBuildID())
+	if !ok {
+		// The task can be deleted while its worker result is in flight. Keep the
+		// legacy FinishTask behavior: do not publish an artifact for a task that
+		// no longer exists, but let the scheduler retire the local task.
+		mlog.Warn(ctx, "index task no longer exists while publishing manifest",
+			mlog.Int64("buildID", taskInfo.GetBuildID()),
+			mlog.Int64("segmentID", segmentID))
+		return nil
+	}
+	updatedIdx, oldSize, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
+	if err != nil {
+		return err
+	}
+	if err := m.catalog.Update(ctx, metastore.UpdateSegment(segUpdated.SegmentInfo), metastore.UpdateSegmentIndex(updatedIdx)); err != nil {
+		return err
+	}
+	m.segments.SetSegment(segmentID, segUpdated)
+	m.indexMeta.updateSegmentIndex(updatedIdx)
+	m.indexMeta.recordFinishedTask(segIdx, updatedIdx, oldSize, taskInfo)
 	return nil
 }
 

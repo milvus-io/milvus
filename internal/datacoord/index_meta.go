@@ -298,6 +298,35 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 	return updateFunc(model.CloneSegmentIndex(segIdx))
 }
 
+// buildFinishedSegmentIndex creates the replacement metadata for a worker
+// completion result without persisting or mutating the in-memory record.
+// Callers that need to compose this update with another metadata write can
+// stage the returned value in the same catalog transaction.
+func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, uint64, error) {
+	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
+		return nil, 0, err
+	}
+	if actualPathVersion < segIdx.IndexStorePathVersion {
+		mlog.Info(m.ctx, "worker downgraded index store path version",
+			mlog.Int64("buildID", taskInfo.GetBuildID()),
+			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
+			mlog.String("actual", actualPathVersion.String()))
+	}
+
+	updated := model.CloneSegmentIndex(segIdx)
+	updated.IndexState = taskInfo.GetState()
+	updated.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
+	updated.FailReason = taskInfo.GetFailReason()
+	updated.IndexSerializedSize = taskInfo.GetSerializedSize()
+	updated.IndexMemSize = taskInfo.GetMemSize()
+	updated.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
+	updated.FinishedUTCTime = uint64(time.Now().Unix())
+	updated.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+	updated.IndexStorePathVersion = actualPathVersion
+	return updated, segIdx.IndexSerializedSize, nil
+}
+
 func (m *indexMeta) updateIndexTasksMetrics() {
 	taskMetrics := make(map[indexpb.JobState]int)
 	taskMetrics[indexpb.JobState_JobStateNone] = 0
@@ -1063,55 +1092,33 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		return nil
 	}
 
-	actualPathVersion := taskInfo.GetIndexStorePathVersion()
-	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
+	updated, oldSize, err := m.buildFinishedSegmentIndex(segIdx, taskInfo)
+	if err != nil {
 		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
 			mlog.Int64("buildID", taskInfo.GetBuildID()),
 			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
-			mlog.String("actual", actualPathVersion.String()),
+			mlog.String("actual", taskInfo.GetIndexStorePathVersion().String()),
 			mlog.Err(err))
 		return err
 	}
-	if actualPathVersion < segIdx.IndexStorePathVersion {
-		mlog.Info(m.ctx, "worker downgraded index store path version",
-			mlog.Int64("buildID", taskInfo.GetBuildID()),
-			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
-			mlog.String("actual", actualPathVersion.String()))
-	}
-
-	oldSize := segIdx.IndexSerializedSize
-
-	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IndexState = taskInfo.GetState()
-		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
-		segIdx.FailReason = taskInfo.GetFailReason()
-		segIdx.IndexSerializedSize = taskInfo.GetSerializedSize()
-		segIdx.IndexMemSize = taskInfo.GetMemSize()
-		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
-		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
-		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
-		segIdx.IndexStorePathVersion = actualPathVersion
-		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
-	}
-
-	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+	if err := m.alterSegmentIndexes([]*model.SegmentIndex{updated}); err != nil {
 		return err
 	}
+	m.recordFinishedTask(segIdx, updated, oldSize, taskInfo)
+	return nil
+}
 
+// recordFinishedTask updates process-local observability only. The caller must
+// first persist updated and install it in the in-memory index metadata.
+func (m *indexMeta) recordFinishedTask(old, updated *model.SegmentIndex, oldSize uint64, taskInfo *workerpb.IndexTaskInfo) {
 	mlog.Info(m.ctx, "finish index task success", mlog.Int64("buildID", taskInfo.GetBuildID()),
 		mlog.String("state", taskInfo.GetState().String()), mlog.String("fail reason", taskInfo.GetFailReason()),
-		mlog.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
-	)
-
-	// gauge Add must be serialized vs MarkIndexAsDeleted.
-	newSize := taskInfo.GetSerializedSize()
+		mlog.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()))
 	m.fieldIndexLock.RLock()
-	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
-		float64(newSize)-float64(oldSize))
+	m.addStoredIndexSizeMetric(old.CollectionID, old.IndexID,
+		float64(updated.IndexSerializedSize)-float64(oldSize))
 	m.fieldIndexLock.RUnlock()
-
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
-	return nil
 }
 
 func (m *indexMeta) DeleteTask(buildID int64) error {

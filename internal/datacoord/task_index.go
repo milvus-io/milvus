@@ -150,7 +150,11 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
-	if err := it.meta.indexMeta.FinishTask(result); err != nil {
+	if result.GetState() == commonpb.IndexState_Finished && result.GetManifestPath() != "" {
+		if err := it.meta.FinishIndexTaskWithManifest(it.meta.ctx, result, it.SegmentID, result.GetManifestPath()); err != nil {
+			return merr.Wrap(err, "failed to atomically publish index metadata and manifest")
+		}
+	} else if err := it.meta.indexMeta.FinishTask(result); err != nil {
 		return err
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
@@ -652,7 +656,14 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),
 					mlog.String("failReason", info.GetFailReason()))
-				it.setJobInfo(info)
+				if err := it.setJobInfo(info); err != nil {
+					if errors.Is(err, errIndexManifestPublicationStale) {
+						it.dropAndResetTaskOnWorker(cluster, err.Error())
+						return
+					}
+					log.Warn(ctx, "failed to persist index task result", mlog.Err(err))
+					return
+				}
 			case commonpb.IndexState_Retry, commonpb.IndexState_IndexStateNone:
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),

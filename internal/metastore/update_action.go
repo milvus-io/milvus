@@ -85,6 +85,12 @@ type SegmentEntry struct {
 	AlterEncoding bool
 }
 
+// SegmentIndexEntry targets a single segment index metadata record.
+// The entry carries the complete replacement value for transactional updates.
+type SegmentIndexEntry struct {
+	SegmentIndex *model.SegmentIndex
+}
+
 // ChannelEntry targets a channel's removal tombstone.
 type ChannelEntry struct {
 	Channel string
@@ -153,6 +159,7 @@ type ReplicaKeyEntry struct {
 }
 
 func (SegmentEntry) isEntry()               {}
+func (SegmentIndexEntry) isEntry()          {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
@@ -189,6 +196,12 @@ func AddSegment(seg *datapb.SegmentInfo) UpdateAction {
 // AlterSegments GC-compat behavior is required.
 func UpdateSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg}}
+}
+
+// UpdateSegmentIndex returns an UpdateAction that persists a complete segment
+// index metadata record replacement.
+func UpdateSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
 }
 
 // AlterSegment returns an UpdateAction that rewrites an existing segment's

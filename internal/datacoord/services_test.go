@@ -4801,7 +4801,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
-
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
@@ -4817,16 +4816,21 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 
 		// Mock broadcaster
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
-			BroadcastID: 1,
-			AppendResults: map[string]*types2.AppendResult{
-				"by-dev-rootcoord-dml_0": {
-					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-					LastConfirmedMessageID: rmq.NewRmqID(1),
-				},
-			},
-		}, nil)
+		var captured message.BroadcastMutableMessage
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				captured = msg
+				return &types2.BroadcastAppendResult{
+					BroadcastID: 1,
+					AppendResults: map[string]*types2.AppendResult{
+						"by-dev-rootcoord-dml_0": {
+							MessageID:              rmq.NewRmqID(1),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
+							LastConfirmedMessageID: rmq.NewRmqID(1),
+						},
+					},
+				}, nil
+			})
 		bapi.EXPECT().Close().Return()
 
 		mockBroadcastPatch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -4850,6 +4854,8 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp))
+		body := message.MustAsMutableBatchUpdateManifestMessageV2(captured).MustBody()
+		assert.EqualValues(t, 10, body.GetItems()[0].GetManifestVersion())
 	})
 }
 

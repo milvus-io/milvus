@@ -19,6 +19,8 @@ package index
 import (
 	"context"
 	"fmt"
+	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -418,6 +421,65 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
 
+	manifestPath := ""
+	if it.req.GetStorageVersion() == storage.StorageV3 && it.req.GetManifest() != "" {
+		if serializedSize > math.MaxInt64 || indexStats.GetMemSize() < 0 {
+			return merr.WrapErrServiceInternalMsg("index artifact size cannot be represented in manifest: serialized=%d mem=%d", serializedSize, indexStats.GetMemSize())
+		}
+		indexProperties := common.KeyValuePairs(it.req.GetTypeParams()).ToMap()
+		for key, value := range common.KeyValuePairs(it.req.GetIndexParams()).ToMap() {
+			indexProperties[key] = value
+		}
+		segmentBasePath, _, err := packed.UnmarshalManifestPath(it.req.GetManifest())
+		if err != nil {
+			return merr.WrapErrStorage(err, "failed to parse StorageV3 manifest path for index publication")
+		}
+		if segmentBasePath == "" {
+			return merr.WrapErrServiceInternalMsg("StorageV3 manifest path for index publication has an empty base_path")
+		}
+		indexPrefix := metautil.NewIndexPathBuilder(
+			it.req.GetStorageConfig().GetRootPath(),
+			it.req.GetIndexStorePathVersion(),
+			it.req.GetCollectionID(),
+			it.req.GetPartitionID(),
+			it.req.GetSegmentID(),
+			it.req.GetBuildID(),
+			it.req.GetIndexVersion(),
+		).BuildPrefix()
+		// Manifest Index.path follows the storage layout and is relative to the
+		// segment's _index directory, not the absolute legacy etcd index prefix.
+		manifestIndexPath, err := filepath.Rel(filepath.Join(segmentBasePath, "_index"), indexPrefix)
+		if err != nil {
+			return merr.WrapErrServiceInternalErr(err, "failed to derive relative manifest index path")
+		}
+		manifestPath, err = packed.AddIndexInfoToManifest(it.req.GetManifest(), it.req.GetStorageConfig(), packed.ManifestIndexInfo{
+			ColumnName:                it.req.GetField().GetName(),
+			IndexName:                 it.req.GetIndexName(),
+			IndexType:                 GetIndexType(it.req.GetIndexParams()),
+			Path:                      manifestIndexPath,
+			FieldID:                   it.req.GetFieldID(),
+			IndexID:                   it.req.GetIndexID(),
+			BuildID:                   it.req.GetBuildID(),
+			IndexVersion:              it.req.GetIndexVersion(),
+			NumRows:                   it.req.GetNumRows(),
+			SerializedSize:            int64(serializedSize),
+			MemSize:                   indexStats.GetMemSize(),
+			CurrentIndexVersion:       it.req.GetCurrentIndexVersion(),
+			CurrentScalarIndexVersion: it.req.GetCurrentScalarIndexVersion(),
+			IndexStorePathVersion:     it.req.GetIndexStorePathVersion(),
+			IndexFileKeys:             saveFileKeys,
+			Properties:                indexProperties,
+		})
+		if err != nil {
+			return merr.Wrap(err, "failed to publish index info to manifest")
+		}
+		log.Info(ctx, "published index info to manifest",
+			mlog.String("sourceManifest", it.req.GetManifest()),
+			mlog.String("manifest", manifestPath),
+			mlog.String("indexPrefix", indexPrefix),
+			mlog.String("manifestIndexPath", manifestIndexPath))
+	}
+
 	it.manager.StoreIndexFilesAndStatistic(
 		it.req.GetClusterID(),
 		it.req.GetBuildID(),
@@ -427,6 +489,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		it.req.GetCurrentIndexVersion(),
 		it.req.GetCurrentScalarIndexVersion(),
 		it.req.GetIndexStorePathVersion(),
+		manifestPath,
 	)
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.DataNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
