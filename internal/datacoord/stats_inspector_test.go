@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -239,6 +241,7 @@ func (s *statsInspectorSuite) SetupTest() {
 	gs := task.NewMockGlobalScheduler(s.T())
 	gs.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	gs.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
+	gs.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(0).Maybe()
 	s.scheduler = gs
 
 	s.inspector = newStatsInspector(
@@ -339,20 +342,169 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrSegmentNotFound), "Error should be ErrSegmentNotFound")
 
-	s.mt.statsTaskMeta.tasks.Insert(1001, &indexpb.StatsTask{
-		TaskID:     1001,
-		SegmentID:  10,
-		SubJobType: indexpb.StatsSubJob_Sort,
-	})
-	s.mt.statsTaskMeta.segmentID2Tasks.Insert("10-Sort", &indexpb.StatsTask{
-		TaskID:     1001,
-		SegmentID:  10,
-		SubJobType: indexpb.StatsSubJob_Sort,
+	// Duplicate tasks are skipped before checking the scheduler or allocating a task ID.
+	s.inspector.scheduler = task.NewMockGlobalScheduler(s.T())
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true, nil)
+	s.NoError(err)
+}
+
+func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
+	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
+
+	s.Run("allow at limit", func() {
+		scheduler := task.NewMockGlobalScheduler(s.T())
+		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+		s.inspector.scheduler = scheduler
+
+		err := s.inspector.SubmitStatsTask(20, 20, indexpb.StatsSubJob_TextIndexJob, true, nil)
+		s.NoError(err)
+		s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
 	})
 
-	// Simulate duplicate task error
-	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true, nil)
-	s.NoError(err) // Duplicate tasks are handled as success
+	s.Run("skip over limit", func() {
+		scheduler := task.NewMockGlobalScheduler(s.T())
+		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit + 1).Once()
+		s.inspector.scheduler = scheduler
+		// A strict allocator asserts the admission check runs before task ID allocation.
+		s.inspector.allocator = allocator.NewMockAllocator(s.T())
+
+		err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_TextIndexJob, true, nil)
+		s.NoError(err)
+		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_TextIndexJob))
+	})
+}
+
+// A segment whose task is already in meta must be dropped by the segment
+// selector, so a repeated tick never reaches SubmitStatsTask at all. Asserting
+// on side effects (no ID allocated, nothing enqueued) would not prove this:
+// SubmitStatsTask's own duplicate guard produces exactly the same side effects,
+// so the assertion has to be on whether SubmitStatsTask is called.
+func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
+	submitted := make([]UniqueID, 0)
+	mockSubmit := mockey.Mock((*statsInspector).SubmitStatsTask).To(
+		func(_ *statsInspector, originSegmentID, _ int64, _ indexpb.StatsSubJob, _ bool, _ []*internalpb.FileResourceInfo) error {
+			submitted = append(submitted, originSegmentID)
+			return nil
+		}).Build()
+	defer mockSubmit.UnPatch()
+
+	// Without a task in meta the segment is a candidate.
+	s.inspector.triggerTextStatsTask()
+	s.Equal([]UniqueID{20}, submitted)
+
+	// Once the task is recorded the selector must drop the segment.
+	s.NoError(s.mt.statsTaskMeta.AddStatsTask(&indexpb.StatsTask{
+		CollectionID: 1,
+		TaskID:       1001,
+		SegmentID:    20,
+		SubJobType:   indexpb.StatsSubJob_TextIndexJob,
+	}))
+	submitted = submitted[:0]
+	s.inspector.triggerTextStatsTask()
+	s.Empty(submitted)
+}
+
+// The sub-jobs share one admission budget, so the trigger that runs first wins
+// it. Consecutive rounds must not give the same sub-job first claim.
+func (s *statsInspectorSuite) TestTriggerStatsTasksAlternatesSubJobOrder() {
+	s.putExternalSegment(220, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/220", 1))
+
+	order := make([]indexpb.StatsSubJob, 0)
+	mockSubmit := mockey.Mock((*statsInspector).SubmitStatsTask).To(
+		func(_ *statsInspector, _, _ int64, subJobType indexpb.StatsSubJob, _ bool, _ []*internalpb.FileResourceInfo) error {
+			order = append(order, subJobType)
+			return nil
+		}).Build()
+	defer mockSubmit.UnPatch()
+
+	// Both sub-jobs have candidates, so the first entry is the one that would
+	// have claimed the budget had it been exhausted.
+	s.inspector.triggerStatsTasks(0)
+	s.Require().NotEmpty(order)
+	s.Equal(indexpb.StatsSubJob_TextIndexJob, order[0])
+	s.Contains(order, indexpb.StatsSubJob_JsonKeyIndexJob)
+
+	order = order[:0]
+	s.inspector.triggerStatsTasks(1)
+	s.Require().NotEmpty(order)
+	s.Equal(indexpb.StatsSubJob_JsonKeyIndexJob, order[0])
+	s.Contains(order, indexpb.StatsSubJob_TextIndexJob)
+}
+
+// jsonShreddingTriggerCount is deprecated, but 0 used to disable JSON key index
+// submission outright and must keep doing so instead of silently turning
+// shredding back on after an upgrade.
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZero() {
+	segmentID := UniqueID(230)
+	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/230", 1))
+
+	// Sanity check: the segment is a candidate while the deprecated key is unset.
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.NoError(s.mt.statsTaskMeta.DropStatsTask(s.ctx,
+		s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob).GetTaskID()))
+
+	Params.Save(Params.DataCoordCfg.JSONStatsTriggerCount.Key, "0")
+	defer Params.Reset(Params.DataCoordCfg.JSONStatsTriggerCount.Key)
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
+// Every trigger loop must give up as soon as the scheduler is backlogged instead
+// of walking the remaining collections. The call count is what proves it: the
+// text and JSON loops each ask once for the first collection they look at and
+// then return, while the BM25 loop returns before asking because BM25 is not
+// docked yet. Walking on (continue) would ask once per collection instead.
+func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).
+		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(2)
+	s.inspector.scheduler = scheduler
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+
+	s.putExternalSegment(210, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/210", 1))
+
+	s.inspector.triggerTextStatsTask()
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.inspector.triggerBM25StatsTask()
+
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(210, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
+// The loop keeps submitting while the pending count is at the limit and stops on
+// the first segment that would exceed it, mid-collection.
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimit() {
+	Params.Save(Params.DataCoordCfg.StatsTaskPendingLimit.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.StatsTaskPendingLimit.Key)
+
+	segmentIDs := []UniqueID{301, 302, 303, 304}
+	for _, segmentID := range segmentIDs {
+		s.putExternalSegment(segmentID, false, storage.StorageV3,
+			packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", segmentID), 1))
+	}
+
+	pending := 0
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).RunAndReturn(func(taskcommon.Type) int { return pending })
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(_ task.Task) { pending++ }).Return()
+	s.inspector.scheduler = scheduler
+
+	s.inspector.triggerJSONKeyIndexStatsTask()
+
+	// pending 0 -> allowed, 1 -> allowed (== limit), 2 -> skipped (> limit).
+	submitted := 0
+	for _, segmentID := range segmentIDs {
+		if s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob) != nil {
+			submitted++
+		}
+	}
+	s.Equal(2, submitted)
+	s.Equal(2, pending)
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
@@ -389,9 +541,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 	segmentID := UniqueID(201)
 	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/201", 1))
 
-	lastTrigger := time.Now().Add(-time.Hour).Unix()
-	_, triggered := s.inspector.triggerJSONKeyIndexStatsTask(lastTrigger, 0)
-	s.Equal(1, triggered)
+	s.inspector.triggerJSONKeyIndexStatsTask()
 
 	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 	s.NotNil(jsonTask)
@@ -422,9 +572,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 		s.Run(testCase.name, func() {
 			s.putExternalSegment(testCase.segmentID, false, testCase.storageVersion, testCase.manifestPath)
 
-			lastTrigger := time.Now().Add(-time.Hour).Unix()
-			_, triggered := s.inspector.triggerJSONKeyIndexStatsTask(lastTrigger, 0)
-			s.Equal(0, triggered)
+			s.inspector.triggerJSONKeyIndexStatsTask()
 
 			jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(testCase.segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 			s.Nil(jsonTask)

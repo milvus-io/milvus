@@ -315,6 +315,16 @@ func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64, subJobTy
 	return state
 }
 
+// HasStatsTask reports whether a task for (segmentID, subJobType) is recorded in
+// meta, regardless of its state: a Finished or Failed task still counts until GC
+// recycles it, which is exactly the condition under which AddStatsTask would
+// reject a resubmission.
+func (stm *statsTaskMeta) HasStatsTask(segmentID int64, subJobType indexpb.StatsSubJob) bool {
+	secondaryKey := createSecondaryIndexKey(segmentID, subJobType.String())
+	_, exists := stm.segmentID2Tasks.Get(secondaryKey)
+	return exists
+}
+
 func (stm *statsTaskMeta) CanCleanedTasks() []int64 {
 	needCleanedTaskIDs := make([]int64, 0)
 	stm.tasks.Range(func(key UniqueID, value *indexpb.StatsTask) bool {
