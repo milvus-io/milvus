@@ -843,7 +843,7 @@ func placeholderGroupToLogString(placeholderGroup []byte) string {
 		if i > 0 {
 			sb.WriteString(" | ")
 		}
-		sb.WriteString(fmt.Sprintf("[type=%s nq=%d] ", ph.GetType().String(), len(ph.GetValues())))
+		fmt.Fprintf(&sb, "[type=%s nq=%d] ", ph.GetType().String(), len(ph.GetValues()))
 		sb.WriteString(placeholderValueToLogString(ph))
 	}
 	return sb.String()
