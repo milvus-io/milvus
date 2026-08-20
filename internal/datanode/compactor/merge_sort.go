@@ -88,6 +88,9 @@ func mergeSortMultipleSegments(ctx context.Context,
 			reader.Close()
 			return nil, err
 		}
+		// storage.MergeSort requires every writer-schema field to be present.
+		// The materializer backfills all absent non-function fields and computes
+		// missing function outputs before any record reaches the merge.
 		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithStorageConfig(compactionParams.StorageConfig))

@@ -644,7 +644,7 @@ func TestSelectedMaterializedRecordReaderSkipsAllFilteredRecords(t *testing.T) {
 	}, false)
 	_, err = reader.Next()
 	require.Error(t, err)
-	require.True(t, base.closed == false)
+	require.False(t, base.closed)
 	require.NoError(t, reader.Close())
 }
 

@@ -372,7 +372,9 @@ func radixSortByInt64(indices []rowIndex, keys [][]int64) {
 // MergeSort merges rows from rr, which each yield records already sorted by
 // sortedByFieldIDs, into a single sorted stream written through rw in batches
 // of roughly batchSize bytes. Rows for which predicate returns false are
-// skipped; predicate is evaluated exactly once per row.
+// skipped; predicate is evaluated exactly once per row. Every input record
+// must expose every field in schema; schema-evolution callers must materialize
+// missing fields before calling MergeSort.
 //
 // Performance notes (vs. the earlier all-rows-in-the-queue approach):
 //   - The heap holds one entry per reader rather than every in-flight row, so
@@ -474,6 +476,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		return nil
 	}
 
+	// Keep the post-rejection fallback global for the rest of the merge. This is
+	// intentionally conservative: filters are rare after compactor selection,
+	// and not re-entering run lookahead keeps its predicate cache state simple.
 	predicateDropped := false
 	rowKept := func(ri, i int) bool {
 		state := &states[ri]

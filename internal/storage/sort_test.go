@@ -601,9 +601,17 @@ func TestMergeSortPreparedOutputMatchesGenericRecordBuilder(t *testing.T) {
 
 	referenceBuilder := NewRecordBuilder(schema)
 	require.NoError(t, referenceBuilder.Append(rec, 0, rec.Len()))
+	referenceSize := referenceBuilder.GetSize()
 	reference := referenceBuilder.Build()
 	referenceBuilder.Release()
 	defer reference.Release()
+	var forwardedSize uint64
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		size, ok := recordBuilderValueSize(reference.Column(field.GetFieldID()), 0, reference.Len())
+		require.True(t, ok, field.GetName())
+		forwardedSize += size
+	}
+	require.Equal(t, referenceSize, forwardedSize)
 
 	var output Record
 	rw := &MockRecordWriter{writefn: func(out Record) error {
@@ -633,9 +641,17 @@ func TestMergeSortPreparedOutputMatchesGenericForStorageFieldFamilies(t *testing
 
 	referenceBuilder := NewRecordBuilder(schema)
 	require.NoError(t, referenceBuilder.Append(record, 0, record.Len()))
+	referenceSize := referenceBuilder.GetSize()
 	reference := referenceBuilder.Build()
 	referenceBuilder.Release()
 	defer reference.Release()
+	var forwardedSize uint64
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		size, ok := recordBuilderValueSize(reference.Column(field.GetFieldID()), 0, reference.Len())
+		require.True(t, ok, "unsupported size accounting for %s (%s)", field.GetName(), field.GetDataType())
+		forwardedSize += size
+	}
+	require.Equal(t, referenceSize, forwardedSize)
 
 	var output Record
 	writer := &MockRecordWriter{
@@ -657,6 +673,68 @@ func TestMergeSortPreparedOutputMatchesGenericForStorageFieldFamilies(t *testing
 		require.True(t, array.Equal(reference.Column(field.GetFieldID()), output.Column(field.GetFieldID())),
 			"prepared output mismatch for %s (%s)", field.GetName(), field.GetDataType())
 	}
+}
+
+func TestRecordBuilderValueSizeIgnoresNullVariablePayload(t *testing.T) {
+	const field = FieldID(100)
+	cases := []struct {
+		name       string
+		dataType   schemapb.DataType
+		arrowType  arrow.DataType
+		buildArray func(arrow.ArrayData) arrow.Array
+	}{
+		{name: "string", dataType: schemapb.DataType_VarChar, arrowType: arrow.BinaryTypes.String,
+			buildArray: func(data arrow.ArrayData) arrow.Array { return array.NewStringData(data) }},
+		{name: "binary", dataType: schemapb.DataType_JSON, arrowType: arrow.BinaryTypes.Binary,
+			buildArray: func(data arrow.ArrayData) arrow.Array { return array.NewBinaryData(data) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+				FieldID: field, Name: "value", DataType: tc.dataType, Nullable: true,
+			}}}
+			data := array.NewData(tc.arrowType, 3, []*memory.Buffer{
+				memory.NewBufferBytes([]byte{0b00000101}),
+				memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 1, 4, 5})),
+				memory.NewBufferBytes([]byte("abcde")),
+			}, nil, 1, 0)
+			values := tc.buildArray(data)
+			data.Release()
+			record := NewSimpleArrowRecord(array.NewRecord(
+				writerArrowSchema(schema), []arrow.Array{values}, 3), map[FieldID]int{field: 0})
+			values.Release()
+			defer record.Release()
+
+			builder := NewRecordBuilder(schema)
+			defer builder.Release()
+			var prepared preparedRecordAppender
+			require.NoError(t, builder.prepareRecord(record, &prepared))
+			for row := 0; row < record.Len(); row++ {
+				require.NoError(t, builder.appendPreparedRow(&prepared, row))
+			}
+
+			size, ok := recordBuilderValueSize(record.Column(field), 0, record.Len())
+			require.True(t, ok)
+			require.Equal(t, builder.GetSize(), size)
+		})
+	}
+}
+
+func TestMergeSortRejectsMissingSchemaField(t *testing.T) {
+	const keyField = FieldID(100)
+	const missingField = FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: keyField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: missingField, Name: "missing", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	record := mergeSortTestRec(t, map[FieldID][]int64{keyField: {1}}, nil)
+	defer record.Release()
+	writer := &MockRecordWriter{writefn: func(Record) error { return nil }, closefn: func() error { return nil }}
+
+	_, err := MergeSort(1024, schema, []RecordReader{&oneShotRecordReader{rec: record}}, writer,
+		func(Record, int, int) bool { return true }, []int64{keyField})
+	require.ErrorContains(t, err, "invalid source value type")
+	require.ErrorContains(t, err, "field missing")
 }
 
 // Benchmark sort

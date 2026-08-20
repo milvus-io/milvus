@@ -797,8 +797,9 @@ func (b *RecordBuilder) canDirectForwardRecord(rec Record) bool {
 // recordBuilderValueSize returns the same logical payload byte count that
 // appendPreparedRow adds to RecordBuilder.size. Arrow validity and offset
 // buffers are intentionally excluded: batch flush/segment rotation must be
-// identical whether rows are rebuilt or forwarded zero-copy.
-func recordBuilderValueSize(a arrow.Array, start, end int) uint64 {
+// identical whether rows are rebuilt or forwarded zero-copy. The bool is false
+// for an unsupported physical layout so direct forwarding can fail closed.
+func recordBuilderValueSize(a arrow.Array, start, end int) (uint64, bool) {
 	validCount := func() int {
 		if a.NullN() == 0 {
 			return end - start
@@ -813,25 +814,43 @@ func recordBuilderValueSize(a arrow.Array, start, end int) uint64 {
 	}
 	switch values := a.(type) {
 	case *array.Boolean, *array.Int8:
-		return uint64(validCount())
+		return uint64(validCount()), true
 	case *array.Int16:
-		return uint64(validCount() * 2)
+		return uint64(validCount() * 2), true
 	case *array.Int32, *array.Float32:
-		return uint64(validCount() * 4)
+		return uint64(validCount() * 4), true
 	case *array.Int64, *array.Float64:
-		return uint64(validCount() * 8)
+		return uint64(validCount() * 8), true
 	case *array.String:
-		offsets := values.ValueOffsets()
-		return uint64(offsets[end] - offsets[start])
+		if values.NullN() == 0 {
+			offsets := values.ValueOffsets()
+			return uint64(offsets[end] - offsets[start]), true
+		}
+		var size uint64
+		for i := start; i < end; i++ {
+			if values.IsValid(i) {
+				size += uint64(len(values.Value(i)))
+			}
+		}
+		return size, true
 	case *array.Binary:
-		offsets := values.ValueOffsets()
-		return uint64(offsets[end] - offsets[start])
+		if values.NullN() == 0 {
+			offsets := values.ValueOffsets()
+			return uint64(offsets[end] - offsets[start]), true
+		}
+		var size uint64
+		for i := start; i < end; i++ {
+			if values.IsValid(i) {
+				size += uint64(len(values.Value(i)))
+			}
+		}
+		return size, true
 	case *array.FixedSizeBinary:
-		return uint64(validCount() * values.DataType().(*arrow.FixedSizeBinaryType).ByteWidth)
+		return uint64(validCount() * values.DataType().(*arrow.FixedSizeBinaryType).ByteWidth), true
 	case *array.List:
 		listValues, ok := values.ListValues().(*array.FixedSizeBinary)
 		if !ok {
-			return 0
+			return 0, false
 		}
 		var size uint64
 		for i := start; i < end; i++ {
@@ -841,9 +860,9 @@ func recordBuilderValueSize(a arrow.Array, start, end int) uint64 {
 			valueStart, valueEnd := values.ValueOffsets(i)
 			size += uint64(valueEnd-valueStart) * uint64(listValues.DataType().(*arrow.FixedSizeBinaryType).ByteWidth)
 		}
-		return size
+		return size, true
 	default:
-		return 0
+		return 0, false
 	}
 }
 
@@ -862,14 +881,22 @@ func (b *RecordBuilder) directForwardRecord(rec Record, start, end int, maxSize 
 	var size uint64
 	for _, field := range b.fields {
 		colIdx := sar.field2Col[field.GetFieldID()]
-		size += recordBuilderValueSize(sar.r.Column(colIdx), start, end)
+		columnSize, ok := recordBuilderValueSize(sar.r.Column(colIdx), start, end)
+		if !ok {
+			return nil, 0, start, false
+		}
+		size += columnSize
 	}
 	if size > maxSize {
 		size = 0
 		for row := start; row < end; row++ {
 			for _, field := range b.fields {
 				colIdx := sar.field2Col[field.GetFieldID()]
-				size += recordBuilderValueSize(sar.r.Column(colIdx), row, row+1)
+				columnSize, ok := recordBuilderValueSize(sar.r.Column(colIdx), row, row+1)
+				if !ok {
+					return nil, 0, start, false
+				}
+				size += columnSize
 			}
 			// RecordBuilder flushes after the first row that reaches the limit.
 			// End the forwarded slice at the same row, even when that row makes the
