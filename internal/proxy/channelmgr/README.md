@@ -23,7 +23,8 @@ dispatch work. This package owns that lookup.
    cache), so this package never serves stale channel metadata and never needs
    its own invalidation path.
 3. **Message packing helpers**: `GenInsertMsgsByPartition` splits an insert
-   payload into per-segment messages honoring the WAL-specific single-row limit.
+   payload into per-segment messages honoring the WAL-specific single-row limit;
+   `GetActiveWALName` returns the active WAL implementation name.
 
 ## Architecture
 
@@ -77,11 +78,15 @@ mgr := channelmgr.NewChannelsMgr(
   message is packed.
 - **Search/query/flush/import** call `GetVChannels(collID)` to fan work out
   across the virtual channels.
+- **Errors**: resolver errors (e.g. `metaCache.GetCollectionInfo` returning
+  `ErrCollectionNotFound`) propagate to callers as-is, so Input-vs-System
+  classification is decided at the data source, not rewritten here.
 
 ## Testing
 
 The package is self-contained and testable without a coordinator: tests inject
-a fake `GetChannelsFunc` and assert delegation and alignment-check behavior.
+a fake `GetChannelsFunc` and assert delegation and alignment-check behavior,
+including that every call re-resolves (no internal cache).
 
 **Mocks** (via mockery): `mock_channels_manager.go` mocks the `ChannelsMgr`
 interface.

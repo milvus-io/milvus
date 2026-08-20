@@ -68,7 +68,7 @@ import (
 // TODO(dragondriver): add more test cases
 
 // newTestChannelsMgr builds a channels manager backed by the coordinator's
-// DescribeCollection, mirroring the production provider wiring in Proxy.Init.
+// DescribeCollection (test-only; production wiring reads the meta cache).
 func newTestChannelsMgr(ctx context.Context, mixCoord types.MixCoordClient) channelmgr.ChannelsMgr {
 	return channelmgr.NewChannelsMgr(
 		func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
