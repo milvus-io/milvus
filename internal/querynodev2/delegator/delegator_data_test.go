@@ -243,13 +243,6 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.delegator = sd
 }
 
-func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	s.T().Cleanup(func() {
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-	})
-}
-
 func (s *DelegatorDataSuite) TearDownTest() {
 	function.GetManager().Release(s.collectionID, "WAL-"+s.vchannelName)
 	function.GetManager().Release(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))

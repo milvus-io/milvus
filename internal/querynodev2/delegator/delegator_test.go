@@ -2121,6 +2121,12 @@ func newFunctionRuntimeTestSchema(functions ...*schemapb.FunctionSchema) *schema
 	}
 }
 
+func newFunctionRuntimeTestSchemaWithVersion(version int32, functions ...*schemapb.FunctionSchema) *schemapb.CollectionSchema {
+	schema := newFunctionRuntimeTestSchema(functions...)
+	schema.Version = version
+	return schema
+}
+
 func newBM25FunctionSchema() *schemapb.FunctionSchema {
 	return &schemapb.FunctionSchema{
 		Type:             schemapb.FunctionType_BM25,
@@ -2356,7 +2362,7 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	key := delegatorFunctionRunnerKey("test-channel")
-	initialSchema := newFunctionRuntimeTestSchema()
+	initialSchema := newFunctionRuntimeTestSchemaWithVersion(1)
 	require.NoError(t, function.GetManager().Alloc(1000, key, initialSchema))
 	t.Cleanup(func() {
 		function.GetManager().Release(1000, key)
@@ -2379,7 +2385,7 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 	}
 	defer sd.Close()
 
-	newSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
+	newSchema := newFunctionRuntimeTestSchemaWithVersion(2, newBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
 	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
 	sd.collectionManager = collectionManager
@@ -2404,7 +2410,7 @@ func TestUpdateSchemaPanicsOnInvalidFunctionMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	key := delegatorFunctionRunnerKey("invalid-schema-test-channel")
-	initialSchema := newFunctionRuntimeTestSchema()
+	initialSchema := newFunctionRuntimeTestSchemaWithVersion(1)
 	require.NoError(t, function.GetManager().Alloc(1001, key, initialSchema))
 	t.Cleanup(func() {
 		function.GetManager().Release(1001, key)
@@ -2429,7 +2435,7 @@ func TestUpdateSchemaPanicsOnInvalidFunctionMetadata(t *testing.T) {
 
 	invalidFunction := newBM25FunctionSchema()
 	invalidFunction.OutputFieldIds = []int64{999}
-	invalidSchema := newFunctionRuntimeTestSchema(invalidFunction)
+	invalidSchema := newFunctionRuntimeTestSchemaWithVersion(2, invalidFunction)
 	collectionManager := segments.NewMockCollectionManager(t)
 	collectionManager.EXPECT().UpdateSchema(int64(1001), invalidSchema, uint64(100)).Return(nil).Once()
 	sd.collectionManager = collectionManager
