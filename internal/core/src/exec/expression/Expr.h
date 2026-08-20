@@ -415,58 +415,23 @@ class SegmentExpr : public Expr {
     }
 
     void
-    MoveCursorForDataMultipleChunk() {
-        int64_t processed_size = 0;
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-            auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-
-            size = std::min(size, batch_size_ - processed_size);
-
-            processed_size += size;
-            if (processed_size >= batch_size_) {
-                current_data_chunk_ = i;
-                current_data_chunk_pos_ = data_pos + size;
-                current_data_global_pos_ =
-                    current_data_global_pos_ + processed_size;
-                break;
-            }
-            // }
-        }
-    }
-    // Non-chunked segments are always Growing (Sealed is always chunked).
-    void
-    MoveCursorForDataSingleChunk() {
-        int64_t processed_size = 0;
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-            auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            auto size = (i == (num_data_chunk_ - 1) &&
-                         active_count_ % size_per_chunk_ != 0)
-                            ? active_count_ % size_per_chunk_ - data_pos
-                            : size_per_chunk_ - data_pos;
-
-            size = std::min(size, batch_size_ - processed_size);
-
-            processed_size += size;
-            if (processed_size >= batch_size_) {
-                current_data_chunk_ = i;
-                current_data_chunk_pos_ = data_pos + size;
-                current_data_global_pos_ =
-                    current_data_global_pos_ + processed_size;
-                break;
-            }
-        }
-    }
-
-    void
     MoveCursorForData() {
-        if (segment_->is_chunked()) {
-            MoveCursorForDataMultipleChunk();
-        } else {
-            MoveCursorForDataSingleChunk();
+        int64_t processed_size = 0;
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+            auto size = GetDataChunkRemainingRows(i, data_pos);
+
+            size = std::min(size, batch_size_ - processed_size);
+
+            processed_size += size;
+            if (processed_size >= batch_size_) {
+                current_data_chunk_ = i;
+                current_data_chunk_pos_ = data_pos + size;
+                current_data_global_pos_ =
+                    current_data_global_pos_ + processed_size;
+                break;
+            }
         }
     }
 
@@ -1178,9 +1143,8 @@ class SegmentExpr : public Expr {
                 value_buffer.push_back(std::move(child));
             }
             consume(value_buffer.data(),
-                    has_null
-                        ? ValidityView::FromExpanded(valid_buffer.data())
-                        : ValidityView{},
+                    has_null ? ValidityView::FromExpanded(valid_buffer.data())
+                             : ValidityView{},
                     length);
         } else if constexpr (std::is_same_v<ElementType, std::string_view> ||
                              std::is_same_v<ElementType, std::string> ||
@@ -1208,7 +1172,7 @@ class SegmentExpr : public Expr {
               typename BatchEvaluator,
               typename... ValTypes>
     size_t
-    VisitElementLevelRowsByOffsets(
+    VisitArrayRowsForElementLevelByOffsets(
         int64_t chunk_id,
         const FixedVector<int32_t>& row_offsets,
         const FixedVector<int32_t>& first_elem_indices,
@@ -1259,12 +1223,11 @@ class SegmentExpr : public Expr {
                        "recursive ARRAY row count mismatch: {} vs {}",
                        rows.size(),
                        row_offsets.size());
-            emit_rows(
-                rows.data(),
-                valid_data.empty()
-                    ? ValidityView{}
-                    : ValidityView::FromExpanded(valid_data.data()),
-                [](size_t i) { return i; });
+            emit_rows(rows.data(),
+                      valid_data.empty()
+                          ? ValidityView{}
+                          : ValidityView::FromExpanded(valid_data.data()),
+                      [](size_t i) { return i; });
         } else if (segment_->type() == SegmentType::Sealed) {
             auto pw = segment_->get_views_by_offsets<ArrayView>(
                 op_ctx_, field_id_, chunk_id, row_offsets);
@@ -1273,12 +1236,11 @@ class SegmentExpr : public Expr {
                        "ARRAY row count mismatch: {} vs {}",
                        rows.size(),
                        row_offsets.size());
-            emit_rows(
-                rows.data(),
-                valid_data.empty()
-                    ? ValidityView{}
-                    : ValidityView::FromExpanded(valid_data.data()),
-                [](size_t i) { return i; });
+            emit_rows(rows.data(),
+                      valid_data.empty()
+                          ? ValidityView{}
+                          : ValidityView::FromExpanded(valid_data.data()),
+                      [](size_t i) { return i; });
         } else {
             auto pw = segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
             auto chunk = pw.get();
@@ -1293,15 +1255,15 @@ class SegmentExpr : public Expr {
               typename BatchEvaluator,
               typename... ValTypes>
     int64_t
-    VisitElementLevelRows(int64_t chunk_id,
-                          int64_t start_offset,
-                          int64_t length,
-                          BatchEvaluator& evaluate_batch,
-                          TargetBitmapView res,
-                          TargetBitmapView valid_res,
-                          std::vector<ElementType>& value_buffer,
-                          FixedVector<bool>& valid_buffer,
-                          const ValTypes&... values) {
+    VisitArrayRowsForElementLevel(int64_t chunk_id,
+                                  int64_t start_offset,
+                                  int64_t length,
+                                  BatchEvaluator& evaluate_batch,
+                                  TargetBitmapView res,
+                                  TargetBitmapView valid_res,
+                                  std::vector<ElementType>& value_buffer,
+                                  FixedVector<bool>& valid_buffer,
+                                  const ValTypes&... values) {
         int64_t processed_elems = 0;
         auto emit_rows = [&](const auto* rows, ValidityView valid_data) {
             for (int64_t i = 0; i < length; ++i) {
@@ -1332,6 +1294,7 @@ class SegmentExpr : public Expr {
         };
 
         if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+            // Recursive ARRAY rows for both Growing and Sealed segments.
             auto pw = segment_->chunk_view<ArrayValueView>(
                 op_ctx_,
                 field_id_,
@@ -1344,6 +1307,7 @@ class SegmentExpr : public Expr {
                        length);
             emit_rows(rows.data(), valid_data);
         } else if (segment_->type() == SegmentType::Sealed) {
+            // Legacy ARRAY rows from a Sealed segment's chunked storage.
             auto pw = segment_->get_batch_views<ArrayView>(
                 op_ctx_, field_id_, chunk_id, start_offset, length);
             const auto& [rows, valid_data] = pw.get();
@@ -1353,6 +1317,7 @@ class SegmentExpr : public Expr {
                        length);
             emit_rows(rows.data(), valid_data);
         } else {
+            // Legacy ARRAY rows from a Growing segment's in-memory storage.
             auto pw = segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data() + start_offset,
@@ -1478,17 +1443,18 @@ class SegmentExpr : public Expr {
 
             // Fetch one physical ARRAY row per run, then expose each run's
             // logical elements through the common batch-evaluator contract.
-            const auto batch_pos = VisitElementLevelRowsByOffsets<ElementType>(
-                chunk_id,
-                offsets,
-                first_elem_indices,
-                run_lengths,
-                evaluate_batch,
-                res + processed_size,
-                valid_res + processed_size,
-                value_buffer,
-                valid_buffer,
-                values...);
+            const auto batch_pos =
+                VisitArrayRowsForElementLevelByOffsets<ElementType>(
+                    chunk_id,
+                    offsets,
+                    first_elem_indices,
+                    run_lengths,
+                    evaluate_batch,
+                    res + processed_size,
+                    valid_res + processed_size,
+                    value_buffer,
+                    valid_buffer,
+                    values...);
             AssertInfo(batch_pos == batch_size,
                        "ARRAY element batch size mismatch: {} vs {}",
                        batch_pos,
@@ -1542,16 +1508,7 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
-            int64_t size;
-            if (segment_->is_chunked()) {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
-            } else {
-                size = (i == num_data_chunk_ - 1)
-                           ? (active_count_ % size_per_chunk_ == 0
-                                  ? size_per_chunk_ - data_pos
-                                  : active_count_ % size_per_chunk_ - data_pos)
-                           : size_per_chunk_ - data_pos;
-            }
+            auto size = GetDataChunkRemainingRows(i, data_pos);
             size = std::min(size, batch_size_ - processed_rows);
             if (size <= 0) {
                 continue;
@@ -1592,7 +1549,7 @@ class SegmentExpr : public Expr {
                 processed_elems += element_count;
             } else {
                 const auto chunk_processed_elems =
-                    VisitElementLevelRows<ElementType>(
+                    VisitArrayRowsForElementLevel<ElementType>(
                         i,
                         data_pos,
                         size,
@@ -1638,10 +1595,7 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            auto size = (i == (num_data_chunk_ - 1) &&
-                         active_count_ % size_per_chunk_ != 0)
-                            ? active_count_ % size_per_chunk_ - data_pos
-                            : size_per_chunk_ - data_pos;
+            auto size = GetDataChunkRemainingRows(i, data_pos);
 
             size = std::min(size, batch_size_ - processed_size);
             if (size == 0)
@@ -1767,8 +1721,7 @@ class SegmentExpr : public Expr {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
 
-            // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            auto size = GetDataChunkRemainingRows(i, data_pos);
             size = std::min(size, batch_size_ - processed_size);
 
             if (size == 0)
@@ -2433,19 +2386,7 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            int64_t size = 0;
-            if (segment_->is_chunked()) {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
-            } else {
-                size = (i == (num_data_chunk_ - 1))
-                           ? (segment_->type() == SegmentType::Growing
-                                  ? (active_count_ % size_per_chunk_ == 0
-                                         ? size_per_chunk_ - data_pos
-                                         : active_count_ % size_per_chunk_ -
-                                               data_pos)
-                                  : active_count_ - data_pos)
-                           : size_per_chunk_ - data_pos;
-            }
+            auto size = GetDataChunkRemainingRows(i, data_pos);
 
             size = std::min(size, batch_size_ - processed_size);
             if (size == 0)
@@ -2567,6 +2508,19 @@ class SegmentExpr : public Expr {
     }
 
  protected:
+    int64_t
+    GetDataChunkRemainingRows(size_t chunk_id, int64_t data_pos) const {
+        if (segment_->is_chunked()) {
+            return segment_->chunk_size(field_id_, chunk_id) - data_pos;
+        }
+
+        const auto chunk_start =
+            static_cast<int64_t>(chunk_id) * size_per_chunk_;
+        const auto chunk_rows =
+            std::min(size_per_chunk_, active_count_ - chunk_start);
+        return chunk_rows - data_pos;
+    }
+
     // Check if a compatible scalar index exists for this expression.
     // Only called internally by DetermineExecPath().
     bool

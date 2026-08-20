@@ -263,6 +263,8 @@ class ArrayValueView {
           begin_(begin),
           end_(end),
           is_null_(is_null) {
+        AssertInfo(type_ != nullptr && child_ != nullptr,
+                   "ArrayValueView type and child must not be null");
     }
 
     static ArrayValueView

@@ -14,6 +14,7 @@
 
 #include <boost/container/vector.hpp>
 #include <boost/cstdint.hpp>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stddef.h>
@@ -61,6 +62,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "storage/MmapManager.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -676,7 +678,8 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
     }
 }
 
-TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
+TEST(MatchExprZeroElementBatch,
+     NullableNestedRowsAcrossConsecutiveEmptyBatches) {
     struct BatchSizeGuard {
         int64_t saved;
         ~BatchSizeGuard() {
@@ -688,22 +691,58 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
     auto schema = std::make_shared<Schema>();
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
-    auto sub_int_fid = schema->AddDebugArrayField(
-        "struct_array[sub_int]", DataType::INT32, false);
+    const auto nested_int_fid = FieldId(int64_fid.get() + 1);
+    proto::schema::TypeSchema nested_int_type;
+    nested_int_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("struct_array[nested_values]"),
+                               nested_int_fid,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               true,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(nested_int_type))));
 
-    constexpr int64_t N = 3;
+    constexpr int64_t N = 7;
     auto insert_data = std::make_unique<InsertRecordProto>();
 
-    std::vector<int64_t> ids = {0, 1, 2};
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
     auto id_array = CreateDataArrayFrom(
         ids.data(), nullptr, N, schema->operator[](int64_fid));
     insert_data->mutable_fields_data()->AddAllocated(id_array.release());
 
-    std::vector<milvus::proto::schema::ScalarField> sub_int_data(N);
-    sub_int_data[2].mutable_int_data()->add_data(9001);
-    auto sub_int_array = CreateDataArrayFrom(
-        sub_int_data.data(), nullptr, N, schema->operator[](sub_int_fid));
-    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    auto* nested_int_field = insert_data->add_fields_data();
+    nested_int_field->set_field_id(nested_int_fid.get());
+    nested_int_field->set_field_name("struct_array[nested_values]");
+    nested_int_field->set_type(proto::schema::DataType::Array);
+    for (const bool valid : {false, true, true, false, true, true, true}) {
+        nested_int_field->mutable_scalars()->add_valid_data(valid);
+    }
+    auto* nested_int_rows =
+        nested_int_field->mutable_scalars()->mutable_array_data();
+    nested_int_rows->set_element_type(proto::schema::DataType::Array);
+    auto append_row =
+        [nested_int_rows](const std::vector<std::vector<int32_t>>& children) {
+            auto* row = nested_int_rows->add_data()->mutable_array_data();
+            row->set_element_type(proto::schema::DataType::Int32);
+            for (const auto& child_values : children) {
+                auto* child = row->add_data()->mutable_int_data();
+                for (const auto value : child_values) {
+                    child->add_data(value);
+                }
+            }
+        };
+    append_row({});
+    append_row({});
+    append_row({});
+    append_row({});
+    append_row({});
+    append_row({{9001}});
+    append_row({{1}});
     insert_data->set_num_rows(N);
 
     GeneratedData generated_data;
@@ -716,20 +755,46 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
 
     auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
     ScopedSchemaHandle schema_handle(*schema);
-    auto plan_str =
-        schema_handle.Parse("match_any(struct_array, $[sub_int] >= 9000)");
-    auto plan =
-        CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
-    ASSERT_NE(plan, nullptr);
+    auto retrieve = [&](const std::string& expression)
+        -> std::unique_ptr<proto::segcore::RetrieveResults> {
+        const auto plan_bytes = schema_handle.Parse(expression);
+        auto plan = CreateRetrievePlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        EXPECT_NE(plan, nullptr);
+        if (plan == nullptr) {
+            return nullptr;
+        }
+        return segment->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    };
 
-    auto result = segment->Retrieve(
-        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
-    ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->offset_size(), 1);
-    EXPECT_EQ(result->offset(0), 2);
+    // Rows [0, 1] and [2, 3] form two consecutive batches with no elements.
+    // The child cursor must still advance before rows 5 and 6 are evaluated.
+    auto match_any = retrieve(
+        "match_any(struct_array, array_contains($[nested_values], 9001))");
+    ASSERT_NE(match_any, nullptr);
+    ASSERT_EQ(match_any->offset_size(), 1);
+    EXPECT_EQ(match_any->offset(0), 5);
+
+    // Empty non-null rows match_all vacuously; nullable StructArray rows 0
+    // and 3 must remain invalid and therefore must not be returned.
+    auto match_all = retrieve(
+        "match_all(struct_array, array_length($[nested_values]) >= 0)");
+    ASSERT_NE(match_all, nullptr);
+    const std::vector<int64_t> expected = {1, 2, 4, 5, 6};
+    ASSERT_EQ(match_all->offset_size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(match_all->offset(i), expected[i]);
+    }
 }
 
 TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
+    const auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+    auto batch_size_guard = folly::makeGuard([saved_batch_size] {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+    });
+
     auto schema = std::make_shared<Schema>();
     const auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
@@ -947,6 +1012,33 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         check_segment(growing.get(), "growing multi-chunk");
     }
 
+    {
+        auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+        const auto saved_growing_mmap = mmap_config.GetEnableGrowingMmap();
+        mmap_config.SetEnableGrowingMmap(true);
+        auto mmap_guard = folly::makeGuard([&mmap_config, saved_growing_mmap] {
+            mmap_config.SetEnableGrowingMmap(saved_growing_mmap);
+        });
+
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        config.set_chunk_rows(2);
+        auto growing =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        const auto reserved_offset = growing->PreInsert(row_count);
+        growing->Insert(reserved_offset,
+                        row_count,
+                        row_ids.data(),
+                        timestamps.data(),
+                        insert_data.get());
+        auto* growing_impl = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+        ASSERT_NE(growing_impl, nullptr);
+        EXPECT_TRUE(growing_impl->get_insert_record()
+                        .get_data<ArrayValue>(nested_int_fid)
+                        ->is_mmap());
+        check_segment(growing.get(), "growing mmap multi-chunk");
+    }
+
     GeneratedData generated_data;
     generated_data.schema_ = schema;
     generated_data.raw_ = new InsertRecordProto(*insert_data);
@@ -954,6 +1046,10 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     generated_data.timestamps_ = timestamps;
     auto sealed = CreateSealedWithFieldDataLoaded(schema, generated_data);
     check_segment(sealed.get(), "sealed");
+
+    auto sealed_mmap =
+        CreateSealedWithFieldDataLoaded(schema, generated_data, true);
+    check_segment(sealed_mmap.get(), "sealed mmap");
 }
 
 namespace {

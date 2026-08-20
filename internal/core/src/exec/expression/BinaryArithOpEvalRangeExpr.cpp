@@ -1259,7 +1259,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
                ElementLevel);
     if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
         AssertInfo(expr_->column_.nested_path_.empty(),
-                   "recursive ARRAY length does not support nested path");
+                   "recursive ARRAY length does not support nested path now");
     }
 
     auto real_batch_size = GetNextRealBatchSize(input, ElementLevel);

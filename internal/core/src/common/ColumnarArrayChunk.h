@@ -136,8 +136,8 @@ class ColumnarArrayChunk final : public Chunk {
         return isValid(static_cast<int>(row));
     }
 
-    // ViewType is intentionally dependent in these accessors because
-    // ArrayValueView is only completed after this header has been parsed.
+    // ViewType is intentionally dependent because ArrayValueView is only
+    // completed after this header has been parsed.
     template <typename ViewType = ArrayValueView>
     ViewType
     View(size_t row) const {

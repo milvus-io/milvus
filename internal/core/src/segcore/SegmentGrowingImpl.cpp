@@ -1634,10 +1634,8 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
             views.push_back(std::move(view));
         }
         std::pair<std::vector<ArrayValueView>, ValidityView> content{
-            std::move(views),
-            ValidityView::FromExpanded(valid_data->data())};
-        return PinWrapper<
-            std::pair<std::vector<ArrayValueView>, ValidityView>>(
+            std::move(views), ValidityView::FromExpanded(valid_data->data())};
+        return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
             std::move(valid_data), std::move(content));
     }
 
