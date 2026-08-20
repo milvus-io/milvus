@@ -20,9 +20,16 @@ namespace milvus::segcore {
 
 static YAML::Node
 subnode(const YAML::Node& parent, const std::string& key) {
-    AssertInfo(parent.IsMap(), "wrong type node when getting key[{}]", key);
+    if (!(parent.IsMap())) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "wrong type node when getting key[{}]",
+                  key);
+    }
     auto& node = parent[key];
-    AssertInfo(node.IsDefined(), "key[{}] not found in sub-node", key);
+    if (!(node.IsDefined())) {
+        ThrowInfo(
+            ErrorCode::ConfigInvalid, "key[{}] not found in sub-node", key);
+    }
     return node;
 }
 
@@ -99,8 +106,8 @@ SegcoreConfig::parse_from(const std::string& config_path) {
             }
         }
 #endif
-    } catch (const SegcoreError& e) {
-        throw e;
+    } catch (const SegcoreError&) {
+        throw;
     } catch (const std::exception& e) {
         std::string str =
             std::string("Invalid Yaml: ") + config_path + ", err: " + e.what();

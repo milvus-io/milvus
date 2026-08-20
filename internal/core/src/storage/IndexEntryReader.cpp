@@ -63,7 +63,7 @@ class TransientBudgetGuard {
                 slice_transient_bytes_, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
-            ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
+            ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
         }
     }
 
@@ -160,11 +160,13 @@ ReadOrderedEntryStream(
     ThrowIfCancelled(cancellation_token, "ReadEntryStream");
     if (num_slices == 0) {
         auto actual_crc = Crc32cValue(nullptr, 0);
-        AssertInfo(actual_crc == expected_crc,
-                   "{}: expected {}, actual {}",
-                   crc_error_context,
-                   Crc32cToHex(expected_crc),
-                   Crc32cToHex(actual_crc));
+        if (!(actual_crc == expected_crc)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{}: expected {}, actual {}",
+                      crc_error_context,
+                      Crc32cToHex(expected_crc),
+                      Crc32cToHex(actual_crc));
+        }
         return;
     }
 
@@ -326,11 +328,13 @@ ReadOrderedEntryStream(
         std::rethrow_exception(first_error);
     }
 
-    AssertInfo(running_crc == expected_crc,
-               "{}: expected {}, actual {}",
-               crc_error_context,
-               Crc32cToHex(expected_crc),
-               Crc32cToHex(running_crc));
+    if (!(running_crc == expected_crc)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "{}: expected {}, actual {}",
+                  crc_error_context,
+                  Crc32cToHex(expected_crc),
+                  Crc32cToHex(running_crc));
+    }
 }
 
 }  // namespace
@@ -376,8 +380,10 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
 
     if (reader->is_encrypted_) {
         reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(reader->cipher_plugin_ != nullptr,
-                   "Cipher plugin required for encrypted V3 index");
+        if (!(reader->cipher_plugin_ != nullptr)) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "Cipher plugin required for encrypted V3 index");
+        }
     }
 
     // Parse __meta__ entry
@@ -387,8 +393,9 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
             reader->meta_json_ = nlohmann::json::parse(meta_entry.data.begin(),
                                                        meta_entry.data.end());
         } catch (const nlohmann::json::parse_error& e) {
-            AssertInfo(
-                false, "Failed to parse V3 index meta JSON: {}", e.what());
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Failed to parse V3 index meta JSON: {}",
+                      e.what());
         }
     }
 
@@ -406,11 +413,12 @@ IndexEntryReader::ValidateMagic() {
     char magic_buf[MILVUS_V3_MAGIC_SIZE];
     size_t bytes_read = input_->ReadAt(magic_buf, 0, MILVUS_V3_MAGIC_SIZE);
     CheckCancelled("IndexEntryReader::ValidateMagic");
-    AssertInfo(bytes_read == MILVUS_V3_MAGIC_SIZE,
-               "Failed to read V3 magic number");
-    AssertInfo(
-        std::memcmp(magic_buf, MILVUS_V3_MAGIC, MILVUS_V3_MAGIC_SIZE) == 0,
-        "Invalid V3 magic number");
+    if (!(bytes_read == MILVUS_V3_MAGIC_SIZE)) {
+        ThrowInfo(ErrorCode::FileReadFailed, "Failed to read V3 magic number");
+    }
+    if (!(std::memcmp(magic_buf, MILVUS_V3_MAGIC, MILVUS_V3_MAGIC_SIZE) == 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Invalid V3 magic number");
+    }
 }
 
 void
@@ -425,11 +433,14 @@ IndexEntryReader::ReadFooterAndDirectory() {
     size_t bytes_read =
         input_->ReadAt(tail_data.data(), tail_offset, tail_size);
     CheckCancelled("IndexEntryReader::ReadFooterAndDirectory");
-    AssertInfo(bytes_read == tail_size, "Failed to read file tail");
+    if (!(bytes_read == tail_size)) {
+        ThrowInfo(ErrorCode::FileReadFailed, "Failed to read file tail");
+    }
 
     // Parse 32-byte Footer from the last 32 bytes
-    AssertInfo(tail_size >= MILVUS_V3_FOOTER_SIZE,
-               "File too small for V3 footer");
+    if (!(tail_size >= MILVUS_V3_FOOTER_SIZE)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "File too small for V3 footer");
+    }
     const uint8_t* footer_ptr =
         tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE;
 
@@ -442,14 +453,21 @@ IndexEntryReader::ReadFooterAndDirectory() {
         &meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
     milvus::fastmem::FastMemcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
 
-    AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
-               "Unsupported V3 format version: {}",
-               version);
-    AssertInfo(dir_size > 0, "Directory table size is zero");
-    AssertInfo(static_cast<size_t>(dir_size) + meta_entry_size +
-                       MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
-                   static_cast<size_t>(file_size_),
-               "Directory table + meta entry + footer size exceeds file size");
+    if (!(version == MILVUS_V3_FORMAT_VERSION)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Unsupported V3 format version: {}",
+                  version);
+    }
+    if (!(dir_size > 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Directory table size is zero");
+    }
+    if (!(static_cast<size_t>(dir_size) + meta_entry_size +
+              MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
+          static_cast<size_t>(file_size_))) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "Directory table + meta entry + footer size exceeds file size");
+    }
 
     // Check if the directory itself needs a second read. The meta entry is
     // loaded separately by Open() and is not needed for directory parsing.
@@ -466,8 +484,10 @@ IndexEntryReader::ReadFooterAndDirectory() {
         size_t additional_read =
             input_->ReadAt(full_tail_data.data(), new_tail_offset, need_more);
         CheckCancelled("IndexEntryReader::ReadFooterAndDirectory");
-        AssertInfo(additional_read == need_more,
-                   "Failed to read additional directory data");
+        if (!(additional_read == need_more)) {
+            ThrowInfo(ErrorCode::FileReadFailed,
+                      "Failed to read additional directory data");
+        }
 
         milvus::fastmem::FastMemcpy(
             full_tail_data.data() + need_more, tail_data.data(), tail_size);
@@ -485,12 +505,15 @@ IndexEntryReader::ReadFooterAndDirectory() {
     try {
         dir_json = nlohmann::json::parse(dir_start, dir_end);
     } catch (const nlohmann::json::parse_error& e) {
-        AssertInfo(false,
-                   "Failed to parse V3 index directory table JSON: {}",
-                   e.what());
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Failed to parse V3 index directory table JSON: {}",
+                  e.what());
     }
 
-    AssertInfo(dir_json.contains("entries"), "Directory table missing entries");
+    if (!(dir_json.contains("entries"))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Directory table missing entries");
+    }
 
     if (dir_json.contains("__edek__")) {
         is_encrypted_ = true;
@@ -514,9 +537,11 @@ IndexEntryReader::ReadFooterAndDirectory() {
                                        s["size"].get<uint64_t>()};
                 meta.enc.slices.push_back(slice);
 
-                AssertInfo(output_offset < meta.enc.original_size,
-                           "Encrypted slice exceeds original entry size {}",
-                           meta.enc.original_size);
+                if (!(output_offset < meta.enc.original_size)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "Encrypted slice exceeds original entry size {}",
+                              meta.enc.original_size);
+                }
                 auto remaining =
                     static_cast<size_t>(meta.enc.original_size - output_offset);
                 auto plain_len = std::min(remaining, slice_size_);
@@ -530,10 +555,12 @@ IndexEntryReader::ReadFooterAndDirectory() {
                              task_transient_bytes);
                 output_offset += plain_len;
             }
-            AssertInfo(output_offset == meta.enc.original_size,
-                       "Encrypted slices cover {} bytes, expected {}",
-                       output_offset,
-                       meta.enc.original_size);
+            if (!(output_offset == meta.enc.original_size)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Encrypted slices cover {} bytes, expected {}",
+                          output_offset,
+                          meta.enc.original_size);
+            }
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
             entry_index_.emplace(std::move(name), std::move(meta));
@@ -565,11 +592,13 @@ IndexEntryReader::VerifyCrc32c(uint32_t expected,
                                size_t size,
                                const std::string& name) {
     uint32_t actual = Crc32cValue(data, size);
-    AssertInfo(actual == expected,
-               "CRC-32C mismatch for entry '{}': expected {}, got {}",
-               name,
-               Crc32cToHex(expected),
-               Crc32cToHex(actual));
+    if (!(actual == expected)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "CRC-32C mismatch for entry '{}': expected {}, got {}",
+                  name,
+                  Crc32cToHex(expected),
+                  Crc32cToHex(actual));
+    }
 }
 
 size_t
@@ -606,7 +635,9 @@ IndexEntryReader::ReadEntry(const std::string& name) {
     }
 
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     const auto& meta = it->second;
 
     Entry result;
@@ -634,7 +665,9 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
         size_t n = input_->ReadAt(
             result.data.data(), MILVUS_V3_MAGIC_SIZE + pm.offset, pm.size);
         CheckCancelled("IndexEntryReader::ReadPlainEntry");
-        AssertInfo(n == pm.size, "Failed to read entry data");
+        if (!(n == pm.size)) {
+            ThrowInfo(ErrorCode::FileReadFailed, "Failed to read entry data");
+        }
         VerifyCrc32c(pm.crc32, result.data.data(), pm.size, "");
         return result;
     }
@@ -664,7 +697,10 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
                         len);
                     ThrowIfCancelled(cancellation_token,
                                      "IndexEntryReader::ReadPlainEntry");
-                    AssertInfo(n == len, "Failed to read entry data range");
+                    if (!(n == len)) {
+                        ThrowInfo(ErrorCode::FileReadFailed,
+                                  "Failed to read entry data range");
+                    }
                 }));
 
             remaining -= len;
@@ -722,16 +758,21 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
                                           slice.size);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEncryptedEntry");
-                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+                if (!(n == slice.size)) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "Failed to read encrypted slice");
+                }
 
                 auto dec =
                     cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                AssertInfo(plain.size() == plain_len,
-                           "Decrypted size mismatch: expected {}, got {}",
-                           plain_len,
-                           plain.size());
+                if (!(plain.size() == plain_len)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "Decrypted size mismatch: expected {}, got {}",
+                              plain_len,
+                              plain.size());
+                }
                 milvus::fastmem::FastMemcpy(
                     dest + this_output_offset, plain.data(), plain.size());
             }));
@@ -758,7 +799,11 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
     CheckCancelled("IndexEntryReader::PrepareEntryDownload");
 
     int fd = ::open(local_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    AssertInfo(fd != -1, "Failed to create file: {}", local_path);
+    if (!(fd != -1)) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "Failed to create file: {}",
+                  local_path);
+    }
 
     EntryDownloadState state;
     state.name = name;
@@ -769,10 +814,12 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
             state.expected_crc = meta.enc.crc32;
             state.range_crcs.resize(meta.enc.slices.size());
             auto trc_ret = ::ftruncate(fd, meta.enc.original_size);
-            AssertInfo(trc_ret == 0,
-                       "Failed to ftruncate file {}: {}",
-                       local_path,
-                       strerror(errno));
+            if (trc_ret != 0) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "Failed to ftruncate file {}: {}",
+                          local_path,
+                          strerror(errno));
+            }
         } else {
             state.expected_crc = meta.plain.crc32;
             size_t num_ranges = DownloadRangeCount(meta.plain.size);
@@ -822,22 +869,28 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                                           slice.size);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesToFiles");
-                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+                if (!(n == slice.size)) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "Failed to read encrypted slice");
+                }
 
                 auto dec =
                     cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                AssertInfo(plain.size() == plain_len,
-                           "Decrypted size mismatch: expected {}, got {}",
-                           plain_len,
-                           plain.size());
+                if (!(plain.size() == plain_len)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "Decrypted size mismatch: expected {}, got {}",
+                              plain_len,
+                              plain.size());
+                }
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesToFiles");
                 auto written = ::pwrite(
                     fd, plain.data(), plain.size(), this_output_offset);
-                AssertInfo(written == static_cast<ssize_t>(plain.size()),
-                           "Failed to pwrite");
+                if (!(written == static_cast<ssize_t>(plain.size()))) {
+                    ThrowInfo(ErrorCode::FileWriteFailed, "Failed to pwrite");
+                }
                 state.range_crcs[i] = {
                     Crc32cValue(reinterpret_cast<const uint8_t*>(plain.data()),
                                 plain.size()),
@@ -872,10 +925,14 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                     buf.data(), MILVUS_V3_MAGIC_SIZE + this_src_offset, len);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesToFiles");
-                AssertInfo(n == len, "Failed to read data for file");
+                if (!(n == len)) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "Failed to read data for file");
+                }
                 auto written = ::pwrite(fd, buf.data(), len, this_file_offset);
-                AssertInfo(written == static_cast<ssize_t>(len),
-                           "Failed to pwrite");
+                if (!(written == static_cast<ssize_t>(len))) {
+                    ThrowInfo(ErrorCode::FileWriteFailed, "Failed to pwrite");
+                }
                 state.range_crcs[this_range_idx] = {
                     Crc32cValue(buf.data(), len), len};
             }));
@@ -899,11 +956,13 @@ IndexEntryReader::FinalizeEntryDownload(EntryDownloadState& state) {
                 combined_crc, state.range_crcs[i].crc, state.range_crcs[i].len);
         }
     }
-    AssertInfo(combined_crc == state.expected_crc,
-               "CRC-32C mismatch for entry '{}': expected {}, got {}",
-               state.name,
-               Crc32cToHex(state.expected_crc),
-               Crc32cToHex(combined_crc));
+    if (!(combined_crc == state.expected_crc)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "CRC-32C mismatch for entry '{}': expected {}, got {}",
+                  state.name,
+                  Crc32cToHex(state.expected_crc),
+                  Crc32cToHex(combined_crc));
+    }
 
     ::close(state.fd);
     state.fd = -1;
@@ -965,10 +1024,12 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
         for (size_t i = 0; i < em.slices.size(); i++) {
             auto slice = em.slices[i];
             size_t output_offset = i * slice_size_;
-            AssertInfo(output_offset < em.original_size,
-                       "Encrypted slice {} exceeds original entry size {}",
-                       i,
-                       em.original_size);
+            if (!(output_offset < em.original_size)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Encrypted slice {} exceeds original entry size {}",
+                          i,
+                          em.original_size);
+            }
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
@@ -1000,16 +1061,21 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                          slice.size);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
-                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+                if (!(n == slice.size)) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "Failed to read encrypted slice");
+                }
 
                 auto dec =
                     cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                AssertInfo(plain.size() == plain_len,
-                           "Decrypted size mismatch: expected {}, got {}",
-                           plain_len,
-                           plain.size());
+                if (!(plain.size() == plain_len)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "Decrypted size mismatch: expected {}, got {}",
+                              plain_len,
+                              plain.size());
+                }
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
                 writer->WriteAt(output_offset, plain.data(), plain.size());
@@ -1053,7 +1119,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                     buf.data(), MILVUS_V3_MAGIC_SIZE + src_offset, len);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
-                AssertInfo(n == len, "Failed to read entry slice");
+                if (!(n == len)) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "Failed to read entry slice");
+                }
 
                 writer->WriteAt(output_offset, buf.data(), len);
                 state.range_crcs[seq] = {Crc32cValue(buf.data(), len), len};
@@ -1073,11 +1142,13 @@ IndexEntryReader::FinalizeEntryStreamDownload(EntryStreamDownloadState& state) {
                 combined_crc, state.range_crcs[i].crc, state.range_crcs[i].len);
         }
     }
-    AssertInfo(combined_crc == state.expected_crc,
-               "CRC-32C mismatch for entry '{}': expected {}, got {}",
-               state.name,
-               Crc32cToHex(state.expected_crc),
-               Crc32cToHex(combined_crc));
+    if (!(combined_crc == state.expected_crc)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "CRC-32C mismatch for entry '{}': expected {}, got {}",
+                  state.name,
+                  Crc32cToHex(state.expected_crc),
+                  Crc32cToHex(combined_crc));
+    }
 
     state.writer->Finish();
     state.writer.reset();
@@ -1088,7 +1159,9 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
                                   const std::string& local_path) {
     CheckCancelled("IndexEntryReader::ReadEntryToFile");
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     const auto& meta = it->second;
 
     auto state = PrepareEntryDownload(name, local_path, meta);
@@ -1142,7 +1215,10 @@ IndexEntryReader::ReadEntriesToFiles(
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
-            AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+            if (!(it != entry_index_.end())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+            }
             states.push_back(PrepareEntryDownload(name, path, it->second));
             total_task_count += DownloadTaskCount(it->second);
         }
@@ -1178,7 +1254,9 @@ IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
                                         const std::string& local_path,
                                         io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::ReadEntryStreamToFile");
-    AssertInfo(HasEntry(name), "Entry not found: {}", name);
+    if (!(HasEntry(name))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     auto writer = FileWriter(local_path, write_priority);
     ReadEntryStream(name, [&writer](const uint8_t* data, size_t len) {
         writer.Write(data, len);
@@ -1203,7 +1281,10 @@ IndexEntryReader::ReadEntriesStreamToFiles(
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
-            AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+            if (!(it != entry_index_.end())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+            }
             states.push_back(PrepareEntryStreamDownload(
                 name, path, it->second, write_priority));
             total_task_count += StreamDownloadTaskCount(it->second);
@@ -1238,7 +1319,9 @@ size_t
 IndexEntryReader::GetEntrySize(const std::string& name) const {
     CheckCancelled("IndexEntryReader::GetEntrySize");
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     if (it->second.encrypted) {
         return it->second.enc.original_size;
     }
@@ -1252,7 +1335,9 @@ IndexEntryReader::ReadEntryStream(
     size_t slice_size) {
     CheckCancelled("IndexEntryReader::ReadEntryStream");
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     const auto& meta = it->second;
 
     if (meta.encrypted) {
@@ -1297,7 +1382,9 @@ IndexEntryReader::ReadPlainEntryStream(
         size_t n = input->ReadAt(data.data(), MILVUS_V3_MAGIC_SIZE + src, len);
         ThrowIfCancelled(cancellation_token,
                          "IndexEntryReader::ReadEntryStream");
-        AssertInfo(n == len, "Failed to read entry slice");
+        if (!(n == len)) {
+            ThrowInfo(ErrorCode::FileReadFailed, "Failed to read entry slice");
+        }
         return data;
     };
 
@@ -1319,10 +1406,12 @@ IndexEntryReader::ReadEncryptedEntryStream(
     size_t num_slices = em.slices.size();
     auto slicePlainBytes = [this, &em](size_t seq) {
         size_t output_offset = seq * slice_size_;
-        AssertInfo(output_offset < em.original_size,
-                   "Encrypted slice {} exceeds original entry size {}",
-                   seq,
-                   em.original_size);
+        if (!(output_offset < em.original_size)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Encrypted slice {} exceeds original entry size {}",
+                      seq,
+                      em.original_size);
+        }
         size_t remaining = em.original_size - output_offset;
         return std::min(remaining, slice_size_);
     };
@@ -1361,15 +1450,20 @@ IndexEntryReader::ReadEncryptedEntryStream(
                 cipher.data(), MILVUS_V3_MAGIC_SIZE + slice.offset, slice.size);
             ThrowIfCancelled(cancellation_token,
                              "IndexEntryReader::ReadEntryStream");
-            AssertInfo(n == slice.size, "Failed to read encrypted slice");
+            if (!(n == slice.size)) {
+                ThrowInfo(ErrorCode::FileReadFailed,
+                          "Failed to read encrypted slice");
+            }
 
             auto dec = cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
             plain = dec->Decrypt(cipher.data(), cipher.size());
         }
-        AssertInfo(plain.size() == expected_plain_len,
-                   "Decrypted size mismatch: expected {}, got {}",
-                   expected_plain_len,
-                   plain.size());
+        if (!(plain.size() == expected_plain_len)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Decrypted size mismatch: expected {}, got {}",
+                      expected_plain_len,
+                      plain.size());
+        }
         return std::vector<uint8_t>(
             reinterpret_cast<const uint8_t*>(plain.data()),
             reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());

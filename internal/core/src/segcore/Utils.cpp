@@ -53,6 +53,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "parquet/arrow/reader.h"
+#include "parquet/exception.h"
 #include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegmentInterface.h"
@@ -63,6 +64,7 @@
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPool.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -1354,21 +1356,37 @@ LoadArrowReaderForJsonStatsFromRemote(
                 auto buffer_reader =
                     std::make_shared<arrow::io::BufferReader>(arrow_buf);
 
-                std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-                auto status = parquet::arrow::OpenFile(
-                    buffer_reader, arrow::default_memory_pool(), &arrow_reader);
-                AssertInfo(status.ok(),
-                           "failed to open parquet file: {}",
-                           status.message());
+                try {
+                    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+                    auto status =
+                        parquet::arrow::OpenFile(buffer_reader,
+                                                 arrow::default_memory_pool(),
+                                                 &arrow_reader);
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "failed to open parquet file: {}",
+                            status.message());
+                    }
 
-                std::shared_ptr<arrow::RecordBatchReader> batch_reader;
-                status = arrow_reader->GetRecordBatchReader(&batch_reader);
-                AssertInfo(status.ok(),
-                           "failed to get record batch reader: {}",
-                           status.message());
+                    std::shared_ptr<arrow::RecordBatchReader> batch_reader;
+                    status = arrow_reader->GetRecordBatchReader(&batch_reader);
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "failed to get record batch reader: {}",
+                            status.message());
+                    }
 
-                return std::make_shared<ArrowDataWrapper>(
-                    std::move(batch_reader), std::move(arrow_reader), buf);
+                    return std::make_shared<ArrowDataWrapper>(
+                        std::move(batch_reader), std::move(arrow_reader), buf);
+                } catch (const parquet::ParquetException& e) {
+                    // parquet throws directly on malformed files; keep the
+                    // failure typed as permanent data corruption.
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "parquet parse failed: {}",
+                              e.what());
+                }
             });
             futures.emplace_back(std::move(future));
         }
@@ -1540,24 +1558,31 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         load_index_info->index_id,
         load_index_info->mmap_dir_path);
     // get index type
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
+    if (!(index_params.find("index_type") != index_params.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index type is empty");
+    }
     index_info.index_type = index_params.at("index_type");
 
     // get metric type
     if (milvus::IsVectorDataType(field_type)) {
-        AssertInfo(index_params.find("metric_type") != index_params.end(),
-                   "metric type is empty for vector index");
+        if (!(index_params.find("metric_type") != index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "metric type is empty for vector index");
+        }
         index_info.metric_type = index_params.at("metric_type");
     }
 
     if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
-        AssertInfo(
-            index_params.find(milvus::index::MIN_GRAM) != index_params.end(),
-            "min_gram is empty for ngram index");
-        AssertInfo(
-            index_params.find(milvus::index::MAX_GRAM) != index_params.end(),
-            "max_gram is empty for ngram index");
+        if (!(index_params.find(milvus::index::MIN_GRAM) !=
+              index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "min_gram is empty for ngram index");
+        }
+        if (!(index_params.find(milvus::index::MAX_GRAM) !=
+              index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "max_gram is empty for ngram index");
+        }
 
         // get min_gram and max_gram and convert to uintptr_t
         milvus::index::NgramParams ngram_params{};

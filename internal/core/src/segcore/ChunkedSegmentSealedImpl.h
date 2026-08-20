@@ -87,6 +87,7 @@
 
 #ifdef MILVUS_UNIT_TEST
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "storage/StatusToErrorCode.h"
 #endif
 
 namespace milvus::segcore {
@@ -2381,12 +2382,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
         auto estimate_reader_result =
             runtime->reader->get_chunk_reader(index, estimate_columns);
-        AssertInfo(estimate_reader_result.ok(),
-                   "get estimate chunk reader failed, segment {}, column "
-                   "group index {}, status msg: {}",
-                   get_segment_id(),
-                   index,
-                   estimate_reader_result.status().ToString());
+        if (!estimate_reader_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(estimate_reader_result),
+                "get estimate chunk reader failed, segment {}, column "
+                "group index {}, status msg: {}",
+                get_segment_id(),
+                index,
+                estimate_reader_result.status().ToString());
+        }
         auto estimate_reader = std::move(estimate_reader_result).ValueOrDie();
         auto size_estimate =
             storagev2translator::FetchColumnSizeEstimates(*estimate_reader);

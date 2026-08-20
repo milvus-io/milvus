@@ -41,6 +41,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -309,10 +310,13 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                             reader_memory_limit,
                             milvus::storage::GetReaderProperties(),
                             milvus::storage::GetArrowReaderProperties());
-                        AssertInfo(
-                            result.ok(),
-                            "[StorageV2] Failed to create row group reader: {}",
-                            result.status().ToString());
+                        if (!result.ok()) {
+                            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
+                                          result.status()),
+                                      "[StorageV2] Failed to create row group "
+                                      "reader: {}",
+                                      result.status().ToString());
+                        }
                         auto row_group_reader = result.ValueOrDie();
                         auto close_guard =
                             folly::makeGuard([&row_group_reader]() {
@@ -321,23 +325,30 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                         auto status =
                             row_group_reader->SetRowGroupOffsetAndCount(
                                 block.offset, block.count);
-                        AssertInfo(status.ok(),
-                                   "[StorageV2] Failed to set row group offset "
-                                   "and count {} and {} with error {}",
-                                   block.offset,
-                                   block.count,
-                                   status.ToString());
+                        if (!status.ok()) {
+                            ThrowInfo(
+                                milvus::storage::ArrowStatusToErrorCode(status),
+                                "[StorageV2] Failed to set row group offset "
+                                "and count {} and {} with error {}",
+                                block.offset,
+                                block.count,
+                                status.ToString());
+                        }
                         auto ret = std::make_shared<ArrowDataWrapper>();
                         for (int64_t i = 0; i < block.count; ++i) {
                             std::shared_ptr<arrow::Table> table;
                             auto status =
                                 row_group_reader->ReadNextRowGroup(&table);
-                            AssertInfo(status.ok(),
-                                       "[StorageV2] Failed to read row group "
-                                       "{} from file {} with error {}",
-                                       block.offset + i,
-                                       file,
-                                       status.ToString());
+                            if (!status.ok()) {
+                                ThrowInfo(
+                                    milvus::storage::ArrowStatusToErrorCode(
+                                        status),
+                                    "[StorageV2] Failed to read row group "
+                                    "{} from file {} with error {}",
+                                    block.offset + i,
+                                    file,
+                                    status.ToString());
+                            }
                             ret->arrow_tables.push_back(
                                 {file_idx,
                                  static_cast<size_t>(block.offset + i),
@@ -357,7 +368,11 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     } catch (std::exception& e) {
         LOG_INFO("[StorageV2] failed to load data from remote: {}", e.what());
         channel->close();
-        throw e;
+        // Rethrow the original exception object: `throw e;` would copy-construct
+        // a plain std::exception (slicing off SegcoreError and its error code),
+        // so the cgo boundary's dynamic_cast could no longer recover the typed
+        // code and every failure here would collapse to UnexpectedError.
+        throw;
     }
 }
 

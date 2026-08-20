@@ -14,15 +14,21 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef void* CColumnSplits;
+// Returns NULL on allocation failure; callers must check.
 CColumnSplits
 NewCColumnSplits();
 
-void
+// Returns false when the split could not be recorded (null input or
+// allocation failure) so the caller can abort instead of silently writing a
+// wrong column grouping.
+bool
 AddCColumnSplit(CColumnSplits cgs, int* group, int group_size);
 
 int

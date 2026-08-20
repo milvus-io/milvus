@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -154,9 +155,8 @@ NewSegment(CCollection collection,
 
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -182,9 +182,8 @@ NewSegmentWithLoadInfo(CCollection collection,
         segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 milvus::SchemaPtr
@@ -248,16 +247,35 @@ AsyncReopenSegment(CTraceContext c_trace,
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     } catch (std::exception& e) {
+        // Keep the ORIGINAL error code (a typed SegcoreError, e.g. a
+        // retriable storage failure from preflight, must not collapse into
+        // UnexpectedError) while still prefixing the preflight context.
+        auto code = milvus::UnexpectedError;
+        if (auto* se = dynamic_cast<const milvus::SegcoreError*>(&e)) {
+            code = se->get_error_code();
+        }
         std::string error_msg = e.what();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [error_msg = std::move(error_msg)](
+            [code, error_msg = std::move(error_msg)](
                 folly::CancellationToken cancel_token) -> bool* {
                 (void)cancel_token;
-                ThrowInfo(milvus::UnexpectedError,
-                          "AsyncReopenSegment preflight failed: {}",
-                          error_msg);
+                ThrowInfo(
+                    code, "AsyncReopenSegment preflight failed: {}", error_msg);
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (...) {
+        auto eptr = std::current_exception();
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [eptr](folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                std::rethrow_exception(eptr);
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);
@@ -307,9 +325,8 @@ SegmentLoad(CTraceContext c_trace,
         }
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CFuture*
@@ -559,6 +576,9 @@ CreateLeakedCRetrieveResultFromProto(
     } catch (std::exception& e) {
         delete[] buffer;
         throw;
+    } catch (...) {
+        delete[] buffer;
+        throw;
     }
 
     auto result = new CRetrieveResult();
@@ -712,7 +732,26 @@ HasRawData(CSegmentInterface c_segment, int64_t field_id) {
 
     auto segment =
         reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-    return segment->HasRawData(field_id);
+    try {
+        return segment->HasRawData(field_id);
+    } catch (const std::exception& e) {
+        // Returning through a plain bool leaves no channel for an error, and
+        // the impls AssertInfo-throw on a field the published schema has not
+        // caught up with yet (normal schema-evolution timing, no malformed
+        // data needed) as well as on not-ready indexes. "No raw data" is the
+        // safe answer -- the caller just loads the field data -- and it must
+        // not terminate the process.
+        LOG_WARN("HasRawData({}) failed, reporting no raw data: {}",
+                 field_id,
+                 e.what());
+        return false;
+    } catch (...) {
+        LOG_WARN(
+            "HasRawData({}) failed with an unknown exception, reporting "
+            "no raw data",
+            field_id);
+        return false;
+    }
 }
 
 bool
@@ -752,9 +791,8 @@ Insert(CSegmentInterface c_segment,
                         timestamps,
                         insert_record_proto.get());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -765,9 +803,8 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         *offset = segment->PreInsert(size);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -779,15 +816,18 @@ Delete(CSegmentInterface c_segment,
     SCOPE_CGO_CALL_METRIC();
 
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-    auto pks = std::make_unique<milvus::proto::schema::IDs>();
-    auto suc = pks->ParseFromArray(ids, ids_size);
-    AssertInfo(suc, "failed to parse pks from ids");
     try {
+        // Parse inside the try: a malformed IDs blob makes AssertInfo throw a
+        // SegcoreError, and it would leave this CStatus-returning function as a
+        // live exception across the C ABI (Insert and LoadDeletedRecord already
+        // parse inside theirs).
+        auto pks = std::make_unique<milvus::proto::schema::IDs>();
+        auto suc = pks->ParseFromArray(ids, ids_size);
+        AssertInfo(suc, "failed to parse pks from ids");
         auto res = segment->Delete(size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
@@ -803,9 +843,8 @@ LoadFieldData(CSegmentInterface c_segment,
         auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
         segment->LoadFieldData(*load_info);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -826,9 +865,8 @@ LoadDeletedRecord(CSegmentInterface c_segment,
                                                deleted_record_info.row_count};
         segment_interface->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -843,9 +881,8 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropFieldData(milvus::FieldId(field_id));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -865,6 +902,9 @@ ExprResCacheEraseSegment(int64_t segment_id) {
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -1756,9 +1796,8 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
             *count = static_cast<int64_t>(ids.size());
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1906,9 +1945,8 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                                 growing_segment->get_segment_id()));
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -2673,6 +2711,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 

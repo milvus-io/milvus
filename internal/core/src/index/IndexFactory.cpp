@@ -278,15 +278,20 @@ ResolveHybridInternalIndexType(
 
     if (index_files.size() == 1 && file_manager_context.fs != nullptr) {
         auto input = file_manager.OpenInputStream(index_files[0]);
-        AssertInfo(input != nullptr,
-                   "failed to open packed hybrid index file: {}",
-                   index_files[0]);
+        if (!(input != nullptr)) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open packed hybrid index file: {}",
+                      index_files[0]);
+        }
         auto reader = storage::IndexEntryReader::Open(
             input,
             input->Size(),
             file_manager_context.fieldDataMeta.collection_id);
-        AssertInfo(reader != nullptr,
-                   "failed to create IndexEntryReader for hybrid index file");
+        if (!(reader != nullptr)) {
+            ThrowInfo(
+                ErrorCode::FileOpenFailed,
+                "failed to create IndexEntryReader for hybrid index file");
+        }
         if (stream_load_info != nullptr) {
             *stream_load_info = reader->GetStreamLoadInfo();
         }
@@ -309,9 +314,11 @@ InspectScalarIndexStreamLoadInfo(
 
     storage::MemFileManagerImpl file_manager(file_manager_context);
     auto input = file_manager.OpenInputStream(index_files[0]);
-    AssertInfo(input != nullptr,
-               "failed to open packed scalar index file: {}",
-               index_files[0]);
+    if (!(input != nullptr)) {
+        ThrowInfo(ErrorCode::FileOpenFailed,
+                  "failed to open packed scalar index file: {}",
+                  index_files[0]);
+    }
     return storage::IndexEntryReader::InspectStreamLoadInfo(input,
                                                             input->Size());
 }
@@ -1130,10 +1137,12 @@ IndexFactory::CreateJsonIndex(
 
     // Inverted / NGram (existing paths). FMINDEX is VARCHAR-only in this
     // release — JSON string paths are a follow-up — so it never reaches here.
-    AssertInfo(
-        index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE,
-        "Invalid index type for json index: {}",
-        index_type);
+    if (!(index_type == INVERTED_INDEX_TYPE ||
+          index_type == NGRAM_INDEX_TYPE)) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "Invalid index type for json index: {}",
+                  index_type);
+    }
 
     auto tantivy_ver =
         static_cast<uint32_t>(create_index_info.tantivy_index_version);
@@ -1169,8 +1178,10 @@ IndexBasePtr
 IndexFactory::CreateGeometryIndex(
     IndexType index_type,
     const storage::FileManagerContext& file_manager_context) {
-    AssertInfo(index_type == RTREE_INDEX_TYPE,
-               "Invalid index type for geometry index");
+    if (!(index_type == RTREE_INDEX_TYPE)) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "Invalid index type for geometry index");
+    }
     return std::make_unique<RTreeIndex<std::string>>(file_manager_context);
 }
 

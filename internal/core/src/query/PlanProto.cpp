@@ -1196,7 +1196,7 @@ ProtoParser::ParseElementFilterExprs(
     // ElementFilterExpr is not a regular expression that can be evaluated directly.
     // It should be handled at the PlanNode level (in PlanNodeFromProto).
     // This method should never be called.
-    ThrowInfo(ExprInvalid,
+    ThrowInfo(UnexpectedError,
               "ParseElementFilterExprs should not be called directly. "
               "ElementFilterExpr must be handled at PlanNode level.");
 }
@@ -1542,7 +1542,7 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             break;
         }
         case ppe::kElementFilterExpr: {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "ElementFilterExpr should be handled at PlanNode level, "
                       "not in ParseExprs");
         }
@@ -1564,8 +1564,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             // node carries a client blob up to 128 MiB of user values — which
             // then travels back to the client and into logs. An old QueryNode
             // that does not know a newer node type lands here, so this is
-            // exactly the path a rolling upgrade exercises.
-            ThrowInfo(ExprInvalid,
+            // exactly the path a rolling upgrade exercises -- a version skew,
+            // not caller input, so it must not be blamed on the request
+            // (ExprInvalid is an InputError and would stop replica failover).
+            ThrowInfo(UnexpectedError,
                       "unsupported or unset expr proto node (expr_case: {})",
                       static_cast<int>(expr_pb.expr_case()));
         }
@@ -1573,8 +1575,9 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
     if (type_check(result->type())) {
         return result;
     }
-    ThrowInfo(
-        ExprInvalid, "expr type check failed, actual type: {}", result->type());
+    ThrowInfo(UnexpectedError,
+              "expr type check failed, actual type: {}",
+              result->type());
 }
 
 std::shared_ptr<rescores::Scorer>

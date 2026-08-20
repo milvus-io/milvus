@@ -152,15 +152,18 @@ def id_delta(actual_ids, expected_ids):
 
 
 def is_known_executor_type_assertion(exc, expected_value_case):
+    # Old wire contract: every segcore error collapsed to code 2000 with a
+    # "segcoreCode=NNNN" decoration in the message. New contract: the original
+    # segcore code (2001 here) travels the wire directly, undecorated. Accept
+    # both; the structural tokens identify the known assertion either way.
     message = str(exc)
-    return exc.code == 2000 and all(
+    return exc.code in (2000, 2001) and all(
         token in message
         for token in (
             "Operator:PhyFilterBitsNode",
             "value_proto.val_case()",
             f"GenericValue::{expected_value_case}",
             "internal/core/src/exec/expression/Utils.h:",
-            "segcoreCode=2001",
         )
     )
 

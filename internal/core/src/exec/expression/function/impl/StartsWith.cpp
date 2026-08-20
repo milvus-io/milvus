@@ -36,7 +36,7 @@ namespace function {
 void
 StartsWithVarchar(const RowVector& args, FilterFunctionReturn& result) {
     if (args.childrens().size() != 2) {
-        ThrowInfo(ExprInvalid,
+        ThrowInfo(UnexpectedError,
                   "invalid argument count, expect 2, actual {}",
                   args.childrens().size());
     }

@@ -383,7 +383,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             nostd_span_load_engine);
         auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
         if (stat != knowhere::Status::success)
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to Deserialize index, {}",
                       KnowhereStatusString(stat));
         span_load_engine->End();
@@ -401,7 +401,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     if (restored_id_map.has_valid_data) {
         if (all_null_nullable || empty_emb_list_state.has_value()) {
             FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
+
                                   "disk metadata-only load");
         }
     }
@@ -415,7 +415,7 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     if (!IsAllNullNullable(id_map) && !IsEmptyEmbListIndex()) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to serialize index, {}",
                       KnowhereStatusString(stat));
         }
@@ -533,7 +533,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                     config.value("build_id", "unknown"));
                 return;
             }
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::DataFormatBroken,
                       fmt::format("Embedding list offsets file not found: {}",
                                   offsets_path));
         }
@@ -575,7 +575,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     build_config.erase(VEC_OPT_FIELDS);
     auto stat = index_.Build(id_map_dataset, build_config);
     if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to build disk index, {}",
                   KnowhereStatusString(stat));
 
@@ -702,7 +702,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
     auto stat = index_.Build(dataset, build_config);
     if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to build index, {}",
                   KnowhereStatusString(stat));
 
@@ -780,7 +780,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             auto res =
                 index_.RangeSearch(dataset, search_config, bitset, op_context);
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           fmt::format("failed to range search: {}: {}",
                                       KnowhereStatusString(res.error()),
                                       res.what()));
@@ -791,7 +791,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             auto res =
                 index_.Search(dataset, search_config, bitset, op_context);
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           fmt::format("failed to search: {}: {}",
                                       KnowhereStatusString(res.error()),
                                       res.what()));
@@ -903,7 +903,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
 
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   fmt::format("failed to get vector: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));
@@ -929,7 +929,7 @@ VectorDiskAnnIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
 
     auto res = index_.GetEmbListByIds(dataset, metric_type);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   fmt::format("failed to get emb list: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));

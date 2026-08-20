@@ -13,6 +13,7 @@
 #include <string.h>
 #include <string>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
@@ -20,16 +21,29 @@
 
 void
 IndexBuilderInit(const char* conf_file) {
-    milvus::config::KnowhereInitImpl(conf_file);
+    try {
+        milvus::config::KnowhereInitImpl(conf_file);
+    }
+    CGO_CATCH_AND_LOG("IndexBuilderInit")
 }
 
 // return value must be freed by the caller
 char*
 IndexBuilderSetSimdType(const char* value) {
-    auto real_type = milvus::config::KnowhereSetSimdType(value);
-    char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
-    AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
-    milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
-    ret[real_type.length()] = 0;
-    return ret;
+    // Returns NULL on failure; the Go caller ignores the return value, so a
+    // swallowed exception degrades to keeping the default SIMD type instead
+    // of an exception crossing the C boundary (AssertInfo here would throw
+    // straight through cgo and terminate the process).
+    try {
+        auto real_type = milvus::config::KnowhereSetSimdType(value);
+        char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
+        if (ret == nullptr) {
+            return nullptr;
+        }
+        milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
+        ret[real_type.length()] = 0;
+        return ret;
+    }
+    CGO_CATCH_AND_LOG("IndexBuilderSetSimdType")
+    return nullptr;
 }

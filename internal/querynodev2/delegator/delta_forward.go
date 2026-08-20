@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -409,11 +410,44 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 					log.Warn(ctx, "try to delete data of released segment", mlog.Int64s("ids", resp.GetMissingIds()))
 				}
 				if len(resp.GetFailedIds()) > 0 {
-					log.Warn(ctx, "apply delete for segment failed, marking it offline")
-					offlineSegments.Upsert(resp.GetFailedIds()...)
+					// Decide per segment with the typed status the worker now
+					// carries: a permanent failure offlines the segment, a
+					// retryable one (OOM, transient IO) retries -- restricted to
+					// the failed subset -- instead of being offlined on first
+					// failure.
+					statuses := resp.GetFailedStatuses()
+					retryIDs := make([]int64, 0, len(resp.GetFailedIds()))
+					for i, segmentID := range resp.GetFailedIds() {
+						var segErr error
+						if i < len(statuses) {
+							segErr = merr.Error(statuses[i])
+						}
+						if segErr != nil && merr.IsRetryableErr(segErr) {
+							retryIDs = append(retryIDs, segmentID)
+							continue
+						}
+						log.Warn(ctx, "apply delete for segment failed permanently, marking it offline",
+							mlog.Int64("segmentID", segmentID), mlog.Err(segErr))
+						offlineSegments.Upsert(segmentID)
+					}
+					if len(retryIDs) > 0 {
+						segmentIDs = retryIDs
+						return true, merr.WrapErrServiceInternal(
+							fmt.Sprintf("retryable delete failures on segments %v", retryIDs))
+					}
 				}
 				return false, nil
 			}, retry.Attempts(10))
+			if err != nil && len(segmentIDs) > 0 {
+				// The retry budget is spent and these segments still have not
+				// applied the delete. AwaitAll below discards this error, so
+				// leaving them alone would silently drop the delete and keep
+				// the segments serving deleted rows; offline them so a reload
+				// reapplies it (what master did on the first failure).
+				log.Warn(ctx, "delete still failing after retries, marking segments offline",
+					mlog.Int64s("segmentIDs", segmentIDs), mlog.Err(err))
+				offlineSegments.Upsert(segmentIDs...)
+			}
 
 			return struct{}{}, err
 		})

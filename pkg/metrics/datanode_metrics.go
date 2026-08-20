@@ -471,6 +471,12 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
+	// DataNode runs the C++ core (index build / analyze via cgo), so it produces
+	// segcore errors too; register the cgo metrics here so UnmappedSegcoreCodeTotal
+	// (and the other cgo metrics) are scrapeable on a dedicated DataNode, not only
+	// on QueryNode. RegisterCGOMetrics is guarded by sync.Once, so a shared-registry
+	// process (standalone) registers them exactly once.
+	RegisterCGOMetrics(registry)
 	RegisterLoggingMetrics(registry)
 }
 

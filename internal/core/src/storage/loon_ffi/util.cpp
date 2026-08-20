@@ -46,6 +46,7 @@
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/loon_ffi/loon_error_code.h"
 
 using json = nlohmann::json;
 
@@ -158,10 +159,14 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
 
     if (!loon_ffi_is_success(&result)) {
         auto message = loon_ffi_get_errmsg(&result);
-        // Copy the error message before freeing the LoonFFIResult
+        // Copy the error message and the code before freeing the
+        // LoonFFIResult: dropping err_code here made every properties
+        // failure indistinguishable at the cgo boundary.
         std::string error_msg = message ? message : "Unknown error";
+        const int err_code = result.err_code;
         loon_ffi_free_result(&result);
-        throw std::runtime_error(error_msg);
+        ThrowInfo(
+            milvus::storage::LoonErrCodeToErrorCode(err_code), "{}", error_msg);
     }
 
     loon_ffi_free_result(&result);
@@ -568,10 +573,12 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     // Caller must have run Go ValidateExternalSource; malformed here
     // signals etcd corruption or bypass — fail adjacent to bad input.
     auto scheme_end = external_source.find("://");
-    AssertInfo(scheme_end != std::string::npos,
-               "external_source for collection {} missing scheme: {}",
-               collection_id,
-               external_source);
+    if (!(scheme_end != std::string::npos)) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} missing scheme: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
@@ -581,10 +588,12 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     // where rest itself is empty.
     std::string host =
         (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : rest;
-    AssertInfo(!host.empty(),
-               "external_source for collection {} has empty host: {}",
-               collection_id,
-               external_source);
+    if (!(!host.empty())) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} has empty host: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string path_part =
         (slash_pos != std::string::npos) ? rest.substr(slash_pos + 1) : "";
@@ -679,7 +688,7 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                 "(collection_id={}): {}",
                 collection_id,
                 e.what());
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+            ThrowInfo(milvus::ErrorCode::ConfigInvalid,
                       "external_spec parse failed for collection {}: {}",
                       collection_id,
                       e.what());
@@ -881,14 +890,21 @@ GetLoonManifest(
         auto current_manifest = manifest_result.ValueOrDie();
         return current_manifest;
     } catch (const json::parse_error& e) {
-        throw std::runtime_error(
-            std::string("Failed to parse manifest JSON: ") + e.what());
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "{}",
+                  std::string(std::string("Failed to parse manifest JSON: ") +
+                              e.what()));
     } catch (const json::out_of_range& e) {
-        throw std::runtime_error(
-            std::string("Missing required field in manifest: ") + e.what());
+        ThrowInfo(
+            milvus::ErrorCode::DataFormatBroken,
+            "{}",
+            std::string(std::string("Missing required field in manifest: ") +
+                        e.what()));
     } catch (const json::type_error& e) {
-        throw std::runtime_error(
-            std::string("Invalid field type in manifest: ") + e.what());
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "{}",
+                  std::string(std::string("Invalid field type in manifest: ") +
+                              e.what()));
     }
 }
 

@@ -315,16 +315,26 @@ MmapChunkManager::Allocate(const MmapChunkDescriptorPtr descriptor,
         }
         // create a new block
         auto new_block = blocks_handler_->AllocateFixSizeBlock();
-        AssertInfo(new_block != nullptr, "new mmap_block can't be nullptr");
+        if (!(new_block != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError, "new mmap_block can't be nullptr");
+        }
         auto addr = new_block->Get(size);
-        AssertInfo(addr != nullptr, "fail to allocate from mmap block.");
+        if (!(addr != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "fail to allocate from mmap block.");
+        }
         blocks_table_[blocks_table_key].emplace_back(std::move(new_block));
         return addr;
     } else {
         auto new_block = blocks_handler_->AllocateLargeBlock(size);
-        AssertInfo(new_block != nullptr, "new mmap_block can't be nullptr");
+        if (!(new_block != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError, "new mmap_block can't be nullptr");
+        }
         auto addr = new_block->Get(size);
-        AssertInfo(addr != nullptr, "fail to allocate from mmap block.");
+        if (!(addr != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "fail to allocate from mmap block.");
+        }
         blocks_table_[blocks_table_key].emplace_back(std::move(new_block));
         return addr;
     }

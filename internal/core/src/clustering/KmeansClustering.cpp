@@ -105,10 +105,12 @@ KmeansClustering::FetchDataFiles(uint8_t* buf,
         fetched_file_size +=
             CopyFieldDatasToBuf(buf, expected_train_size, field_datas, offset);
     }
-    AssertInfo(fetched_file_size == expected_remote_file_size,
-               "file size inconsistent, expected: {}, actual: {}",
-               expected_remote_file_size,
-               fetched_file_size);
+    if (!(fetched_file_size == expected_remote_file_size)) {
+        ThrowInfo(ErrorCode::FileReadFailed,
+                  "file size inconsistent, expected: {}, actual: {}",
+                  expected_remote_file_size,
+                  fetched_file_size);
+    }
 }
 
 template <typename T>
@@ -128,10 +130,12 @@ KmeansClustering::FetchSegmentViaManifest(
     auto field_datas = file_manager_->CacheRawDataToMemory(config);
     int64_t fetched =
         CopyFieldDatasToBuf(buf, expected_train_size, field_datas, offset);
-    AssertInfo(fetched == expected_remote_file_size,
-               "file size inconsistent, expected: {}, actual: {}",
-               expected_remote_file_size,
-               fetched);
+    if (!(fetched == expected_remote_file_size)) {
+        ThrowInfo(ErrorCode::FileReadFailed,
+                  "file size inconsistent, expected: {}, actual: {}",
+                  expected_remote_file_size,
+                  fetched);
+    }
 }
 
 template <typename T>
@@ -381,7 +385,7 @@ KmeansClustering::StreamingAssignandUpload(
             dataset->SetIsOwner(true);
             auto res = cluster_node.Assign(*dataset);
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           fmt::format("failed to kmeans assign: {}: {}",
                                       KnowhereStatusString(res.error()),
                                       res.what()));
@@ -530,7 +534,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     // return id mapping
     auto res = cluster_node.Train(*dataset, train_conf);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   fmt::format("failed to kmeans train: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));
@@ -544,10 +548,10 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
 
     auto centroids_res = cluster_node.GetCentroids();
     if (!centroids_res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(centroids_res.error()),
                   fmt::format("failed to get centroids: {}: {}",
-                              KnowhereStatusString(res.error()),
-                              res.what()));
+                              KnowhereStatusString(centroids_res.error()),
+                              centroids_res.what()));
     }
     // centroids owned by cluster_node
     centroids_res.value()->SetIsOwner(false);

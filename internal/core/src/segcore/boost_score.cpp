@@ -24,6 +24,7 @@
 #include <memory>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -38,6 +39,7 @@
 #include "query/PlanProto.h"
 #include "rescores/BoostScoreRunner.h"
 #include "segcore/SegmentInterface.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace {
 
@@ -115,10 +117,13 @@ BuildScorerOffsetChunks(ArrowArray* offset_chunks,
     for (auto chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
         auto offset_array_result = arrow::ImportArray(
             &offset_chunks[chunk_idx], &offset_schemas[chunk_idx]);
-        AssertInfo(offset_array_result.ok(),
-                   "failed to import offset chunk {}: {}",
-                   chunk_idx,
-                   offset_array_result.status().ToString());
+        if (!offset_array_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(offset_array_result),
+                "failed to import offset chunk {}: {}",
+                chunk_idx,
+                offset_array_result.status().ToString());
+        }
         auto offset_array = offset_array_result.ValueOrDie();
         if (offset_array->length() == 0) {
             continue;
@@ -270,9 +275,8 @@ ComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
                                             output_score_chunks,
                                             output_has_score_chunks);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CFuture*
@@ -338,17 +342,40 @@ AsyncComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     } catch (std::exception& e) {
+        // Keep the ORIGINAL error code (a typed SegcoreError from preflight
+        // must not collapse into UnexpectedError) while still prefixing the
+        // preflight context the caller-side diagnostics rely on.
+        auto code = milvus::UnexpectedError;
+        if (auto* se = dynamic_cast<const milvus::SegcoreError*>(&e)) {
+            code = se->get_error_code();
+        }
         std::string error_msg = e.what();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getSearchCPUExecutor(),
             milvus::futures::ExecutePriority::HIGH,
-            [error_msg = std::move(error_msg)](
+            [code, error_msg = std::move(error_msg)](
                 folly::CancellationToken cancel_token) -> bool* {
                 (void)cancel_token;
-                ThrowInfo(milvus::UnexpectedError,
+                ThrowInfo(code,
                           "AsyncComputeScorerScoresOnOffsetChunks preflight "
                           "failed: {}",
                           error_msg);
+                return nullptr;
+            });
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (...) {
+        // A non-std exception (folly's own) would otherwise escape this
+        // extern-C entry and terminate the process; mirror the error-future
+        // construction above so the caller still gets a destroyable future.
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getSearchCPUExecutor(),
+            milvus::futures::ExecutePriority::HIGH,
+            [](folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncComputeScorerScoresOnOffsetChunks preflight "
+                          "failed: unknown exception");
                 return nullptr;
             });
         return static_cast<CFuture*>(static_cast<void*>(

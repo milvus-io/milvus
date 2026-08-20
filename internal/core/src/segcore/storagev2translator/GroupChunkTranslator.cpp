@@ -200,14 +200,16 @@ GroupChunkTranslator::GroupChunkTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    AssertInfo(
-        meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
-        fmt::format(
-            "[StorageV2] data lost while loading column group {}: found "
-            "num rows {} but expected {}",
-            column_group_info_.field_id,
-            meta_.num_rows_until_chunk_.back(),
-            column_group_info_.row_count));
+    if (!(meta_.num_rows_until_chunk_.back() == column_group_info_.row_count)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "[StorageV2] data lost while loading column group {}: found "
+                "num rows {} but expected {}",
+                column_group_info_.field_id,
+                meta_.num_rows_until_chunk_.back(),
+                column_group_info_.row_count));
+    }
 
     LOG_INFO(
         "[StorageV2] translator {} merged {} row groups into {} cells "
@@ -528,7 +530,18 @@ GroupChunkTranslator::load_group_chunk(
                           "unknown group chunk type: {}",
                           static_cast<uint8_t>(group_chunk_type_));
         }
-        std::filesystem::create_directories(filepath.parent_path());
+        // Error-code overload: the throwing one escapes this async producer
+        // as a plain filesystem_error and lands on the future/CGo boundary as
+        // a permanent UnexpectedError, so a transient ENOSPC/EACCES would
+        // never be retried or rerouted.
+        std::error_code mkdir_ec;
+        std::filesystem::create_directories(filepath.parent_path(), mkdir_ec);
+        if (mkdir_ec) {
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "failed to create chunk directory {}: {}",
+                      filepath.parent_path().string(),
+                      mkdir_ec.message());
+        }
         chunks = create_group_chunk(field_ids,
                                     field_metas,
                                     array_vecs,

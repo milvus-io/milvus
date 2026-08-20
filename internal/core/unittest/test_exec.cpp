@@ -345,6 +345,72 @@ TEST_P(TaskTest, CallExprEmpty) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
+// A filter function that throws a typed SegcoreError, used to verify that the
+// Driver preserves the original error code across the operator boundary
+// instead of collapsing it to UnexpectedError(2001).
+static void
+ThrowingSegcoreErrorFilter(
+    const milvus::RowVector& args,
+    milvus::exec::expression::FilterFunctionReturn& result) {
+    ThrowInfo(milvus::ErrorCode::ExprInvalid,
+              "intentional segcore error from filter function");
+}
+
+// Regression test for the Driver CALL_OPERATOR path: a SegcoreError thrown
+// inside an operator must propagate with its original error code, not be
+// rewrapped into a code-less ExecOperatorException (which would make
+// FailureCStatus fall back to UnexpectedError at the cgo boundary).
+TEST_P(TaskTest, DriverPreservesSegcoreErrorCode) {
+    milvus::exec::expression::FunctionFactory& factory =
+        milvus::exec::expression::FunctionFactory::Instance();
+    factory.RegisterFilterFunction(
+        "throw_segcore", {DataType::VARCHAR}, ThrowingSegcoreErrorFilter);
+    auto func_ptr = factory.GetFilterFunction(
+        milvus::exec::expression::FilterFunctionRegisterKey{
+            "throw_segcore", {DataType::VARCHAR}});
+    ASSERT_TRUE(func_ptr != nullptr);
+
+    expr::ColumnInfo col(field_map_["string1"], DataType::VARCHAR);
+    std::vector<milvus::expr::TypedExprPtr> parameters;
+    parameters.push_back(std::make_shared<milvus::expr::ColumnExpr>(col));
+    auto call_expr = std::make_shared<milvus::expr::CallExpr>(
+        "throw_segcore", parameters, func_ptr);
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", call_expr, sources);
+    auto plan = plan::PlanFragment(filter_node);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_throw_segcore",
+        segment_.get(),
+        100000,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_throw_segcore", plan, 0, query_context);
+    bool caught_segcore_error = false;
+    try {
+        for (;;) {
+            auto result = task->Next();
+            if (!result) {
+                break;
+            }
+        }
+    } catch (const milvus::SegcoreError& e) {
+        caught_segcore_error = true;
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ExprInvalid);
+    } catch (const std::exception& e) {
+        FAIL() << "expected a SegcoreError carrying the original code, got a "
+                  "different exception: "
+               << e.what();
+    }
+    EXPECT_TRUE(caught_segcore_error)
+        << "task->Next() did not surface the operator's SegcoreError";
+}
+
 TEST_P(TaskTest, UnaryExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);
