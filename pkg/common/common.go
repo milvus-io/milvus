@@ -279,9 +279,11 @@ const (
 	// idempotency key, the proxy derives one from the insert destination plus a
 	// hash of the client payload ("auto key"). Enabling this property therefore
 	// means CONTENT-ADDRESSED dedup: a byte-identical insert into the same
-	// db/collection/partition/namespace within streaming.idempotency.windowTTL
-	// (default 10m) is answered with the first insert's result and its rows are
-	// NOT written again. That is the intended retry protection for clients that
+	// db/collection/partition/namespace, while the first one is still inside the
+	// deduplication window, is answered with the first insert's result and its
+	// rows are NOT written again. The window is bounded by BYTES of subsequent
+	// writes, not by elapsed time (streaming.idempotency.maxBytesPerWindow), so on
+	// a quiet shard it can reach back a long way. That is the intended retry protection for clients that
 	// cannot pass keys (SDK-internal retries), but it also means workloads that
 	// legitimately insert identical content twice (e.g. duplicate log records
 	// into an autoID collection) MUST NOT enable this property, or must supply

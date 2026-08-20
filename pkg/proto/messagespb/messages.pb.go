@@ -840,9 +840,35 @@ func (x *InsertMessageHeader) GetIdempotentResult() *IdempotentInsertResult {
 	return nil
 }
 
-// IdempotentInsertResult carries the first successful insert result for a
-// duplicate idempotent insert append. Proxy uses row_offsets to merge ids back
-// into the original request order.
+// IdempotentInsertResult is what a duplicate idempotent insert replays back to
+// the client: the primary keys the FIRST attempt produced on this write unit,
+// and where each of them belongs in the client's original request.
+//
+// It has two roles. As a field of InsertMessageHeader it is what the streaming
+// node stores so the answer survives; as the payload of an append result's
+// `extra` it is what the proxy reads back to rebuild MutationResult. It is
+// defined here, next to the header, because the header is what makes it durable.
+//
+// THIS FIELD IS THE ONE EXCEPTION to the "keep the header light" rule above, and
+// the exception is deliberate:
+//
+//   - ids cannot be recovered from the body. For autoID the keys are
+//     server-allocated and a retry allocates different ones, so a duplicate must
+//     answer with the originals. They do sit in the body, but the streaming node
+//     never decodes an insert body on the append path -- segment assignment and
+//     size estimation all read the header -- and decoding would materialize every
+//     column including vectors to extract an 8-byte key per row, on the write hot
+//     path, without even holding the schema needed to locate the primary column.
+//   - row_offsets does not exist in the body at all. The mapping back to the
+//     client's row order is built in the proxy. It could be recomputed on retry
+//     since routing is deterministic, but only if the size-driven message split
+//     boundaries also matched between attempts; a maxMessageSize or schema change
+//     moves them, and a recomputed mapping would then scatter primary keys onto
+//     the wrong rows silently.
+//
+// The cost is real: for a large insert this is the dominant term in the message,
+// and it is stamped whether or not the collection uses autoID. Making the stamp
+// conditional on autoID is tracked as follow-up work.
 type IdempotentInsertResult struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

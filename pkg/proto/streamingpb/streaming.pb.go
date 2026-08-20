@@ -5013,9 +5013,8 @@ func (x *PartitionInfoOfVChannel) GetPartitionId() int64 {
 	return 0
 }
 
-// /
-// / Summary store metadata (etcd)
-// /
+// --- Summary store metadata (etcd) ---
+//
 // PChannelSummaryMeta records one thing: which WAL assignment term last owned
 // this store. It is not a checkpoint and not an inventory.
 //
@@ -5083,9 +5082,8 @@ func (x *PChannelSummaryMeta) GetTerm() int64 {
 	return 0
 }
 
-// /
-// / Summary store manifest (object storage)
-// /
+// --- Summary store manifest (object storage) ---
+//
 // The manifest is the only description of the chunk set. One live version per
 // pchannel, at {pchannel}.manifest.{term}, rewritten as "inherit the previous
 // manifest, then amend it" so that nothing a previous owner left unfinished can

@@ -59,16 +59,15 @@ func (m *summaryManager) recoverSummaries(ctx context.Context, pchannel string, 
 // wrapSummaryRecoveryError decorates corruption of state the manifest still
 // retains with the operator remediation, and FAILS the WAL open.
 //
-// A retained chunk is the only durable copy of the idempotency keys below the
-// persist watermark once the WAL has been truncated past them -- and it is the
-// summary store's own watermark that allowed that truncation. Silently starting
-// with an empty window would accept in-retention client retries as fresh
-// writes: duplicate data, no error anywhere. Failing the open is explicit and
-// actionable instead.
+// A chunk the manifest still retains is the only durable copy of its keys: the
+// WAL is truncated on the consume checkpoint, and that checkpoint advanced only
+// after this chunk was durable. Silently starting with an empty window would
+// accept in-retention client retries as fresh writes: duplicate data, no error
+// anywhere. Failing the open is explicit and actionable instead.
 //
-// Chunks above the watermark are a different case and never escalate: they were
-// never acknowledged, their data is still in the WAL, and probing simply stops
-// short of them.
+// A chunk found ABOVE the manifest never escalates. The persist that wrote it
+// had to write the manifest next, and failing that fails the whole checkpoint
+// persist, so its writes are still in the WAL and replay recovers them.
 func wrapSummaryRecoveryError(err error) error {
 	if errors.Is(err, ErrPChannelSummaryStoreFenced) {
 		return errors.Wrap(err,

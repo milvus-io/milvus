@@ -701,11 +701,19 @@ enum VChannelSchemaState {
 //
 // Three artifacts, defined in that order below:
 //
-//   1. meta, in etcd: a pointer to the newest manifest, plus the persist
-//      watermark.
-//   2. manifest, in object storage: the only description of the chunk set --
-//      what recovery reads, what a lazy reader indexes by, what GC deletes.
-//   3. chunk payloads, in object storage: the facts themselves.
+//   1. meta, in etcd, one per pchannel: the WAL assignment term that last owned
+//      the store, and nothing else. It is not a checkpoint, not a pointer to the
+//      manifest, and not an inventory.
+//   2. manifest, in object storage, one per term: the only description of the
+//      chunk set -- what recovery reads, what a lazy reader indexes by, and what
+//      GC deletes.
+//   3. chunk payloads, in object storage, one object per generation: the facts
+//      themselves, split into per-consumer sections.
+//
+// No position is recorded in any of them. A chunk is written synchronously
+// before the WAL consume checkpoint that covers it, so that checkpoint is
+// already the boundary between what a chunk holds and what the WAL holds;
+// anything stored here could only ever disagree with it.
 //
 // What recovery hands a consumer once it has replayed the chunks is
 // deliberately NOT in this file. It is built at WAL open, consumed once in the
@@ -716,9 +724,8 @@ enum VChannelSchemaState {
 // A physical WAL position is recorded only at pchannel level. Everything below
 // it is addressed by timetick.
 
-///
-/// Summary store metadata (etcd)
-///
+// --- Summary store metadata (etcd) ---
+//
 // PChannelSummaryMeta records one thing: which WAL assignment term last owned
 // this store. It is not a checkpoint and not an inventory.
 //
@@ -736,9 +743,8 @@ message PChannelSummaryMeta {
     int64 term      = 2;
 }
 
-///
-/// Summary store manifest (object storage)
-///
+// --- Summary store manifest (object storage) ---
+//
 // The manifest is the only description of the chunk set. One live version per
 // pchannel, at {pchannel}.manifest.{term}, rewritten as "inherit the previous
 // manifest, then amend it" so that nothing a previous owner left unfinished can
@@ -784,9 +790,8 @@ message PChannelSummaryChunkRef {
     int64 term        = 2;
 }
 
-///
-/// Summary store chunk payloads (object storage)
-///
+// --- Summary store chunk payloads (object storage) ---
+//
 // A summary chunk lives in object storage, not in etcd, and the object frames
 // its own payloads: a fixed header, the per-vchannel sections back to back, then
 // a footer indexing each section by offset/length, the footer checksum, its

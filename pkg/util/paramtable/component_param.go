@@ -8168,13 +8168,13 @@ type streamingConfig struct {
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyEnabled                     ParamItem `refreshable:"false"`
-	IdempotencyMaxBytesPerWindow           ParamItem `refreshable:"false"`
-	IdempotencyMinRetainedBytes ParamItem `refreshable:"false"`
-	IdempotencyRetentionTTL                ParamItem `refreshable:"false"`
-	IdempotencyMaxRetainedChunks           ParamItem `refreshable:"false"`
-	IdempotencyGCInterval                  ParamItem `refreshable:"false"`
-	IdempotencyMaxKeyLength                ParamItem `refreshable:"false"`
+	IdempotencyEnabled           ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow ParamItem `refreshable:"false"`
+	IdempotencyMinRetainedBytes  ParamItem `refreshable:"false"`
+	IdempotencyRetentionTTL      ParamItem `refreshable:"false"`
+	IdempotencyMaxRetainedChunks ParamItem `refreshable:"false"`
+	IdempotencyGCInterval        ParamItem `refreshable:"false"`
+	IdempotencyMaxKeyLength      ParamItem `refreshable:"false"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -8664,7 +8664,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Version:      "3.0.0",
 		Doc:          `How often the summary store sweeps chunks queued for deletion. There is no periodic persist: chunks are written synchronously with the WAL consume checkpoint, so this drives gc only.`,
 		DefaultValue: "10s",
-		FallbackKeys: []string{"idempotency.gcInterval", "idempotency.persistInterval"},
+		FallbackKeys: []string{"idempotency.gcInterval"},
 		Export:       false,
 	}
 	p.IdempotencyGCInterval.Init(base.mgr)
