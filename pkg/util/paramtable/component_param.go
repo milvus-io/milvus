@@ -1268,7 +1268,7 @@ The default value is 1, which is enough for most cases.`,
 
 	p.StorageIopsInitialRate = ParamItem{
 		Key:          "common.storage.iops.initialRate",
-		Version:      "2.7.0",
+		Version:      "3.0.1",
 		DefaultValue: strconv.FormatUint(uint64(DefaultStorageIopsInitialRate), 10),
 		Doc: `Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
 The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
@@ -1286,7 +1286,7 @@ The default matches the milvus-storage default.`,
 
 	p.StorageIopsMaxRate = ParamItem{
 		Key:          "common.storage.iops.maxRate",
-		Version:      "2.7.0",
+		Version:      "3.0.1",
 		DefaultValue: strconv.FormatUint(uint64(DefaultStorageIopsMaxRate), 10),
 		Doc: `Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
 Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
