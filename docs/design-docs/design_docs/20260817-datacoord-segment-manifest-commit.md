@@ -38,7 +38,8 @@ Today the lifecycle is split across several owners:
   resulting path to DataCoord;
 - DataCoord GC removes index entries from a manifest, then separately publishes
   a new path and removes files/`SegmentIndex` metadata;
-- copy/restore appends copied index entries before a later `UpdateManifest`;
+- copy/restore has the worker write the target's index entries into the
+  manifest it produces, then publishes that pointer with `UpdateManifest`;
 - stats, flush/import, and compaction paths publish manifests through several
   forms of `UpdateManifest`.
 
@@ -172,14 +173,12 @@ func (m *meta) CommitSegmentManifest(
 
 `ManifestMutation` is a closed/typed set, initially including:
 
-- `CreateManifest` — construct the first revision from worker-supplied
-  structured entries;
-- `AddIndexes` and `DropIndexes`;
-- `AddStats`;
-- `AppendData` / `ReplaceData` as needed by flush and compaction;
-- `PublishPreparedManifest` only as a temporary compatibility adapter.  It must
-  validate the base and is removed once every producer returns structured
-  entries.
+- `CommitUpdates` — construct the next revision from the segment's currently
+  published pointer and a structured `packed.ManifestUpdates` payload: new data
+  files, delta logs, stats, and index add/drop entries;
+- `Noop` — publish a prepared manifest path unchanged, only as a temporary
+  compatibility adapter.  It must validate the base and is removed once every
+  producer returns structured entries.
 
 `CatalogMutation` describes the metadata that must become visible with the
 manifest pointer.  Examples are completing one `SegmentIndex`, creating copied
@@ -246,25 +245,32 @@ artifact files -> manifest revision -> etcd/catalog pointer -> memory
   task-specific consumers such as Stats can discard obsolete worker output
   without classifying unrelated service-unavailable failures as stale.
 
-Drop requires a durable cleanup state in addition to serialization:
+Drop inverts the ordering, because the risk is inverted: an artifact whose
+bytes are gone but whose metadata still claims it is a read failure, while an
+artifact whose metadata is gone but whose bytes remain is only wasted storage.
 
 ```text
-commit manifest without index + mark index cleanup pending
-  -> delete index objects (retryable)
-  -> remove SegmentIndex metadata / complete cleanup marker
+commit manifest without index + remove SegmentIndex (one catalog transaction)
+  -> delete index objects (best effort; a failure leaks bytes, never visibility)
 ```
 
-The framework prevents an interleaved index/stat commit during these steps, but
-it cannot make object deletion and etcd deletion atomic across a process crash.
-The pending state makes the remaining cleanup discoverable and idempotent.
+No pending marker is needed. Both stores stop referencing the artifact in the
+same transaction, so after it commits there is nothing left to rediscover -
+only bytes. A deletion failure is therefore logged with the leaked paths rather
+than retried from metadata that no longer exists.
+
+The framework prevents an interleaved index/stat commit during these steps, and
+it does make the manifest revision and the `SegmentIndex` removal atomic; what
+it still cannot do is make object deletion atomic with either. Ordering the
+metadata first is what confines that residual gap to storage accounting.
 
 ## Required Caller Migration
 
 | Current owner/path | Framework migration |
 |---|---|
-| `task_index.go` / DataNode index task | Return index artifact metadata.  `meta.CommitSegmentManifest(AddIndexes)` creates the revision and atomically completes `SegmentIndex`. |
-| `garbage_collector.go` | Use `DropIndexes`; publish pointer and cleanup intent in one catalog transaction, then perform retryable object cleanup. |
-| `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. |
+| `task_index.go` / DataNode index task | Return index artifact metadata.  `meta.CommitSegmentManifest(AddIndexes)` creates the revision and, via a `SegmentIndexUpsert` catalog mutation, atomically completes `SegmentIndex`. |
+| `garbage_collector.go` | Use `DropIndexes` with a `SegmentIndexRemove` catalog mutation, so the retracting revision's pointer and the `SegmentIndex` removal land in one catalog transaction, then delete the objects. Applies to the manifest-backed path only: a StorageV2 segment, a dropped segment, or a manifest that never carried the entry keeps the legacy delete-then-remove ordering. |
+| `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. Index entries are part of "complete": the copied manifest inherits the source's entries, whose stored paths point outside the segment base and therefore encode the source IDs, so the copy worker retracts them and records the target's own entries in the same transaction. DataCoord supplies the identity it owns (reallocated index IDs, the inherited entry IDs to retract) in the copy request rather than creating a revision of its own. |
 | `task_stats.go` | Text, JSON, and sort stats all use `AddStats`; remove the bare sort `UpdateManifest` path. |
 | flush / `SaveBinlogPaths` | No migration. Publishes inline via `UpdateManifest`. A growing or L0 segment is flushed by its single WAL owner and advanced sequentially, so its manifest write has no concurrent writer and needs no `CommitSegmentManifest` serialization even though the manifest advances from `ManifestEarliest`. |
 | compaction | Generate output files in DataNode, return output manifest entries, then publish each output segment through the framework. |
@@ -294,9 +300,12 @@ below are not satisfied until that collection-level protocol is implemented.
 2. Add typed packed mutation adapters and tests for add/drop/stats/create.  The
    storage transaction uses `OVERWRITE`; do not add a protobuf-serialized
    `SegmentInfo` value-equality CAS.
-3. Migrate index completion end-to-end: update DataNode result contract, remove
-   worker-side index manifest publication, and atomically publish
-   `SegmentInfo` plus `SegmentIndex` from `meta`.
+3. Migrate index completion end-to-end: no worker-side index manifest
+   publication and no change to the DataNode result contract - DataCoord builds
+   the `ManifestIndexInfo` from the collection schema, the index definition, and
+   the index task record, then atomically publishes `SegmentInfo` plus
+   `SegmentIndex`.  Implemented; see
+   [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md).
 4. Migrate GC with the durable cleanup state and crash/retry tests.
 5. Migrate stats, including the sort path.
 6. Migrate compaction output publication to the framework. Leave flush

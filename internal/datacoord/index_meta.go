@@ -298,6 +298,60 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 	return updateFunc(model.CloneSegmentIndex(segIdx))
 }
 
+// buildFinishedSegmentIndex projects a worker completion result onto a fresh
+// copy of the task's metadata without persisting it or touching the in-memory
+// record. Callers that must compose this update with another metadata write
+// stage the returned value in the same catalog transaction; the second return
+// value is the previously recorded serialized size, needed for the stored-size
+// gauge delta.
+//
+// Precondition: the caller holds keyLock for taskInfo.BuildID.
+func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, uint64, error) {
+	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
+		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
+			mlog.Int64("buildID", taskInfo.GetBuildID()),
+			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
+			mlog.String("actual", actualPathVersion.String()),
+			mlog.Err(err))
+		return nil, 0, err
+	}
+	if actualPathVersion < segIdx.IndexStorePathVersion {
+		mlog.Info(m.ctx, "worker downgraded index store path version",
+			mlog.Int64("buildID", taskInfo.GetBuildID()),
+			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
+			mlog.String("actual", actualPathVersion.String()))
+	}
+
+	updated := model.CloneSegmentIndex(segIdx)
+	updated.IndexState = taskInfo.GetState()
+	updated.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
+	updated.FailReason = taskInfo.GetFailReason()
+	updated.IndexSerializedSize = taskInfo.GetSerializedSize()
+	updated.IndexMemSize = taskInfo.GetMemSize()
+	updated.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
+	updated.FinishedUTCTime = uint64(time.Now().Unix())
+	updated.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+	updated.IndexStorePathVersion = actualPathVersion
+	return updated, segIdx.IndexSerializedSize, nil
+}
+
+// recordFinishedTask updates process-local observability only. The caller must
+// have already persisted updated and installed it in the in-memory metadata.
+func (m *indexMeta) recordFinishedTask(old, updated *model.SegmentIndex, oldSize uint64, taskInfo *workerpb.IndexTaskInfo) {
+	mlog.Info(m.ctx, "finish index task success", mlog.Int64("buildID", taskInfo.GetBuildID()),
+		mlog.String("state", taskInfo.GetState().String()), mlog.String("fail reason", taskInfo.GetFailReason()),
+		mlog.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()))
+
+	// gauge Add must be serialized vs MarkIndexAsDeleted.
+	m.fieldIndexLock.RLock()
+	m.addStoredIndexSizeMetric(old.CollectionID, old.IndexID,
+		float64(updated.IndexSerializedSize)-float64(oldSize))
+	m.fieldIndexLock.RUnlock()
+
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
+}
+
 func (m *indexMeta) updateIndexTasksMetrics() {
 	taskMetrics := make(map[indexpb.JobState]int)
 	taskMetrics[indexpb.JobState_JobStateNone] = 0
@@ -1063,54 +1117,14 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		return nil
 	}
 
-	actualPathVersion := taskInfo.GetIndexStorePathVersion()
-	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
-		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
-			mlog.Int64("buildID", taskInfo.GetBuildID()),
-			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
-			mlog.String("actual", actualPathVersion.String()),
-			mlog.Err(err))
+	updated, oldSize, err := m.buildFinishedSegmentIndex(segIdx, taskInfo)
+	if err != nil {
 		return err
 	}
-	if actualPathVersion < segIdx.IndexStorePathVersion {
-		mlog.Info(m.ctx, "worker downgraded index store path version",
-			mlog.Int64("buildID", taskInfo.GetBuildID()),
-			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
-			mlog.String("actual", actualPathVersion.String()))
-	}
-
-	oldSize := segIdx.IndexSerializedSize
-
-	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IndexState = taskInfo.GetState()
-		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
-		segIdx.FailReason = taskInfo.GetFailReason()
-		segIdx.IndexSerializedSize = taskInfo.GetSerializedSize()
-		segIdx.IndexMemSize = taskInfo.GetMemSize()
-		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
-		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
-		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
-		segIdx.IndexStorePathVersion = actualPathVersion
-		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
-	}
-
-	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+	if err := m.alterSegmentIndexes([]*model.SegmentIndex{updated}); err != nil {
 		return err
 	}
-
-	mlog.Info(m.ctx, "finish index task success", mlog.Int64("buildID", taskInfo.GetBuildID()),
-		mlog.String("state", taskInfo.GetState().String()), mlog.String("fail reason", taskInfo.GetFailReason()),
-		mlog.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
-	)
-
-	// gauge Add must be serialized vs MarkIndexAsDeleted.
-	newSize := taskInfo.GetSerializedSize()
-	m.fieldIndexLock.RLock()
-	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
-		float64(newSize)-float64(oldSize))
-	m.fieldIndexLock.RUnlock()
-
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
+	m.recordFinishedTask(segIdx, updated, oldSize, taskInfo)
 	return nil
 }
 
@@ -1188,6 +1202,19 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 		return err
 	}
 
+	m.removeSegmentIndexInMemory(segIdx)
+
+	return nil
+}
+
+// removeSegmentIndexInMemory drops a SegmentIndex from the in-memory indexes
+// and reconciles its metrics, after its catalog record has been removed. The
+// caller must hold keyLock for segIdx.BuildID. It is shared by
+// RemoveSegmentIndex, which owns the catalog removal itself, and by the
+// manifest-commit staging below, where the removal rides in the catalog
+// transaction that publishes the retracting manifest revision, so the two
+// paths cannot drift.
+func (m *indexMeta) removeSegmentIndexInMemory(segIdx *model.SegmentIndex) {
 	// Reclaim size only when the index is still alive (segment-drop case);
 	// MarkIndexAsDeleted already subtracted otherwise.
 	m.fieldIndexLock.RLock()
@@ -1205,9 +1232,90 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 		}
 	}
 
-	m.segmentBuildInfo.Remove(buildID)
+	m.segmentBuildInfo.Remove(segIdx.BuildID)
+}
 
-	return nil
+// errSegmentIndexRecordGone reports that the SegmentIndex record a staged
+// upsert must be projected from no longer exists. The commit that staged the
+// mutation is abandoned without publishing: its prepared manifest revision
+// stays unreferenced and invisible, whereas publishing it would strand an
+// index entry that no SegmentIndex record can ever drive GC for.
+var errSegmentIndexRecordGone = errors.New("segment index record no longer exists")
+
+// stagedSegmentIndexMutation carries a SegmentIndex change from its projection
+// under keyLock to the in-memory install that follows a successful catalog
+// write. action is nil when the mutation resolves to no catalog write at all;
+// unlock releases the key lock the projection was made under and must be
+// called by the staging caller even when staging fails.
+type stagedSegmentIndexMutation struct {
+	action  *metastore.UpdateAction
+	install func()
+	unlock  func()
+}
+
+// stageSegmentIndexMutation projects mut against the SegmentIndex record
+// current under its per-buildID key lock, and returns the catalog action to
+// compose into the caller's transaction plus the in-memory install to run once
+// that transaction commits. The lock is held from projection through install,
+// so a persisted value can never be built from a read that predates it.
+//
+// A missing record is terminal for an upsert (errSegmentIndexRecordGone) and
+// benign for a removal - the record already being gone is that mutation's
+// intended end state, so the caller's manifest revision still publishes.
+func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*stagedSegmentIndexMutation, error) {
+	if mut.BuildID == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
+	}
+	switch mut.Type {
+	case SegmentIndexUpsert:
+		if mut.FinishedTask == nil {
+			return nil, merr.WrapErrServiceInternalMsg("segment index upsert requires a finished task, buildID=%d", mut.BuildID)
+		}
+		if mut.FinishedTask.GetBuildID() != mut.BuildID {
+			return nil, merr.WrapErrServiceInternalMsg("finished task buildID %d does not match segment index mutation buildID %d",
+				mut.FinishedTask.GetBuildID(), mut.BuildID)
+		}
+	case SegmentIndexRemove:
+		if mut.FinishedTask != nil {
+			return nil, merr.WrapErrServiceInternalMsg("segment index removal cannot carry a finished task, buildID=%d", mut.BuildID)
+		}
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
+	}
+
+	m.keyLock.Lock(mut.BuildID)
+	staged := &stagedSegmentIndexMutation{
+		install: func() {},
+		unlock:  func() { m.keyLock.Unlock(mut.BuildID) },
+	}
+
+	previous, ok := m.segmentBuildInfo.Get(mut.BuildID)
+	if !ok {
+		if mut.Type == SegmentIndexUpsert {
+			return staged, errSegmentIndexRecordGone
+		}
+		return staged, nil
+	}
+
+	if mut.Type == SegmentIndexRemove {
+		segIdx := previous
+		action := metastore.DropSegmentIndex(segIdx)
+		staged.action = &action
+		staged.install = func() { m.removeSegmentIndexInMemory(segIdx) }
+		return staged, nil
+	}
+
+	finished, previousSize, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
+	if err != nil {
+		return staged, err
+	}
+	action := metastore.UpdateSegmentIndex(finished)
+	staged.action = &action
+	staged.install = func() {
+		m.updateSegmentIndex(finished)
+		m.recordFinishedTask(previous, finished, previousSize, mut.FinishedTask)
+	}
+	return staged, nil
 }
 
 func (m *indexMeta) GetDeletedIndexes() []*model.Index {

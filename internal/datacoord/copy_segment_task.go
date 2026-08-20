@@ -36,6 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -706,6 +709,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	}
 	isExternalCollection := typeutil.IsExternalCollection(sourceSchema)
 
+	targetIndexes := buildCopySegmentTargetIndexes(t.meta, job.GetCollectionId())
+
 	for _, mapping := range idMappings {
 		sourceSegID := mapping.GetSourceSegmentId()
 		targetSegID := mapping.GetTargetSegmentId()
@@ -736,6 +741,57 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			SourceRootPath:       sourceRootPath,
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
 		}
+		// WHICH INDEX FILES TO COPY: the snapshot's own index metadata wins.
+		// SegmentDescription.IndexFiles is the snapshot's capture of the etcd
+		// SegmentIndex records, so a segment that has them - including every
+		// segment predating manifest index publication - is served entirely from
+		// there and the manifest is never consulted for this question.
+		snapshotCarriesIndexFiles := len(source.GetIndexFiles()) > 0
+
+		// WHICH INDEX ENTRIES THE TARGET INHERITS: only the manifest can answer.
+		// The target manifest is a byte copy of this one, so it inherits every
+		// entry the source manifest holds. An entry's stored path is relative to
+		// the segment base but points outside it, so it hardcodes the SOURCE
+		// collection/partition/segment/build IDs; the worker must retract these
+		// before recording the target's own, and is told which by ID.
+		//
+		// This is why the read is not conditional on the snapshot lacking index
+		// metadata: in the normal case the snapshot HAS the files and the source
+		// manifest HAS entries that must still be retracted. A manifest that
+		// carries no index section - anything written before index publication -
+		// simply yields an empty list here, not an error.
+		//
+		// Only for a local source: the manifest is read with the target-side
+		// storage config, which cannot address a foreign bucket. An external
+		// restore therefore keeps its pre-existing behavior - no manifest-resolved
+		// index files, and inherited entries left in place - until a source-side
+		// storage config is plumbed through the request.
+		var inheritedIndexIDs []int64
+		if !job.GetExternal() && source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
+			manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
+			if err != nil {
+				// Proceeding without the inherited set would publish a target
+				// manifest still pointing at the source's index artifacts, so
+				// this cannot be downgraded to a warning.
+				return nil, merr.Wrap(err, "failed to load source index metadata from manifest")
+			}
+			// The retraction covers every entry, including one whose index
+			// definition the snapshot no longer has: that artifact is not copied,
+			// so leaving its entry behind would point the target at source files.
+			for _, manifestIndex := range manifestIndexes {
+				inheritedIndexIDs = append(inheritedIndexIDs, manifestIndex.IndexID)
+				// Fallback for the second question only: a StorageV3 segment that
+				// recorded its artifacts in the manifest and nowhere else.
+				if snapshotCarriesIndexFiles || !snapshotHasIndex(snapshotData, manifestIndex.IndexID) {
+					continue
+				}
+				info, ok := manifestIndexFilePathInfo(source.GetSegmentId(), manifestIndex)
+				if !ok {
+					return nil, merr.WrapErrServiceInternalMsg("invalid source index metadata in manifest for segment %d", source.GetSegmentId())
+				}
+				source.IndexFiles = append(source.IndexFiles, info)
+			}
+		}
 		sources = append(sources, source)
 
 		// Collect all unique source build IDs from index files and allocate new ones
@@ -752,7 +808,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			}
 			return nil
 		}
-		for _, indexFile := range sourceSegDesc.GetIndexFiles() {
+		for _, indexFile := range source.GetIndexFiles() {
 			if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
 				return nil, err
 			}
@@ -771,13 +827,27 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 				}
 			}
 		}
+		// The worker records the copied index artifacts in the target manifest,
+		// but index identity is reallocated by RestoreIndexes() and the artifact's
+		// row count is only known here (StorageV3 bundles omit legacy PB insert
+		// binlogs), so both are shipped with the target.
+		numRows := sourceSegDesc.GetNumOfRows()
+		if t.meta != nil {
+			if segment := t.meta.GetSegment(ctx, targetSegID); segment != nil {
+				numRows = segment.GetNumOfRows()
+			}
+		}
+
 		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
-			CollectionId:   job.GetCollectionId(),
-			PartitionId:    partitionID,
-			SegmentId:      targetSegID,
-			NewBuildIds:    newBuildIDs,
-			TargetRootPath: storageConfig.GetRootPath(),
+			CollectionId:      job.GetCollectionId(),
+			PartitionId:       partitionID,
+			SegmentId:         targetSegID,
+			NewBuildIds:       newBuildIDs,
+			TargetRootPath:    storageConfig.GetRootPath(),
+			TargetIndexes:     targetIndexes,
+			NumRows:           numRows,
+			InheritedIndexIds: inheritedIndexIDs,
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -886,16 +956,19 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		for _, result := range resp.GetSegmentResults() {
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
-			var err error
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
 			operators := []UpdateOperator{op1, op2, op3}
-			// A copy target is a freshly created, exclusively owned segment and
-			// the worker returns a complete manifest pointer, so first-time
-			// publication is set inline via UpdateManifest (no CommitSegmentManifest
-			// serialization is needed for a segment no other writer touches).
+			var err error
+			// A copy target is a freshly created, exclusively owned segment and the
+			// worker returns a complete manifest pointer - including the copied
+			// index entries, which it re-derives rather than inheriting from the
+			// source manifest. First-time publication is therefore set inline via
+			// UpdateManifest; no CommitSegmentManifest serialization is needed for
+			// a segment no other writer touches, and no second revision is needed
+			// to correct what the worker already published.
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
@@ -967,6 +1040,56 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			UpdateCopyTaskReason(resp.GetReason()))
 	}
 	return nil
+}
+
+// snapshotHasIndex reports whether the snapshot still defines the index a
+// manifest entry belongs to. A manifest can outlive a dropped index definition,
+// and copying that artifact would restore an index the snapshot never had.
+func snapshotHasIndex(snapshotData *snapshotstorage.SnapshotData, indexID int64) bool {
+	for _, index := range snapshotData.Indexes {
+		if index != nil && index.GetIndexID() == indexID {
+			return true
+		}
+	}
+	return false
+}
+
+// buildCopySegmentTargetIndexes projects the target collection's index
+// definitions into the per-index metadata the worker needs to record a copied
+// artifact in the target manifest.
+//
+// Index identity is remapped across the snapshot boundary: RestoreIndexes()
+// allocates new index IDs, and indexName is the only stable key (one JSON field
+// can carry several indexes on different paths, so fieldID cannot be used). The
+// worker knows the name it copied and nothing else about the target, so the
+// mapping is resolved here and shipped with the request.
+func buildCopySegmentTargetIndexes(m *meta, collectionID int64) map[string]*datapb.CopySegmentTargetIndex {
+	if m == nil || m.indexMeta == nil {
+		return nil
+	}
+	indexes := m.indexMeta.GetIndexesForCollection(collectionID, "")
+	if len(indexes) == 0 {
+		return nil
+	}
+	targetIndexes := make(map[string]*datapb.CopySegmentTargetIndex, len(indexes))
+	for _, index := range indexes {
+		if index == nil || index.IsDeleted {
+			continue
+		}
+		indexParams := m.indexMeta.GetIndexParams(collectionID, index.IndexID)
+		properties := common.KeyValuePairs(m.indexMeta.GetTypeParams(collectionID, index.IndexID)).ToMap()
+		for key, value := range common.KeyValuePairs(indexParams).ToMap() {
+			properties[key] = value
+		}
+		targetIndexes[index.IndexName] = &datapb.CopySegmentTargetIndex{
+			IndexId:    index.IndexID,
+			FieldId:    index.FieldID,
+			ColumnName: collectionFieldName(m, collectionID, index.FieldID),
+			IndexType:  GetIndexType(indexParams),
+			Properties: properties,
+		}
+	}
+	return targetIndexes
 }
 
 // ===========================================================================================

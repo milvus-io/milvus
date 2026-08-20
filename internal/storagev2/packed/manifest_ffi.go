@@ -40,6 +40,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +55,16 @@ import (
 const (
 	milvusTableSourceManifestPathProperty = "milvus_table.source_manifest_path"
 	milvusTableSourceRowCountProperty     = "milvus_table.source_row_count"
+)
+
+// Manifest revision layout, mirroring milvus-storage's kMetadataDir /
+// kManifestFileNamePrefix / kManifestFileNameSuffix (cpp/common/layout.h).
+const (
+	// ManifestDir is the segment-base-relative directory holding every
+	// manifest revision of that segment.
+	ManifestDir            = "_metadata"
+	manifestFileNamePrefix = "manifest-"
+	manifestFileNameSuffix = ".avro"
 )
 
 // Fragment represents a data fragment from an external data source.
@@ -540,6 +551,42 @@ func manifestColumnGroupHasAnyColumn(group manifestColumnGroup, columns map[stri
 	return false
 }
 
+// ManifestFilePath returns the object-storage path of the manifest file a
+// marshaled manifest pointer refers to. Callers that need to ask storage
+// whether a revision still exists use it instead of re-deriving the layout.
+func ManifestFilePath(manifestPath string) (string, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to parse manifest path")
+	}
+	if basePath == "" {
+		return "", merr.WrapErrServiceInternalMsg("manifest path %s has an empty base path", manifestPath)
+	}
+	return manifestObjectPath(basePath, version), nil
+}
+
+func manifestObjectPath(basePath string, version int64) string {
+	return fmt.Sprintf("%s/%s/%s%d%s", basePath, ManifestDir,
+		manifestFileNamePrefix, version, manifestFileNameSuffix)
+}
+
+// IsManifestRevisionObject reports whether an object path names a manifest
+// revision file inside a segment's manifest directory.
+//
+// A caller that copies a segment directory wholesale needs this to tell the
+// revision files apart from the data it is copying: milvus-storage discovers
+// the current version by listing ManifestDir and taking the highest revision
+// number it finds, so which revision objects exist at the destination decides
+// what the next commit there is built on.
+func IsManifestRevisionObject(objectPath string) bool {
+	dir, name := path.Split(objectPath)
+	if path.Base(path.Clean(dir)) != ManifestDir {
+		return false
+	}
+	return strings.HasPrefix(name, manifestFileNamePrefix) &&
+		strings.HasSuffix(name, manifestFileNameSuffix)
+}
+
 func readColumnGroupsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
@@ -549,7 +596,7 @@ func readColumnGroupsFromManifest(
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
 
-	manifestFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
+	manifestFilePath := manifestObjectPath(basePath, version)
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {

@@ -31,6 +31,7 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -150,11 +151,93 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
-	if err := it.meta.indexMeta.FinishTask(result); err != nil {
+	published, err := it.publishIndexToManifest(result)
+	if err != nil {
 		return err
+	}
+	if !published {
+		if err := it.meta.indexMeta.FinishTask(result); err != nil {
+			return err
+		}
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil
+}
+
+// publishIndexToManifest records a completed StorageV3 index build in the
+// segment manifest and in the index task metadata as one commit, and reports
+// whether it took ownership of the result.
+//
+// The worker only uploads index files; every manifest revision for a segment
+// is created here, serialized against the segment's other manifest writers by
+// CommitSegmentManifest. That is what lets the entry be built from the
+// segment's current revision instead of the possibly-stale revision the build
+// was issued against.
+func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
+	ctx := it.meta.ctx
+	if result.GetState() != commonpb.IndexState_Finished {
+		return false, nil
+	}
+	// A fake-finished build (a segment too small to train an index) uploads no
+	// files and has no artifact to register.
+	if len(result.GetIndexFileKeys()) == 0 {
+		return false, nil
+	}
+	segment := it.meta.GetSegment(ctx, it.SegmentID)
+	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
+		return false, nil
+	}
+	// A segment dropped or compacted away while the build ran publishes no
+	// further manifest revision. Record the result the legacy way and let the
+	// task retire with the segment, instead of retrying a commit that a
+	// manifest-less segment can never accept.
+	if !isSegmentHealthy(segment) {
+		return false, nil
+	}
+	segIdx, ok := it.meta.indexMeta.GetIndexJob(it.BuildID)
+	if !ok || segIdx == nil {
+		return false, nil
+	}
+	// Project the worker result now so an invalid one is rejected before any
+	// manifest I/O. CommitSegmentManifest repeats this under indexMeta's
+	// per-buildID lock and persists that authoritative copy.
+	finished, _, err := it.meta.indexMeta.buildFinishedSegmentIndex(segIdx, result)
+	if err != nil {
+		return false, err
+	}
+	manifestIndex, err := buildManifestIndexInfo(it.meta, segment, finished)
+	if err != nil {
+		return false, err
+	}
+
+	if err := it.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+		SegmentID:     it.SegmentID,
+		StorageConfig: createStorageConfig(),
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{manifestIndex}},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{
+				Type:         SegmentIndexUpsert,
+				BuildID:      it.BuildID,
+				FinishedTask: result,
+			},
+		},
+	}); err != nil {
+		// The segment can be retired between the health check above and the
+		// commit. CommitSegmentManifest reports that as ErrSegmentNotFound, the
+		// same benign-terminal contract the stats and L0 callers honor: record
+		// the result the legacy way instead of re-polling a commit that a
+		// retired segment can never accept.
+		if errors.Is(err, merr.ErrSegmentNotFound) {
+			mlog.Info(ctx, "segment retired during index manifest publication, recording result without it",
+				mlog.Int64("buildID", it.BuildID), mlog.Int64("segmentID", it.SegmentID))
+			return false, nil
+		}
+		return false, merr.Wrap(err, "publish index artifact through segment manifest")
+	}
+	return true, nil
 }
 
 func (it *indexBuildTask) resetTask(reason string) {
@@ -652,7 +735,12 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),
 					mlog.String("failReason", info.GetFailReason()))
-				it.setJobInfo(info)
+				if err := it.setJobInfo(info); err != nil {
+					// Leave the task InProgress: the worker keeps the result
+					// until it is dropped, so the next query retries publication.
+					log.Warn(ctx, "failed to record index task result", mlog.Err(err))
+					return
+				}
 			case commonpb.IndexState_Retry, commonpb.IndexState_IndexStateNone:
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),

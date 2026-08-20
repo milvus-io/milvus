@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -48,6 +49,34 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 		case metastore.SegmentEntry:
 			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
 				return err
+			}
+		case metastore.SegmentIndexEntry:
+			if e.SegmentIndex == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment index in UpdateAction")
+			}
+			key := BuildSegmentIndexKey(
+				e.SegmentIndex.CollectionID,
+				e.SegmentIndex.PartitionID,
+				e.SegmentIndex.SegmentID,
+				e.SegmentIndex.BuildID,
+			)
+			switch action.Type {
+			case metastore.ActionUpdate:
+				value, err := proto.Marshal(model.MarshalSegmentIndexModel(e.SegmentIndex))
+				if err != nil {
+					return err
+				}
+				b.Save(key, string(value))
+			case metastore.ActionDelete:
+				// Same key as the ActionUpdate encoding above, so a removal
+				// stages against exactly the record an upsert would write.
+				// Remove, not CommitRemove: an action set containing a segment
+				// index entry never takes the ordered fallback path (see
+				// containsSegmentIndexUpdate below), so there is no visibility
+				// point to mark.
+				b.Remove(key)
+			default:
+				return unsupportedAction(action)
 			}
 		case metastore.ChannelEntry:
 			if action.Type != metastore.ActionUpdate {
@@ -142,7 +171,24 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
+	if containsSegmentIndexUpdate(actions) {
+		// A segment index record and the segment manifest pointer that
+		// publishes (or retracts) its artifact must land together: a chunked
+		// fallback could leave a finished index whose artifact is not in the
+		// visible manifest revision, or a retracted artifact whose index
+		// record still claims it, or either reverse. Refuse the write instead.
+		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
+	}
 	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
+	for _, action := range actions {
+		if _, ok := action.Entry.(metastore.SegmentIndexEntry); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // applySegmentEntry stages the kv writes for a segment action.

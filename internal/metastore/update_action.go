@@ -85,6 +85,17 @@ type SegmentEntry struct {
 	AlterEncoding bool
 }
 
+// SegmentIndexEntry targets a single segment's index-task metadata record.
+//
+// For ActionUpdate the entry carries the complete replacement value, matching
+// the full-value replace semantics of ActionUpdate. For ActionDelete only the
+// record's identity is read - the same
+// (collection, partition, segment, build) key an ActionUpdate writes - and
+// that key is removed.
+type SegmentIndexEntry struct {
+	SegmentIndex *model.SegmentIndex
+}
+
 // ChannelEntry targets a channel's removal tombstone.
 type ChannelEntry struct {
 	Channel string
@@ -153,6 +164,7 @@ type ReplicaKeyEntry struct {
 }
 
 func (SegmentEntry) isEntry()               {}
+func (SegmentIndexEntry) isEntry()          {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
@@ -189,6 +201,23 @@ func AddSegment(seg *datapb.SegmentInfo) UpdateAction {
 // AlterSegments GC-compat behavior is required.
 func UpdateSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg}}
+}
+
+// UpdateSegmentIndex returns an UpdateAction that persists a complete segment
+// index metadata record. Pair it with a segment action to make an index task
+// result and the manifest revision publishing its artifact one atomic write.
+func UpdateSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
+}
+
+// DropSegmentIndex returns an UpdateAction that removes a segment index
+// metadata record, identified by segIdx's (collection, partition, segment,
+// build) key. Pair it with a segment action to make the retraction of an index
+// artifact from the manifest and the removal of its metadata one atomic write,
+// so no reader can observe an index record whose artifact the visible manifest
+// revision no longer carries.
+func DropSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
 }
 
 // AlterSegment returns an UpdateAction that rewrites an existing segment's

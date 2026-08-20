@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2107,3 +2108,101 @@ func TestAssembleCopySegmentRequest_RedispatchAllocatesFreshBuildIDs(t *testing.
 // embeddedAllocator: named type for mockey interface-method patching; avoids a
 // go1.26 `go vet` printf-pass panic on method expressions of anonymous structs.
 type embeddedAllocator struct{ allocator.Allocator }
+
+// assembleIndexPrecedenceFixture builds a one-segment copy request whose source
+// is a StorageV3 segment carrying the snapshot's own (etcd-derived) index
+// metadata, so a test only has to say what its manifest reports.
+func assembleIndexPrecedenceFixture(t *testing.T, manifestIndexes []packed.ManifestIndexInfo) *datapb.CopySegmentRequest {
+	t.Helper()
+
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/10/1", 3)
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "test_snapshot"},
+		Indexes:      []*indexpb.IndexInfo{{IndexID: 1001, FieldID: 100}},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:      1,
+				PartitionId:    10,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   manifestPath,
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{BuildID: 3001, FieldID: 100, IndexID: 1001, IndexName: "vec_idx"},
+				},
+			},
+		},
+	}
+
+	defer mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build().UnPatch()
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+	defer mockey.Mock(packed.GetManifestIndexInfos).Return(manifestIndexes, nil).Build().UnPatch()
+
+	nextID := int64(9001)
+	defer mockey.Mock((*embeddedAllocator).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
+		id := nextID
+		nextID++
+		return id, nil
+	}).Build().UnPatch()
+
+	task := &copySegmentTask{
+		ctx:          context.Background(),
+		snapshotMeta: &snapshotMeta{},
+		alloc:        &embeddedAllocator{},
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 10},
+		},
+	})
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{JobId: 100, CollectionId: 100, SnapshotName: "test_snapshot"},
+		tr:             timerecord.NewTimeRecorder("test_job"),
+		snapshotCache:  &copySegmentSnapshotCache{},
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+	require.NoError(t, err)
+	require.Len(t, req.GetSources(), 1)
+	require.Len(t, req.GetTargets(), 1)
+	return req
+}
+
+// A manifest written before index publication existed carries no index section.
+// The segment still has indexes, recorded in etcd and captured by the snapshot,
+// so the manifest must not be treated as the authority on whether they exist.
+func TestAssembleCopySegmentRequest_LegacyManifestKeepsSnapshotIndexFiles(t *testing.T) {
+	req := assembleIndexPrecedenceFixture(t, nil)
+
+	indexFiles := req.GetSources()[0].GetIndexFiles()
+	require.Len(t, indexFiles, 1, "snapshot index metadata must survive an index-less manifest")
+	assert.Equal(t, int64(3001), indexFiles[0].GetBuildID())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+
+	// Nothing was inherited, so there is nothing for the worker to retract.
+	assert.Empty(t, req.GetTargets()[0].GetInheritedIndexIds())
+}
+
+// The manifest read is not conditional on the snapshot lacking index metadata:
+// in the normal case both carry entries, and the manifest's must still be
+// retracted or the target would keep pointing at the source's artifacts.
+func TestAssembleCopySegmentRequest_ManifestEntriesRetractedAlongsideSnapshotFiles(t *testing.T) {
+	req := assembleIndexPrecedenceFixture(t, []packed.ManifestIndexInfo{
+		{IndexID: 1001, BuildID: 3001, FieldID: 100, IndexName: "vec_idx"},
+		{IndexID: 1002, BuildID: 3002, FieldID: 101, IndexName: "dropped_idx"},
+	})
+
+	// The snapshot answered which files to copy, so the manifest did not add to
+	// or replace that list.
+	indexFiles := req.GetSources()[0].GetIndexFiles()
+	require.Len(t, indexFiles, 1)
+	assert.Equal(t, int64(3001), indexFiles[0].GetBuildID())
+
+	// Every inherited entry is retracted, including the one whose definition the
+	// snapshot no longer carries - its artifact is not copied, so leaving the
+	// entry would point the target at the source's files.
+	assert.ElementsMatch(t, []int64{1001, 1002}, req.GetTargets()[0].GetInheritedIndexIds())
+}

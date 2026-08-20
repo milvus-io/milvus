@@ -379,6 +379,7 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 		t.ctx,
 		t.sourceCM,
 		t.sourceStorageConfig,
+		t.req.GetStorageConfig(),
 		t.copier,
 		t.sourceBucket,
 		t.targetBucket,

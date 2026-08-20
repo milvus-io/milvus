@@ -1043,11 +1043,37 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {
 	segIdxes := h.s.meta.indexMeta.getSegmentIndexes(collectionID, segID)
+	if len(segIdxes) == 0 {
+		// A StorageV3 segment can have no SegmentIndex rows at all; its manifest
+		// is then the only record of the completed index artifacts.
+		manifestIndexes, manifestPath := h.s.getManifestIndexesForSegment(h.s.ctx, segID)
+		if manifestPath == "" {
+			return nil
+		}
+		activeIndexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+		return resolveManifestIndexFilePathInfos(h.s.ctx, segID, manifestPath, manifestIndexes, activeIndexes)
+	}
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
+	var (
+		manifestIndexes []packed.ManifestIndexInfo
+		manifestPath    string
+		manifestLoaded  bool
+	)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
 			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+
+			if len(segIdx.IndexFileKeys) == 0 {
+				if !manifestLoaded {
+					manifestIndexes, manifestPath = h.s.getManifestIndexesForSegment(h.s.ctx, segID)
+					manifestLoaded = true
+				}
+				if info, ok := resolveManifestIndexFilePathInfo(h.s.ctx, manifestPath, manifestIndexes, segIdx, fieldID); ok {
+					indexesFiles = append(indexesFiles, info)
+					continue
+				}
+			}
 
 			builder := metautil.NewIndexPathBuilder(h.s.meta.chunkManager.RootPath(),
 				segIdx.IndexStorePathVersion, segIdx.CollectionID,
