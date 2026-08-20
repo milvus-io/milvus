@@ -57,12 +57,25 @@ fail=0
 #   folly::Future*                        folly's own control-flow signals,
 #                                         consumed by the futures layer and
 #                                         never projected to a CStatus
+#   std::bad_alloc                        the ONE std:: type with a dedicated
+#                                         classified handler at both boundaries
+#                                         (CGoCatch.h pulls it out ahead of
+#                                         std::exception, Future.h has a
+#                                         thenError arm), so it arrives as
+#                                         MemAllocateFailed, not 2001. It also
+#                                         models the implicit allocation-failure
+#                                         path every `new` can raise, which no
+#                                         throw-site rule can enumerate; banning
+#                                         the explicit form (used by the R-Tree
+#                                         fault-injection hooks) would buy no
+#                                         safety the implicit form does not
+#                                         already require
 #   ;                                     bare rethrow (throw;) preserving the
 #                                         original dynamic type. `throw e;` is
 #                                         deliberately NOT allowed: it rethrows
 #                                         by the CAUGHT type, slicing a derived
 #                                         SegcoreError back to its base
-ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^folly::Future[A-Za-z]*\(|^;'
+ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
 
 # `throw` is matched anywhere on the line, not just at its start: `if (bad)
 # throw ...;` and `} else throw ...;` are throws too. Line comments are stripped
