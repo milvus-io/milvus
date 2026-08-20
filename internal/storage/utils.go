@@ -1761,8 +1761,9 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	for _, field := range allFields {
-		// Skip embedding function output fields and system fields.
-		if isEmbeddingFunctionOutputField(field, schema) || field.GetFieldID() < 100 {
+		// Preserve 2.6 behavior for function outputs that are materialized by
+		// other paths, while BM25 is handled before WAL append.
+		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
 			continue
 		}
 

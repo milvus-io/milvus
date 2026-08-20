@@ -1292,7 +1292,7 @@ func TestColumnBasedInsertMsgToInsertDataKeepsBM25Output(t *testing.T) {
 	assert.Equal(t, [][]byte{sparseRow}, fieldData.GetContents())
 }
 
-func TestColumnBasedInsertMsgToInsertDataRequiresNonEmbeddingFunctionOutput(t *testing.T) {
+func TestColumnBasedInsertMsgToInsertDataAllowsMissingNonBM25FunctionOutput(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "text_embedding_schema",
 		Fields: []*schemapb.FieldSchema{
@@ -1340,9 +1340,10 @@ func TestColumnBasedInsertMsgToInsertDataRequiresNonEmbeddingFunctionOutput(t *t
 		},
 	}
 
-	_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "embedding")
+	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	require.NoError(t, err)
+	_, exists := idata.Data[102]
+	assert.False(t, exists)
 }
 
 func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
@@ -2822,7 +2823,7 @@ func TestFillMissingFields(t *testing.T) {
 		assert.False(t, exists)
 	})
 
-	t.Run("missing non-embedding function output field is required", func(t *testing.T) {
+	t.Run("skip non-BM25 function output fields", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name: "test_schema",
 			Fields: []*schemapb.FieldSchema{
@@ -2871,8 +2872,9 @@ func TestFillMissingFields(t *testing.T) {
 		}
 
 		err := fillMissingFields(schema, insertData)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "text_embedding_output")
+		assert.NoError(t, err)
+		_, exists := insertData.Data[101]
+		assert.False(t, exists)
 	})
 
 	t.Run("all fields present - no filling needed", func(t *testing.T) {
