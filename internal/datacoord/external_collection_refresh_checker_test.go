@@ -1574,6 +1574,48 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		})
 	})
 
+	t.Run("a result-store read failure fails open", func(t *testing.T) {
+		// If the gate cannot learn which segments the refresh produced, it
+		// must not hold the job on a guess: the read failure is logged and
+		// the job finishes exactly as it would with the gate off.
+		mockey.PatchConvey("fail open", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			catalog := &stubCatalog{}
+			jobs := []*datapb.ExternalCollectionRefreshJob{
+				{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
+			}
+			tasks := []*datapb.ExternalCollectionRefreshTask{
+				{
+					TaskId: 1001, JobId: 1, CollectionId: 100,
+					State:                indexpb.JobState_JobStateFinished,
+					Progress:             100,
+					ResultReady:          true,
+					OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+				},
+			}
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+			mockey.Mock((*externalCollectionRefreshMeta).GetCommittedTaskResultsByJobID).
+				Return(nil, errors.New("object storage timeout")).Build()
+			meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+			require.NoError(t, err)
+
+			debtAsked := false
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), refreshCheckerHooks{
+				unindexedSegments: func(int64, []int64) []int64 { debtAsked = true; return []int64{555} },
+			})
+
+			checker.aggregateJobState(meta.GetJob(1))
+
+			assert.False(t, debtAsked, "no index judgment without the produced-segment list")
+			assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState(),
+				"an unreadable result store must not hold the job hostage")
+		})
+	})
+
 	t.Run("gate bookkeeping survives the eager and periodic paths racing", func(t *testing.T) {
 		// processJob runs on two goroutines in production: the periodic
 		// checker tick and the eager per-task path (processJobByID). The
