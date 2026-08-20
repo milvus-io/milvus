@@ -201,13 +201,14 @@ func recordPChannelSummaryChunk(manifest *streamingpb.PChannelSummaryManifest, e
 
 // chunkIndexEntryFromFooter mirrors a written chunk's footer into a manifest
 // entry, so retention and lazy reads work off the manifest alone.
-func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter) *streamingpb.PChannelSummaryChunkIndexEntry {
+func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter, objectSize uint64) *streamingpb.PChannelSummaryChunkIndexEntry {
 	if footer == nil {
 		return nil
 	}
 	return &streamingpb.PChannelSummaryChunkIndexEntry{
 		Generation:    footer.GetGeneration(),
 		Term:          footer.GetTerm(),
+		ObjectSize:    objectSize,
 		StartTimetick: footer.GetStartTimetick(),
 		EndTimetick:   footer.GetEndTimetick(),
 		Vchannels:     footer.GetChunks(),
@@ -233,18 +234,12 @@ func pchannelSummaryManifestOldest(manifest *streamingpb.PChannelSummaryManifest
 	return chunks[0], true
 }
 
-// vchannelSummaryIndexBytes is how much of a chunk one vchannel occupies: every
-// section it wrote, summed.
-func vchannelSummaryIndexBytes(index *streamingpb.VChannelSummaryChunkIndex) int {
-	return int(index.GetIdempotency().GetLength() + index.GetInserts().GetLength())
-}
-
 // retentionBoundary returns the index of the oldest chunk retention keeps.
 // Everything below it is released.
 //
 // Three bounds decide it, and they are not symmetric:
 //
-//   - minBytesPerVChannel is a FLOOR. A chunk inside it is kept regardless of age.
+//   - minRetainedBytes is a FLOOR. A chunk inside it is kept regardless of age.
 //   - ttlHorizonTimetick expires chunks by age, but only where the floor allows.
 //   - maxRetainedChunks is a HARD CAP that overrides the floor.
 //
@@ -258,18 +253,18 @@ func vchannelSummaryIndexBytes(index *streamingpb.VChannelSummaryChunkIndex) int
 // per CHUNK. A workload writing little per checkpoint fills the floor with a
 // great many tiny chunks, and both the manifest and the replay would grow
 // without limit. When the cap binds, the retained window is smaller than
-// minBytesPerVChannel asks for -- a deliberate trade of dedup coverage for a
+// minRetainedBytes asks for -- a deliberate trade of dedup coverage for a
 // bounded recovery.
 //
-// The floor is accounted PER VCHANNEL and the boundary is the minimum across
-// them, so a vchannel that has gone idle keeps its own history until ITS bytes
-// are displaced. Taking the whole object's size instead would let one hot
-// vchannel consume the floor and evict a cold vchannel's keys -- and the cold one
-// is exactly the case this feature exists for, being the most likely to still be
-// mid-retry after an outage.
+// All three are accounted per OBJECT. A chunk is retained or released whole, and
+// both the storage it costs and the read recovery pays for it are the object's,
+// so a per-vchannel share of it would not describe either. The consequence is
+// that retention spans a window of the PCHANNEL's write rate: on a busy pchannel
+// every vchannel's history, including an idle one's, is displaced by the
+// aggregate traffic rather than by its own.
 func retentionBoundary(
 	manifest *streamingpb.PChannelSummaryManifest,
-	minBytesPerVChannel int,
+	minRetainedBytes int,
 	maxRetainedChunks int,
 	ttlHorizonTimetick uint64,
 ) int {
@@ -278,7 +273,7 @@ func retentionBoundary(
 		return 0
 	}
 	boundary := minInt(
-		retentionFloorBoundary(chunks, minBytesPerVChannel),
+		retentionFloorBoundary(chunks, minRetainedBytes),
 		retentionTTLBoundary(chunks, ttlHorizonTimetick),
 	)
 	if maxRetainedChunks > 0 && len(chunks)-boundary > maxRetainedChunks {
@@ -287,43 +282,21 @@ func retentionBoundary(
 	return boundary
 }
 
-// retentionFloorBoundary is the oldest chunk index the byte floor still needs.
-//
-// It is resolved per vchannel and then minimised, rather than short-circuiting
-// the walk at the first chunk whose vchannels are all satisfied. The difference
-// matters for an idle vchannel: its bytes sit only in old chunks, so a walk that
-// stopped early would never evaluate its floor at all and would release its keys
-// on a busy neighbour's schedule.
-func retentionFloorBoundary(chunks []*streamingpb.PChannelSummaryChunkIndexEntry, minBytesPerVChannel int) int {
-	if minBytesPerVChannel <= 0 {
+// retentionFloorBoundary is the oldest chunk index the byte floor still needs:
+// walk back from the newest, accumulating object sizes, and stop once the floor
+// is covered. Until it is covered nothing may be released.
+func retentionFloorBoundary(chunks []*streamingpb.PChannelSummaryChunkIndexEntry, minRetainedBytes int) int {
+	if minRetainedBytes <= 0 {
 		return len(chunks)
 	}
-	accumulated := make(map[string]int)
-	oldestNeeded := make(map[string]int)
-	satisfied := make(map[string]struct{})
+	accumulated := 0
 	for i := len(chunks) - 1; i >= 0; i-- {
-		for _, index := range chunks[i].GetVchannels() {
-			name := index.GetVchannel()
-			if _, done := satisfied[name]; done {
-				continue
-			}
-			accumulated[name] += vchannelSummaryIndexBytes(index)
-			oldestNeeded[name] = i
-			if accumulated[name] >= minBytesPerVChannel {
-				satisfied[name] = struct{}{}
-			}
+		accumulated += int(chunks[i].GetObjectSize())
+		if accumulated >= minRetainedBytes {
+			return i
 		}
 	}
-	boundary := len(chunks)
-	for name, index := range oldestNeeded {
-		if _, done := satisfied[name]; !done {
-			// This vchannel has never accumulated a floor's worth, so nothing of it
-			// may be dropped yet.
-			return 0
-		}
-		boundary = minInt(boundary, index)
-	}
-	return boundary
+	return 0
 }
 
 // retentionTTLBoundary is the length of the leading run of chunks older than the

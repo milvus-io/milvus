@@ -224,7 +224,7 @@ func (m *summaryManager) probeForwardFromManifest(
 		if !exists {
 			break
 		}
-		_, footer, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, manifestTerm)
+		_, footer, objectSize, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, manifestTerm)
 		if errors.Is(err, ErrPChannelSummaryStoreCorrupted) {
 			// A probed chunk is by construction one whose WAL checkpoint never
 			// advanced: the persist that wrote it had to write the manifest next,
@@ -244,7 +244,7 @@ func (m *summaryManager) probeForwardFromManifest(
 		if err != nil {
 			return nil, err
 		}
-		discovered = append(discovered, chunkIndexEntryFromFooter(footer))
+		discovered = append(discovered, chunkIndexEntryFromFooter(footer, objectSize))
 	}
 	return discovered, nil
 }
@@ -267,7 +267,7 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 	generation uint64,
 	expectedTerm int64,
 ) error {
-	recordsByVChannel, _, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, expectedTerm)
+	recordsByVChannel, _, _, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, expectedTerm)
 	if err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	expectedTerm int64,
-) (map[string][]*SummaryRecord, *streamingpb.PChannelSummaryChunkFooter, error) {
+) (map[string][]*SummaryRecord, *streamingpb.PChannelSummaryChunkFooter, uint64, error) {
 	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, expectedTerm)
 	// Bounded retry on the raw read. Referenced-state corruption hard-fails the
 	// WAL open, so only a VERIFIED decode/checksum failure below may be called
@@ -302,23 +302,23 @@ func (m *summaryManager) readPChannelSummaryChunk(
 		payload, readErr = resource.Resource().ChunkManager().Read(ctx, chunkKey)
 		return readErr
 	}, retry.Attempts(5)); err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to read pchannel summary chunk %s", chunkKey)
+		return nil, nil, 0, errors.Wrapf(err, "failed to read pchannel summary chunk %s", chunkKey)
 	}
 	recordsByVChannel, footer, err := unmarshalPChannelSummaryChunk(payload)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to unmarshal pchannel summary chunk %s", chunkKey)
+		return nil, nil, 0, errors.Wrapf(err, "failed to unmarshal pchannel summary chunk %s", chunkKey)
 	}
 	if footer.Pchannel != "" && footer.Pchannel != pchannel {
-		return nil, nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.Pchannel)
+		return nil, nil, 0, pchannelSummaryStoreCorruptedf("pchannel summary chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.Pchannel)
 	}
 	if footer.Generation != generation {
-		return nil, nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
+		return nil, nil, 0, pchannelSummaryStoreCorruptedf("pchannel summary chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
 	}
 	if footer.Term > m.term {
-		return nil, nil, pchannelSummaryStoreFencedf("pchannel summary chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
+		return nil, nil, 0, pchannelSummaryStoreFencedf("pchannel summary chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
 	}
 	if footer.Term != expectedTerm {
-		return nil, nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk %s term mismatch, manifest %d, footer %d", chunkKey, expectedTerm, footer.Term)
+		return nil, nil, 0, pchannelSummaryStoreCorruptedf("pchannel summary chunk %s term mismatch, manifest %d, footer %d", chunkKey, expectedTerm, footer.Term)
 	}
-	return recordsByVChannel, footer, nil
+	return recordsByVChannel, footer, uint64(len(payload)), nil
 }

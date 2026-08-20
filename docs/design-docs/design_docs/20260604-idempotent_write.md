@@ -96,7 +96,7 @@ a collection's inserts to be idempotent.
 | --- | --- | --- |
 | `streaming.idempotency.enabled` | `false` | Global kill switch. |
 | `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Per-vchannel in-memory window cap. Nothing is evicted until this is reached; then oldest-first. |
-| `streaming.idempotency.minRetainedBytesPerVChannel` | `64MiB` | Durable retention FLOOR, per vchannel. Chunks holding this much of a vchannel's bytes are kept regardless of age. |
+| `streaming.idempotency.minRetainedBytes` | `64MiB` | Durable retention FLOOR, in bytes of chunk objects per pchannel. Chunks inside it are kept regardless of age. |
 | `streaming.idempotency.retentionTTL` | `10m` | Age at which a chunk may be released — but only where the floor already allows it. |
 | `streaming.idempotency.maxRetainedChunks` | `256` | Hard CAP on retained chunks per pchannel. Overrides the floor. |
 | `streaming.idempotency.gcInterval` | `10s` | How often queued deletions are swept. |
@@ -106,9 +106,10 @@ There is **no persist interval and no chunk size trigger**. A chunk is written
 synchronously from the WAL checkpoint's dirty persist and from nowhere else, so its
 batching is the checkpoint's batching. See [Persist path](#persist-path).
 
-`minRetainedBytesPerVChannel` should be at least `maxBytesPerWindow`; otherwise the
-store discards history a window would still have room to hold, and a restart rebuilds
-less than the running process had.
+`minRetainedBytes` should comfortably exceed `maxBytesPerWindow`; otherwise the store
+discards history a window would still have room to hold, and a restart rebuilds less than
+the running process had. It is a pchannel-wide budget against a per-vchannel window, so
+the headroom needs to scale with the number of active vchannels.
 
 The three retention knobs are not independent — the cap beats the floor and the floor
 beats the TTL. See [Retention](#retention).
@@ -282,18 +283,24 @@ One window per vchannel, keyed by idempotency key. `Begin(key)` returns one of:
 
 Retention is **byte-bounded only**, at both layers.
 
-**Window (memory).** Nothing is evicted while the window is under
-`maxBytesPerWindow`. Once it is full, entries are replaced oldest-first. There is no
-TTL and no minimum entry count.
+**Window (memory), per vchannel.** Nothing is evicted while the window is under
+`maxBytesPerWindow`. Once it is full, entries are replaced oldest-first by commit
+timetick. There is no TTL and no minimum entry count. This is the only layer that bounds
+anything per vchannel, and it is the right one: memory is what a vchannel consumes
+individually.
 
 **Store (objects).** Three bounds decide which chunks survive, and they are deliberately
 asymmetric:
 
 | Bound | Kind | Beats |
 | --- | --- | --- |
-| `minRetainedBytesPerVChannel` | floor — keep at least this much | the TTL |
+| `minRetainedBytes` | floor — keep at least this many object bytes | the TTL |
 | `retentionTTL` | ceiling on age | — |
-| `maxRetainedChunks` | cap — keep at most this many | the floor |
+| `maxRetainedChunks` | cap — keep at most this many chunks | the floor |
+
+All three are accounted **per object**. A chunk is retained or released whole, so the
+object is both what keeping it costs and what recovery pays to read it; a per-vchannel
+share of it would describe neither.
 
 The releasable prefix is `min(floor boundary, TTL boundary)`, then forced down by the
 cap.
@@ -308,21 +315,18 @@ chunks, and both the manifest and the replay would grow without limit. When the 
 binds, the retained window is smaller than the floor asks for — a deliberate trade of
 dedup coverage for a bounded recovery time.
 
-The floor is accounted **per vchannel**: each vchannel's own section lengths are summed
-from the manifest index, the oldest chunk each one still needs is resolved, and the
-boundary is the minimum across them. Accounting whole object sizes instead would let one
-hot vchannel consume the floor and evict a cold vchannel's keys — and a cold vchannel
-mid-retry is exactly what this feature protects. Resolving per vchannel rather than
-stopping the scan at the first fully-satisfied chunk matters for the same reason: an idle
-vchannel's bytes live only in old chunks, so an early stop would never evaluate its floor
-at all and would release its keys on a busy neighbour's schedule.
+The consequence is that retention spans a window of the **pchannel's** write rate. On a
+busy pchannel an idle vchannel's history is displaced by the aggregate traffic rather than
+by its own, so its effective dedup window is shorter than the same vchannel would get on a
+quiet pchannel. Bounding per vchannel instead would mean the store carrying per-vchannel
+accounting for a budget that is spent per object anyway — the in-memory window is where
+per-vchannel bounding belongs, and it already does exactly that.
 
 Two consequences follow, and both must be stated plainly because they change what the
 feature promises:
 
 - **Duplicate visibility is measured in bytes of writes, not in time.** On a busy
-  shard the retained window may span minutes; on a quiet one it may span days. A key
-  written long ago on an idle shard still answers as a duplicate.
+  pchannel the retained window may span minutes; on a quiet one it may span days.
 - **An idle vchannel does not release its window over time.** Memory is bounded by
   `maxBytesPerWindow`, not reclaimed by inactivity.
 
@@ -833,9 +837,10 @@ Trade-offs that were argued and settled, with what was rejected and why.
 ### Retention is byte-bounded, with the TTL subordinate to a byte floor
 
 **Chosen:** the window evicts oldest-first only when `maxBytesPerWindow` is reached. The
-store keeps at least `minRetainedBytesPerVChannel` per vchannel regardless of age, expires
-by `retentionTTL` only outside that floor, and caps the whole thing at
-`maxRetainedChunks`.
+store keeps at least `minRetainedBytes` of chunk objects regardless of age, expires by
+`retentionTTL` only outside that floor, and caps the whole thing at `maxRetainedChunks`.
+The two layers bound different things — memory per vchannel, objects per pchannel — and
+neither borrows the other's unit.
 
 **Rejected — a TTL as the primary bound.** Any horizon expressed in time is invalidated
 by time passing. After an outage, everything in the restored window is older than
@@ -847,6 +852,12 @@ The TTL survives as a cost bound *behind* the floor, where it cannot do that.
 **Rejected — an entry-count floor.** It reintroduces the problem the byte cap exists to
 solve: one entry carries the per-row primary keys of its insert, so a count says nothing
 about memory. It also forces the store to ask each consumer what it still needs.
+
+**Rejected — a per-vchannel byte floor in the store.** It sounds more protective of an
+idle vchannel, but the store releases whole objects, so a per-vchannel figure never
+matches what is actually freed. It also puts per-vchannel accounting back into a layer
+that had just been freed of it, to bound something the in-memory window already bounds
+correctly. The cost of dropping it is stated in [Retention](#retention).
 
 **Rejected — bytes alone, with no chunk cap.** The floor bounds bytes, but recovery pays
 per chunk: a workload writing little per checkpoint fills the floor with an unbounded

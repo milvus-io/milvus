@@ -108,13 +108,13 @@ func writeTestPChannelSummaryChunk(
 	generation uint64,
 	term int64,
 	recordsByVChannel map[string][]*SummaryRecord,
-) *streamingpb.PChannelSummaryChunkFooter {
+) *streamingpb.PChannelSummaryChunkIndexEntry {
 	t.Helper()
 	payload, footer, err := marshalPChannelSummaryChunk(pchannel, generation, term, recordsByVChannel)
 	require.NoError(t, err)
 	key := buildPChannelSummaryChunkKey(chunkManager, pchannel, generation, term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
-	return footer
+	return chunkIndexEntryFromFooter(footer, uint64(len(payload)))
 }
 
 // writeTestPChannelSummaryManifest stores a manifest for one term directly.

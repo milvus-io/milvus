@@ -8170,7 +8170,7 @@ type streamingConfig struct {
 	// idempotent write configuration.
 	IdempotencyEnabled                     ParamItem `refreshable:"false"`
 	IdempotencyMaxBytesPerWindow           ParamItem `refreshable:"false"`
-	IdempotencyMinRetainedBytesPerVChannel ParamItem `refreshable:"false"`
+	IdempotencyMinRetainedBytes ParamItem `refreshable:"false"`
 	IdempotencyRetentionTTL                ParamItem `refreshable:"false"`
 	IdempotencyMaxRetainedChunks           ParamItem `refreshable:"false"`
 	IdempotencyGCInterval                  ParamItem `refreshable:"false"`
@@ -8629,20 +8629,20 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	}
 	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
 
-	p.IdempotencyMinRetainedBytesPerVChannel = ParamItem{
-		Key:          "streaming.idempotency.minRetainedBytesPerVChannel",
+	p.IdempotencyMinRetainedBytes = ParamItem{
+		Key:          "streaming.idempotency.minRetainedBytes",
 		Version:      "3.0.0",
-		Doc:          `The floor of durable retention, per vchannel. Chunks holding this many of a vchannel's bytes are kept EVEN IF they are older than retentionTTL, so a long outage still leaves the most recent writes recoverable and a resuming client is still deduplicated. The boundary is the minimum across vchannels, so a hot vchannel cannot push a cold one out of retention. Should be at least maxBytesPerWindow, otherwise the store discards history a window would still have room to hold.`,
+		Doc:          `Retention FLOOR for the summary store, in bytes of chunk objects per pchannel. Chunks inside this floor are kept regardless of age, so an outage of any length still leaves the most recent writes recoverable. Accounted per object, because a chunk is retained or released whole.`,
 		DefaultValue: "67108864",
 		FallbackKeys: []string{"idempotency.minRetainedBytesPerVChannel", "idempotency.retainedBytesPerVChannel"},
 		Export:       false,
 	}
-	p.IdempotencyMinRetainedBytesPerVChannel.Init(base.mgr)
+	p.IdempotencyMinRetainedBytes.Init(base.mgr)
 
 	p.IdempotencyRetentionTTL = ParamItem{
 		Key:          "streaming.idempotency.retentionTTL",
 		Version:      "3.0.0",
-		Doc:          `How long summary chunks are kept before they may be released. A chunk is deleted only when it is BOTH older than this AND outside the minRetainedBytesPerVChannel floor, so the floor always wins: time never removes the last window of writes.`,
+		Doc:          `How long summary chunks are kept before they may be released. A chunk is deleted only when it is BOTH older than this AND outside the minRetainedBytes floor, so the floor always wins: time never removes the last window of writes.`,
 		DefaultValue: "10m",
 		FallbackKeys: []string{"idempotency.retentionTTL"},
 		Export:       false,
@@ -8652,7 +8652,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMaxRetainedChunks = ParamItem{
 		Key:          "streaming.idempotency.maxRetainedChunks",
 		Version:      "3.0.0",
-		Doc:          `Hard cap on how many summary chunks stay retained per pchannel. It overrides the per-vchannel byte floor: the floor bounds bytes, but recovery pays per chunk, so a workload writing little per checkpoint would otherwise keep an unbounded number of tiny chunks. When this cap binds, the deduplication window is smaller than minRetainedBytesPerVChannel asks for.`,
+		Doc:          `Hard cap on how many summary chunks stay retained per pchannel. It overrides the byte floor: the floor bounds bytes, but recovery pays per chunk, so a workload writing little per checkpoint would otherwise keep an unbounded number of tiny chunks. When this cap binds, the deduplication window is smaller than minRetainedBytes asks for.`,
 		DefaultValue: "256",
 		FallbackKeys: []string{"idempotency.maxRetainedChunks"},
 		Export:       false,

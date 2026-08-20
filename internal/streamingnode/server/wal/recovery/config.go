@@ -21,7 +21,7 @@ func newConfig() *config {
 		maxDirtyMessages:             maxDirtyMessages,
 		gracefulTimeout:              gracefulTimeout,
 		idempotencyEnabled:           params.StreamingCfg.IdempotencyEnabled.GetAsBool(),
-		idempotencyMinRetainedBytes:  int(params.StreamingCfg.IdempotencyMinRetainedBytesPerVChannel.GetAsSize()),
+		idempotencyMinRetainedBytes:  int(params.StreamingCfg.IdempotencyMinRetainedBytes.GetAsSize()),
 		idempotencyRetentionTTL:      params.StreamingCfg.IdempotencyRetentionTTL.GetAsDurationByParse(),
 		idempotencyMaxRetainedChunks: params.StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt(),
 		idempotencyGCInterval:        params.StreamingCfg.IdempotencyGCInterval.GetAsDurationByParse(),
@@ -55,7 +55,7 @@ func (cfg *config) sanitizeIdempotency() {
 	// The floor is what makes retention survive an outage; without it a TTL alone
 	// would empty the store exactly when a resuming client needs it.
 	if cfg.idempotencyMinRetainedBytes <= 0 {
-		fallback := defaultInt(&params.StreamingCfg.IdempotencyMinRetainedBytesPerVChannel)
+		fallback := defaultInt(&params.StreamingCfg.IdempotencyMinRetainedBytes)
 		mlog.Warn(context.TODO(), "non-positive idempotency retention floor; falling back to default",
 			mlog.Int("configured", cfg.idempotencyMinRetainedBytes),
 			mlog.Int("fallback", fallback))
@@ -100,11 +100,14 @@ type config struct {
 	gracefulTimeout  time.Duration // gracefulTimeout is the timeout for graceful close of recovery module.
 
 	idempotencyEnabled bool // idempotencyEnabled gates all summary-store machinery (recovery, bootstrap, in-memory summaries).
-	// idempotencyMinRetainedBytes is the FLOOR of durable retention, per vchannel.
-	// Chunks holding this many of a vchannel's bytes survive even past the TTL, so
-	// an outage of any length still leaves the most recent writes recoverable.
-	// This is a data-layer bound owned by the store; how much of what it hands
-	// over a consumer then caches is the consumer's own business.
+	// idempotencyMinRetainedBytes is the FLOOR of durable retention, in bytes of
+	// chunk objects. Chunks inside it survive even past the TTL, so an outage of
+	// any length still leaves the most recent writes recoverable.
+	//
+	// It is accounted per OBJECT, not per vchannel: a chunk is retained or released
+	// whole, so the object is both what it costs to keep and what recovery pays to
+	// read. How much of what the store hands over a consumer then caches in memory
+	// is the consumer's own bound (the window's byte cap), not this one.
 	idempotencyMinRetainedBytes int
 	// idempotencyRetentionTTL is the normal expiry. A chunk is released only when
 	// it is older than this AND outside the floor above.

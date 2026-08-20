@@ -762,11 +762,18 @@ message PChannelSummaryManifest {
 message PChannelSummaryChunkIndexEntry {
     uint64 generation = 1;
     int64 term        = 2;
+    // The whole object's size. Retention is decided per OBJECT, not per vchannel:
+    // what a retained chunk costs is the object, and what recovery pays to read it
+    // is the object. Accounting a vchannel's slice of it would make the boundary
+    // depend on how the writes happened to be distributed, for a budget that is
+    // spent on the object either way.
+    uint64 object_size = 3;
     // The chunk's own span, for coarse time filtering before any read.
-    uint64 start_timetick = 3;
-    uint64 end_timetick   = 4;
-    // The chunk footer's per-vchannel index, copied verbatim.
-    repeated VChannelSummaryChunkIndex vchannels = 5;
+    uint64 start_timetick = 4;
+    uint64 end_timetick   = 5;
+    // The chunk footer's per-vchannel index, copied verbatim. Read by a consumer
+    // locating its own section; retention does not look at it.
+    repeated VChannelSummaryChunkIndex vchannels = 6;
 }
 
 // PChannelSummaryChunkRef is the minimum needed to address a chunk object:

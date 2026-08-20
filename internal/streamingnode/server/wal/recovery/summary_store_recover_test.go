@@ -140,10 +140,10 @@ func TestSummaryStoreRecoveryStopsOnChunkFromNewerTerm(t *testing.T) {
 
 	// The manifest is this owner's own, but it names a chunk stamped with a term
 	// above ours: another owner has taken the store over.
-	footer := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 7, map[string][]*SummaryRecord{
+	entry := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 7, map[string][]*SummaryRecord{
 		"v1": {newTestSummaryRecord("key-a", 20, 100)},
 	})
-	writeTestPChannelSummaryManifest(ctx, t, "p1", 2, chunkIndexEntryFromFooter(footer))
+	writeTestPChannelSummaryManifest(ctx, t, "p1", 2, entry)
 
 	manager := newTestSummaryManager(t, "p1", 3, newTestSummaryConfig())
 	rs := newTestRecoveryStorageForSummary(t, 10, "v1")
@@ -166,7 +166,7 @@ func TestSummaryStoreRecoveryReplaysOnlyRetainedChunks(t *testing.T) {
 	// no longer part of the set recovery reads, even though the object still
 	// exists because gc has not run.
 	manifest := &streamingpb.PChannelSummaryManifest{
-		Chunks:    []*streamingpb.PChannelSummaryChunkIndexEntry{chunkIndexEntryFromFooter(retained)},
+		Chunks:    []*streamingpb.PChannelSummaryChunkIndexEntry{retained},
 		PendingGc: []*streamingpb.PChannelSummaryChunkRef{{Generation: released.GetGeneration(), Term: released.GetTerm()}},
 	}
 	require.NoError(t, writePChannelSummaryManifest(ctx, "p1", 1, manifest))

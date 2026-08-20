@@ -10,21 +10,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// newTestChunkIndexEntry builds a manifest entry whose vchannels each occupy
-// bytesPerVChannel, so a retention test can state its inputs in the unit
-// retention actually accounts in.
-func newTestChunkIndexEntry(generation uint64, term int64, endTimetick uint64, bytesPerVChannel int, vchannels ...string) *streamingpb.PChannelSummaryChunkIndexEntry {
+// newTestChunkIndexEntry builds a manifest entry of a given object size, which
+// is the unit retention accounts in. The vchannel list is filled for realism
+// only -- retention never reads it.
+func newTestChunkIndexEntry(generation uint64, term int64, endTimetick uint64, objectSize int, vchannels ...string) *streamingpb.PChannelSummaryChunkIndexEntry {
 	entry := &streamingpb.PChannelSummaryChunkIndexEntry{
 		Generation:    generation,
 		Term:          term,
+		ObjectSize:    uint64(objectSize),
 		StartTimetick: endTimetick,
 		EndTimetick:   endTimetick,
 	}
 	for _, vchannel := range vchannels {
 		entry.Vchannels = append(entry.Vchannels, &streamingpb.VChannelSummaryChunkIndex{
 			Vchannel:    vchannel,
-			Idempotency: &streamingpb.VChannelSummarySectionRef{Length: uint64(bytesPerVChannel / 2), RecordCount: 1},
-			Inserts:     &streamingpb.VChannelSummarySectionRef{Length: uint64(bytesPerVChannel / 2), RecordCount: 1},
+			Idempotency: &streamingpb.VChannelSummarySectionRef{Length: 1, RecordCount: 1},
+			Inserts:     &streamingpb.VChannelSummarySectionRef{Length: 1, RecordCount: 1},
 		})
 	}
 	return entry
@@ -67,33 +68,29 @@ func TestRetentionReleasesOnlyWhereFloorAndTTLAgree(t *testing.T) {
 	require.Equal(t, 2, retentionBoundary(manifest, 200, 0, 1_000_000))
 }
 
-func TestRetentionAccountsFloorPerVChannel(t *testing.T) {
-	// v2 goes idle after chunk 0 while v1 keeps writing. v1's floor is filled by
-	// the newest chunks, but v2's is not, and v2's only bytes live in chunk 0.
-	// Releasing chunk 0 would forget v2's keys on v1's schedule -- and a cold
-	// vchannel mid-retry is exactly what this feature protects.
+func TestRetentionAccountsWholeObjects(t *testing.T) {
+	// Retention is decided per object: a chunk is retained or released whole, so
+	// what fills the floor is the object's size, not any one vchannel's slice of
+	// it. Two chunks of 100 bytes cover a 200-byte floor whatever mix of
+	// vchannels wrote them.
 	manifest := testManifestOf(
 		newTestChunkIndexEntry(0, 1, 10, 100, "v1", "v2"),
 		newTestChunkIndexEntry(1, 1, 20, 100, "v1"),
-		newTestChunkIndexEntry(2, 1, 30, 100, "v1"),
-		newTestChunkIndexEntry(3, 1, 40, 100, "v1"),
+		newTestChunkIndexEntry(2, 1, 30, 100, "v1", "v2", "v3"),
 	)
-	require.Equal(t, 0, retentionBoundary(manifest, 200, 0, 1_000_000))
+	require.Equal(t, 1, retentionBoundary(manifest, 200, 0, 1_000_000))
 
-	// v2 writing again is not enough on its own: it still needs chunk 0 to make
-	// up its floor, so chunk 0 stays.
-	manifest.Chunks = append(manifest.Chunks, newTestChunkIndexEntry(4, 1, 50, 100, "v2"))
-	require.Equal(t, 0, retentionBoundary(manifest, 200, 0, 1_000_000))
-
-	// Once v2's own recent bytes cover its floor, chunk 0 is no longer needed and
-	// the boundary falls back to what v1 requires.
-	manifest.Chunks = append(manifest.Chunks, newTestChunkIndexEntry(5, 1, 60, 200, "v2"))
-	require.Equal(t, 2, retentionBoundary(manifest, 200, 0, 1_000_000))
+	// The consequence, stated as a test: an idle vchannel's history is displaced
+	// by the PCHANNEL's write rate. v2 wrote nothing after chunk 0, yet a single
+	// newer object large enough to cover the floor releases everything below it,
+	// chunk 0 included.
+	manifest.Chunks = append(manifest.Chunks, newTestChunkIndexEntry(3, 1, 40, 200, "v1"))
+	require.Equal(t, 3, retentionBoundary(manifest, 200, 0, 1_000_000))
 }
 
 func TestRetentionMaxChunksOverridesFloor(t *testing.T) {
-	// Small chunks: the floor is never filled, so floor and TTL alone would retain
-	// everything. The cap is what bounds recovery, which pays per chunk.
+	// Small objects: the floor is never filled, so floor and TTL alone would
+	// retain everything. The cap is what bounds recovery, which pays per chunk.
 	entries := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0, 10)
 	for i := 0; i < 10; i++ {
 		entries = append(entries, newTestChunkIndexEntry(uint64(i), 1, uint64(10+i), 2, "v1"))

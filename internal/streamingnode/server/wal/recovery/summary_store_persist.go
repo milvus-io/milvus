@@ -64,7 +64,7 @@ func (m *summaryManager) persistPChannelSummary(
 	m.nextGeneration = generation + 1
 	m.latestCoveredTT = footer.GetEndTimetick()
 
-	recordPChannelSummaryChunk(m.manifest, chunkIndexEntryFromFooter(footer))
+	recordPChannelSummaryChunk(m.manifest, chunkIndexEntryFromFooter(footer, uint64(len(chunkPayload))))
 	if err := m.refreshPChannelSummaryManifest(ctx, logger); err != nil {
 		return 0, err
 	}

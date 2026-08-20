@@ -143,10 +143,10 @@ func TestRecoverSummariesFailsOnRetainedChunkCorruption(t *testing.T) {
 	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	footer := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
+	entry := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
 		"v1": {newTestSummaryRecord("key-1", 99, 1)},
 	})
-	writeTestPChannelSummaryManifest(ctx, t, "p1", 0, chunkIndexEntryFromFooter(footer))
+	writeTestPChannelSummaryManifest(ctx, t, "p1", 0, entry)
 
 	key := buildPChannelSummaryChunkKey(chunkManager, "p1", 0, 0)
 	payload, err := chunkManager.Read(ctx, key)
@@ -172,10 +172,10 @@ func TestRecoverSummariesSelfHealsCorruptChunkAboveManifest(t *testing.T) {
 	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	footer := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
+	entry := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
 		"v1": {newTestSummaryRecord("key-1", 99, 1)},
 	})
-	writeTestPChannelSummaryManifest(ctx, t, "p1", 0, chunkIndexEntryFromFooter(footer))
+	writeTestPChannelSummaryManifest(ctx, t, "p1", 0, entry)
 
 	writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 1, 0, map[string][]*SummaryRecord{
 		"v1": {newTestSummaryRecord("key-2", 130, 2)},
