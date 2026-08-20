@@ -19,3 +19,11 @@ func TestLoadPlugin_NonExistentFile(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "fail to open plugin")
 }
+
+func TestFinishPluginLoading(t *testing.T) {
+	// FinishPluginLoading must not panic with unconfigured plugin paths, and
+	// must be safe to call more than once (InitOnceCipher is a sync.Once and
+	// json.DisableGate is idempotent).
+	FinishPluginLoading()
+	FinishPluginLoading()
+}

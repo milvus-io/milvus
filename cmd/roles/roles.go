@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -548,6 +549,13 @@ func (mr *MilvusRoles) Run() {
 		return
 	}
 	mlog.Info(context.TODO(), "All components are ready", mlog.Strings("roles", lo.Keys(componentMap)))
+
+	// All components have started. Every plugin load this process can perform is
+	// now done (the hook plugin is loaded eagerly by the proxy during creation;
+	// the cipher plugin is forced to completion here), so permanently disable the
+	// sonic JSON gate: plugin.Open can no longer run and sonic JIT registration
+	// cannot race with it, and the JSON hot path costs nothing from now on.
+	hookutil.FinishPluginLoading()
 
 	http.RegisterStopComponent(func(role string) error {
 		if len(role) == 0 || componentMap[role] == nil {
