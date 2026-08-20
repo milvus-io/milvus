@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <folly/FBVector.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <cstdint>
@@ -34,6 +35,8 @@
 #include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprBatchTestUtils.h"
+#include "exec/expression/UnaryExpr.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/Meta.h"
@@ -2371,11 +2374,13 @@ INSTANTIATE_TEST_SUITE_P(ElementFilter,
                              return info.param ? "Sealed" : "Growing";
                          });
 
+class ElementFilterZeroElementBatch : public ::testing::TestWithParam<bool> {};
+
 // Element-level filters can legitimately produce a zero-length element bitmap
 // even when the segment has active rows: every active document may have an
 // empty/null struct array. ExecPlanNodeVisitor must still treat that bitmap as
 // element-level instead of comparing it with the row count.
-TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
+TEST_P(ElementFilterZeroElementBatch, ActiveDocsWithZeroElements) {
     bool with_sealed = GetParam();
 
     int dim = 4;
@@ -2446,6 +2451,407 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
     ASSERT_NE(retrieve_results, nullptr);
     ASSERT_EQ(retrieve_results->offset_size(), 0);
 }
+
+TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(4);
+
+    bool with_sealed = GetParam();
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, true);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    constexpr size_t kRowCount = 9;
+    constexpr size_t kTargetRow = 8;
+    auto raw_data = DataGen(schema, kRowCount, 42, 0, 1, 1);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != int_array_fid.get()) {
+            continue;
+        }
+
+        auto* array_data = field_data->mutable_scalars()->mutable_array_data();
+        // Batch 1 contains NULL arrays with retained physical payloads.
+        for (size_t row = 0; row < 4; ++row) {
+            auto* values = array_data->mutable_data(row)
+                               ->mutable_int_data()
+                               ->mutable_data();
+            values->Clear();
+            values->Add(100 + row);
+        }
+        // Batch 2 contains valid but empty arrays.
+        for (size_t row = 4; row < kTargetRow; ++row) {
+            array_data->mutable_data(row)
+                ->mutable_int_data()
+                ->mutable_data()
+                ->Clear();
+        }
+        auto* target_values = array_data->mutable_data(kTargetRow)
+                                  ->mutable_int_data()
+                                  ->mutable_data();
+        target_values->Clear();
+        target_values->Add(7);
+        target_values->Add(9);
+
+        auto* valid_data = MutableFieldDataRowValidData(field_data);
+        valid_data->Clear();
+        for (size_t row = 0; row < kTargetRow; ++row) {
+            valid_data->Add(row >= 4);
+        }
+        valid_data->Add(true);
+        break;
+    }
+
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        SegcoreConfig config;
+        config.set_chunk_rows(4);
+        auto growing =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        growing->PreInsert(kRowCount);
+        growing->Insert(0,
+                        kRowCount,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+    auto* internal_segment =
+        dynamic_cast<SegmentInternalInterface*>(segment.get());
+    ASSERT_NE(internal_segment, nullptr);
+
+    auto array_offsets = segment->GetArrayOffsets(int_array_fid);
+    ASSERT_NE(array_offsets, nullptr);
+    ASSERT_EQ(array_offsets->GetTotalElementCount(), 2);
+    for (size_t row = 0; row < kTargetRow; ++row) {
+        EXPECT_EQ(array_offsets->ElementIDRangeOfRow(row),
+                  std::make_pair(0, 0));
+    }
+    EXPECT_EQ(array_offsets->ElementIDRangeOfRow(kTargetRow),
+              std::make_pair(0, 2));
+
+    enum class PredicateMode {
+        UnaryRange,
+        UnaryOverflow,
+        BinaryRange,
+        BinaryRangeOverflow,
+        Term,
+        BinaryArithmetic,
+    };
+    auto run_retrieve = [&](PredicateMode mode) {
+        proto::plan::PlanNode plan_node;
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(100);
+
+        auto* element_filter =
+            query->mutable_predicates()->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+
+        auto* binary =
+            element_filter->mutable_element_expr()->mutable_binary_expr();
+        binary->set_op(mode == PredicateMode::BinaryRangeOverflow
+                           ? proto::plan::BinaryExpr::LogicalOr
+                           : proto::plan::BinaryExpr::LogicalAnd);
+        auto set_element_column = [&](proto::plan::ColumnInfo* column) {
+            column->set_field_id(int_array_fid.get());
+            column->set_data_type(proto::schema::DataType::Int32);
+            column->set_element_type(proto::schema::DataType::Int32);
+            column->set_is_element_level(true);
+        };
+        auto set_element_range = [&](proto::plan::Expr* expr,
+                                     proto::plan::OpType op,
+                                     int64_t value) {
+            auto* range = expr->mutable_unary_range_expr();
+            set_element_column(range->mutable_column_info());
+            range->set_op(op);
+            range->mutable_value()->set_int64_val(value);
+        };
+        switch (mode) {
+            case PredicateMode::BinaryRange:
+            case PredicateMode::BinaryRangeOverflow: {
+                auto* range =
+                    binary->mutable_left()->mutable_binary_range_expr();
+                set_element_column(range->mutable_column_info());
+                range->set_lower_inclusive(true);
+                range->set_upper_inclusive(true);
+                range->mutable_lower_value()->set_int64_val(
+                    mode == PredicateMode::BinaryRangeOverflow ? 2147483648LL
+                                                               : 0LL);
+                range->mutable_upper_value()->set_int64_val(
+                    mode == PredicateMode::BinaryRangeOverflow ? 2147483649LL
+                                                               : 10LL);
+                break;
+            }
+            case PredicateMode::Term: {
+                auto* term = binary->mutable_left()->mutable_term_expr();
+                set_element_column(term->mutable_column_info());
+                term->add_values()->set_int64_val(7);
+                term->add_values()->set_int64_val(9);
+                break;
+            }
+            case PredicateMode::BinaryArithmetic: {
+                auto* arith = binary->mutable_left()
+                                  ->mutable_binary_arith_op_eval_range_expr();
+                set_element_column(arith->mutable_column_info());
+                arith->set_arith_op(proto::plan::ArithOpType::Add);
+                arith->mutable_right_operand()->set_int64_val(0);
+                arith->set_op(proto::plan::OpType::GreaterEqual);
+                arith->mutable_value()->set_int64_val(0);
+                break;
+            }
+            case PredicateMode::UnaryRange:
+            case PredicateMode::UnaryOverflow: {
+                auto lower_bound =
+                    mode == PredicateMode::UnaryOverflow ? -2147483649LL : 0LL;
+                set_element_range(binary->mutable_left(),
+                                  proto::plan::OpType::GreaterEqual,
+                                  lower_bound);
+                break;
+            }
+        }
+        set_element_range(
+            binary->mutable_right(), proto::plan::OpType::Equal, 9);
+
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+
+        auto parser = ProtoParser(schema);
+        auto plan = parser.CreateRetrievePlan(plan_node);
+        return segment->Retrieve(nullptr,
+                                 plan.get(),
+                                 1L << 63,
+                                 INT64_MAX,
+                                 false,
+                                 folly::CancellationToken(),
+                                 0,
+                                 0);
+    };
+
+    auto assert_target_element = [&](const auto& retrieve_results) {
+        ASSERT_NE(retrieve_results, nullptr);
+        ASSERT_TRUE(retrieve_results->element_level());
+        ASSERT_EQ(retrieve_results->offset_size(), 1);
+        EXPECT_EQ(retrieve_results->offset(0), kTargetRow);
+        ASSERT_EQ(retrieve_results->element_indices(0).indices_size(), 1);
+        EXPECT_EQ(retrieve_results->element_indices(0).indices(0), 1);
+    };
+
+    std::unique_ptr<proto::segcore::RetrieveResults> retrieve_results;
+    auto run_all_modes = [&] {
+        for (auto mode : {PredicateMode::UnaryRange,
+                          PredicateMode::UnaryOverflow,
+                          PredicateMode::BinaryRange,
+                          PredicateMode::BinaryRangeOverflow,
+                          PredicateMode::Term,
+                          PredicateMode::BinaryArithmetic}) {
+            // Every visitor family and both overflow fast paths must keep the
+            // child expressions aligned across zero-element batches.
+            ASSERT_NO_THROW(retrieve_results = run_retrieve(mode));
+            assert_target_element(retrieve_results);
+        }
+    };
+    run_all_modes();
+
+    class CountingPrefetchUnaryExpr final
+        : public exec::PhyUnaryRangeFilterExpr {
+     public:
+        using exec::PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+        int
+        prefetch_count() const {
+            return prefetch_count_;
+        }
+
+        size_t
+        prefetch_start_chunk() const {
+            return prefetch_start_chunk_;
+        }
+
+     private:
+        void
+        PrefetchRawData() override {
+            prefetch_start_chunk_ = RawDataPrefetchStartChunk();
+            ++prefetch_count_;
+        }
+
+        int prefetch_count_{0};
+        size_t prefetch_start_chunk_{0};
+    };
+
+    auto assert_leaf_batches_to_eof = [&](bool expect_nested_index) {
+        auto column =
+            expr::ColumnInfo(int_array_fid, DataType::ARRAY, DataType::INT32);
+        column.element_level_ = true;
+        proto::plan::GenericValue lower_bound;
+        lower_bound.set_int64_val(0);
+        auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+            column, proto::plan::OpType::GreaterEqual, lower_bound);
+        auto make_physical = [&](const std::string& name,
+                                 int64_t active_count) {
+            return std::make_shared<CountingPrefetchUnaryExpr>(
+                std::vector<exec::ExprPtr>{},
+                logical,
+                name,
+                nullptr,
+                internal_segment,
+                active_count,
+                4,
+                0);
+        };
+        auto physical = make_physical("CountingPrefetchUnaryExpr", kRowCount);
+
+        auto prefetch_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+        physical->PrefetchAsync(prefetch_pool);
+        physical->WaitPrefetch();
+        EXPECT_EQ(physical->prefetch_count(), 0);
+        EXPECT_EQ(physical->CanUseNestedIndex(), expect_nested_index);
+
+        auto query_context = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, internal_segment, kRowCount, MAX_TIMESTAMP);
+        exec::ExecContext exec_context(query_context.get());
+        exec::OffsetVector empty_offsets;
+        exec::EvalCtx empty_offset_context(&exec_context, &empty_offsets);
+        VectorPtr result;
+        physical->Eval(empty_offset_context, result);
+        EXPECT_EQ(result, nullptr);
+        EXPECT_EQ(physical->prefetch_count(), 0);
+
+        // An empty offset input is exhaustion for that invocation only; it
+        // must neither touch payload nor advance the full-mode row cursor.
+        exec::EvalCtx eval_context(&exec_context);
+        for (auto expected_size : {0, 0, 2}) {
+            physical->Eval(eval_context, result);
+            auto column_result =
+                std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(column_result, nullptr);
+            EXPECT_EQ(column_result->size(), expected_size);
+        }
+        EXPECT_EQ(physical->prefetch_count(), expect_nested_index ? 0 : 1);
+        if (!expect_nested_index) {
+            const auto [target_chunk, _] =
+                internal_segment->get_chunk_by_offset(int_array_fid,
+                                                      kTargetRow);
+            EXPECT_EQ(physical->prefetch_start_chunk(), target_chunk);
+        }
+
+        physical->Eval(eval_context, result);
+        EXPECT_EQ(result, nullptr);
+
+        if (!expect_nested_index) {
+            exec::OffsetVector element_offsets;
+            element_offsets.emplace_back(0);
+            element_offsets.emplace_back(1);
+
+            auto deferred_offset_physical = make_physical(
+                "DeferredOffsetCountingPrefetchUnaryExpr", kRowCount);
+            deferred_offset_physical->PrefetchAsync(prefetch_pool);
+            deferred_offset_physical->WaitPrefetch();
+            EXPECT_EQ(deferred_offset_physical->prefetch_count(), 0);
+            exec::EvalCtx deferred_offset_context(&exec_context,
+                                                  &element_offsets);
+            deferred_offset_physical->Eval(deferred_offset_context, result);
+            auto offset_column =
+                std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(offset_column, nullptr);
+            EXPECT_EQ(offset_column->size(), element_offsets.size());
+            EXPECT_EQ(deferred_offset_physical->prefetch_count(), 1);
+
+            auto iterative_offset_physical = make_physical(
+                "IterativeOffsetCountingPrefetchUnaryExpr", kRowCount);
+            exec::EvalCtx iterative_offset_context(&exec_context,
+                                                   &element_offsets);
+            iterative_offset_physical->Eval(iterative_offset_context, result);
+            offset_column = std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(offset_column, nullptr);
+            EXPECT_EQ(offset_column->size(), element_offsets.size());
+            EXPECT_EQ(iterative_offset_physical->prefetch_count(), 0);
+        }
+
+        constexpr int64_t kZeroTailRowCount = 7;
+        auto zero_tail_physical = make_physical(
+            "ZeroTailCountingPrefetchUnaryExpr", kZeroTailRowCount);
+        zero_tail_physical->PrefetchAsync(prefetch_pool);
+        zero_tail_physical->WaitPrefetch();
+        auto zero_tail_query_context =
+            std::make_shared<exec::QueryContext>(DEAFULT_QUERY_ID,
+                                                 internal_segment,
+                                                 kZeroTailRowCount,
+                                                 MAX_TIMESTAMP);
+        exec::ExecContext zero_tail_exec_context(zero_tail_query_context.get());
+        exec::EvalCtx zero_tail_eval_context(&zero_tail_exec_context);
+        for (auto expected_size : {0, 0}) {
+            zero_tail_physical->Eval(zero_tail_eval_context, result);
+            auto column_result =
+                std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(column_result, nullptr);
+            EXPECT_EQ(column_result->size(), expected_size);
+        }
+        EXPECT_EQ(zero_tail_physical->prefetch_count(), 0);
+        zero_tail_physical->Eval(zero_tail_eval_context, result);
+        EXPECT_EQ(result, nullptr);
+
+        auto skipped_batch_physical =
+            make_physical("SkippedBatchCountingPrefetchUnaryExpr", kRowCount);
+        skipped_batch_physical->PrefetchAsync(prefetch_pool);
+        skipped_batch_physical->WaitPrefetch();
+        auto skipped_query_context = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, internal_segment, kRowCount, MAX_TIMESTAMP);
+        exec::ExecContext skipped_exec_context(skipped_query_context.get());
+        exec::EvalCtx skipped_eval_context(&skipped_exec_context);
+
+        skipped_batch_physical->Eval(skipped_eval_context, result);
+        auto skipped_column = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(skipped_column, nullptr);
+        EXPECT_EQ(skipped_column->size(), 0);
+        skipped_batch_physical->MoveCursor();
+        skipped_batch_physical->Eval(skipped_eval_context, result);
+        skipped_column = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(skipped_column, nullptr);
+        EXPECT_EQ(skipped_column->size(), 2);
+        EXPECT_EQ(skipped_batch_physical->prefetch_count(),
+                  expect_nested_index ? 0 : 1);
+        skipped_batch_physical->Eval(skipped_eval_context, result);
+        EXPECT_EQ(result, nullptr);
+    };
+    assert_leaf_batches_to_eof(false);
+
+    if (with_sealed) {
+        std::vector<int32_t> indexed_elements = {7, 9};
+        auto nested_index =
+            std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
+                storage::FileManagerContext(), true /* is_nested */);
+        nested_index->Build(
+            indexed_elements.size(), indexed_elements.data(), nullptr);
+
+        LoadIndexInfo load_info;
+        load_info.field_id = int_array_fid.get();
+        load_info.field_type = DataType::ARRAY;
+        load_info.element_type = DataType::INT32;
+        load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
+        load_info.cache_index = CreateTestCacheIndex("zero_element_nested",
+                                                     std::move(nested_index));
+        auto* sealed_segment = dynamic_cast<SegmentSealed*>(segment.get());
+        ASSERT_NE(sealed_segment, nullptr);
+        sealed_segment->LoadIndex(load_info);
+
+        // Re-run the compound cases after the nested index is present. Binary
+        // arithmetic remains a raw fallback, so this also covers mixed
+        // raw/index children sharing the same zero-element cursor contract.
+        run_all_modes();
+        assert_leaf_batches_to_eof(true);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(ElementFilter,
+                         ElementFilterZeroElementBatch,
+                         ::testing::Values(true, false),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                             return info.param ? "Sealed" : "Growing";
+                         });
 
 TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     auto schema = std::make_shared<Schema>();
@@ -3983,12 +4389,6 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    std::unique_ptr<bool[]> valid_rows(new bool[kNullableElemN]);
-    for (int row = 0; row < kNullableElemN; ++row) {
-        valid_rows[row] = true;
-    }
-    indexing->BuildValidData(valid_rows.get(), kNullableElemN);
-
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index_params = GenIndexParams(indexing.get());
@@ -4009,12 +4409,6 @@ LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
                                    kNullableElemDim,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
-
-    std::unique_ptr<bool[]> valid_data(new bool[valid_rows.size()]);
-    for (size_t row = 0; row < valid_rows.size(); ++row) {
-        valid_data[row] = valid_rows[row];
-    }
-    indexing->BuildValidData(valid_data.get(), valid_rows.size());
 
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();

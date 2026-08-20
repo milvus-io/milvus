@@ -114,6 +114,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using InvertedIndexTantivy<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::IsNotNull",

@@ -20,6 +20,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <shared_mutex>
 #include <string>
 #include <type_traits>
@@ -80,6 +81,7 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            check_source_span(num_rows, data, field_meta);
             reserve_to(length_ + num_rows);
             write_from(
                 length_, num_rows, GetFieldDataRowValidData(*data).data());
@@ -98,6 +100,10 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            // This is the overload the ingest path uses (SegmentGrowingImpl's
+            // Insert and fill_empty_field backfill), so the source-span check
+            // has to live here too, not only on the appending overload above.
+            check_source_span(num_rows, data, field_meta);
             const auto end = element_offset + num_rows;
             // No gaps. length_ advances to `end`, and is_valid() admits every
             // offset below it, so a write that starts past the current length
@@ -197,6 +203,29 @@ class ThreadSafeValidData {
     }
 
  private:
+    // write_from reads exactly num_rows entries from the source, so a producer
+    // payload shorter than the row count is an out-of-bounds read. Reject it at
+    // the boundary rather than silently treating the missing tail as NULL
+    // further down the ingest path.
+    static void
+    check_source_span(size_t num_rows,
+                      const DataArray* data,
+                      const FieldMeta& field_meta) {
+        // Resolve validity the same way write_from's caller does
+        // (GetFieldDataRowValidData): new payloads carry it in the
+        // field-specific ScalarField/VectorField, legacy ones in
+        // FieldData.valid_data. Checking the top-level field alone would
+        // reject every new-format payload as empty.
+        const auto valid_size =
+            static_cast<size_t>(GetFieldDataRowValidData(*data).size());
+        AssertInfo(valid_size == num_rows,
+                   "nullable field {} valid_data size {} must match "
+                   "num_rows {}",
+                   field_meta.get_id().get(),
+                   valid_size,
+                   num_rows);
+    }
+
     // Ensure enough chunks exist to hold `n` elements. Caller holds the lock.
     void
     reserve_to(size_t n) {
@@ -336,6 +365,11 @@ class VectorBase {
     virtual FixedVector<bool>
     get_valid_data() const {
         return FixedVector<bool>{};
+    }
+
+    virtual void
+    bulk_is_valid_range(int64_t start, int64_t count, bool* out) const {
+        std::fill_n(out, count, true);
     }
 
     // Non-nullable fields have no mapping at all; hand back the shared no-op
@@ -603,6 +637,11 @@ class ConcurrentVectorImpl : public VectorBase {
             fmt::format(
                 "The value of elements_per_row_ is not 1, elements_per_row_={}",
                 elements_per_row_));
+        if constexpr (std::is_same_v<Type, ArrayValue>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap nested ARRAY rows must be accessed through "
+                       "view_element()");
+        }
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         auto data =
@@ -685,6 +724,17 @@ class ConcurrentVectorImpl : public VectorBase {
             return valid_data_ptr_->get_data();
         }
         return FixedVector<bool>{};
+    }
+
+    void
+    bulk_is_valid_range(int64_t start,
+                        int64_t count,
+                        bool* out) const override {
+        if (valid_data_ptr_ != nullptr) {
+            valid_data_ptr_->bulk_is_valid_range(start, count, out);
+            return;
+        }
+        std::fill_n(out, count, true);
     }
 
  private:
@@ -837,6 +887,46 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
         auto chunk_offset = element_index % size_per_chunk_;
         return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
+};
+
+template <>
+class ConcurrentVector<ArrayValue>
+    : public ConcurrentVectorImpl<ArrayValue, true> {
+    using Base = ConcurrentVectorImpl<ArrayValue, true>;
+
+ public:
+    explicit ConcurrentVector(
+        int64_t size_per_chunk,
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
+        : Base(1,
+               size_per_chunk,
+               std::move(mmap_descriptor),
+               std::move(valid_data_ptr)) {
+    }
+
+    using Base::set_data_raw;
+
+    void
+    set_data_raw(ssize_t element_offset,
+                 ssize_t element_count,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) override;
+
+    ArrayValueView
+    view_element(ssize_t element_index) const {
+        auto chunk_id = element_index / size_per_chunk_;
+        auto chunk_offset = element_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
+    }
+
+ private:
+    void
+    set_mmap_proto_rows(ssize_t element_offset,
+                        std::span<const ScalarFieldProto* const> rows);
+
+    std::once_flag array_type_once_;
+    std::shared_ptr<const proto::schema::TypeSchema> array_type_;
 };
 
 template <>

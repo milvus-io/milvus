@@ -414,60 +414,57 @@ class SegmentExpr : public Expr {
         return true;
     }
 
-    void
-    MoveCursorForDataMultipleChunk() {
-        int64_t processed_size = 0;
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-            auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-
-            size = std::min(size, batch_size_ - processed_size);
-
-            processed_size += size;
-            if (processed_size >= batch_size_) {
-                current_data_chunk_ = i;
-                current_data_chunk_pos_ = data_pos + size;
-                current_data_global_pos_ =
-                    current_data_global_pos_ + processed_size;
-                break;
-            }
-            // }
-        }
+    // Global row offset of (chunk, chunk_pos) within the segment.
+    int64_t
+    RowOffsetInSegment(size_t chunk, int64_t chunk_pos) const {
+        return segment_->is_chunked()
+                   ? segment_->num_rows_until_chunk(field_id_, chunk) +
+                         chunk_pos
+                   : static_cast<int64_t>(chunk) * size_per_chunk_ + chunk_pos;
     }
-    // Non-chunked segments are always Growing (Sealed is always chunked).
-    void
-    MoveCursorForDataSingleChunk() {
-        int64_t processed_size = 0;
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-            auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            auto size = (i == (num_data_chunk_ - 1) &&
-                         active_count_ % size_per_chunk_ != 0)
-                            ? active_count_ % size_per_chunk_ - data_pos
-                            : size_per_chunk_ - data_pos;
 
-            size = std::min(size, batch_size_ - processed_size);
-
-            processed_size += size;
-            if (processed_size >= batch_size_) {
-                current_data_chunk_ = i;
-                current_data_chunk_pos_ = data_pos + size;
-                current_data_global_pos_ =
-                    current_data_global_pos_ + processed_size;
-                break;
-            }
+    // Row count of `chunk`. Non-chunked segments are always Growing (Sealed is
+    // always chunked) and use a fixed chunk size, so only the trailing chunk is
+    // partial and is bounded by active_count_. Callers must pass a chunk below
+    // num_data_chunk_.
+    int64_t
+    ChunkRowCount(size_t chunk) const {
+        if (segment_->is_chunked()) {
+            return segment_->chunk_size(field_id_, chunk);
         }
+        return std::min(
+            size_per_chunk_,
+            active_count_ - static_cast<int64_t>(chunk) * size_per_chunk_);
     }
 
     void
     MoveCursorForData() {
-        if (segment_->is_chunked()) {
-            MoveCursorForDataMultipleChunk();
-        } else {
-            MoveCursorForDataSingleChunk();
+        int64_t processed_size = 0;
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+            const auto active_remaining =
+                active_count_ - RowOffsetInSegment(i, data_pos);
+            if (active_remaining <= 0) {
+                break;
+            }
+            int64_t size = ChunkRowCount(i) - data_pos;
+
+            size = std::min(
+                {size, batch_size_ - processed_size, active_remaining});
+            if (size <= 0) {
+                continue;
+            }
+
+            processed_size += size;
+            current_data_chunk_ = i;
+            current_data_chunk_pos_ = data_pos + size;
+            if (processed_size >= batch_size_) {
+                break;
+            }
         }
+        current_data_global_pos_ =
+            RowOffsetInSegment(current_data_chunk_, current_data_chunk_pos_);
     }
 
     void
@@ -475,8 +472,11 @@ class SegmentExpr : public Expr {
         // The index cursor is a global row position. This holds for sealed
         // segments and for growing segments with a segment-level scalar
         // index (the geometry interim R-Tree, see issue #51237).
-        auto size =
-            std::min(active_count_ - current_index_chunk_pos_, batch_size_);
+        const auto remaining = active_count_ - current_index_chunk_pos_;
+        if (remaining <= 0) {
+            return;
+        }
+        auto size = std::min(remaining, batch_size_);
 
         current_index_chunk_pos_ += size;
     }
@@ -588,8 +588,8 @@ class SegmentExpr : public Expr {
     GetNextBatchSize() {
         EnsureExecPathDetermined();
         if (exec_path_ == ExprExecPath::JsonStats) {
-            return std::min(batch_size_,
-                            active_count_ - current_data_global_pos_);
+            const auto remaining = active_count_ - current_data_global_pos_;
+            return remaining <= 0 ? 0 : std::min(batch_size_, remaining);
         }
         auto current_chunk =
             UseIndexCursor() ? current_index_chunk_ : current_data_chunk_;
@@ -605,20 +605,52 @@ class SegmentExpr : public Expr {
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
-        return current_rows + batch_size_ >= active_count_
-                   ? active_count_ - current_rows
-                   : batch_size_;
+        const auto remaining = active_count_ - current_rows;
+        return remaining <= 0 ? 0 : std::min(batch_size_, remaining);
     }
 
-    int64_t
+    // nullopt means exhaustion (or an empty offset input). An engaged 0 is a
+    // real, non-empty row batch containing no logical ARRAY elements; positive
+    // values are result counts. Every engaged batch without offset input must
+    // advance its row cursor exactly once, including the engaged-zero case.
+    std::optional<int64_t>
     GetNextRealBatchSize(const OffsetVector* input, bool element_level) {
         if (input != nullptr) {
+            if (input->empty()) {
+                return std::nullopt;
+            }
             return input->size();
         } else if (element_level) {
-            auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+            auto [batch_rows, elem_count] = GetNextBatchSizeForElementLevel();
+            // A non-empty row batch can legitimately contain no logical
+            // elements. Keep 0 distinct from exhaustion so callers still
+            // advance their row cursor for this batch.
+            if (batch_rows <= 0) {
+                return std::nullopt;
+            }
             return elem_count;
         }
-        return GetNextBatchSize();
+        auto batch_size = GetNextBatchSize();
+        if (batch_size <= 0) {
+            return std::nullopt;
+        }
+        return batch_size;
+    }
+
+    VectorPtr
+    AdvanceEmptyElementBatch(const OffsetVector* input,
+                             bool element_level,
+                             int64_t result_count) {
+        if (!element_level || input != nullptr || result_count != 0) {
+            return nullptr;
+        }
+
+        // ArrayOffsets already proved that this row batch has no logical
+        // elements. Do not fetch or inspect ARRAY payloads just to make
+        // progress; nullptr is reserved for expression exhaustion.
+        MoveCursor();
+        return std::make_shared<ColumnVector>(TargetBitmap(0, false),
+                                              TargetBitmap(0, true));
     }
 
     // Get the next batch size for element-level processing
@@ -649,9 +681,11 @@ class SegmentExpr : public Expr {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
 
-        auto batch_rows = std::min(batch_size_, active_count_ - current_rows);
+        const auto remaining = active_count_ - current_rows;
+        auto batch_rows =
+            remaining <= 0 ? int64_t{0} : std::min(batch_size_, remaining);
 
-        if (batch_rows == 0) {
+        if (batch_rows <= 0) {
             return {0, 0};
         }
 
@@ -695,8 +729,9 @@ class SegmentExpr : public Expr {
     // Candidate evaluator contract:
     // - every logical candidate position advances the evaluator exactly once;
     // - data == nullptr means the reader already decided the candidate result
-    //   (for example SkipIndex pruning or a NULL reverse lookup), so the
-    //   evaluator must only advance position-indexed state by size and return;
+    //   (for example candidate-mask/SkipIndex pruning or a NULL reverse
+    //   lookup), so the evaluator must only advance position-indexed state by
+    //   size and return;
     // - result and validity for a null batch are owned by the reader.
     //
     // This contract keeps callback-local bitmap_input cursors aligned across
@@ -710,6 +745,33 @@ class SegmentExpr : public Expr {
                                 TargetBitmapView res,
                                 TargetBitmapView valid_res,
                                 const ValTypes&... values) {
+        return ProcessIndexLookupByOffsetsImpl<T>(
+            evaluate_batch, input, res, valid_res, nullptr, values...);
+    }
+
+    // Same reverse-lookup path, but candidates cleared by candidate_mask are
+    // left untouched and never sent to Reverse_Lookup. The mask is indexed by
+    // candidate position, not segment offset.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupByOffsetsWithMask(BatchEvaluator evaluate_batch,
+                                        OffsetVector* input,
+                                        TargetBitmapView res,
+                                        TargetBitmapView valid_res,
+                                        const TargetBitmap& candidate_mask,
+                                        const ValTypes&... values) {
+        return ProcessIndexLookupByOffsetsImpl<T>(
+            evaluate_batch, input, res, valid_res, &candidate_mask, values...);
+    }
+
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupByOffsetsImpl(BatchEvaluator evaluate_batch,
+                                    OffsetVector* input,
+                                    TargetBitmapView res,
+                                    TargetBitmapView valid_res,
+                                    const TargetBitmap* candidate_mask,
+                                    const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -719,6 +781,12 @@ class SegmentExpr : public Expr {
         const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
         const bool all_valid = cached_index_all_valid_;
         auto batch_size = input->size();
+        const bool has_candidate_mask =
+            candidate_mask != nullptr && !candidate_mask->empty();
+        AssertInfo(!has_candidate_mask || candidate_mask->size() == batch_size,
+                   "candidate mask size {} does not match offset batch size {}",
+                   candidate_mask == nullptr ? 0 : candidate_mask->size(),
+                   batch_size);
 
         // A scalar index is one logical index chunk for the whole segment,
         // while SkipIndex statistics remain partitioned by the original data
@@ -727,6 +795,19 @@ class SegmentExpr : public Expr {
         // the whole candidate batch is incorrect. Reverse lookup is already
         // candidate-local; evaluate every offset instead.
         for (auto i = 0; i < batch_size; ++i) {
+            if (has_candidate_mask && !(*candidate_mask)[i]) {
+                // Preserve the evaluator's candidate-position cursor without
+                // reading or changing this already-excluded row.
+                evaluate_batch.template operator()<FilterType::random>(
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+                continue;
+            }
             auto offset = (*input)[i];
             auto raw = index_ptr->Reverse_Lookup(offset);
             if (!raw.has_value()) {
@@ -767,13 +848,58 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
+        return ProcessDataByOffsetsImpl<T>(evaluate_batch,
+                                           skip_func,
+                                           input,
+                                           res,
+                                           valid_res,
+                                           nullptr,
+                                           values...);
+    }
+
+    // Candidate-mask-aware entry point for expressions whose index-only path
+    // must prune before Reverse_Lookup. Raw-data callbacks still own their
+    // per-row mask checks.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsetsWithMask(
+        BatchEvaluator evaluate_batch,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const TargetBitmap& candidate_mask,
+        const ValTypes&... values) {
+        return ProcessDataByOffsetsImpl<T>(evaluate_batch,
+                                           skip_func,
+                                           input,
+                                           res,
+                                           valid_res,
+                                           &candidate_mask,
+                                           values...);
+    }
+
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsetsImpl(
+        BatchEvaluator evaluate_batch,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const TargetBitmap* candidate_mask,
+        const ValTypes&... values) {
         int64_t processed_size = 0;
 
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
-                return ProcessIndexLookupByOffsets<T>(
-                    evaluate_batch, input, res, valid_res, values...);
+                return ProcessIndexLookupByOffsetsImpl<T>(evaluate_batch,
+                                                          input,
+                                                          res,
+                                                          valid_res,
+                                                          candidate_mask,
+                                                          values...);
             }
         }
 
@@ -1049,6 +1175,13 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
+        if (element_ids->empty()) {
+            return 0;
+        }
+        if (raw_data_prefetch_deferred_) {
+            EnsureRawDataPrefetched();
+        }
+
         auto skip_index = segment_->GetSkipIndex();
         if (segment_->type() == SegmentType::Sealed) {
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
@@ -1297,20 +1430,16 @@ class SegmentExpr : public Expr {
         int64_t processed_rows = 0;
         int64_t processed_elems = 0;
 
-        // Prefetch chunks to reduce cache miss latency
-        if (!prefetched_) {
-            std::vector<int64_t> pf_chunk_ids;
-            pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
-            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-                pf_chunk_ids.push_back(i);
-            }
-            segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
-            prefetched_ = true;
-        }
+        EnsureRawDataPrefetched();
 
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
+            const auto row_start = RowOffsetInSegment(i, data_pos);
+            const auto active_remaining = active_count_ - row_start;
+            if (active_remaining <= 0) {
+                break;
+            }
             int64_t size;
             if (segment_->is_chunked()) {
                 size = segment_->chunk_size(field_id_, i) - data_pos;
@@ -1321,7 +1450,8 @@ class SegmentExpr : public Expr {
                                   : active_count_ % size_per_chunk_ - data_pos)
                            : size_per_chunk_ - data_pos;
             }
-            size = std::min(size, batch_size_ - processed_rows);
+            size = std::min(
+                {size, batch_size_ - processed_rows, active_remaining});
             if (size <= 0) {
                 continue;
             }
@@ -1495,11 +1625,6 @@ class SegmentExpr : public Expr {
                 // the logical element address space: nullable rows contribute
                 // zero elements even if storage retains a physical payload.
                 // Derive the skipped span without inspecting that payload.
-                const int64_t row_start =
-                    segment_->is_chunked()
-                        ? segment_->num_rows_until_chunk(field_id_, i) +
-                              data_pos
-                        : static_cast<int64_t>(i) * size_per_chunk_ + data_pos;
                 const auto start_range =
                     array_offsets->ElementIDRangeOfRow(row_start);
                 const auto end_range =
@@ -1519,13 +1644,15 @@ class SegmentExpr : public Expr {
             }
 
             processed_rows += size;
+            current_data_chunk_ = i;
+            current_data_chunk_pos_ = data_pos + size;
             if (processed_rows >= batch_size_) {
-                current_data_chunk_ = i;
-                current_data_chunk_pos_ = data_pos + size;
                 break;
             }
         }
 
+        current_data_global_pos_ =
+            RowOffsetInSegment(current_data_chunk_, current_data_chunk_pos_);
         return processed_elems;
     }
 
@@ -2824,10 +2951,61 @@ class SegmentExpr : public Expr {
             }
             self->EnsureExecPathDetermined();
             if (self->exec_path_ == ExprExecPath::RawData) {
-                self->PrefetchRawData();
-                self->prefetched_ = true;
+                if (self->ShouldPrefetchRawDataEagerly()) {
+                    self->PrefetchRawData();
+                    self->prefetched_ = true;
+                } else {
+                    self->raw_data_prefetch_deferred_ = true;
+                }
             }
         }));
+    }
+
+    bool
+    ShouldPrefetchRawDataEagerly() {
+        if (!IsElementLevelExpression()) {
+            return true;
+        }
+
+        // The prefetch worker can race with compound-expression cursor moves,
+        // so inspect immutable initial-batch geometry rather than live cursor
+        // state. A leading zero-element batch must not touch ARRAY payloads.
+        auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        AssertInfo(array_offsets != nullptr,
+                   "ArrayOffsets not found for field {}",
+                   field_id_.get());
+        const auto initial_rows = std::min(batch_size_, active_count_);
+        const auto elem_start = array_offsets->ElementIDRangeOfRow(0).first;
+        const auto elem_end =
+            array_offsets->ElementIDRangeOfRow(initial_rows).first;
+        return elem_end > elem_start;
+    }
+
+    // RawData prefetch remains eager unless a leaf explicitly opts into the
+    // ARRAY element-batch contract. SegmentExpr subclasses are not required to
+    // implement GetColumnInfo(), so this hook must stay total at the base.
+    virtual bool
+    IsElementLevelExpression() const {
+        return false;
+    }
+
+    size_t
+    ComputeRawDataPrefetchStartChunk() const {
+        auto first_chunk = current_data_chunk_;
+        if (first_chunk >= num_data_chunk_) {
+            return first_chunk;
+        }
+
+        const auto chunk_rows = ChunkRowCount(first_chunk);
+        if (current_data_chunk_pos_ >= chunk_rows) {
+            ++first_chunk;
+        }
+        return first_chunk;
+    }
+
+    size_t
+    RawDataPrefetchStartChunk() const {
+        return raw_data_prefetch_start_chunk_;
     }
 
     virtual void
@@ -2836,8 +3014,35 @@ class SegmentExpr : public Expr {
     }
 
     void
+    EnsureRawDataPrefetched() {
+        if (prefetched_) {
+            return;
+        }
+
+        // Eval has joined the eager future before reaching raw-data readers.
+        // A deferred element-level prefetch can therefore snapshot the cursor
+        // after any leading zero-element batches and keep SkipIndex pruning in
+        // the expression-specific PrefetchRawData() implementation.
+        raw_data_prefetch_start_chunk_ = ComputeRawDataPrefetchStartChunk();
+        PrefetchRawData();
+        prefetched_ = true;
+        raw_data_prefetch_deferred_ = false;
+    }
+
+    void
     PrefetchRawData(FieldId field_id) {
-        segment_->prefetch_chunks(op_ctx_, field_id);
+        const auto first_chunk = RawDataPrefetchStartChunk();
+        if (first_chunk == 0) {
+            segment_->prefetch_chunks(op_ctx_, field_id);
+            return;
+        }
+
+        std::vector<int64_t> chunk_ids;
+        chunk_ids.reserve(num_data_chunk_ - first_chunk);
+        for (size_t i = first_chunk; i < num_data_chunk_; ++i) {
+            chunk_ids.push_back(i);
+        }
+        segment_->prefetch_chunks(op_ctx_, field_id, chunk_ids);
     }
 
     void
@@ -2886,6 +3091,11 @@ class SegmentExpr : public Expr {
     bool execute_all_at_once_{false};
     // used for reducing cache miss latency in tiered storage
     bool prefetched_{false};
+    // True only when PrefetchAsync() was requested but deliberately deferred
+    // for a leading zero-element batch. A by-offset reader may resume this
+    // request; iterative readers that never requested prefetch stay lazy.
+    bool raw_data_prefetch_deferred_{false};
+    size_t raw_data_prefetch_start_chunk_{0};
     // Scalar index is pinned lazily by EnsurePinnedIndex(). Pre-pin
     // existence checks (HasCompatibleScalarIndex) query segment metadata
     // directly, so expressions on short-circuit paths (TextIndex, PkIndex,

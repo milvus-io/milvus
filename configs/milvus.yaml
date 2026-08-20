@@ -351,6 +351,24 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
+  clientTelemetry:
+    cleanupInterval: 60 # seconds. How often to sweep clients that stopped heartbeating and commands that expired.
+    inactiveClientThreshold: 600 # seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.
+    # seconds. How long a client may go without a heartbeat before it is reported as inactive.
+    # It is still kept, and still reported, until inactiveClientThreshold.
+    clientStatusThreshold: 60
+    commandCleanupTimeout: 10 # seconds. Timeout for the etcd operations that remove expired client commands.
+    # bytes. Largest metrics payload accepted from one client per heartbeat; anything beyond is truncated.
+    # Zero removes the cap entirely, unlike the other limits here, where a non-positive value falls back to the default.
+    maxMetricsPerClient: 1048576
+    maxOperationTypesPerClient: 100 # Largest number of distinct operation types kept per client; anything beyond is truncated.
+    maxClientsInMemory: 100000 # Largest number of clients tracked at once, so a misconfigured or malicious fleet cannot grow this memory without bound.
+    # How many heartbeat windows to keep per client.
+    # A telemetry query is answered from the oldest window kept, so this is also how far the answer lags
+    # the client and how many consecutive idle intervals it survives: at 2, one interval without traffic
+    # cannot blank the view; at 3, two cannot. Each extra window is another copy of every operation and
+    # per-collection breakdown for every connected client. Values below 1 are treated as the default.
+    retainedWindows: 2
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
   grpc:
@@ -371,8 +389,8 @@ proxy:
   maxFieldNum: 256 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
-  maxBloomFilterSize: 67108864 # The maximum byte size of the SBBF body in a client pre-built bloom_match filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-request memory/network amplification. Must not exceed the MBF1 format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
-  maxBloomFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of bloom-bearing expression plans in one Search, HybridSearch, or Query request. The proxy checks the assembled plans before proto.Marshal, so repeated references to one bloom_match template value and Bloom filters across hybrid sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.
+  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built bloom_match or roaring_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
+  maxMembershipFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of membership-filter-bearing expression plans in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -448,11 +466,21 @@ proxy:
     # itself is the risk the setting exists to remove; values below 1 are read as 1.
     maxExprParamsDepth: 100
     # high-level restful api, return a JSON field as the document it holds rather than as a string.
-    # A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
-    # Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
-    # hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
-    # form and a warning is logged, so a caller always sees one shape or the other and never a mixture.
-    nativeJSONResponse: false
+    # Turn this off only to keep clients written against the older shape working while they migrate: there a JSON field read
+    # back as "{\"a\":1}" while the same value in the dynamic field read back as {"a":1}. The insert path follows the same
+    # switch, so either shape can be sent back unchanged: while the field reads back as text, a JSON string is read as the
+    # document it spells; once it reads back as the document itself, a string is stored as the string it is. Rows written
+    # before the insert path stopped storing non-JSON bytes may not hold a document; if any row in a response is such a row,
+    # every JSON field in that response falls back to the string form and a warning is logged, so a caller always sees one
+    # shape or the other and never a mixture.
+    nativeJSONResponse: true
+    # high-level restful api, whether to return Array fields wrapped in the raw protobuf ScalarField shape
+    # ({"tags":{"Data":{"StringData":{"data":["a","b"]}}}}) instead of a native JSON array ({"tags":["a","b"]}).
+    # Only enable this to keep clients written against the old, incorrect shape working while they migrate;
+    # it will be removed in a future release. It covers the shape of a top-level Array field and nothing else:
+    # a struct array's sub-fields are unaffected, and so is Accept-Type-Allow-Int64, which renders an Int64 as a
+    # string wherever one appears, including inside either kind of array.
+    legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
@@ -505,8 +533,8 @@ queryCoord:
   checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
-  channelTaskTimeout: 60000 # 1 minute
-  segmentTaskTimeout: 120000 # 2 minute
+  channelTaskTimeout: 120000 # 2 minutes
+  segmentTaskTimeout: 300000 # 5 minutes
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
@@ -888,8 +916,6 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
-  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
-  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write

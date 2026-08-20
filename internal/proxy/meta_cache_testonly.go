@@ -50,22 +50,27 @@ func RemoveRootUserFromAdminRole() {
 	}
 }
 
-func InitEmptyGlobalCache() {
+func InitEmptyMetaCacheForTest() *MetaCache {
 	var err error
 	emptyMock := common.NewEmptyMockT()
 	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
 	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.WrapErrParameterInvalidMsg("collection not found"))
 	mixcoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.WrapErrParameterInvalidMsg("alias not found"))
-	globalMetaCache, err = NewMetaCache(mixcoord)
+	metaCache, err := NewMetaCache(mixcoord)
 	if err != nil {
 		panic(err)
 	}
 	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
 	privilege.InitPrivilegeCache(context.Background(), mixcoord)
+	return metaCache
 }
 
-func SetGlobalMetaCache(metaCache *MetaCache) {
-	globalMetaCache = metaCache
+func mustInitMetaCacheForTest(ctx context.Context, mixCoord types.MixCoordClient) Cache {
+	cache, err := initMetaCache(ctx, mixCoord)
+	if err != nil {
+		panic(err)
+	}
+	return cache
 }
 
 func mustNewMetaCacheForTest(mixCoord types.MixCoordClient) *MetaCache {

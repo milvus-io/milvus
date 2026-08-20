@@ -20,8 +20,7 @@ import (
 
 func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 	mockey.PatchConvey("TestSearchTask_PlanNamespace_AfterPreExecute", t, func() {
-		// Setup global meta cache and common mocks
-		globalMetaCache = &MetaCache{}
+		cache := &MetaCache{}
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
@@ -53,6 +52,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Build task
 		task := &searchTask{
+			baseTask:      baseTask{metaCache: cache},
 			Condition:     NewTaskCondition(context.Background()),
 			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 			ctx:           context.Background(),
@@ -72,7 +72,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 	mockey.PatchConvey("TestSearchTask_NamespaceSetsPartitionIDs", t, func() {
-		globalMetaCache = &MetaCache{}
+		cache := &MetaCache{}
 
 		partitionNames := []string{"_default_0", "_default_1"}
 		partitionIDs := map[string]int64{"_default_0": 101, "_default_1": 102}
@@ -105,6 +105,7 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		for _, ns := range namespaces {
 			namespace := ns
 			task := &searchTask{
+				baseTask:      baseTask{metaCache: cache},
 				Condition:     NewTaskCondition(context.Background()),
 				SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 				ctx:           context.Background(),

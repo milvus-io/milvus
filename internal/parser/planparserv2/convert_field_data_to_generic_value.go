@@ -104,7 +104,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 		}
 		elementType = schemapb.DataType_JSON
 	default:
-		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type: %v", templateValue.GetData())
+		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type")
 	}
 	return &planpb.GenericValue{
 		Val: &planpb.GenericValue_ArrayVal{

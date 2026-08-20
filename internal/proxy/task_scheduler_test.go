@@ -571,7 +571,6 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	globalMetaCache = cache
 	tsoAllocatorIns := newMockTsoAllocator()
 	scheduler, err := newTaskScheduler(context.Background(), tsoAllocatorIns)
 	assert.NoError(t, err)
@@ -581,7 +580,8 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 		it := &insertTask{
-			ctx: context.Background(),
+			baseTask: baseTask{metaCache: cache},
+			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
@@ -611,7 +611,6 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	globalMetaCache = mockMetaCache
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	queue := newBaseTaskQueue(tsoAllocatorIns)
@@ -630,6 +629,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
 				Base:       &commonpb.MsgBase{},
@@ -647,6 +647,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 
 	t.Run("search", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{},
 			},
@@ -664,6 +665,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	mockMetaCache.EXPECT().AllocID(mock.Anything).Return(0, errors.New("mock error")).Once()
 	t.Run("failed", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{},
 			},

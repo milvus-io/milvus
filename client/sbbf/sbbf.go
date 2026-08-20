@@ -97,7 +97,7 @@ const (
 	// DefaultFPR is the recommended false-positive rate when a caller has no
 	// specific target. Sizing follows OptimalNumOfBytes, so a body holds roughly
 	// 0.72 members per byte at this rate: a 64 MiB body (the default
-	// proxy.maxBloomFilterSize) holds ~48.6M members, a 32 MiB body ~24.3M.
+	// proxy.maxMembershipFilterSize) holds ~48.6M members, a 32 MiB body ~24.3M.
 	// Because bodies are powers of two, a member count just past a tier boundary
 	// doubles the blob; raising fpr is usually the cheaper fix. 50M members, for
 	// example, need fpr >= ~0.0058 to stay inside 64 MiB.

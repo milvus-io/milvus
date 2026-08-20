@@ -600,6 +600,13 @@
             color: white;
         }
 
+        /* Used while a pushed command is still in flight: accepted by the coordinator, not
+           yet answered by the client, which is neither success nor failure. */
+        .toast.info {
+            background: var(--primary);
+            color: white;
+        }
+
         @keyframes slideIn {
             from {
                 transform: translateX(100%);
@@ -2671,10 +2678,69 @@
                 // Refresh commands from server
                 await loadServerCommands();
 
-                showToast(`Config pushed successfully (ID: ${result.command_id})`, 'success');
+                // A 200 here means the coordinator accepted the command, not that any
+                // client acted on it -- unknown keys are dropped by the client and used to
+                // look identical to a config that took effect. Wait for the client's reply
+                // and report what it actually applied.
+                showToast(`Config pushed (ID: ${result.command_id}); waiting for client reply...`, 'info');
+                reportConfigOutcome(result.command_id, targetScope === 'client' ? targetClient : '');
             } catch (error) {
                 showToast('Error: ' + error.message, 'error');
             }
+        }
+
+        // reportConfigOutcome polls for the client's reply to a push_config command and
+        // reports which payload keys the client applied and which it ignored.
+        //
+        // The command rides the client's next heartbeat, so nothing is available
+        // immediately; a client with a long heartbeat interval may not answer within the
+        // window below, which is reported as unknown rather than as success.
+        async function reportConfigOutcome(commandId, clientId) {
+            const deadline = Date.now() + 15000;
+            while (Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 1000));
+                let body;
+                try {
+                    const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
+                    const resp = await fetch(`${API_BASE}/_telemetry/commands/${commandId}/reply${query}`, {
+                        headers: authToken ? { 'Authorization': authToken } : {}
+                    });
+                    if (resp.status === 401) { logout(); return; }
+                    if (!resp.ok) { continue; }
+                    body = await resp.json();
+                } catch (e) {
+                    continue;
+                }
+                if (body.status !== 'done' || !body.reply) { continue; }
+
+                const reply = body.reply;
+                if (reply.success === false) {
+                    showToast(`Client rejected the config: ${reply.error_msg || 'unknown error'}`, 'error');
+                    return;
+                }
+
+                let applied = [], ignored = [];
+                try {
+                    const detail = JSON.parse(reply.payload || '{}');
+                    applied = detail.applied || [];
+                    ignored = detail.ignored || [];
+                } catch (e) {
+                    // An older client answers without the detail; all that can be said is
+                    // that it accepted the command.
+                    showToast('Client accepted the config', 'success');
+                    return;
+                }
+
+                if (ignored.length > 0) {
+                    const appliedText = applied.length > 0 ? `applied ${applied.join(', ')}; ` : 'applied nothing; ';
+                    showToast(`Client ${appliedText}ignored unknown key(s): ${ignored.join(', ')}`,
+                        applied.length > 0 ? 'info' : 'error');
+                } else {
+                    showToast(`Client applied: ${applied.join(', ') || '(empty payload)'}`, 'success');
+                }
+                return;
+            }
+            showToast('No client reply yet; check Command Center again after the next heartbeat', 'info');
         }
 
         // =====================================================
