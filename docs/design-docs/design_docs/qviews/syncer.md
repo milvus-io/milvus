@@ -1,5 +1,10 @@
 # Syncer Design
 
+- Feature DRI: @chyezh
+- Primary Approver: @czs007
+- Independent Approver: @weiliu1031
+- Design Review: 2026-07-29
+
 > A reliable message delivery layer over unreliable gRPC bidirectional streams.
 > Package: [`internal/views/coord/coordview/syncer/`](../../../../internal/views/coord/coordview/syncer/), Proto: [view.proto](../../../../pkg/proto/view.proto)
 

@@ -1,5 +1,10 @@
 # Shard View Manager Design
 
+- Feature DRI: @chyezh
+- Primary Approver: @czs007
+- Independent Approver: @weiliu1031
+- Design Review: 2026-07-29
+
 > This document describes the Coord-side management of QueryViews for one shard
 > (vchannel) and the shared flush scheduler used to externalize state-machine
 > effects across shards.

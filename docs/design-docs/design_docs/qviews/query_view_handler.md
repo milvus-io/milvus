@@ -1,5 +1,10 @@
 # QueryViewHandler Design
 
+- Feature DRI: @chyezh
+- Primary Approver: @czs007
+- Independent Approver: @weiliu1031
+- Design Review: 2026-07-29
+
 > Work-node side components that receive Coord-pushed query views and report state changes back.
 > Counterpart to the Coord-side [Syncer](syncer.md).
 
