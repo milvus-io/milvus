@@ -61,6 +61,7 @@ class IndexFactory {
             case DataType::VARCHAR:
             case DataType::STRING:
             case DataType::TEXT:
+            case DataType::UUID:
             case DataType::ARRAY:
             case DataType::JSON:
             case DataType::GEOMETRY:

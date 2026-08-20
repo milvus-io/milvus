@@ -59,6 +59,8 @@ generate_scalar_index(SpanBase data, DataType data_type) {
             return generate_scalar_index(Span<double>(data));
         case DataType::VARCHAR:
             return generate_scalar_index(Span<std::string>(data));
+        case DataType::UUID:
+            return generate_scalar_index(Span<milvus::UUID>(data));
         default:
             ThrowInfo(DataTypeInvalid, "unsupported type {}", data_type);
     }

@@ -69,6 +69,7 @@ ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
         case DataType::FLOAT:
         case DataType::DOUBLE:
         case DataType::VARCHAR:
+        case DataType::UUID:
             break;
         default:
             ThrowInfo(DataTypeInvalid,

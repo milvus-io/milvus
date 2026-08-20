@@ -249,6 +249,7 @@ class PhyBloomFilterExpr : public SegmentExpr {
             case DataType::INT32:
             case DataType::INT64:
             case DataType::VARCHAR:
+            case DataType::UUID:
             // JSON probes the value at the column's nested path per row,
             // hashing by the value's runtime type (see ExecVisitorImplJson).
             case DataType::JSON:
@@ -374,6 +375,8 @@ class PhyBloomFilterExpr : public SegmentExpr {
                 return IndexUsableForReverseLookup<int64_t>();
             case DataType::VARCHAR:
                 return IndexUsableForReverseLookup<std::string>();
+            case DataType::UUID:
+                return IndexUsableForReverseLookup<milvus::UUID>();
             default:
                 return false;
         }
