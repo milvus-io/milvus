@@ -315,7 +315,7 @@ func TestParseIDs2PrimaryKeys_LengthPreservation(t *testing.T) {
 	ids := &schemapb.IDs{
 		IdField: &schemapb.IDs_UuidId{
 			UuidId: &schemapb.UUIDArray{
-				Data: [][]byte{validU[:], []byte{0x01, 0x02}, validU[:]},
+				Data: [][]byte{validU[:], {0x01, 0x02}, validU[:]},
 			},
 		},
 	}
