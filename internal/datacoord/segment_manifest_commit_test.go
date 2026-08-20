@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -479,4 +480,62 @@ func TestUpdateManifestAllowsStorageV3FirstPublication(t *testing.T) {
 	err = meta.UpdateSegmentsInfo(context.Background(), UpdateManifest(206, firstManifest))
 	require.NoError(t, err)
 	require.Equal(t, firstManifest, meta.GetSegment(context.Background(), 206).GetManifestPath())
+}
+
+// A segment retired by compaction while its stats task was still running is
+// still present in meta (not yet GC'd) but Dropped. Publication must not advance
+// its pointer, and the rejection must be ErrSegmentNotFound (terminal, not
+// retriable) rather than an unclassified internal error, so the stats caller
+// discards the obsolete worker result instead of re-polling the task forever.
+func TestCommitSegmentManifestRejectsDroppedSegmentAsNotFound(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/230"
+	manifest7 := packed.MarshalManifestPath(basePath, 7)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             230,
+		State:          commonpb.SegmentState_Dropped,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifest7,
+	})))
+
+	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        230,
+		ExpectedManifest: manifest7,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: packed.MarshalManifestPath(basePath, 8),
+		},
+	})
+	require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	require.Equal(t, manifest7, meta.GetSegment(context.Background(), 230).GetManifestPath())
+}
+
+// shouldPublishPreparedManifest is the guard that keeps a dropped segment from
+// entering CommitSegmentManifest in the first place: GetSegment returns dropped
+// segments, so without the health check a retired segment would take the
+// prepared-commit path and fail. A healthy segment with a newer worker manifest
+// still takes it.
+func TestShouldPublishPreparedManifestSkipsUnhealthySegment(t *testing.T) {
+	base := "/tmp/milvus/insert_log/1/10/"
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, mt.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             231,
+		State:          commonpb.SegmentState_Dropped,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(base+"231", 7),
+	})))
+	require.NoError(t, mt.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             232,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(base+"232", 7),
+	})))
+
+	st := &statsTask{meta: mt}
+	require.False(t, st.shouldPublishPreparedManifest(context.Background(), 231,
+		&workerpb.StatsResult{Manifest: packed.MarshalManifestPath(base+"231", 8)}))
+	require.True(t, st.shouldPublishPreparedManifest(context.Background(), 232,
+		&workerpb.StatsResult{Manifest: packed.MarshalManifestPath(base+"232", 8)}))
 }

@@ -646,6 +646,12 @@ func (e staleStatsResultError) Is(target error) bool { return target == errStats
 func (st *statsTask) shouldPublishPreparedManifest(ctx context.Context, segmentID int64, result *workerpb.StatsResult) bool {
 	segment := st.meta.GetSegment(ctx, segmentID)
 	return segment != nil &&
+		// Skip a segment retired by compaction while the stats task was still
+		// running: GetSegment returns dropped segments, and routing one into
+		// CommitSegmentManifest would only fail its health check. The ordinary
+		// fallback path (updateStatsResultIfManifestMatches) discards the
+		// obsolete result instead, so the task reaches a terminal state.
+		isSegmentHealthy(segment) &&
 		segment.GetStorageVersion() == storage.StorageV3 &&
 		result.GetManifest() != "" &&
 		// Nothing to publish when the worker's manifest already matches the

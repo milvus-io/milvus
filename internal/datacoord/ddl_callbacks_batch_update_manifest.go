@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -46,28 +44,24 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			operators = append(operators, UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
 			v2Count++
 		case hasV3:
-			segment := c.meta.GetSegment(ctx, segID)
-			if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
-				mlog.Warn(ctx, "batch update manifest V3 item has no published StorageV3 segment; skipping", mlog.FieldSegmentID(segID))
-				continue
-			}
-			basePath, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
-			if err != nil {
-				return err
-			}
-			if item.GetManifestVersion() <= currentVersion {
-				continue
-			}
-			if err := c.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-				SegmentID:        segID,
-				ExpectedManifest: segment.GetManifestPath(),
-				Mutation: ManifestMutation{
-					Type:         ManifestMutationNoop,
-					ManifestPath: packed.MarshalManifestPath(basePath, item.GetManifestVersion()),
-				},
-			}); err != nil {
-				return err
-			}
+			// TODO(segment-manifest-commit): a batch broadcast carries up to 512
+			// items and this V3 payload is a pure manifest-version bump (no
+			// object-storage I/O). We deliberately keep it as an UpdateManifestVersion
+			// operator so the whole batch — V2 column groups and V3 version bumps —
+			// commits in a single atomic UpdateSegmentsInfo (one AlterSegments).
+			//
+			// Routing each item through meta.CommitSegmentManifest instead would take
+			// the per-segment manifest lock plus segMu twice per item and issue one
+			// catalog.Update per item, and a mid-loop failure would return before the
+			// accumulated V2 operators are applied — i.e. the batch would no longer be
+			// applied as a unit. The open tension is that CommitSegmentManifest's
+			// per-segment serialization is what protects against concurrent writers
+			// (stats/index/GC/compaction) racing the manifest pointer; skipping it here
+			// trades that protection for batch atomicity. This is the same unresolved
+			// conflict as the external collection refresh path. Revisit with a batched
+			// CommitSegmentManifests primitive that preserves the single-writer
+			// invariant without giving up single-transaction batching.
+			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:
 			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",

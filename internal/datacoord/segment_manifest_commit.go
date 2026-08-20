@@ -154,7 +154,13 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 	}
 	if !isSegmentHealthy(segment) {
-		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a healthy segment, segmentID=%d", commit.SegmentID)
+		// A segment retired (dropped) after the worker finished is gone for
+		// publication purposes: the pointer must not advance and the caller must
+		// not retry the obsolete result. Report not-found rather than an
+		// unclassified internal error so callers that already treat a missing
+		// segment as a benign, terminal outcome (stats SetJobInfo discards the
+		// result and finishes the task) do not stall re-polling forever.
+		return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
 	}
 	if !matchesExpectedManifest(commit.ExpectedManifest, segment.GetManifestPath()) {
 		return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, segment.GetManifestPath())
@@ -184,7 +190,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 		}
 		if !isSegmentHealthy(latest) {
-			return merr.WrapErrServiceInternalMsg("segment manifest commit requires a healthy segment, segmentID=%d", commit.SegmentID)
+			// Same as the pre-I/O check above: a segment dropped during manifest
+			// I/O is treated as not-found so callers discard rather than retry.
+			return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
 		}
 		if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
 			return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())

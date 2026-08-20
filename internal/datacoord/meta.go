@@ -1775,9 +1775,6 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 			}
 			return false
 		}
-		if segment.GetStorageVersion() == storage.StorageV3 {
-			return modPack.fail(merr.WrapErrServiceInternalMsg("StorageV3 manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID))
-		}
 		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 		return true
 	}
