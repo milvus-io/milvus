@@ -18,6 +18,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -109,10 +110,16 @@ func TestEnforceErrorMapsToInternalServerError(t *testing.T) {
 
 func TestCheckExprAuth(t *testing.T) {
 	paramtable.Init()
+	passwordVerifyMu.RLock()
 	originalPasswordVerify := passwordVerifyFunc
+	originalManagementVerifiers := managementVerifiers
+	passwordVerifyMu.RUnlock()
 	originalGetUserRole := getUserRoleFunc
 	defer func() {
+		passwordVerifyMu.Lock()
 		passwordVerifyFunc = originalPasswordVerify
+		managementVerifiers = originalManagementVerifiers
+		passwordVerifyMu.Unlock()
 		getUserRoleFunc = originalGetUserRole
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.RootShouldBindRole.Key)
@@ -148,12 +155,167 @@ func TestCheckExprAuth(t *testing.T) {
 	})
 }
 
+func isolateCredentialVerifiers(t *testing.T) {
+	t.Helper()
+	passwordVerifyMu.Lock()
+	previousPassword := passwordVerifyFunc
+	previousVerifiers := managementVerifiers
+	passwordVerifyFunc = nil
+	managementVerifiers = [numManagementVerifierSlots]CredentialVerifier{}
+	passwordVerifyMu.Unlock()
+	t.Cleanup(func() {
+		passwordVerifyMu.Lock()
+		defer passwordVerifyMu.Unlock()
+		passwordVerifyFunc = previousPassword
+		managementVerifiers = previousVerifiers
+	})
+}
+
+func TestManagementVerifierRegistrationOrder(t *testing.T) {
+	for _, proxyFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("proxy-first-%t", proxyFirst), func(t *testing.T) {
+			isolateCredentialVerifiers(t)
+			proxyCalls, coordinatorCalls := 0, 0
+			proxyVerifier := func(context.Context, string, string) error {
+				proxyCalls++
+				return nil
+			}
+			coordinatorVerifier := func(context.Context, string, string) error {
+				coordinatorCalls++
+				return merr.WrapErrServiceInternal("coordinator must not replace proxy")
+			}
+
+			if proxyFirst {
+				RegisterManagementVerifier(VerifierSlotProxy, proxyVerifier)
+				RegisterManagementVerifier(VerifierSlotCoordinator, coordinatorVerifier)
+			} else {
+				RegisterManagementVerifier(VerifierSlotCoordinator, coordinatorVerifier)
+				RegisterManagementVerifier(VerifierSlotProxy, proxyVerifier)
+			}
+
+			assert.NoError(t, verifyManagementPassword(context.Background(), util.UserRoot, "password", "/management/test"))
+			assert.Equal(t, 1, proxyCalls)
+			assert.Zero(t, coordinatorCalls)
+		})
+	}
+}
+
+func TestManagementVerifierUnregistration(t *testing.T) {
+	t.Run("stopping coordinator keeps proxy verifier", func(t *testing.T) {
+		isolateCredentialVerifiers(t)
+		proxyCalls := 0
+		RegisterManagementVerifier(VerifierSlotProxy, func(context.Context, string, string) error {
+			proxyCalls++
+			return nil
+		})
+		RegisterManagementVerifier(VerifierSlotCoordinator, func(context.Context, string, string) error {
+			return merr.WrapErrServiceInternal("stopped coordinator called")
+		})
+		RegisterManagementVerifier(VerifierSlotCoordinator, nil)
+
+		assert.NoError(t, verifyManagementPassword(context.Background(), util.UserRoot, "password", "/management/test"))
+		assert.Equal(t, 1, proxyCalls)
+	})
+
+	t.Run("stopping proxy leaves coordinator verifier", func(t *testing.T) {
+		isolateCredentialVerifiers(t)
+		coordinatorCalls := 0
+		RegisterManagementVerifier(VerifierSlotProxy, func(context.Context, string, string) error {
+			return merr.WrapErrServiceInternal("stopped proxy called")
+		})
+		RegisterManagementVerifier(VerifierSlotCoordinator, func(context.Context, string, string) error {
+			coordinatorCalls++
+			return nil
+		})
+		RegisterManagementVerifier(VerifierSlotProxy, nil)
+
+		assert.NoError(t, verifyManagementPassword(context.Background(), util.UserRoot, "password", "/management/test"))
+		assert.Equal(t, 1, coordinatorCalls)
+	})
+
+	t.Run("stopping local providers leaves worker fallback", func(t *testing.T) {
+		isolateCredentialVerifiers(t)
+		fallbackCalls := 0
+		RegisterManagementVerifier(VerifierSlotProxy, func(context.Context, string, string) error {
+			return merr.WrapErrServiceInternal("stopped proxy called")
+		})
+		RegisterManagementVerifier(VerifierSlotCoordinator, func(context.Context, string, string) error {
+			return merr.WrapErrServiceInternal("stopped coordinator called")
+		})
+		RegisterManagementVerifier(VerifierSlotWorker, func(context.Context, string, string) error {
+			fallbackCalls++
+			return nil
+		})
+		RegisterManagementVerifier(VerifierSlotProxy, nil)
+		RegisterManagementVerifier(VerifierSlotCoordinator, nil)
+
+		assert.NoError(t, verifyManagementPassword(context.Background(), util.UserRoot, "password", "/management/test"))
+		assert.Equal(t, 1, fallbackCalls)
+	})
+}
+
+func TestManagementVerifiersDoNotMakeExprAvailable(t *testing.T) {
+	isolateCredentialVerifiers(t)
+	RegisterManagementVerifier(VerifierSlotCoordinator, func(context.Context, string, string) error {
+		return nil
+	})
+	RegisterManagementVerifier(VerifierSlotWorker, func(context.Context, string, string) error {
+		return nil
+	})
+
+	assert.False(t, hasRBACPasswordVerifier())
+	RegisterPasswordVerifyFunc(func(context.Context, string, string) bool {
+		return true
+	})
+	assert.True(t, hasRBACPasswordVerifier())
+}
+
+func TestManagementVerifierFailureDoesNotBypassProxy(t *testing.T) {
+	for _, test := range []struct {
+		name                 string
+		proxyErr             error
+		expectAuthentication bool
+	}{
+		{
+			name:                 "password mismatch is authoritative",
+			proxyErr:             NewAuthenticationError("invalid root password"),
+			expectAuthentication: true,
+		},
+		{
+			name:     "corrupt credential fails closed",
+			proxyErr: merr.WrapErrServiceInternal("stored root credential hash is invalid"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateCredentialVerifiers(t)
+			coordinatorCalls := 0
+			RegisterManagementVerifier(VerifierSlotProxy, func(context.Context, string, string) error {
+				return test.proxyErr
+			})
+			RegisterManagementVerifier(VerifierSlotCoordinator, func(context.Context, string, string) error {
+				coordinatorCalls++
+				return nil
+			})
+
+			err := verifyManagementPassword(context.Background(), util.UserRoot, "password", "/management/test")
+			assert.Error(t, err)
+			if test.expectAuthentication {
+				assert.True(t, IsAuthenticationError(err))
+			} else {
+				assert.True(t, IsServiceUnavailableError(err))
+			}
+			assert.Zero(t, coordinatorCalls)
+		})
+	}
+}
+
 // CheckPrivilegeTestSuite tests the CheckPrivilege function
 type CheckPrivilegeTestSuite struct {
 	suite.Suite
-	ctx                    context.Context
-	originalPasswordVerify func(ctx context.Context, username, password string) bool
-	originalGetUserRole    func(username string) ([]string, error)
+	ctx                         context.Context
+	originalPasswordVerify      func(ctx context.Context, username, password string) bool
+	originalManagementVerifiers [numManagementVerifierSlots]CredentialVerifier
+	originalGetUserRole         func(username string) ([]string, error)
 }
 
 func (s *CheckPrivilegeTestSuite) SetupSuite() {
@@ -163,13 +325,19 @@ func (s *CheckPrivilegeTestSuite) SetupSuite() {
 func (s *CheckPrivilegeTestSuite) SetupTest() {
 	s.ctx = context.Background()
 	// Save original functions to restore later
+	passwordVerifyMu.RLock()
 	s.originalPasswordVerify = passwordVerifyFunc
+	s.originalManagementVerifiers = managementVerifiers
+	passwordVerifyMu.RUnlock()
 	s.originalGetUserRole = getUserRoleFunc
 }
 
 func (s *CheckPrivilegeTestSuite) TearDownTest() {
 	// Restore original functions
+	passwordVerifyMu.Lock()
 	passwordVerifyFunc = s.originalPasswordVerify
+	managementVerifiers = s.originalManagementVerifiers
+	passwordVerifyMu.Unlock()
 	getUserRoleFunc = s.originalGetUserRole
 	// Reset paramtable settings
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
@@ -304,6 +472,42 @@ func (s *CheckPrivilegeTestSuite) TestPasswordVerificationFailure() {
 	s.Contains(err.Error(), "invalid credentials")
 }
 
+func (s *CheckPrivilegeTestSuite) TestManagementVerifierDoesNotOverrideRBACVerifier() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.RootShouldBindRole.Key, "false")
+
+	RegisterPasswordVerifyFunc(func(_ context.Context, username, password string) bool {
+		return username == "alice" && password == "alice-password"
+	})
+	RegisterManagementVerifier(VerifierSlotProxy, func(_ context.Context, username, _ string) error {
+		if username != util.UserRoot {
+			return NewAuthenticationError("invalid root password")
+		}
+		return nil
+	})
+	RegisterGetUserRoleFunc(func(string) ([]string, error) {
+		return nil, errors.New("role lookup intentionally stopped after authentication")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/expr", nil)
+	req.SetBasicAuth("alice", "alice-password")
+	err := CheckPrivilege(
+		s.ctx,
+		req,
+		commonpb.ObjectType_Global,
+		commonpb.ObjectPrivilege_PrivilegeAll.String(),
+		util.AnyWord,
+		util.DefaultDBName,
+	)
+	s.Error(err, "a non-root user must continue to RBAC authorization after password verification")
+	s.True(IsServiceUnavailableError(err))
+	s.False(IsAuthenticationError(err), "the root-only management verifier must not authenticate RBAC requests")
+
+	s.NoError(verifyRBACPassword(s.ctx, "alice", "alice-password", ""),
+		"a root-only management verifier must not replace ordinary RBAC password verification")
+	s.Error(verifyRBACPassword(s.ctx, "alice", "wrong", ""))
+}
+
 func (s *CheckPrivilegeTestSuite) TestRootUserBypassWhenRootShouldBindRoleIsFalse() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.RootShouldBindRole.Key, "false")
@@ -399,9 +603,10 @@ func TestCheckPrivilegeSuite(t *testing.T) {
 // These tests require setting up the privilege cache and enforcer
 type CheckPrivilegeWithEnforcerTestSuite struct {
 	suite.Suite
-	ctx                    context.Context
-	originalPasswordVerify func(ctx context.Context, username, password string) bool
-	originalGetUserRole    func(username string) ([]string, error)
+	ctx                         context.Context
+	originalPasswordVerify      func(ctx context.Context, username, password string) bool
+	originalManagementVerifiers [numManagementVerifierSlots]CredentialVerifier
+	originalGetUserRole         func(username string) ([]string, error)
 }
 
 func (s *CheckPrivilegeWithEnforcerTestSuite) SetupSuite() {
@@ -410,12 +615,18 @@ func (s *CheckPrivilegeWithEnforcerTestSuite) SetupSuite() {
 
 func (s *CheckPrivilegeWithEnforcerTestSuite) SetupTest() {
 	s.ctx = context.Background()
+	passwordVerifyMu.RLock()
 	s.originalPasswordVerify = passwordVerifyFunc
+	s.originalManagementVerifiers = managementVerifiers
+	passwordVerifyMu.RUnlock()
 	s.originalGetUserRole = getUserRoleFunc
 }
 
 func (s *CheckPrivilegeWithEnforcerTestSuite) TearDownTest() {
+	passwordVerifyMu.Lock()
 	passwordVerifyFunc = s.originalPasswordVerify
+	managementVerifiers = s.originalManagementVerifiers
+	passwordVerifyMu.Unlock()
 	getUserRoleFunc = s.originalGetUserRole
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.RootShouldBindRole.Key)
