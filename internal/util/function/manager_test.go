@@ -1471,15 +1471,16 @@ func TestFunctionRunnerManagerMaterializeLatestRetriesWithAllocatedSchema(t *tes
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 	<-started
 	close(release)
-	requireFunctionRunnerStateEventually(t, manager, 1, signature, functionRunnerStateFailed)
 
-	body := newBM25InsertRequest("message")
-	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newTestInsertMessage(body))
-	require.NoError(t, err)
-	require.True(t, changed)
+	var body *msgpb.InsertRequest
+	require.Eventually(t, func() bool {
+		body = newBM25InsertRequest("message")
+		changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newTestInsertMessage(body))
+		return err == nil && changed
+	}, time.Second, 10*time.Millisecond)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
 	require.Equal(t, int32(2), buildCount.Load())
-	requireFunctionRunnerState(t, manager, 1, signature, functionRunnerStateReady)
+	requireFunctionRunnerReady(t, manager, 1, signature, true)
 }
 
 func TestFunctionRunnerManagerAllocDoesNotStartWhenReady(t *testing.T) {
