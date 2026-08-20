@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -48,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
@@ -1360,4 +1362,63 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
+}
+
+func TestFilterUnindexedBySnapshotSchema(t *testing.T) {
+	const (
+		collectionID  = int64(1)
+		snapshotField = int64(100)
+		addedField    = int64(101)
+		snapshotIndex = int64(10)
+		boundIndex    = int64(11)
+	)
+	newJob := func(schema *schemapb.CollectionSchema) ImportJob {
+		return &importJob{ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: collectionID,
+			Schema:       schema,
+		}}
+	}
+	snapshot := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: snapshotField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	im := &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collectionID: {
+				snapshotIndex: {CollectionID: collectionID, IndexID: snapshotIndex, FieldID: snapshotField},
+				boundIndex:    {CollectionID: collectionID, IndexID: boundIndex, FieldID: addedField},
+			},
+		},
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	}
+	insertSegmentIndex := func(segmentID, indexID int64, state commonpb.IndexState) {
+		segmentIndexes, _ := im.segmentIndexes.GetOrInsert(segmentID, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
+		segmentIndexes.Insert(indexID, &model.SegmentIndex{SegmentID: segmentID, IndexID: indexID, IndexState: state})
+	}
+	// segment 1: snapshot-scoped index finished, bound index absent -> released.
+	insertSegmentIndex(1, snapshotIndex, commonpb.IndexState_Finished)
+	// segment 2: snapshot-scoped index still building -> kept waiting.
+	insertSegmentIndex(2, snapshotIndex, commonpb.IndexState_InProgress)
+	// segment 3: no segment index at all -> kept waiting (snapshot-scoped index missing).
+
+	unindexed := []int64{1, 2, 3}
+	kept, excluded := filterUnindexedBySnapshotSchema(newJob(snapshot), im, unindexed)
+	assert.ElementsMatch(t, []int64{2, 3}, kept)
+	assert.Len(t, excluded, 1)
+	assert.Equal(t, boundIndex, excluded[0].IndexID)
+
+	// nil snapshot keeps the wait set unchanged.
+	kept, excluded = filterUnindexedBySnapshotSchema(newJob(nil), im, unindexed)
+	assert.ElementsMatch(t, unindexed, kept)
+	assert.Nil(t, excluded)
+
+	// every index out of snapshot scope -> nothing to wait for, both excluded.
+	foreignSnapshot := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 102, Name: "other", DataType: schemapb.DataType_Int64}},
+	}
+	kept, excluded = filterUnindexedBySnapshotSchema(newJob(foreignSnapshot), im, unindexed)
+	assert.Empty(t, kept)
+	assert.Len(t, excluded, 2)
 }

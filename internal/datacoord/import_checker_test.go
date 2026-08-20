@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ImportCheckerSuite struct {
@@ -288,6 +290,66 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		}
 	}
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+}
+
+// TestCheckIndexBuildingJobSnapshotScope: an index bound to a field absent from the
+// job's schema snapshot (e.g. created by a concurrent add_function_field) must not
+// block the IndexBuilding -> Uncommitted transition; it cannot build before commit (#52154).
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobSnapshotScope() {
+	const (
+		segmentID     = int64(700)
+		sortedSegID   = int64(701)
+		snapshotIndex = int64(10)
+		boundIndex    = int64(11)
+	)
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	taskProto := &datapb.ImportTaskV2{
+		JobID:            s.jobID,
+		TaskID:           7,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{segmentID},
+		SortedSegmentIDs: []int64{sortedSegID},
+	}
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(taskProto)
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	s.NoError(s.checker.meta.AddSegment(context.Background(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            sortedSegID,
+			CollectionID:  1,
+			State:         commonpb.SegmentState_Flushed,
+			IsImporting:   true,
+			InsertChannel: "ch0",
+			IsSorted:      true,
+		},
+	}))
+
+	// Index on the snapshot field (100) is still building; the bound index targets a
+	// post-snapshot field (101) and has no segment index at all (inspector defers it).
+	indexMeta := s.checker.meta.indexMeta
+	indexMeta.indexes[1] = map[UniqueID]*model.Index{
+		snapshotIndex: {CollectionID: 1, IndexID: snapshotIndex, FieldID: 100},
+		boundIndex:    {CollectionID: 1, IndexID: boundIndex, FieldID: 101},
+	}
+	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	snapshotSegIdx := &model.SegmentIndex{SegmentID: sortedSegID, IndexID: snapshotIndex, IndexState: commonpb.IndexState_InProgress}
+	segmentIndexes.Insert(snapshotIndex, snapshotSegIdx)
+	indexMeta.segmentIndexes.Insert(sortedSegID, segmentIndexes)
+
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_IndexBuilding))
+
+	// Snapshot-scoped index unfinished -> keep waiting.
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+
+	// Snapshot-scoped index finished -> the missing bound index alone must not block commit.
+	snapshotSegIdx.IndexState = commonpb.IndexState_Finished
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
 func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
