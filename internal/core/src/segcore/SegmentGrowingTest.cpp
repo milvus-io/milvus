@@ -399,7 +399,8 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                          label,
                          DataType::ARRAY,
                          DataType::VARCHAR,
-                         true);
+                         true,
+                         false);
     segment->Reopen(new_schema);
 
     auto offsets = segment->GetArrayOffsets(label);

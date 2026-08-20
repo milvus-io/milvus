@@ -48,18 +48,13 @@ namespace milvus {
 
 inline const google::protobuf::RepeatedField<bool>&
 GetFieldDataRowValidData(const DataArray& field_data) {
-    // New payloads normally store validity in the field-specific ScalarField
-    // or VectorField. FieldData.valid_data is kept as a fallback for legacy
-    // payloads that do not contain field-specific validity.
-    if (field_data.has_scalars() &&
-        field_data.scalars().valid_data_size() > 0) {
+    if (field_data.valid_data_size() > 0) {
+        return field_data.valid_data();
+    }
+    if (field_data.has_scalars()) {
         return field_data.scalars().valid_data();
     }
-    if (field_data.has_vectors() &&
-        field_data.vectors().valid_data_size() > 0) {
-        return field_data.vectors().valid_data();
-    }
-    return field_data.valid_data();
+    return field_data.vectors().valid_data();
 }
 
 inline google::protobuf::RepeatedField<bool>*

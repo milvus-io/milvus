@@ -1242,7 +1242,7 @@ class SegmentExpr : public Expr {
                         if (chunk_active) {
                             // Extract element from ArrayView
                             auto value =
-                                array_vec[j].template get_data<ElementType>(
+                                array_vec[j].template get_data_unchecked<ElementType>(
                                     first_elem_indices[j] + t);
                             bool is_valid = !valid_data.data() || valid_data[j];
 
@@ -1325,7 +1325,7 @@ class SegmentExpr : public Expr {
                 for (int64_t t = 0; t < run_len; ++t) {
                     if (chunk_active) {
                         // Extract element from Array
-                        auto value = array_ptr->get_data<ElementType>(
+                        auto value = array_ptr->get_data_unchecked<ElementType>(
                             row.element_index + t);
                         bool is_valid = !validity || validity[0];
 
@@ -1444,7 +1444,7 @@ class SegmentExpr : public Expr {
                                 for (size_t k = 0; k < elem_count; k++) {
                                     auto str_view =
                                         data_vec[j]
-                                            .template get_data<
+                                            .template get_data_unchecked<
                                                 std::string_view>(k);
                                     ElementType str_val(str_view);
                                     evaluate_batch(
@@ -1526,7 +1526,7 @@ class SegmentExpr : public Expr {
                                 for (size_t k = 0; k < elem_count; k++) {
                                     auto str_view =
                                         data[j]
-                                            .template get_data<
+                                            .template get_data_unchecked<
                                                 std::string_view>(k);
                                     ElementType str_val(str_view);
                                     evaluate_batch(

@@ -487,7 +487,7 @@ struct UnaryElementFunc {
                 valid_res[i] = false;                                        \
                 continue;                                                    \
             }                                                                \
-            auto array_data = src[offset].template get_data<GetType>(index); \
+            auto array_data = src[offset].template get_data_unchecked<GetType>(index); \
             res[i] = (cmp);                                                  \
         }                                                                    \
     } while (false)
@@ -549,7 +549,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = array_data == val;
                 }
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -562,7 +562,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
@@ -591,7 +591,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -611,7 +611,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*regex_matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,

@@ -140,22 +140,32 @@ class Schema {
     AddDebugField(const std::string& name,
                   DataType data_type,
                   DataType element_type,
-                  bool nullable = false) {
+                  bool nullable = false,
+                  bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, element_type, nullable);
+        this->AddField(FieldName(name),
+                       field_id,
+                       data_type,
+                       element_type,
+                       nullable,
+                       element_nullable);
         return field_id;
     }
 
     FieldId
     AddDebugArrayField(const std::string& name,
                        DataType element_type,
-                       bool nullable) {
+                       bool nullable,
+                       bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, DataType::ARRAY, element_type, nullable);
+        this->AddField(FieldName(name),
+                       field_id,
+                       DataType::ARRAY,
+                       element_type,
+                       nullable,
+                       element_nullable);
         return field_id;
     }
 
@@ -185,7 +195,8 @@ class Schema {
                              DataType element_type,
                              int64_t dim,
                              std::optional<knowhere::MetricType> metric_type,
-                             bool nullable = false) {
+                             bool nullable = false,
+                             bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -194,7 +205,8 @@ class Schema {
                                     element_type,
                                     dim,
                                     metric_type,
-                                    nullable);
+                                    nullable,
+                                    element_nullable);
         this->AddField(std::move(field_meta));
         return field_id;
     }
@@ -242,15 +254,14 @@ class Schema {
              const FieldId id,
              DataType data_type,
              DataType element_type,
-             bool nullable) {
+             bool nullable,
+             bool element_nullable) {
         auto field_meta = FieldMeta(name,
                                     id,
                                     data_type,
                                     element_type,
                                     nullable,
-                                    std::nullopt,
-                                    std::string{},
-                                    LOCAL_FORMAT_RAW,
+                                    element_nullable,
                                     std::nullopt);
         this->AddField(std::move(field_meta));
     }
