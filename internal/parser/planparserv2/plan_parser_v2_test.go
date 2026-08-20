@@ -14,11 +14,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	clientroaring "github.com/milvus-io/milvus/client/v3/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -3115,7 +3115,7 @@ func Test_SegmentScorers(t *testing.T) {
 	})
 
 	t.Run("ok - membership scorer filters", func(t *testing.T) {
-		roaringBlob, err := roaringfilter.Build([]int64{1, 2, 3})
+		roaringBlob, err := clientroaring.Build([]int64{1, 2, 3})
 		require.NoError(t, err)
 		bloomTemplate, _ := bloomBytesTemplate(t, 0.01, 1, 2, 3)
 
