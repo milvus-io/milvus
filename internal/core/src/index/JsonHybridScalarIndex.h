@@ -67,7 +67,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 
         auto n = result.field_data->get_num_rows();
-        int64_t total_rows = n;
+        non_exist_row_count_ = n;
         std::set<T> distinct_vals;
         for (size_t i = 0; i < n; ++i) {
             if (result.field_data->is_valid(i)) {
@@ -84,8 +84,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;
+        BuildExistsBitset(non_exist_row_count_);
         this->ComputeByteSize();
-        BuildExistsBitset(total_rows);
     }
 
     void
@@ -123,7 +123,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 
         auto n = result.field_data->get_num_rows();
-        int64_t total_rows = n;
+        non_exist_row_count_ = n;
         // Do cardinality counting that respects is_valid(), unlike the base
         // class SelectBuildTypeForPrimitiveType which counts invalid rows too.
         std::set<T> distinct_vals;
@@ -142,8 +142,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;
+        BuildExistsBitset(non_exist_row_count_);
         this->ComputeByteSize();
-        BuildExistsBitset(total_rows);
     }
 
     TargetBitmap
@@ -152,15 +152,23 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
     }
 
     void
+    ComputeByteSize() override {
+        HybridScalarIndex<T>::ComputeByteSize();
+        this->cached_byte_size_ += RoaringMemoryBytes(non_exist_offsets_);
+        this->cached_byte_size_ += exists_bitset_.size_in_bytes();
+    }
+
+    void
     WriteEntries(storage::IndexEntryWriter* writer) override {
         HybridScalarIndex<T>::WriteEntries(writer);
 
-        bool has_non_exist = !non_exist_offsets_.empty();
+        bool has_non_exist = !non_exist_offsets_.isEmpty();
         writer->PutMeta("has_non_exist", has_non_exist);
         if (has_non_exist) {
+            auto legacy_offsets = RoaringToLegacyOffsets(non_exist_offsets_);
             writer->WriteEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME,
-                               non_exist_offsets_.data(),
-                               non_exist_offsets_.size() * sizeof(size_t));
+                               legacy_offsets.data(),
+                               legacy_offsets.size() * sizeof(size_t));
         }
     }
 
@@ -172,13 +180,15 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         bool has_non_exist = reader.GetMeta<bool>("has_non_exist", false);
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
-            non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
-            milvus::fastmem::FastMemcpy(
-                non_exist_offsets_.data(), e.data.data(), e.data.size());
+            LoadLegacyOffsets(non_exist_offsets_, e.data.data(), e.data.size());
         }
         LOG_INFO("LoadEntries JsonHybridScalarIndex done, has_non_exist: {}",
                  has_non_exist);
-        BuildExistsBitset(this->Count());
+        non_exist_row_count_ =
+            GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
+                .value_or(this->Count());
+        BuildExistsBitset(non_exist_row_count_);
+        ComputeByteSize();
     }
 
     JsonCastType
@@ -188,14 +198,9 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
  private:
     void
-    BuildExistsBitset(int64_t count) {
-        exists_bitset_ = TargetBitmap(count, true);
-        for (auto offset : non_exist_offsets_) {
-            if (static_cast<int64_t>(offset) >= count) {
-                break;
-            }
-            exists_bitset_.reset(offset);
-        }
+    BuildExistsBitset(size_t count) {
+        exists_bitset_ =
+            RoaringToBitset(non_exist_offsets_, count, /*inverted=*/true);
     }
 
     JsonCastType cast_type_;
@@ -203,7 +208,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
     JsonCastFunction cast_function_;
     proto::schema::FieldSchema json_schema_;
     storage::MemFileManagerImplPtr json_file_manager_;
-    std::vector<size_t> non_exist_offsets_;
+    roaring::Roaring non_exist_offsets_;
+    size_t non_exist_row_count_{0};
     TargetBitmap exists_bitset_;
 };
 

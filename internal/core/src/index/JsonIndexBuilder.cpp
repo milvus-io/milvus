@@ -10,12 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <simdjson.h>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
 
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/JsonUtils.h"
@@ -197,7 +199,8 @@ ConvertJsonToTypedFieldData(
     // Use FixedVector to avoid std::vector<bool> specialization
     FixedVector<T> values(total_rows);
     std::vector<uint8_t> valid_data((total_rows + 7) / 8, 0);
-    std::vector<size_t> non_exist_offsets;
+    roaring::Roaring non_exist_offsets;
+    roaring::BulkContext non_exist_context;
 
     ProcessJsonFieldData<T>(
         json_field_datas,
@@ -213,8 +216,12 @@ ConvertJsonToTypedFieldData(
         },
         [](int64_t) {},
         // non_exist_adder: track offsets where the path truly doesn't exist
-        [&non_exist_offsets](int64_t offset) {
-            non_exist_offsets.push_back(offset);
+        [&non_exist_offsets, &non_exist_context](int64_t offset) {
+            AssertInfo(offset <= std::numeric_limits<uint32_t>::max(),
+                       "JSON row offset {} exceeds uint32 range",
+                       offset);
+            non_exist_offsets.addBulk(non_exist_context,
+                                      static_cast<uint32_t>(offset));
         },
         [](const Json&, const std::string&, simdjson::error_code) {});
 
@@ -222,6 +229,9 @@ ConvertJsonToTypedFieldData(
     FieldDataBase* base_ptr = field_data.get();
     base_ptr->FillFieldData(
         data_ptr, valid_data.data(), (ssize_t)total_rows, (ssize_t)0);
+
+    non_exist_offsets.runOptimize();
+    non_exist_offsets.shrinkToFit();
 
     return JsonToTypedResult{
         .field_data = field_data,

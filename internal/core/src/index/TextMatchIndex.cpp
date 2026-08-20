@@ -231,10 +231,9 @@ TextMatchIndex::Load(const Config& config) {
         // clear index_datas to free memory early
         index_datas.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(),
-                                    index_valid_data->data.get(),
-                                    (size_t)index_valid_data->size);
+        LoadLegacyOffsets(null_offsets_,
+                          index_valid_data->data.get(),
+                          index_valid_data->size);
     }
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
@@ -267,7 +266,7 @@ TextMatchIndex::AddTextSealed(const std::string& text,
 // Add null for sealed segment
 void
 TextMatchIndex::AddNullSealed(int64_t offset) {
-    null_offset_.push_back(offset);
+    AddNullOffset(offset);
     // still need to add null to make offset is correct
     static const std::string empty;
     wrapper_->add_array_data(&empty, 0, offset);
@@ -284,7 +283,7 @@ TextMatchIndex::AddTextsGrowing(size_t n,
             auto offset = i + offset_begin;
             if (!valids[i]) {
                 std::unique_lock<folly::SharedMutex> lock(mutex_);
-                null_offset_.push_back(offset);
+                AddNullOffset(offset);
             }
         }
     }
@@ -300,20 +299,12 @@ TextMatchIndex::BuildIndexFromFieldData(
     const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
     if (nullable) {
-        int64_t total = 0;
-        for (const auto& data : field_datas) {
-            total += data->get_null_count();
-        }
-        {
-            std::unique_lock<folly::SharedMutex> lock(mutex_);
-            null_offset_.reserve(total);
-        }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
                     std::unique_lock<folly::SharedMutex> lock(mutex_);
-                    null_offset_.push_back(offset);
+                    AddNullOffset(offset);
                     // add empty array doc to register offset in tantivy,
                     // same as AddNullSealed
                     static const std::string empty;
@@ -334,6 +325,10 @@ TextMatchIndex::BuildIndexFromFieldData(
                 static_cast<const std::string*>(data->Data()), n, offset);
             offset += n;
         }
+    }
+    {
+        std::unique_lock<folly::SharedMutex> lock(mutex_);
+        OptimizeNullOffsets();
     }
 }
 
