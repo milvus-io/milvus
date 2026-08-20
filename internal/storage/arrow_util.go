@@ -231,38 +231,56 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		if !ok {
 			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
-		if ba.IsNull(idx) {
-			if defaultValue != nil {
-				val := defaultValue.GetBytesData()
-				if len(val) == 0 {
-					defStr := defaultValue.GetStringData()
-					if defStr != "" {
-						u, err := typeutil.ParseUUID(defStr)
-						if err == nil {
-							mlog.Warn(context.TODO(), "legacy String UUID fallback for default value", mlog.String("field", field.GetName()))
-							val = u[:]
-						} else {
-							return 0, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", field.GetName())
+		if field.GetDataType() == schemapb.DataType_UUID {
+			if ba.IsNull(idx) {
+				if defaultValue != nil {
+					val := defaultValue.GetBytesData()
+					if len(val) == 0 {
+						defStr := defaultValue.GetStringData()
+						if defStr != "" {
+							u, err := typeutil.ParseUUID(defStr)
+							if err == nil {
+								mlog.Warn(context.TODO(), "legacy String UUID fallback for default value", mlog.String("field", field.GetName()))
+								val = u[:]
+							} else {
+								return 0, merr.WrapErrServiceInternalErr(err, "invalid default UUID string for field %s", field.GetName())
+							}
 						}
 					}
+					if len(val) != 0 && len(val) != 16 {
+						return 0, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(val), field.GetName())
+					}
+					if len(val) == 16 {
+						b.Append(val)
+						return uint64(len(val)), nil
+					}
 				}
-				if len(val) != 0 && len(val) != 16 {
-					return 0, merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(val), field.GetName())
+				b.AppendNull()
+				return 0, nil
+			} else {
+				val := ba.Value(idx)
+				if len(val) != 16 {
+					return 0, merr.WrapErrParameterInvalidMsg("invalid UUID length %d, expected 16 for field %s", len(val), field.GetName())
 				}
-				if len(val) == 16 {
-					b.Append(val)
-					return uint64(len(val)), nil
-				}
+				b.Append(val)
+				return uint64(len(val)), nil
 			}
-			b.AppendNull()
-			return 0, nil
 		} else {
-			val := ba.Value(idx)
-			if len(val) != 16 {
-				return 0, merr.WrapErrParameterInvalidMsg("invalid UUID length %d, expected 16 for field %s", len(val), field.GetName())
+			if ba.IsNull(idx) {
+				if defaultValue != nil {
+					val := defaultValue.GetBytesData()
+					if len(val) != 0 {
+						b.Append(val)
+						return uint64(len(val)), nil
+					}
+				}
+				b.AppendNull()
+				return 0, nil
+			} else {
+				val := ba.Value(idx)
+				b.Append(val)
+				return uint64(len(val)), nil
 			}
-			b.Append(val)
-			return uint64(len(val)), nil
 		}
 	case *array.ListBuilder:
 		// Handle ListBuilder for ArrayOfVector type
