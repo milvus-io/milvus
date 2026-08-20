@@ -11,6 +11,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/Types.h"
 #include "tantivy-binding.h"
 #include "rust-binding.h"
 #include "rust-array.h"
@@ -796,6 +797,19 @@ struct TantivyIndexWrapper {
                     reader_, views.data(), len, bitset);
             }
 
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                std::vector<std::string> strs;
+                std::vector<const char*> views;
+                strs.reserve(len);
+                views.reserve(len);
+                for (uintptr_t i = 0; i < len; i++) {
+                    strs.push_back(terms[i].ToString());
+                    views.push_back(strs.back().c_str());
+                }
+                return tantivy_terms_query_keyword(
+                    reader_, views.data(), len, bitset);
+            }
+
             throw fmt::format(
                 "InvertedIndex.terms_query: unsupported data type: {}",
                 typeid(T).name());
@@ -858,6 +872,12 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                auto str = lower_bound.ToString();
+                return tantivy_lower_bound_range_query_keyword(
+                    reader_, str.c_str(), inclusive, bitset);
+            }
+
             throw fmt::format(
                 "InvertedIndex.lower_bound_range_query: unsupported data type: "
                 "{}",
@@ -904,6 +924,12 @@ struct TantivyIndexWrapper {
                     static_cast<std::string>(upper_bound).c_str(),
                     inclusive,
                     bitset);
+            }
+
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                auto str = upper_bound.ToString();
+                return tantivy_upper_bound_range_query_keyword(
+                    reader_, str.c_str(), inclusive, bitset);
             }
 
             throw fmt::format(
@@ -965,6 +991,17 @@ struct TantivyIndexWrapper {
                     lb_inclusive,
                     ub_inclusive,
                     bitset);
+            }
+
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                auto lower_str = lower_bound.ToString();
+                auto upper_str = upper_bound.ToString();
+                return tantivy_range_query_keyword(reader_,
+                                                   lower_str.c_str(),
+                                                   upper_str.c_str(),
+                                                   lb_inclusive,
+                                                   ub_inclusive,
+                                                   bitset);
             }
 
             throw fmt::format(
