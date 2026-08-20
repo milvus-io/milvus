@@ -3229,6 +3229,14 @@ func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileReso
 	}, nil
 }
 
+// GetFileResources resolves file resources for other coordinators inside MixCoord.
+func (c *Core) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetFileResources(ctx, resourceIDs...)
+}
+
 func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) ([]*milvuspb.GrantEntity, error) {
 	newGrants := []*milvuspb.GrantEntity{}
 	createGrantEntity := func(grant *milvuspb.GrantEntity, privilegeName string) (*milvuspb.GrantEntity, error) {

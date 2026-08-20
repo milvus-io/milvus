@@ -52,6 +52,7 @@ require (
 
 require (
 	cloud.google.com/go/storage v1.50.0
+	github.com/RoaringBitmap/roaring/v2 v2.8.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/apache/pulsar-client-go v0.19.0
@@ -85,7 +86,6 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.8.0 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cloudfoundry/gosigar v1.3.6 // indirect
@@ -311,7 +311,7 @@ require (
 )
 
 replace (
-	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.1
+	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.2
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93

@@ -31,6 +31,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
@@ -667,7 +668,8 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
  public:
     explicit ChunkedArrayColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
                                 const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(slot), field_meta) {
+        : ChunkedColumnBase(std::move(slot), field_meta),
+          is_nested_array_(field_meta.is_nested_array()) {
     }
 
     void
@@ -675,6 +677,10 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                 std::function<void(const ArrayView&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
+        if (is_nested_array_) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "legacy ArrayView API does not support nested ARRAY");
+        }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
@@ -684,11 +690,31 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         }
     }
 
+    void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const override {
+        AssertInfo(is_nested_array_,
+                   "BulkArrayValueAt requires a nested ARRAY field");
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        for (int64_t i = 0; i < count; ++i) {
+            auto* chunk =
+                static_cast<ColumnarArrayChunk*>(ca->get_cell_of(cids[i]));
+            fn(chunk->output_data(offsets_in_chunk[i]), i);
+        }
+    }
+
     PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
+        if (is_nested_array_) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "legacy ArrayViews API does not support nested ARRAY");
+        }
         auto ca = SemiInlineGet(
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
@@ -700,12 +726,20 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
+        if (is_nested_array_) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "legacy ArrayViewsByOffsets API does not support nested ARRAY");
+        }
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             std::move(ca),
             static_cast<ArrayChunk*>(chunk)->ViewsByOffsets(offsets));
     }
+
+ private:
+    bool is_nested_array_{false};
 };
 
 class ChunkedVectorArrayColumn : public ChunkedColumnBase {
@@ -753,6 +787,13 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<const size_t*>(
             std::move(ca), static_cast<VectorArrayChunk*>(chunk)->Offsets());
+    }
+
+ protected:
+    void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
+        BuildVectorArrayValidOffsets(chunk_pws);
     }
 };
 

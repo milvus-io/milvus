@@ -19,12 +19,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1178,6 +1180,34 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     EXPECT_GT(info.ValueOrDie().size(), entry_size);  // ciphertext > plaintext
 
     VerifyEncryptedEntry(file_path, "enc_entry", entry_size);
+}
+
+TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
+    const std::string file_path = kV3FilePath + "_enc_missing_tmpdir";
+    const std::string missing_tmp = GetRootPath() + "/missing_enc_tmp";
+    std::filesystem::remove_all(missing_tmp);
+    ASSERT_FALSE(std::filesystem::exists(missing_tmp));
+    auto cleanup = folly::makeGuard([&missing_tmp]() {
+        std::error_code ec;
+        std::filesystem::remove_all(missing_tmp, ec);
+    });
+
+    const size_t slice_size = kStreamSliceAlignment;
+    auto data = GeneratePattern(1024);
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              missing_tmp,
+                                              slice_size);
+        writer.WriteEntry("enc_entry", data.data(), data.size());
+        writer.Finish();
+    }
+
+    EXPECT_TRUE(std::filesystem::is_directory(missing_tmp));
+    VerifyEncryptedEntry(file_path, "enc_entry", 1024);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterRejectsUnalignedSliceSize) {

@@ -765,6 +765,17 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 			{FieldID: 114, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 115, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 116, Name: "array_vector_float16", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			{
+				FieldID:     117,
+				Name:        "nested_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+						ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}},
+					}},
+				}},
+			},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
@@ -870,6 +881,16 @@ func (s *NumRowsWithSchemaSuite) TestNormalCases() {
 				},
 			},
 			expect: 9,
+		},
+		{
+			tag: "nested_array",
+			input: &schemapb.FieldData{
+				FieldName: "nested_array",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: make([]*schemapb.ScalarField, 6)}}},
+				},
+			},
+			expect: 6,
 		},
 		{
 			tag: "json",

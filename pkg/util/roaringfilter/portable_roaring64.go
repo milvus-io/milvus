@@ -49,18 +49,18 @@ type portableValidationSummary struct {
 	lowContainerCount  uint64
 }
 
-// validatePortableRoaring64Body validates the portable format in time linear
-// in the supplied bytes. We cannot call roaring.Bitmap.Validate on untrusted
-// input: roaring/v2 validates each run interval against every later interval,
-// which makes a small, attacker-controlled run container quadratic in CPU.
-func validatePortableRoaring64Body(body []byte) error {
-	_, err := scanPortableRoaring64Body(body)
-	return err
-}
-
-// scanPortableRoaring64Body validates the portable format and returns the
-// resource-bearing counts needed for admission. The success path performs no
-// heap allocation: it only reads the caller-owned byte slice.
+// scanPortableRoaring64Body validates the portable format in time linear in the
+// supplied bytes and returns the resource-bearing counts needed for admission.
+// The success path performs no heap allocation: it only reads the caller-owned
+// byte slice.
+//
+// This is hand-rolled rather than delegated to roaring.Bitmap.Validate because
+// that path validates each run interval against every later interval, which
+// makes a small, attacker-controlled run container quadratic in CPU. Linearity
+// here is a security property, not a micro-optimization. Nothing asserts the
+// complexity -- TestValidateHandlesHighRunCountLinearly only checks that a
+// maximum-run container is accepted correctly, and would pass against a
+// quadratic scanner -- so keep it in mind when editing this walk.
 func scanPortableRoaring64Body(body []byte) (portableValidationSummary, error) {
 	if err := prevalidatePortableRoaring64Body(body); err != nil {
 		return portableValidationSummary{}, err

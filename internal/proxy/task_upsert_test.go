@@ -3475,6 +3475,78 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 	})
 }
 
+func TestValidateWholeStructFieldDataForPartialUpdateNestedArray(t *testing.T) {
+	typeSchema := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+					},
+				},
+			},
+		},
+	}
+	collectionSchema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 200,
+				Name:    "profile",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     201,
+						Name:        "profile[values]",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+						TypeSchema:  typeSchema,
+					},
+				},
+			},
+		},
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collectionSchema)
+	require.NoError(t, err)
+	nestedRow := &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{
+			ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int32},
+		},
+	}
+	subFieldData := &schemapb.FieldData{
+		FieldName: "values",
+		FieldId:   201,
+		Type:      schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Array,
+						Data:        []*schemapb.ScalarField{nestedRow},
+					},
+				},
+			},
+		},
+	}
+	fieldData := &schemapb.FieldData{
+		FieldName: "profile",
+		FieldId:   200,
+		Type:      schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: []*schemapb.FieldData{subFieldData},
+			},
+		},
+	}
+
+	require.NoError(t, validateWholeStructFieldDataForPartialUpdate(
+		schemaHelper,
+		collectionSchema.GetStructArrayFields()[0],
+		fieldData,
+		1,
+	))
+}
+
 func TestCheckDynamicFieldDataForPartialUpdate(t *testing.T) {
 	t.Run("preserves $meta keys matching static field names after schema evolution", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{

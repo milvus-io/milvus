@@ -17,9 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
 #include <cstring>
-#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <set>
@@ -42,14 +40,6 @@ constexpr int64_t kTestFieldId = 1;
 constexpr int64_t kVectorArrayFieldId = 2;
 constexpr int64_t kVectorArrayRows = 4;
 constexpr int64_t kVectorArrayDim = 2;
-
-std::filesystem::path
-MakeMmapRoot(const std::string& test_name) {
-    return std::filesystem::temp_directory_path() /
-           ("milvus_chunked_column_" + test_name + "_" +
-            std::to_string(
-                std::chrono::steady_clock::now().time_since_epoch().count()));
-}
 
 struct ColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
@@ -369,44 +359,32 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
                      {true, true, true, true}},
                     true};
 
-    auto run_case = [&](bool enable_mmap) {
-        auto fx = TypeParam::Create(spec);
-        EXPECT_TRUE(fx.fetched->empty());
+    auto fx = TypeParam::Create(spec);
+    EXPECT_TRUE(fx.fetched->empty());
 
-        OffsetMappingBuildOptions options;
-        options.enable_mmap_i2o_map = enable_mmap;
-        options.enable_mmap_o2i_map = enable_mmap;
-        if (enable_mmap) {
-            options.mmap_dir_path = MakeMmapRoot("valid_row_ids").string();
-        }
-        fx.column->BuildValidRowIds(nullptr, options);
-        EXPECT_EQ(fx.fetched->size(), 3u);
-        EXPECT_EQ(fx.fetched->count(0), 1u);
-        EXPECT_EQ(fx.fetched->count(1), 1u);
-        EXPECT_EQ(fx.fetched->count(2), 1u);
+    fx.column->BuildValidRowIds(nullptr);
+    EXPECT_EQ(fx.fetched->size(), 3u);
+    EXPECT_EQ(fx.fetched->count(0), 1u);
+    EXPECT_EQ(fx.fetched->count(1), 1u);
+    EXPECT_EQ(fx.fetched->count(2), 1u);
 
-        EXPECT_EQ(fx.column->GetValidCountInChunk(0), 3);
-        EXPECT_EQ(fx.column->GetValidCountInChunk(1), 0);
-        EXPECT_EQ(fx.column->GetValidCountInChunk(2), 4);
+    EXPECT_EQ(fx.column->GetValidCountInChunk(0), 3);
+    EXPECT_EQ(fx.column->GetValidCountInChunk(1), 0);
+    EXPECT_EQ(fx.column->GetValidCountInChunk(2), 4);
 
-        const auto& m = fx.column->GetOffsetMapping();
-        EXPECT_TRUE(m.IsEnabled());
-        EXPECT_EQ(m.IsMmap(), enable_mmap);
-        EXPECT_EQ(m.GetTotalCount(), 12);
-        EXPECT_EQ(m.GetValidCount(), 7);
-        EXPECT_EQ(m.GetPhysicalOffset(0), 0);
-        EXPECT_EQ(m.GetPhysicalOffset(2), 1);
-        EXPECT_EQ(m.GetPhysicalOffset(3), 2);
-        EXPECT_EQ(m.GetPhysicalOffset(1), -1);
-        EXPECT_EQ(m.GetPhysicalOffset(4), -1);
-        EXPECT_EQ(m.GetPhysicalOffset(8), 3);
-        EXPECT_EQ(m.GetPhysicalOffset(9), 4);
-        EXPECT_EQ(m.GetPhysicalOffset(10), 5);
-        EXPECT_EQ(m.GetPhysicalOffset(11), 6);
-    };
-
-    run_case(false);
-    run_case(true);
+    const auto& m = fx.column->GetOffsetMapping();
+    EXPECT_TRUE(m.IsEnabled());
+    EXPECT_EQ(m.GetTotalCount(), 12);
+    EXPECT_EQ(m.GetValidCount(), 7);
+    EXPECT_EQ(m.GetPhysicalOffset(0), 0);
+    EXPECT_EQ(m.GetPhysicalOffset(2), 1);
+    EXPECT_EQ(m.GetPhysicalOffset(3), 2);
+    EXPECT_EQ(m.GetPhysicalOffset(1), -1);
+    EXPECT_EQ(m.GetPhysicalOffset(4), -1);
+    EXPECT_EQ(m.GetPhysicalOffset(8), 3);
+    EXPECT_EQ(m.GetPhysicalOffset(9), 4);
+    EXPECT_EQ(m.GetPhysicalOffset(10), 5);
+    EXPECT_EQ(m.GetPhysicalOffset(11), 6);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest, CellsLoadedDoesNotFetchCells) {
