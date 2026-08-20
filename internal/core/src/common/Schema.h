@@ -243,8 +243,15 @@ class Schema {
              DataType data_type,
              DataType element_type,
              bool nullable) {
-        auto field_meta = FieldMeta(
-            name, id, data_type, element_type, nullable, std::nullopt);
+        auto field_meta = FieldMeta(name,
+                                    id,
+                                    data_type,
+                                    element_type,
+                                    nullable,
+                                    std::nullopt,
+                                    std::string{},
+                                    LOCAL_FORMAT_RAW,
+                                    std::nullopt);
         this->AddField(std::move(field_meta));
     }
 
