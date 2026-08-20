@@ -1361,6 +1361,39 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		})
 	})
 
+	t.Run("gate expiry finishes the refresh instead of failing it", func(t *testing.T) {
+		// The segments were applied at gate entry and are the collection's
+		// committed contents already. Failing on gate expiry would misreport
+		// committed work and skip the schema broadcast for data that is
+		// actually being served; only the wait ends, the index backlog keeps
+		// building in the background.
+		mockey.PatchConvey("expired", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job := stage(t)
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
+				func(int64, []int64) []int64 { return []int64{556} })
+
+			checker.aggregateJobState(job) // enter the gate and hold
+			require.Contains(t, checker.indexGateEntered, int64(1))
+
+			// Age the gate clock past the whole budget.
+			checker.indexGateMu.Lock()
+			checker.indexGateEntered[int64(1)] = time.Now().Add(-1000 * time.Hour)
+			checker.indexGateMu.Unlock()
+
+			checker.aggregateJobState(meta.GetJob(1))
+
+			expired := meta.GetJob(1)
+			assert.Equal(t, indexpb.JobState_JobStateFinished, expired.GetState(),
+				"an expired gate finishes the job; its data is committed and being served")
+			assert.Equal(t, int64(100), expired.GetProgress())
+			assert.NotContains(t, checker.indexGateEntered, int64(1))
+		})
+	})
+
 	t.Run("the gate clock survives a transiently failed finish write", func(t *testing.T) {
 		// The clock is released only after the terminal state PERSISTS. If it
 		// were released the moment the debt clears, a transiently failed
