@@ -273,6 +273,42 @@ FMIndex::buildDerived() {
     // The separator is a fixed synthetic symbol (dense id 1), not a byte. No
     // byte_to_id_ entry equals 1, so a query byte can never step onto it.
     sep_id_ = 1;
+
+    // Bucket index for docOf. Without it docOf binary-searches doc_start_,
+    // whose every step is a cache miss once the array outgrows L2 (one million
+    // documents = 8 MB), costing ~log2(n_docs) misses per located occurrence —
+    // several times the LF-walk it follows. Here one array read lands within a
+    // bucket and the residual scan walks CONSECUTIVE doc_start_ entries, which
+    // share cache lines.
+    //
+    // The bucket width targets ~kDocsPerBucket documents, so the table holds
+    // about n_docs/kDocsPerBucket entries: its size tracks the DOCUMENT COUNT,
+    // not the text length, and stays a rounding error next to the wavelet.
+    doc_ckpt_.clear();
+    ckpt_shift_ = 0;
+    const size_t n_docs = n_doc_bounds_ ? n_doc_bounds_ - 1 : 0;
+    if (n_docs > 0 && text_len_ > 0 &&
+        n_docs <= std::numeric_limits<uint32_t>::max()) {
+        constexpr uint64_t kDocsPerBucket = 8;
+        const uint64_t target = (text_len_ / n_docs) * kDocsPerBucket + 1;
+        uint32_t sh = 6;
+        while (sh < 40 && (uint64_t{1} << sh) < target) {
+            ++sh;
+        }
+        ckpt_shift_ = sh;
+        const size_t nb = static_cast<size_t>(text_len_ >> sh) + 2;
+        doc_ckpt_.assign(nb, 0);
+        // d is monotone across buckets, so the whole table is one linear pass
+        // over doc_start_ regardless of bucket count.
+        size_t d = 0;
+        for (size_t b = 0; b < nb; ++b) {
+            const uint64_t p = static_cast<uint64_t>(b) << sh;
+            while (d + 1 < n_docs && doc_start_[d + 1] <= p) {
+                ++d;
+            }
+            doc_ckpt_[b] = static_cast<uint32_t>(d);
+        }
+    }
 }
 
 inline void
@@ -615,6 +651,21 @@ FMIndex::CountBatch(
 
 inline uint64_t
 FMIndex::docOf(uint64_t internal_pos) const {
+    const size_t n_docs = n_doc_bounds_ ? n_doc_bounds_ - 1 : 0;
+    if (!doc_ckpt_.empty() && n_docs > 0) {
+        // doc_ckpt_[b] is the document covering byte b<<ckpt_shift_, which is
+        // at or before internal_pos, so it is a lower bound for the answer;
+        // walk forward over the (few, contiguous) remaining boundaries.
+        size_t b = static_cast<size_t>(internal_pos >> ckpt_shift_);
+        if (b >= doc_ckpt_.size()) {
+            b = doc_ckpt_.size() - 1;
+        }
+        uint64_t d = doc_ckpt_[b];
+        while (d + 1 < n_docs && doc_start_[d + 1] <= internal_pos) {
+            ++d;
+        }
+        return d;
+    }
     const uint64_t* end = doc_start_ + n_doc_bounds_;
     auto it = std::upper_bound(doc_start_, end, internal_pos);
     return static_cast<uint64_t>(it - doc_start_) - 1;
@@ -1242,7 +1293,11 @@ FMIndex::parseView(const uint8_t* base, size_t size) {
                 return false;
             }
         }
-        buildDerived();  // id_to_byte_ only; isa_sample_ is lazy (Extract)
+        // id_to_byte_ + doc_ckpt_; isa_sample_ stays lazy (Extract only). Safe
+        // here: the bounds checks above already proved doc_start_ is strictly
+        // increasing and ends at text_len_, which doc_ckpt_'s single forward
+        // pass relies on.
+        buildDerived();
         return true;
     } catch (const std::bad_alloc&) {
         throw;
