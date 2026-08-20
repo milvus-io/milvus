@@ -3375,17 +3375,14 @@ TEST(InjectExtfsInheritedFields, CAbiIopsConfigIsCallLocal) {
 
     auto result = loon_properties_inject_external_spec(
         &properties, 42, "s3://my-bucket/key", "", 3000, 0);
-    const std::string error =
-        result.message != nullptr ? result.message : "";
-    EXPECT_EQ(result.err_code, loon_errcode_success)
-        << error;
+    const std::string error = result.message != nullptr ? result.message : "";
+    EXPECT_EQ(result.err_code, loon_errcode_success) << error;
     loon_ffi_free_result(&result);
 
-    EXPECT_STREQ(loon_properties_get(
-                     &properties, "extfs.42.iops_initial_rate"),
+    EXPECT_STREQ(loon_properties_get(&properties, "extfs.42.iops_initial_rate"),
                  "3000");
-    EXPECT_STREQ(
-        loon_properties_get(&properties, "extfs.42.iops_max_rate"), "0");
+    EXPECT_STREQ(loon_properties_get(&properties, "extfs.42.iops_max_rate"),
+                 "0");
 
     const auto singleton_after =
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
