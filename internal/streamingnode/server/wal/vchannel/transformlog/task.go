@@ -60,8 +60,8 @@ func (t *transformFlushTask) Execute(ctx context.Context) error {
 		if result.NextTargetTimeTick > 0 {
 			t.log.submitFlushTask(result.NextTargetTimeTick)
 		}
-		if t.log.shouldMaterialize(ctx) && !t.log.HasPendingMaterializeTask() {
-			t.log.submitMaterializeTask(t.log.checkpointTimeTick())
+		if t.log.shouldMaterialize(ctx) {
+			t.log.RequestMaterializeThrough(t.log.checkpointTimeTick())
 		}
 		t.log.notifyUpdated()
 		releaseMessages(result.CompletedMessages)
@@ -107,22 +107,65 @@ func (t *TransformLog) newFlushTaskLocked(timetick uint64) *transformFlushTask {
 	return task
 }
 
-func (t *TransformLog) submitMaterializeTask(timetick uint64) {
-	scheduler := t.runtime.Scheduler
-	if scheduler == nil {
-		return
+// RequestMaterializeThrough records the desired materialization frontier and
+// schedules the largest safe prefix allowed by the current L1 upper bound.
+// The desired frontier is retained so advancing the upper bound can continue
+// the same request without another WAL trigger.
+func (t *TransformLog) RequestMaterializeThrough(timetick uint64) bool {
+	if t == nil || t.runtime.Scheduler == nil {
+		return false
 	}
 	t.mu.Lock()
+	if timetick > t.requestedMaterializeTimeTick {
+		t.requestedMaterializeTimeTick = timetick
+	}
+	task := t.newRequestedMaterializeTaskLocked()
+	t.mu.Unlock()
+	if task == nil {
+		return false
+	}
+	t.runtime.Scheduler.Submit(task)
+	return true
+}
+
+// SetMaterializeUpperBound updates the VChannel-wide L1 safety frontier and
+// retries any previously requested materialization that can now make progress.
+func (t *TransformLog) SetMaterializeUpperBound(timetick uint64) bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	t.materializeUpperBound = timetick
+	if t.runtime.Scheduler == nil {
+		t.mu.Unlock()
+		return false
+	}
+	task := t.newRequestedMaterializeTaskLocked()
+	t.mu.Unlock()
+	if task == nil {
+		return false
+	}
+	t.runtime.Scheduler.Submit(task)
+	return true
+}
+
+func (t *TransformLog) newRequestedMaterializeTaskLocked() *transformMaterializeTask {
+	target := t.requestedMaterializeTimeTick
+	if target > t.materializeUpperBound {
+		target = t.materializeUpperBound
+	}
+	if target <= t.meta.GetMaterializedTimeTick() || t.pendingMaterializeTargetLocked() >= target {
+		return nil
+	}
 	task := &transformMaterializeTask{
 		transformTaskBase: transformTaskBase{
 			log:          t,
-			timetick:     timetick,
+			timetick:     target,
 			predecessors: t.taskPredecessorsLocked(),
 		},
 	}
 	t.materializeTasks = append(t.materializeTasks, task)
-	t.mu.Unlock()
-	scheduler.Submit(task)
+	return task
 }
 
 func (t *TransformLog) taskPredecessorsLocked() []transformTask {
@@ -165,6 +208,17 @@ func (t *TransformLog) HasPendingMaterializeTask() bool {
 	defer t.mu.Unlock()
 	t.materializeTasks = compactTransformMaterializeTasks(t.materializeTasks)
 	return len(t.materializeTasks) > 0
+}
+
+func (t *TransformLog) pendingMaterializeTargetLocked() uint64 {
+	t.materializeTasks = compactTransformMaterializeTasks(t.materializeTasks)
+	var target uint64
+	for _, task := range t.materializeTasks {
+		if task.timetick > target {
+			target = task.timetick
+		}
+	}
+	return target
 }
 
 func (t *TransformLog) notifyUpdated() {

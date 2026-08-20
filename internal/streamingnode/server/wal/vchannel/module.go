@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -127,6 +128,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		Materializer:        config.TransformLogMaterializer,
 		Runtime:             config.Runtime,
 	})
+	module.refreshTransformMaterializeUpperBoundLocked()
 	return module, nil
 }
 
@@ -519,6 +521,17 @@ func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, v
 	}
 	m.tryFinalizeSegmentLocked(segmentID, view)
 	m.markSegmentDirty(segmentID, view)
+	m.refreshTransformMaterializeUpperBoundLocked()
+}
+
+func (m *VChannelRecoveryModule) refreshTransformMaterializeUpperBoundLocked() {
+	upperBound := uint64(math.MaxUint64)
+	for _, view := range m.segments {
+		if timetick, blocks := view.L1MaterializationBlockerTimeTick(); blocks && timetick < upperBound {
+			upperBound = timetick
+		}
+	}
+	m.transformLog.SetMaterializeUpperBound(upperBound)
 }
 
 func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view *segment.SegmentView) bool {
@@ -654,6 +667,7 @@ func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *s
 	}
 	delete(m.pendingCleanup, segmentID)
 	delete(m.segments, segmentID)
+	m.refreshTransformMaterializeUpperBoundLocked()
 	m.dirtyMu.Lock()
 	delete(m.dirtySegments, segmentID)
 	m.dirtyMu.Unlock()

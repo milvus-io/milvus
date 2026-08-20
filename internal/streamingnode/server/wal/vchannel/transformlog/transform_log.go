@@ -2,6 +2,7 @@ package transformlog
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -81,26 +82,28 @@ type streamNotifier interface {
 var errTransformLogStartPointTruncated = errors.New("transform log start point is truncated")
 
 type TransformLog struct {
-	flushMu                     sync.Mutex
-	materializeMu               sync.Mutex
-	mu                          sync.Mutex
-	vchannel                    string
-	meta                        *streamingpb.VChannelTransformLogMeta
-	persistedCheckpointTimeTick uint64
-	persistedMaterialized       uint64
-	syncUpTimeTick              uint64
-	dirty                       bool
-	pendingDirtySnapshot        *streamingpb.VChannelTransformLogMeta
-	buffer                      buffer
-	store                       Store
-	materializer                Materializer
-	materializeMaxRows          uint64
-	materializeMaxBytes         uint64
-	runtime                     moduleapi.Runtime
-	flushTasks                  []*transformFlushTask
-	materializeTasks            []*transformMaterializeTask
-	pendingMessages             []pendingMessage
-	streamNotifier              streamNotifier
+	flushMu                      sync.Mutex
+	materializeMu                sync.Mutex
+	mu                           sync.Mutex
+	vchannel                     string
+	meta                         *streamingpb.VChannelTransformLogMeta
+	persistedCheckpointTimeTick  uint64
+	persistedMaterialized        uint64
+	syncUpTimeTick               uint64
+	requestedMaterializeTimeTick uint64
+	materializeUpperBound        uint64
+	dirty                        bool
+	pendingDirtySnapshot         *streamingpb.VChannelTransformLogMeta
+	buffer                       buffer
+	store                        Store
+	materializer                 Materializer
+	materializeMaxRows           uint64
+	materializeMaxBytes          uint64
+	runtime                      moduleapi.Runtime
+	flushTasks                   []*transformFlushTask
+	materializeTasks             []*transformMaterializeTask
+	pendingMessages              []pendingMessage
+	streamNotifier               streamNotifier
 
 	chunks []*chunkDescriptor
 }
@@ -113,6 +116,7 @@ func New(config Config) *TransformLog {
 		persistedCheckpointTimeTick: meta.GetCheckpointTimeTick(),
 		persistedMaterialized:       meta.GetMaterializedTimeTick(),
 		syncUpTimeTick:              meta.GetCheckpointTimeTick(),
+		materializeUpperBound:       math.MaxUint64,
 		buffer:                      newBuffer(config.MaxRows),
 		store:                       config.Store,
 		materializer:                config.Materializer,
@@ -162,7 +166,7 @@ func (t *TransformLog) observeMessage(
 		t.submitFlushTask(result.DataTimeTick)
 	}
 	if t.shouldMaterializeByMessage(msg) {
-		t.submitMaterializeTask(msg.TimeTick())
+		t.RequestMaterializeThrough(msg.TimeTick())
 	}
 }
 
@@ -270,6 +274,9 @@ func (t *TransformLog) materialize(ctx context.Context, opt materializeOption) (
 	targetTimeTick := opt.TargetTimeTick
 	if targetTimeTick == 0 {
 		targetTimeTick = t.meta.GetCheckpointTimeTick()
+	}
+	if targetTimeTick > t.materializeUpperBound {
+		targetTimeTick = t.materializeUpperBound
 	}
 	if targetTimeTick <= t.meta.GetMaterializedTimeTick() {
 		t.mu.Unlock()

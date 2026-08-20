@@ -378,6 +378,18 @@ func (info *SegmentView) CreateTimeTick() uint64 {
 	return info.meta.GetStat().GetCreateSegmentTimeTick()
 }
 
+// L1MaterializationBlockerTimeTick reports the inclusive TransformLog
+// materialization frontier imposed by an L1 segment whose final commit has not
+// completed yet.
+func (info *SegmentView) L1MaterializationBlockerTimeTick() (uint64, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.finalCommitDone {
+		return 0, false
+	}
+	return info.meta.GetStat().GetCreateSegmentTimeTick(), true
+}
+
 func (info *SegmentView) markCheckpointPersistedLocked(timetick uint64) {
 	if timetick > info.persistedCheckpointTimeTick {
 		info.persistedCheckpointTimeTick = timetick

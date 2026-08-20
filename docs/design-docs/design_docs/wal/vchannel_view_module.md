@@ -103,6 +103,12 @@ The reference graph joins these effects without a VChannel-level Meta/Data
 state machine. Each component advances its own durable state and releases its
 own handle. Tracker completion occurs only when the entire graph reaches zero.
 
+The VChannel module also computes the L0 materialization safety bound across
+its SegmentViews. An L1 Segment blocks TransformLog materialization after its
+creation TimeTick until its final commit completes. This is scheduling
+coordination only; it does not merge Segment and TransformLog persistence or
+source-message ownership.
+
 ## 6. Recovery
 
 `PChannelRecoveryManager` creates VChannel modules from the union of persisted

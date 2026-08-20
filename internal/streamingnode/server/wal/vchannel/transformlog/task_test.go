@@ -61,7 +61,7 @@ func TestTransformTaskRegistrySupportsConcurrentSubmissionAndInspection(t *testi
 		}(uint64(i + 1))
 		go func(timetick uint64) {
 			defer wg.Done()
-			transformLog.submitMaterializeTask(timetick)
+			transformLog.RequestMaterializeThrough(timetick)
 		}(uint64(i + 1))
 		go func() {
 			defer wg.Done()

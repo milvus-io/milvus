@@ -148,8 +148,28 @@ Materialization:
 - does not retain source WAL messages;
 - does not delay BroadcastAck;
 - does not gate the global recovery checkpoint;
+- does not pass the earliest uncommitted L1 Segment's creation TimeTick;
 - updates `materialized_time_tick` in TransformLog stable metadata;
 - may be retried idempotently at the logical level.
+
+`VChannelRecoveryModule` derives one inclusive materialization upper bound from
+its SegmentViews:
+
+```text
+upper_bound = min(create_segment_time_tick of every Segment with l1_commit_done = false)
+```
+
+When there is no such Segment, the bound is unbounded. The creation TimeTick is
+safe to include because rows assigned to that Segment have later TimeTicks.
+This guarantees that an L0 Segment never covers a transform range whose L1
+data has not completed its final commit.
+
+TransformLog keeps the requested materialization TimeTick separately from the
+currently executable TimeTick. It schedules `min(requested, upper_bound)` and
+retains the original request. Every completed L1 final commit makes the owning
+VChannel recompute the bound, which retries the retained request without
+requiring another WAL trigger. TransformLog still owns batching and may combine
+all eligible entries through the scheduled frontier into its materializer call.
 
 Physical duplicate L0 output after a crash is outside the WAL checkpoint
 protocol and requires lifecycle idempotency or reconciliation.
