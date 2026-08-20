@@ -1494,7 +1494,71 @@ func (kc *Catalog) loadGranteeIDPrefix(ctx context.Context, tenant string, grant
 	return kc.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, granteeKey, idStr, nil, nil)
 }
 
+func validateLoadedGrantees(granteeKeys []string, granteeValues []string) error {
+	if (granteeKeys == nil) != (granteeValues == nil) {
+		return merr.WrapErrServiceInternalMsg("loaded grantee keys and values must both be nil or both be non-nil, got keys=%d values=%d", len(granteeKeys), len(granteeValues))
+	}
+	if granteeKeys != nil && len(granteeKeys) != len(granteeValues) {
+		return merr.WrapErrServiceInternalMsg("loaded grantee keys and values must have equal length, got keys=%d values=%d", len(granteeKeys), len(granteeValues))
+	}
+	return nil
+}
+
+type loadedGranteesProvider func(ctx context.Context) ([]string, []string, error)
+
+func newLoadedGranteesProvider(granteeKeys []string, granteeValues []string) (loadedGranteesProvider, error) {
+	if err := validateLoadedGrantees(granteeKeys, granteeValues); err != nil {
+		return nil, err
+	}
+	if granteeKeys == nil {
+		return nil, nil
+	}
+	return func(context.Context) ([]string, []string, error) {
+		return granteeKeys, granteeValues, nil
+	}, nil
+}
+
+func (kc *Catalog) newLazyLoadedGranteesProvider(tenant string) loadedGranteesProvider {
+	var (
+		loaded        bool
+		granteeKeys   []string
+		granteeValues []string
+		loadErr       error
+	)
+	return func(ctx context.Context) ([]string, []string, error) {
+		if loaded {
+			return granteeKeys, granteeValues, loadErr
+		}
+		loaded = true
+
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		granteeKeys, granteeValues, loadErr = kc.Txn.LoadWithPrefix(ctx, granteeKey)
+		if loadErr != nil {
+			mlog.Error(ctx, "fail to load all grant privilege entities", mlog.String("key", granteeKey), mlog.Err(loadErr))
+			return nil, nil, loadErr
+		}
+		if loadErr = validateLoadedGrantees(granteeKeys, granteeValues); loadErr != nil {
+			return nil, nil, loadErr
+		}
+		if granteeKeys == nil {
+			granteeKeys = []string{}
+		}
+		if granteeValues == nil {
+			granteeValues = []string{}
+		}
+		return granteeKeys, granteeValues, nil
+	}
+}
+
 func (kc *Catalog) loadGranteeIDPrefixWithLoadedGrantees(ctx context.Context, tenant string, granteeKey string, idStr string, granteeKeys []string, granteeValues []string) ([]string, []string, string, error) {
+	loadedGrantees, err := newLoadedGranteesProvider(granteeKeys, granteeValues)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return kc.loadGranteeIDPrefixWithLoadedGranteeProvider(ctx, tenant, granteeKey, idStr, loadedGrantees)
+}
+
+func (kc *Catalog) loadGranteeIDPrefixWithLoadedGranteeProvider(ctx context.Context, tenant string, granteeKey string, idStr string, loadedGrantees loadedGranteesProvider) ([]string, []string, string, error) {
 	var firstPrefix string
 	newID := crypto.GranteeID(granteeKey)
 	if isLegacyGranteeID(idStr) && idStr != newID {
@@ -1503,7 +1567,18 @@ func (kc *Catalog) loadGranteeIDPrefixWithLoadedGrantees(ctx context.Context, te
 			otherGranteeKey string
 			err             error
 		)
-		if granteeKeys != nil {
+		if loadedGrantees != nil {
+			var (
+				granteeKeys   []string
+				granteeValues []string
+			)
+			granteeKeys, granteeValues, err = loadedGrantees(ctx)
+			if err != nil {
+				return nil, nil, granteeIDKey, err
+			}
+			if err := validateLoadedGrantees(granteeKeys, granteeValues); err != nil {
+				return nil, nil, granteeIDKey, err
+			}
 			granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 			otherGranteeKey, err = findOtherGranteeWithIDFromKeys(ctx, granteePrefix, granteeKey, idStr, granteeKeys, granteeValues)
 		} else {
@@ -1667,6 +1742,18 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	return kc.listGrantWithLoadedGrantees(ctx, tenant, entity, nil, nil)
+}
+
+func (kc *Catalog) listGrantWithLoadedGrantees(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, granteeKeys []string, granteeValues []string) ([]*milvuspb.GrantEntity, error) {
+	loadedGrantees, err := newLoadedGranteesProvider(granteeKeys, granteeValues)
+	if err != nil {
+		return nil, err
+	}
+	return kc.listGrantWithLoadedGranteeProvider(ctx, tenant, entity, loadedGrantees)
+}
+
+func (kc *Catalog) listGrantWithLoadedGranteeProvider(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, loadedGrantees loadedGranteesProvider) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
 
 	var granteeKey string
@@ -1676,7 +1763,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		if dbName != entity.DbName && dbName != util.AnyWord && entity.DbName != util.AnyWord {
 			return nil
 		}
-		keys, values, granteeIDKey, err := kc.loadGranteeIDPrefix(ctx, tenant, granteeKey, v)
+		keys, values, granteeIDKey, err := kc.loadGranteeIDPrefixWithLoadedGranteeProvider(ctx, tenant, granteeKey, v, loadedGrantees)
 		if err != nil {
 			mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", granteeIDKey), mlog.Err(err))
 			return err
@@ -2090,12 +2177,17 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 		return entity.GetRole(), true
 	})
 
+	var loadedGrantees loadedGranteesProvider
+	if len(roleEntity) > 0 {
+		loadedGrantees = kc.newLazyLoadedGranteesProvider(tenant)
+	}
+
 	grantsEntity := make([]*milvuspb.GrantEntity, 0)
 	for _, role := range roleEntity {
-		grants, err := kc.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+		grants, err := kc.listGrantWithLoadedGranteeProvider(ctx, tenant, &milvuspb.GrantEntity{
 			Role:   role,
 			DbName: util.AnyWord,
-		})
+		}, loadedGrantees)
 		if err != nil {
 			return nil, err
 		}
