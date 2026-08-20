@@ -1548,7 +1548,7 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 		if cResult.uuid_primary_keys == nil {
 			return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key data is nil")
 		}
-		if cResult.uuid_primary_keys_size != uintptr(cResult.num_primary_keys)*16 {
+		if uintptr(cResult.uuid_primary_keys_size) != uintptr(cResult.num_primary_keys)*16 {
 			return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key size mismatch, num=%d size=%d", cResult.num_primary_keys, cResult.uuid_primary_keys_size)
 		}
 		data := unsafe.Slice((*byte)(unsafe.Pointer(cResult.uuid_primary_keys)), int(cResult.uuid_primary_keys_size))
