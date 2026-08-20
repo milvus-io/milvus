@@ -1901,7 +1901,7 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 		{
 			name: "copy segment",
 			call: func() (*commonpb.Status, error) {
-				return node.CopySegment(ctx, &datapb.CopySegmentRequest{TaskID: 6, StorageConfig: storageConfig})
+				return node.copySegment(ctx, &datapb.CopySegmentRequest{TaskID: 6, StorageConfig: storageConfig}, false)
 			},
 		},
 	}
