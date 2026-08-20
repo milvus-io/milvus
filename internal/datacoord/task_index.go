@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -60,6 +61,25 @@ type indexBuildTask struct {
 var _ globalTask.Task = (*indexBuildTask)(nil)
 
 var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
+
+func fieldSchemaForIndexBuild(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) *schemapb.FieldSchema {
+	if field == nil || field.GetNullable() {
+		return field
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		if !structField.GetNullable() {
+			continue
+		}
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == field.GetFieldID() {
+				buildField := proto.Clone(field).(*schemapb.FieldSchema)
+				buildField.Nullable = true
+				return buildField
+			}
+		}
+	}
+	return field
+}
 
 func newIndexBuildTask(segIndex *model.SegmentIndex,
 	taskSlot int64,
@@ -495,6 +515,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	if field == nil {
 		return nil, merr.WrapErrFieldNotFound(fieldID)
 	}
+	buildField := fieldSchemaForIndexBuild(schema, field)
 
 	// Extract dim only for vector types to avoid unnecessary warnings
 	dim := -1
@@ -550,7 +571,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		Dim:                       int64(dim),
 		DataIds:                   binlogIDs,
 		OptionalScalarFields:      optionalFields,
-		Field:                     field,
+		Field:                     buildField,
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
 		TaskSlot:                  it.taskSlot,

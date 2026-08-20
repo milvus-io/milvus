@@ -559,6 +559,28 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
+    def add_function_field(self, payload, db_name="default"):
+        """Add a function together with its output field and bound index."""
+        url = f"{self.endpoint}/v2/vectordb/collections/add_function_field"
+        payload = copy.deepcopy(payload)
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def drop_function_field(self, payload, db_name="default"):
+        """Drop a function together with its output field and bound index."""
+        url = f"{self.endpoint}/v2/vectordb/collections/drop_function_field"
+        payload = copy.deepcopy(payload)
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
     def add_struct_field(self, collection_name, field_params, db_name="default"):
         """Add struct field"""
         url = f"{self.endpoint}/v2/vectordb/collections/struct_fields/add"

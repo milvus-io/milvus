@@ -20,7 +20,7 @@ func TestFieldDataValidData(t *testing.T) {
 			},
 		}
 		assert.Equal(t, scalarValid, GetFieldDataValidData(field))
-		assert.False(t, HasFieldDataValidDataConflict(field))
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
 	})
 
 	t.Run("vector field-specific", func(t *testing.T) {
@@ -30,7 +30,7 @@ func TestFieldDataValidData(t *testing.T) {
 			},
 		}
 		assert.Equal(t, vectorValid, GetFieldDataValidData(field))
-		assert.False(t, HasFieldDataValidDataConflict(field))
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
 	})
 
 	t.Run("legacy fallback", func(t *testing.T) {
@@ -41,7 +41,7 @@ func TestFieldDataValidData(t *testing.T) {
 			},
 		}
 		assert.Equal(t, legacy, GetFieldDataValidData(field))
-		assert.False(t, HasFieldDataValidDataConflict(field))
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
 	})
 
 	t.Run("field-specific empty slice", func(t *testing.T) {
@@ -52,17 +52,78 @@ func TestFieldDataValidData(t *testing.T) {
 		}
 		assert.NotNil(t, GetFieldDataValidData(field))
 		assert.Empty(t, GetFieldDataValidData(field))
-		assert.False(t, HasFieldDataValidDataConflict(field))
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
 	})
 
-	t.Run("conflict detection", func(t *testing.T) {
+	t.Run("matching dual sources", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: scalarValid,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: scalarValid},
+			},
+		}
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Nil(t, field.GetValidData())
+		assert.Equal(t, scalarValid, field.GetScalars().GetValidData())
+	})
+
+	t.Run("normalize legacy source", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			},
+		}
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Nil(t, field.GetValidData())
+		assert.Equal(t, legacy, field.GetScalars().GetValidData())
+	})
+
+	t.Run("reject mismatched dual sources without normalization", func(t *testing.T) {
 		field := &schemapb.FieldData{
 			ValidData: legacy,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{ValidData: scalarValid},
 			},
 		}
-		assert.True(t, HasFieldDataValidDataConflict(field))
+		assert.False(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Equal(t, legacy, field.GetValidData())
+		assert.Equal(t, scalarValid, field.GetScalars().GetValidData())
+	})
+
+	t.Run("reject nested mismatched dual sources without normalization", func(t *testing.T) {
+		subField := &schemapb.FieldData{
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: scalarValid},
+			},
+		}
+		field := &schemapb.FieldData{
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{subField}},
+			},
+		}
+
+		assert.False(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Equal(t, legacy, subField.GetValidData())
+		assert.Equal(t, scalarValid, subField.GetScalars().GetValidData())
+	})
+
+	t.Run("project current source for legacy readers", func(t *testing.T) {
+		subField := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{ValidData: vectorValid},
+			},
+		}
+		field := &schemapb.FieldData{
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{subField}},
+			},
+		}
+
+		ProjectFieldDataValidDataForLegacy(field)
+		assert.Equal(t, vectorValid, subField.GetValidData())
+		assert.Equal(t, vectorValid, subField.GetVectors().GetValidData())
 	})
 
 	t.Run("set scalar validity", func(t *testing.T) {
@@ -111,8 +172,28 @@ func TestFieldDataValidData(t *testing.T) {
 			},
 		}
 		SetFieldDataValidData(field, scalarValid)
-		assert.Nil(t, field.GetValidData())
-		assert.Nil(t, GetFieldDataValidData(field))
+		assert.Equal(t, legacy, field.GetValidData())
+		assert.Equal(t, legacy, GetFieldDataValidData(field))
+	})
+
+	t.Run("set does not initialize missing scalar field", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: legacy,
+			Field:     &schemapb.FieldData_Scalars{},
+		}
+		SetFieldDataValidData(field, scalarValid)
+		assert.Equal(t, legacy, field.GetValidData())
+		assert.Nil(t, field.GetScalars())
+	})
+
+	t.Run("set does not initialize missing vector field", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: legacy,
+			Field:     &schemapb.FieldData_Vectors{},
+		}
+		SetFieldDataValidData(field, vectorValid)
+		assert.Equal(t, legacy, field.GetValidData())
+		assert.Nil(t, field.GetVectors())
 	})
 }
 
@@ -305,7 +386,7 @@ func TestFieldDataBuilder_Build(t *testing.T) {
 			got := builder.Build()
 			assert.Equal(t, tt.want.Type, got.Type)
 			assert.Equal(t, GetFieldDataValidData(tt.want), got.GetScalars().GetValidData())
-			assert.False(t, HasFieldDataValidDataConflict(got))
+			assert.True(t, ValidateAndNormalizeFieldDataValidData(got))
 
 			switch tt.dt {
 			case schemapb.DataType_Bool:

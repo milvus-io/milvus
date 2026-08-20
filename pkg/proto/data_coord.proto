@@ -112,6 +112,7 @@ service DataCoord {
   rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc ExportSnapshot(ExportSnapshotRequest) returns(ExportSnapshotResponse){}
+  rpc GetExportSnapshotState(GetExportSnapshotStateRequest) returns(GetExportSnapshotStateResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
   rpc PinSnapshotData(PinSnapshotDataRequest) returns(PinSnapshotDataResponse){}
@@ -474,6 +475,10 @@ message SegmentInfo {
   // instead of iterating Binlogs/Statslogs/Deltalogs for scheduling
   // decisions (compaction, load balancing, GC). See message Statistics.
   Statistics stats = 38;
+
+  // create_ts records the planning/create timestamp for replacement segment metadata.
+  // Legacy segments keep the zero value, which means unknown.
+  uint64 create_ts = 39;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -522,6 +527,11 @@ message Statistics {
   // the effective (non-null) row count for vector index build decisions
   // on nullable vector fields.
   map<int64, int64> null_counts = 13;
+  LoadResourceStatistics load_resource = 14;
+  // Unique set of column-group storage formats observed across the
+  // segment's insert binlogs (e.g. ["parquet"], ["lance"], or
+  // ["parquet","lance"] for mixed).
+  repeated string formats = 15;
 }
 
 message SegmentStartPosition {
@@ -854,13 +864,26 @@ message CompactionSegment {
   // equals the segment's current manifest (optimistic-concurrency CAS),
   // mirroring StatsResult.base_manifest.
   string base_manifest = 15;
-  // Aggregate footprint of this compaction output. Populated by the
-  // compactor (mix / sort / bump-schema / L0) at write completion and
-  // copied verbatim onto SegmentInfo.Stats by the DataCoord receiver,
-  // so the receiver never recomputes from FieldBinlog arrays for
-  // compaction results. For V3 outputs whose stats blob lives in the
-  // manifest, this is the only authoritative source for
-  // stats_binlog_size.
+  // Aggregate footprint of this compaction output. Its meaning depends on
+  // how the receiver adopts the result:
+  //   - receiver builds a NEW SegmentInfo (mix / sort / clustering /
+  //     schema-bump full rewrite) -> ABSOLUTE footprint, copied verbatim
+  //     onto SegmentInfo.Stats.
+  //   - receiver updates an EXISTING SegmentInfo in place (schema-bump
+  //     materialization) -> an INCREMENT, added onto that segment's current
+  //     Stats via addStatsDelta.
+  //   - L0 compaction also adopts in place, onto the existing L1
+  //     SegmentInfo(s) it targets, but today the receiver
+  //     (addDeltalogsToSegment in internal/datacoord/meta.go) does not read
+  //     this field at all: it derives its own delta Stats directly from the
+  //     deltalogs array. L0 is therefore neither of the two buckets above in
+  //     practice; do not assume this field is consumed on that path.
+  // nil always means "no change". A producer that writes only part of a
+  // segment must ship an increment: it cannot compute an absolute value,
+  // because the input's FieldBinlog arrays are empty for StorageV3 segments
+  // recovered after a DataCoord restart.
+  // For V3 outputs whose stats blob lives in the manifest, this is the only
+  // authoritative source for stats_binlog_size.
   Statistics stats = 16;
 }
 
@@ -1164,6 +1187,9 @@ message CopySegmentSource {
   // When set, DataNode rewrites this prefix to the target root path before
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
+
+  // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
+  int64 num_of_rows = 16;
 }
 
 message CopySegmentTarget {
@@ -1357,6 +1383,7 @@ message CopySegmentJob {
   bool external = 19;
   string snapshot_s3_location = 20;
   string external_spec = 21;
+  string snapshot_fingerprint = 22;
 }
 
 message ImportJob {
@@ -1448,6 +1475,7 @@ message QuerySlotRequest {}
 message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
+  string version = 3; // Milvus build version reported by the worker
 }
 
 enum CompactionTaskState {
@@ -1462,6 +1490,32 @@ enum CompactionTaskState {
   cleaned = 8;
   meta_saved = 9;
   statistic = 10;
+}
+
+enum TargetState {
+  TARGET_STATE_ACTIVE = 0;
+  TARGET_STATE_INACTIVE = 1;
+}
+
+enum TargetIntent {
+  INTENT_UNKNOWN = 0;
+  INTENT_REWRITE = 1;
+  INTENT_SIZE = 2;
+  INTENT_SORT = 3;
+  INTENT_OPTIMIZE = 4;
+  INTENT_BACKFILL = 5;
+}
+
+message CompactionTarget {
+  int64 targetID = 1;
+  int64 collectionID = 2;
+  TargetIntent intent = 3;
+  map<string, string> properties = 4;
+  uint64 expectedTS = 5;
+  int32 tail_limit = 6;
+  TargetState state = 7;
+  uint64 activatedAtTS = 8;
+  uint64 inactivatedAtTS = 9;
 }
 
 message CompactionTask{
@@ -1494,6 +1548,7 @@ message CompactionTask{
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
+  uint64 create_ts = 30;
 }
 
 message PartitionStatsInfo {
@@ -1526,6 +1581,7 @@ message RefreshExternalCollectionTaskRequest {
   int64 file_index_end = 13;              // File range end for this task
   int64 partitionID = 14;                 // target partition for manifest path
   int64 target_rows_per_segment = 15;     // target row count for segment organization
+  string clusterID = 16;                  // serving cluster that created this task
 }
 
 message RefreshExternalCollectionTaskResponse {
@@ -1600,6 +1656,18 @@ message ExternalCollectionRefreshTask {
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
   repeated SegmentInfo updated_segments = 16;  // Segment upsert payload produced by this task result
   bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
+  // Version of the persisted file-range and segment-ownership contract.
+  // Zero denotes a legacy task without ownership metadata and is rejected.
+  int32 ownership_plan_version = 19;
+  // Immutable baseline segment IDs assigned exclusively to this task.
+  // These IDs are ownership input, not task results.
+  repeated int64 owned_segment_ids = 20;
+  // Version of the task result storage format. Zero stores results inline.
+  int32 result_storage_version = 21;
+  // Object-storage key containing the task result payload.
+  string result_path = 22;
+  // SHA-256 checksum of the serialized task result payload.
+  bytes result_checksum = 23;
 }
 
 message GetRefreshExternalCollectionProgressResponse {
@@ -1655,7 +1723,8 @@ message ExportSnapshotRequest {
 
 message ExportSnapshotResponse {
   common.Status status = 1;
-  string snapshot_metadata_uri = 2;
+  string snapshot_metadata_uri = 2 [deprecated = true];
+  int64 job_id = 3;
 }
 
 message SegmentDescription {
@@ -1712,11 +1781,11 @@ message SnapshotInfo {
   repeated msg.MsgPosition channel_seek_positions = 13;
 }
 
-// StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
-// StorageV2 is Milvus's newer storage format that uses Lance/Arrow for better performance.
+// StorageV2SegmentManifest maps a segment ID to its plain manifest object path.
+// Unlike StorageV3, this path is not a packed manifest descriptor.
 message StorageV2SegmentManifest {
   int64 segment_id = 1;
-  string manifest = 2;
+  string manifest = 2; // Plain StorageV2 manifest object path.
 }
 
 enum SnapshotLayout {
@@ -1886,4 +1955,85 @@ message HandleCommitVchannelRequest {
   // commit_timestamp is the WAL message timestamp of the CommitImportMessage.
   // This becomes the segment's commit_timestamp for MVCC/TTL/delete correctness.
   uint64         commit_timestamp = 4;
+}
+// ExternalCollectionRefreshTaskResult stores the task result outside etcd.
+// Identity fields prevent a valid object from being attached to another task.
+message ExternalCollectionRefreshTaskResult {
+  int64 collection_id = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  int64 task_version = 4;
+  repeated int64 kept_segments = 5;
+  repeated SegmentInfo updated_segments = 6;
+}
+message ColumnGroupStatistics {
+  int64 group_id = 1;
+  repeated int64 field_ids = 2;
+  int64 memory_size = 3;
+}
+
+message LoadResourceStatistics {
+  repeated ColumnGroupStatistics column_groups = 1;
+}
+
+enum ExportSnapshotJobState {
+  ExportSnapshotJobNone = 0;
+  ExportSnapshotJobPending = 1;
+  ExportSnapshotJobExecuting = 2;
+  ExportSnapshotJobCompleted = 3;
+  ExportSnapshotJobFailed = 4;
+  ExportSnapshotJobPublishing = 5;
+}
+
+// ExportSnapshotJob is the constant-size durable record owned by DataCoord.
+// external_spec is retained only while the job is non-terminal.
+message ExportSnapshotJob {
+  int64 job_id = 1;
+  string snapshot_name = 2;
+  int64 collection_id = 3;
+  string db_name = 4;
+  string collection_name = 5;
+  string target_s3_path = 6;
+  string external_spec = 7;
+  ExportSnapshotJobState state = 8;
+  int32 progress = 9;
+  string reason = 10;
+  uint64 start_time = 11;
+  uint64 end_time = 12;
+  uint64 deadline_time = 13;
+  int64 total_files = 14;
+  int64 copied_files = 15;
+  int64 copy_cursor = 16;
+  int32 plan_version = 17;
+  string plan_fingerprint = 18;
+  string snapshot_fingerprint = 19;
+  string snapshot_metadata_uri = 20;
+  int64 pin_id = 21;
+  int64 total_bytes = 22;
+}
+
+message ExportSnapshotJobInfo {
+  int64 job_id = 1;
+  string snapshot_name = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  ExportSnapshotJobState state = 5;
+  int32 progress = 6;
+  string reason = 7;
+  uint64 start_time = 8;
+  uint64 time_cost = 9;
+  int64 total_files = 10;
+  int64 copied_files = 11;
+  string snapshot_metadata_uri = 12;
+  int64 total_bytes = 13;
+}
+
+message GetExportSnapshotStateRequest {
+  common.MsgBase base = 1;
+  int64 job_id = 2;
+}
+
+message GetExportSnapshotStateResponse {
+  common.Status status = 1;
+  ExportSnapshotJobInfo info = 2;
 }

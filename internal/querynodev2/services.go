@@ -354,6 +354,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
+	// The caller may have timed out during the load/seek steps above. Commit
+	// the watch only if it is still wanted: once the pipeline starts, this
+	// node is subscribed while the coordinator has already marked the task
+	// failed, and the re-issued watch would race the stale registration.
+	if err = ctx.Err(); err != nil {
+		log.Warn(ctx, "watch dml channel canceled before commit", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	// start pipeline
 	pipeline.Start()
 	// delegator after all steps done
@@ -1918,7 +1927,7 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 	}
 	defer node.lifetime.Done()
 
-	err := fileresource.Sync(req.GetVersion(), req.GetResources())
+	err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

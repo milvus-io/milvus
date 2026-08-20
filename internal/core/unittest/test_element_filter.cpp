@@ -3983,12 +3983,6 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    std::unique_ptr<bool[]> valid_rows(new bool[kNullableElemN]);
-    for (int row = 0; row < kNullableElemN; ++row) {
-        valid_rows[row] = true;
-    }
-    indexing->BuildValidData(valid_rows.get(), kNullableElemN);
-
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index_params = GenIndexParams(indexing.get());
@@ -4009,12 +4003,6 @@ LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
                                    kNullableElemDim,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
-
-    std::unique_ptr<bool[]> valid_data(new bool[valid_rows.size()]);
-    for (size_t row = 0; row < valid_rows.size(); ++row) {
-        valid_data[row] = valid_rows[row];
-    }
-    indexing->BuildValidData(valid_data.get(), valid_rows.size());
 
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();

@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -126,6 +125,10 @@ type DataCoordCatalog interface {
 	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
+	SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
+	UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error
+	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
 
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
@@ -145,12 +148,11 @@ type DataCoordCatalog interface {
 	ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error)
 	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
 
-	// Analyzer Resource
-	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
-	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
-	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 	// snapshot related
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
 	ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error)
+	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
+	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
+	DropExportSnapshotJob(ctx context.Context, jobID int64) error
 }

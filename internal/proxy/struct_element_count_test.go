@@ -53,6 +53,40 @@ func structElementCountTestScalarArray(fieldName string, rows ...[]int32) *schem
 	}
 }
 
+func structElementCountTestNestedIntArray(fieldName string, rows ...[][]int32) *schemapb.FieldData {
+	data := make([]*schemapb.ScalarField, 0, len(rows))
+	for _, row := range rows {
+		elements := make([]*schemapb.ScalarField, 0, len(row))
+		for _, element := range row {
+			elements = append(elements, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: element}},
+			})
+		}
+		data = append(data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{
+				ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int32,
+					Data:        elements,
+				},
+			},
+		})
+	}
+	return &schemapb.FieldData{
+		FieldName: fieldName,
+		Type:      schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Array,
+						Data:        data,
+					},
+				},
+			},
+		},
+	}
+}
+
 func structElementCountTestVectorArray(fieldName string, rows ...[]float32) *schemapb.FieldData {
 	data := make([]*schemapb.VectorField, 0, len(rows))
 	for _, row := range rows {
@@ -203,6 +237,45 @@ func TestCheckAndFlattenStructFieldDataAllowsMatchingScalarAndVectorElementCount
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
 		structElementCountTestScalarArray("field1", []int32{1, 2}, []int32{3}),
 		structElementCountTestVectorArray("field2", []float32{0.1, 0.2, 0.3, 0.4}, []float32{0.5, 0.6}),
+	))
+
+	err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+	require.NoError(t, err)
+	assert.Len(t, insertMsg.FieldsData, 2)
+}
+
+func TestCheckAndFlattenStructFieldDataAllowsMatchingRecursiveArrayElementCounts(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "test_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "nested",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeSchema: &schemapb.TypeSchema{
+							Kind: &schemapb.TypeSchema_ArrayElement{
+								ArrayElement: &schemapb.TypeSchema{
+									Kind: &schemapb.TypeSchema_ArrayElement{
+										ArrayElement: &schemapb.TypeSchema{
+											Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+										},
+									},
+								},
+							},
+						},
+					},
+					{Name: "scalar", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				},
+			},
+		},
+	}
+	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
+		structElementCountTestNestedIntArray("nested", [][]int32{{1, 2}, {3}}, [][]int32{{4, 5, 6}}),
+		structElementCountTestScalarArray("scalar", []int32{10, 20}, []int32{30}),
 	))
 
 	err := checkAndFlattenStructFieldData(schema, insertMsg)
@@ -415,7 +488,7 @@ func TestStructElementNullableFlattenFillAndValidate(t *testing.T) {
 
 	schemaInfo := mustNewSchemaInfo(schema)
 	require.NoError(t, fillFieldPropertiesOnly(insertMsg.FieldsData, schemaInfo))
-	require.NoError(t, newValidateUtil().Validate(insertMsg.FieldsData, schemaInfo.schemaHelper, 1))
+	require.NoError(t, newValidateUtil().Validate(insertMsg.FieldsData, schemaInfo.SchemaHelper, 1))
 
 	scalarArray := insertMsg.FieldsData[0].GetScalars().GetArrayData()
 	assert.Equal(t, int64(101), insertMsg.FieldsData[0].GetFieldId())

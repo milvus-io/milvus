@@ -541,7 +541,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				b.AppendNull()
 				return nil
 			}
-			elementValidData := vf.GetValidData()
+			elementValidData := typeutil.GetVectorArrayElementValidData(vf)
 
 			builder, ok := b.(*array.ListBuilder)
 			if !ok {
@@ -1094,37 +1094,42 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 			}
 			floatData = append(floatData, arrow.Float32Traits.CastFromBytes(binaryArray.Value(idx))...)
 		}
-		return &schemapb.VectorField{
+		field := &schemapb.VectorField{
 			Dim: dim,
 			Data: &schemapb.VectorField_FloatVector{
 				FloatVector: &schemapb.FloatArray{Data: floatData},
 			},
-			ValidData: validData,
-		}, nil
+		}
+		typeutil.SetVectorArrayElementValidData(field, validData)
+		return field, nil
 	case schemapb.DataType_BinaryVector:
-		return &schemapb.VectorField{
-			Dim:       dim,
-			Data:      &schemapb.VectorField_BinaryVector{BinaryVector: extractByteVectors()},
-			ValidData: validData,
-		}, nil
+		field := &schemapb.VectorField{
+			Dim:  dim,
+			Data: &schemapb.VectorField_BinaryVector{BinaryVector: extractByteVectors()},
+		}
+		typeutil.SetVectorArrayElementValidData(field, validData)
+		return field, nil
 	case schemapb.DataType_Float16Vector:
-		return &schemapb.VectorField{
-			Dim:       dim,
-			Data:      &schemapb.VectorField_Float16Vector{Float16Vector: extractByteVectors()},
-			ValidData: validData,
-		}, nil
+		field := &schemapb.VectorField{
+			Dim:  dim,
+			Data: &schemapb.VectorField_Float16Vector{Float16Vector: extractByteVectors()},
+		}
+		typeutil.SetVectorArrayElementValidData(field, validData)
+		return field, nil
 	case schemapb.DataType_BFloat16Vector:
-		return &schemapb.VectorField{
-			Dim:       dim,
-			Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: extractByteVectors()},
-			ValidData: validData,
-		}, nil
+		field := &schemapb.VectorField{
+			Dim:  dim,
+			Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: extractByteVectors()},
+		}
+		typeutil.SetVectorArrayElementValidData(field, validData)
+		return field, nil
 	case schemapb.DataType_Int8Vector:
-		return &schemapb.VectorField{
-			Dim:       dim,
-			Data:      &schemapb.VectorField_Int8Vector{Int8Vector: extractByteVectors()},
-			ValidData: validData,
-		}, nil
+		field := &schemapb.VectorField{
+			Dim:  dim,
+			Data: &schemapb.VectorField_Int8Vector{Int8Vector: extractByteVectors()},
+		}
+		typeutil.SetVectorArrayElementValidData(field, validData)
+		return field, nil
 	case schemapb.DataType_SparseFloatVector:
 		return nil, merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray deserialization not implemented yet")
 	default:
@@ -1138,7 +1143,15 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 	// to correct the actual size, we need to multiply the memory expansion ratio accordingly.
 	determineMemoryExpansionRatio := func(field *schemapb.FieldSchema) int {
 		if field.DataType == schemapb.DataType_Array {
-			switch field.GetElementType() {
+			elementType := field.GetElementType()
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				typeSchema := field.GetTypeSchema()
+				for typeSchema.GetArrayElement() != nil {
+					typeSchema = typeSchema.GetArrayElement()
+				}
+				elementType = typeSchema.GetLeafType()
+			}
+			switch elementType {
 			case schemapb.DataType_Int16:
 				return 2
 			case schemapb.DataType_Int32:

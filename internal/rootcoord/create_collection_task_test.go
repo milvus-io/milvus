@@ -107,9 +107,10 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(
+		meta.EXPECT().GetAvailableCollectionCount(
 			mock.Anything,
-		).Return(map[int64][]int64{1: {1, 2}})
+			util.DefaultDBID,
+		).Return(2, 2, true)
 
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil)
@@ -145,7 +146,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{util.DefaultDBID: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 
 		// test reach limit
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
@@ -203,7 +204,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil)
 
@@ -238,7 +239,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.RootCoordCfg.MaxGeneralCapacity.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(1)
@@ -265,7 +266,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{
 				Name: "db1",
@@ -852,7 +853,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of vector")
 	})
 
-	t.Run("struct array field - nested array", func(t *testing.T) {
+	t.Run("struct array field - old-style nested element_type", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -878,7 +879,42 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nested array is not supported")
+		assert.Contains(t, err.Error(), "nested array field nested_array must specify type_schema")
+	})
+
+	t.Run("struct array field - non-nested type schema rejected", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					Name: "struct_field",
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:       "array_of_vector",
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							TypeSchema: &schemapb.TypeSchema{
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+								Kind: &schemapb.TypeSchema_ArrayElement{
+									ArrayElement: &schemapb.TypeSchema{
+										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type_schema is only supported for nested array")
 	})
 
 	t.Run("struct array field - invalid element type", func(t *testing.T) {
@@ -1975,7 +2011,7 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		schema.ExternalSource = "file:///tmp/snapshot.json"
 		err := baseTask(schema).prepareMilvusTableSnapshotSchema(context.Background())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "external_source scheme")
+		assert.Contains(t, err.Error(), "external_source is invalid")
 	})
 
 	t.Run("empty source is noop", func(t *testing.T) {
@@ -2076,11 +2112,10 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(model.NewDefaultDatabase(nil), nil)
-	meta.On("ListAllAvailCollections",
+	meta.On("GetAvailableCollectionCount",
 		mock.Anything,
-	).Return(map[int64][]int64{
-		util.DefaultDBID: {1, 2},
-	}, nil)
+		util.DefaultDBID,
+	).Return(2, 2, true)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -2171,9 +2206,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
-			util.DefaultDBID: {1, 2},
-		}).Once()
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -2223,9 +2256,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
-			util.DefaultDBID: {1, 2},
-		}).Once()
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		defer cleanTestEnv()
 
@@ -2269,9 +2300,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
-			util.DefaultDBID: {1, 2},
-		}).Once()
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -2334,11 +2363,10 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(model.NewDefaultDatabase(nil), nil)
-	meta.On("ListAllAvailCollections",
+	meta.On("GetAvailableCollectionCount",
 		mock.Anything,
-	).Return(map[int64][]int64{
-		util.DefaultDBID: {1, 2},
-	}, nil)
+		util.DefaultDBID,
+	).Return(2, 2, true)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -3046,4 +3074,92 @@ func Test_appendConsistecyLevel(t *testing.T) {
 	consistencyLevel, properties := mustConsumeConsistencyLevel(task.Req.Properties)
 	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
 	assert.Len(t, properties, 0)
+}
+
+// The direct RootCoord path never went through validator.ValidateFunction:
+// prepareSchema only validated fields and assigned IDs, so a client hitting
+// RootCoord directly could persist a MinHash schema the proxy path rejects.
+// prepareSchema is the real create path — these cases must fail there, not
+// only in the validator helper.
+func Test_createCollectionTask_prepareSchema_validatesFunctions(t *testing.T) {
+	buildTask := func(numHashes string) createCollectionTask {
+		collectionName := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				}},
+				{Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "32"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "minhash", Type: schemapb.FunctionType_MinHash,
+				InputFieldNames: []string{"text"}, OutputFieldNames: []string{"hash"},
+				Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: numHashes}},
+			}},
+		}
+		return createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+	}
+
+	t.Run("overflowing num_hashes rejected", func(t *testing.T) {
+		// (2^59+1)*32 wraps around int64 to 32; a multiply-based check passes
+		// and the runner then attempts an impossibly large permutation alloc.
+		task := buildTask("576460752303423489")
+		err := task.prepareSchema(context.TODO())
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not match expected dim")
+	})
+
+	t.Run("valid minhash accepted", func(t *testing.T) {
+		task := buildTask("1")
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+	})
+}
+
+// External collections are exempt from the direct-path function validation:
+// prepareSchema sees the RESOLVED schema (e.g. nullability inferred from the
+// external source), not the user-submitted one the proxy validated — judging
+// it by user-schema rules rejects legal external tables (a nullable
+// TextEmbedding input resolved from parquet, as the go-sdk e2e creates).
+func Test_createCollectionTask_prepareSchema_skipsFunctionValidationForExternal(t *testing.T) {
+	collectionName := funcutil.GenRandomStr()
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+			{Name: "doc", DataType: schemapb.DataType_VarChar, Nullable: true, ExternalField: "doc", TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "1024"},
+			}},
+			{Name: "dense", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "8"},
+			}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "tei_fn", Type: schemapb.FunctionType_TextEmbedding,
+			InputFieldNames: []string{"doc"}, OutputFieldNames: []string{"dense"},
+		}},
+	}
+	task := createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			CollectionName: collectionName,
+		},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
+		},
+	}
+	err := task.prepareSchema(context.TODO())
+	assert.NoError(t, err)
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -76,6 +77,13 @@ type upsertTask struct {
 
 	deletePKs       *schemapb.IDs
 	insertFieldData []*schemapb.FieldData
+	// partialUpdateCASGroups binds one partial-update attempt to the metadata
+	// prepared before its MVCC query starts.
+	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS // vchannel -> metadata
+	// partialUpdateOriginalFields is captured before function generation and
+	// query merge mutate the request payload.
+	partialUpdateOriginalFields []*schemapb.FieldData
+	partialUpdateReadTs         uint64
 
 	storageCost segcore.StorageCost
 }
@@ -114,6 +122,14 @@ func (it *upsertTask) EndTs() Timestamp {
 	return it.baseMsg.EndTimestamp
 }
 
+// refreshMutationResultCounts synchronizes the response with the rebuilt
+// insert/delete payload for the current CAS attempt.
+func (it *upsertTask) refreshMutationResultCounts() {
+	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
+	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
+	it.result.UpsertCnt = it.result.InsertCnt
+}
+
 func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	ret := make(map[pChan]pChanStatistics)
 
@@ -132,7 +148,7 @@ func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 }
 
 func (it *upsertTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -160,18 +176,25 @@ func (it *upsertTask) OnEnqueue() error {
 func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
 	var err error
+	readTS := t.partialUpdateReadTs
+	if readTS == 0 {
+		if t.req.GetPartialUpdate() {
+			return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("partial update read timestamp is unavailable")
+		}
+		readTS = t.BeginTs()
+	}
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Retrieve,
-			Timestamp: t.BeginTs(),
+			Timestamp: readTS,
 		},
 		DbName:                t.req.GetDbName(),
 		CollectionName:        t.req.GetCollectionName(),
-		ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+		ConsistencyLevel:      commonpb.ConsistencyLevel_Customized,
 		NotReturnAllMeta:      false,
 		OutputFields:          []string{"*"},
 		UseDefaultConsistency: false,
-		GuaranteeTimestamp:    t.BeginTs(),
+		GuaranteeTimestamp:    readTS,
 		Namespace:             t.req.Namespace,
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
@@ -193,7 +216,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
 		}
-		partID, err := globalMetaCache.GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
+		partID, err := t.getMetaCache().GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
 		if err != nil {
 			log.Warn(ctx, "Failed to get partition id", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
@@ -205,6 +228,9 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.req.Namespace)
 	qt := &queryTask{
+		baseTask: baseTask{
+			metaCache: t.getMetaCache(),
+		},
 		ctx:       t.ctx,
 		Condition: NewTaskCondition(t.ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -214,16 +240,19 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			),
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Customized,
 			QueryLabel:       metrics.UpsertQueryLabel,
 		},
-		request:        queryReq,
-		plan:           plan,
-		mixCoord:       t.node.(*Proxy).mixCoord,
-		lb:             t.node.(*Proxy).lbPolicy,
-		shardclientMgr: t.node.(*Proxy).shardMgr,
-		chMgr:          t.node.(*Proxy).chMgr,
+		request:                queryReq,
+		plan:                   plan,
+		mixCoord:               t.node.(*Proxy).mixCoord,
+		lb:                     t.node.(*Proxy).lbPolicy,
+		shardclientMgr:         t.node.(*Proxy).shardMgr,
+		chMgr:                  t.node.(*Proxy).chMgr,
+		fixedSnapshotTimestamp: readTS,
 	}
+	// Pin the query snapshot to the read timestamp carried by the CAS write.
+	qt.MvccTimestamp = readTS
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
@@ -272,7 +301,8 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		log.Info(ctx, "retrieve by primary key failed", mlog.Err(err))
 		return err
 	}
-	it.storageCost = storageCost
+	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
+	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
 	if len(resp.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
 	}
@@ -305,15 +335,15 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		if typeutil.IsStructSubField(fieldName) {
 			return merr.WrapErrParameterInvalidMsg("partial struct update is not supported for struct sub-field '%s'; use the whole struct field instead", fieldName)
 		}
-		if structSchema := it.schema.schemaHelper.GetStructArrayFieldFromName(fieldName); structSchema != nil {
+		if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(fieldName); structSchema != nil {
 			fieldData.FieldId = structSchema.GetFieldID()
 			fieldData.FieldName = fieldName
-			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.schemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
+			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.SchemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
 				return err
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
 				if len(typeutil.GetFieldDataValidData(subField)) != 0 && subFieldHasData(subField) {
-					subFieldSchema, err := it.schema.schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
+					subFieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 					if err != nil {
 						log.Info(ctx, "get struct sub-field schema failed", mlog.Err(err))
 						return err
@@ -331,7 +361,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			}
 			continue
 		}
-		fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldName)
+		fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(fieldName)
 		if err != nil {
 			log.Info(ctx, "get field schema failed", mlog.Err(err))
 			return err
@@ -371,7 +401,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	}
 
 	// Validate field data alignment before processing to prevent index out of range panic
-	if err := newValidateUtil().checkAligned(fieldsDataToCheckAligned, it.schema.schemaHelper, uint64(upsertIDSize)); err != nil {
+	if err := newValidateUtil().checkAligned(fieldsDataToCheckAligned, it.schema.SchemaHelper, uint64(upsertIDSize)); err != nil {
 		log.Warn(ctx, "check field data aligned failed", mlog.Err(err))
 		return err
 	}
@@ -398,6 +428,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		} else {
 			insertIdxInUpsert = append(insertIdxInUpsert, upsertIdx)
 		}
+	}
+	if it.req.GetPartialUpdate() && primaryFieldSchema.GetAutoID() && len(insertIdxInUpsert) > 0 {
+		return merr.WrapErrParameterInvalidMsg("partial update on an AutoID collection requires every primary key to exist")
 	}
 
 	// 2. merge field data on update semantic
@@ -448,7 +481,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				}
 			}
 
-			if it.schema.schemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
+			if it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
 				if upsertField != nil {
 					if op != schemapb.FieldPartialUpdateOp_REPLACE {
 						return merr.WrapErrParameterInvalidMsg("op %s is not supported for struct field %q", op.String(), existField.GetFieldName())
@@ -460,7 +493,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				continue
 			}
 
-			fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(existField.GetFieldName())
+			fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(existField.GetFieldName())
 			if err != nil {
 				log.Info(ctx, "get field schema failed", mlog.Err(err))
 				return err
@@ -820,16 +853,20 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 // GenNullableFieldData generates all-null nullable field data.
 // Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
+	withValidData := func(fieldData *schemapb.FieldData) *schemapb.FieldData {
+		typeutil.SetFieldDataValidData(fieldData, make([]bool, upsertIDSize))
+		return fieldData
+	}
+
 	switch field.DataType {
 	case schemapb.DataType_Bool:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_BoolData{
 						BoolData: &schemapb.BoolArray{
 							Data: make([]bool, upsertIDSize),
@@ -837,17 +874,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int32:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_IntData{
 						IntData: &schemapb.IntArray{
 							Data: make([]int32, upsertIDSize),
@@ -855,17 +891,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int64:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{
 							Data: make([]int64, upsertIDSize),
@@ -873,17 +908,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Float:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_FloatData{
 						FloatData: &schemapb.FloatArray{
 							Data: make([]float32, upsertIDSize),
@@ -891,17 +925,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Double:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_DoubleData{
 						DoubleData: &schemapb.DoubleArray{
 							Data: make([]float64, upsertIDSize),
@@ -909,17 +942,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_VarChar:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
 							Data: make([]string, upsertIDSize),
@@ -927,17 +959,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_JSON:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_JsonData{
 						JsonData: &schemapb.JSONArray{
 							Data: make([][]byte, upsertIDSize),
@@ -945,17 +976,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Array:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
 							Data:        make([]*schemapb.ScalarField, upsertIDSize),
@@ -964,17 +994,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Timestamptz:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_TimestamptzData{
 						TimestamptzData: &schemapb.TimestamptzArray{
 							Data: make([]int64, upsertIDSize),
@@ -982,18 +1011,17 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	// the intput data of geometry field is in wkt format
 	case schemapb.DataType_Geometry:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_GeometryWktData{
 						GeometryWktData: &schemapb.GeometryWktArray{
 							Data: make([]string, upsertIDSize),
@@ -1001,7 +1029,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	// Nullable vector types
 	case schemapb.DataType_FloatVector:
@@ -1009,105 +1037,99 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Float16Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_BFloat16Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_BinaryVector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_SparseFloatVector:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{},
 					}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int8Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.DataType.String())
@@ -1133,13 +1155,14 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 		validData := make([]bool, rowCount)
 		if typeutil.IsVectorType(subField.GetDataType()) {
 			fieldData.Field = &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{ValidData: validData},
+				Vectors: &schemapb.VectorField{},
 			}
 		} else {
 			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{ValidData: validData},
+				Scalars: &schemapb.ScalarField{},
 			}
 		}
+		typeutil.SetFieldDataValidData(fieldData, validData)
 		fields = append(fields, fieldData)
 	}
 	return &schemapb.FieldData{
@@ -1220,8 +1243,8 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 
 	seenSubFieldIDs := make(map[int64]struct{}, len(structArrays.GetFields()))
 	for _, subField := range structArrays.GetFields() {
-		if typeutil.HasFieldDataValidDataConflict(subField) {
-			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' cannot set both legacy and field-specific valid_data",
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
+			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
 				subField.GetFieldName(), fieldData.GetFieldName())
 		}
 		subFieldSchema, err := schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
@@ -1430,9 +1453,15 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	allFields := typeutil.GetAllFieldSchemas(it.schema.CollectionSchema)
 
-	// use the passed pk as new pk when autoID == false
-	// automatic generate pk as new pk wehen autoID == true
-	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(ctx, allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	// Partial update identifies an existing AutoID row by its current PK. Keep
+	// that PK so delete, insert, and CAS remain on the same vchannel.
+	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(
+		ctx,
+		allFields,
+		it.schema.CollectionSchema,
+		it.upsertMsg.InsertMsg,
+		it.req.GetPartialUpdate(),
+	)
 	if err != nil {
 		log.Warn(ctx, "check primary field data and hash primary key failed when upsert",
 			mlog.Err(err))
@@ -1481,7 +1510,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
+		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.SchemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
 
@@ -1521,7 +1550,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return err
 		}
-		partID, err := globalMetaCache.GetPartitionID(ctx, it.req.GetDbName(), collName, partName)
+		partID, err := it.getMetaCache().GetPartitionID(ctx, it.req.GetDbName(), collName, partName)
 		if err != nil {
 			log.Warn(ctx, "Failed to get partition id", mlog.String("collectionName", collName), mlog.String("partitionName", partName), mlog.Err(err))
 			return err
@@ -1551,33 +1580,36 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		},
 		Timestamp: it.EndTs(),
 	}
+	if err := validateAndNormalizeFieldDataValidData(it.req.GetFieldsData()); err != nil {
+		return err
+	}
 
 	// check collection exists
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
+	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
+	colInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
 
 	if it.schemaTimestamp != 0 {
-		if it.schemaTimestamp != colInfo.updateTimestamp {
+		if it.schemaTimestamp != colInfo.UpdateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
 			log.Info(ctx, "collection schema mismatch", mlog.String("collectionName", collectionName),
 				mlog.Uint64("requestSchemaTs", it.schemaTimestamp),
-				mlog.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
+				mlog.Uint64("collectionSchemaTs", colInfo.UpdateTimestamp),
 				mlog.Err(err))
 			return err
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
+	schema, err := it.getMetaCache().GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection schema",
 			mlog.String("collectionName", collectionName),
@@ -1610,7 +1642,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		it.req.PartitionName = partitionName
 	}
 
-	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
+	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.getMetaCache(), it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed",
 			mlog.String("collectionName", collectionName),
@@ -1626,12 +1658,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.req.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.req.GetDbName(), collectionName, "")
+			pinfo, err := it.getMetaCache().GetPartitionInfo(ctx, it.req.GetDbName(), collectionName, "")
 			if err != nil {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
 			}
-			it.req.PartitionName = pinfo.name
+			it.req.PartitionName = pinfo.Name
 		}
 	}
 
@@ -1687,11 +1719,19 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
 	}
 
+	if it.req.GetPartialUpdate() {
+		it.partialUpdateOriginalFields = cloneFieldDataList(it.req.GetFieldsData())
+	}
+
 	if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, it.req.GetPartialUpdate()); err != nil {
 		return err
 	}
 
 	if it.req.GetPartialUpdate() {
+		if err = it.preparePartialUpdateCASGroups(ctx); err != nil {
+			log.Warn(ctx, "Fail to prepare partial update CAS metadata", mlog.Err(err))
+			return err
+		}
 		err = it.queryPreExecute(ctx)
 		if err != nil {
 			log.Warn(ctx, "Fail to queryPreExecute", mlog.Err(err))
@@ -1715,14 +1755,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
-	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
+	it.refreshMutationResultCounts()
 	if it.result.DeleteCnt != it.result.InsertCnt {
 		log.Info(ctx, "DeleteCnt and InsertCnt are not the same when upsert",
 			mlog.Int64("DeleteCnt", it.result.DeleteCnt),
 			mlog.Int64("InsertCnt", it.result.InsertCnt))
 	}
-	it.result.UpsertCnt = it.result.InsertCnt
 	log.Debug(ctx, "Proxy Upsert PreExecute done")
 	return nil
 }

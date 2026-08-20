@@ -125,10 +125,12 @@ func TestFieldDataColumnValidDataSources(t *testing.T) {
 	}{
 		{name: "legacy fallback", legacy: validData},
 		{name: "field-specific", current: validData},
-		{name: "dual source", legacy: validData, current: validData, wantErr: true},
+		{name: "matching dual sources", legacy: validData, current: validData},
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			col, err := FieldDataColumn(makeField(test.legacy, test.current), 0, -1)
+			field := makeField(test.legacy, test.current)
+			col, err := FieldDataColumn(field, 0, -1)
 			if test.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, col)
@@ -136,8 +138,30 @@ func TestFieldDataColumnValidDataSources(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.NotNil(t, col)
+			assert.Nil(t, field.GetValidData())
+			assert.Equal(t, validData, field.GetScalars().GetValidData())
 		})
 	}
+}
+
+func TestValidateAndNormalizeFieldDataValidDataRejectsNestedMismatch(t *testing.T) {
+	legacy := []bool{true, false}
+	current := []bool{false, true}
+	subField := &schemapb.FieldData{
+		ValidData: legacy,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{ValidData: current},
+		},
+	}
+	field := &schemapb.FieldData{
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{subField}},
+		},
+	}
+
+	assert.False(t, validateAndNormalizeFieldDataValidData(field))
+	assert.Equal(t, legacy, subField.GetValidData())
+	assert.Equal(t, current, subField.GetScalars().GetValidData())
 }
 
 func TestGetIntData(t *testing.T) {

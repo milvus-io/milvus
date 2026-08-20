@@ -149,6 +149,77 @@ func TestBinlogStreamWriter(t *testing.T) {
 	})
 }
 
+func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		}
+	}
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		field         *schemapb.FieldSchema
+		expectedRatio int
+	}{
+		{
+			name: "legacy int32 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+			expectedRatio: 4,
+		},
+		{
+			name: "nested int32 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
+			},
+			expectedRatio: 4,
+		},
+		{
+			name: "deeply nested int64 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema: array(array(array(
+					leaf(schemapb.DataType_Int64),
+				))),
+			},
+			expectedRatio: 8,
+		},
+		{
+			name: "nested float array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  array(array(leaf(schemapb.DataType_Float))),
+			},
+			expectedRatio: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var buffer bytes.Buffer
+			writer, err := newSingleFieldRecordWriter(test.field, &buffer)
+			require.NoError(t, err)
+			require.Equal(t, test.expectedRatio, writer.memoryExpansionRatio)
+			require.NoError(t, writer.Close())
+		})
+	}
+}
+
 func TestRecordToInsertData(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -547,6 +618,7 @@ func TestDeltalogReaderExternalContext(t *testing.T) {
 	defer mock.UnPatch()
 
 	reader, err := NewDeltalogReader(
+		context.Background(),
 		schemapb.DataType_Int64,
 		[]string{sourcePath},
 		WithVersion(StorageV3),

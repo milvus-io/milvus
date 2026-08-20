@@ -4566,6 +4566,138 @@ func (_c *MixCoord_GetDcMetrics_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
+// GetExportSnapshotState provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetExportSnapshotState(_a0 context.Context, _a1 *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExportSnapshotState")
+	}
+
+	var r0 *datapb.GetExportSnapshotStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetExportSnapshotStateRequest) *datapb.GetExportSnapshotStateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetExportSnapshotStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetExportSnapshotStateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetExportSnapshotState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExportSnapshotState'
+type MixCoord_GetExportSnapshotState_Call struct {
+	*mock.Call
+}
+
+// GetExportSnapshotState is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.GetExportSnapshotStateRequest
+func (_e *MixCoord_Expecter) GetExportSnapshotState(_a0 interface{}, _a1 interface{}) *MixCoord_GetExportSnapshotState_Call {
+	return &MixCoord_GetExportSnapshotState_Call{Call: _e.mock.On("GetExportSnapshotState", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetExportSnapshotState_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetExportSnapshotStateRequest)) *MixCoord_GetExportSnapshotState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetExportSnapshotStateRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetExportSnapshotState_Call) Return(_a0 *datapb.GetExportSnapshotStateResponse, _a1 error) *MixCoord_GetExportSnapshotState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetExportSnapshotState_Call) RunAndReturn(run func(context.Context, *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error)) *MixCoord_GetExportSnapshotState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFileResources provides a mock function with given fields: ctx, resourceIDs
+func (_m *MixCoord) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	_va := make([]interface{}, len(resourceIDs))
+	for _i := range resourceIDs {
+		_va[_i] = resourceIDs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFileResources")
+	}
+
+	var r0 []*internalpb.FileResourceInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...int64) ([]*internalpb.FileResourceInfo, error)); ok {
+		return rf(ctx, resourceIDs...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...int64) []*internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, resourceIDs...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.FileResourceInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...int64) error); ok {
+		r1 = rf(ctx, resourceIDs...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFileResources'
+type MixCoord_GetFileResources_Call struct {
+	*mock.Call
+}
+
+// GetFileResources is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceIDs ...int64
+func (_e *MixCoord_Expecter) GetFileResources(ctx interface{}, resourceIDs ...interface{}) *MixCoord_GetFileResources_Call {
+	return &MixCoord_GetFileResources_Call{Call: _e.mock.On("GetFileResources",
+		append([]interface{}{ctx}, resourceIDs...)...)}
+}
+
+func (_c *MixCoord_GetFileResources_Call) Run(run func(ctx context.Context, resourceIDs ...int64)) *MixCoord_GetFileResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetFileResources_Call) Return(_a0 []*internalpb.FileResourceInfo, _a1 error) *MixCoord_GetFileResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetFileResources_Call) RunAndReturn(run func(context.Context, ...int64) ([]*internalpb.FileResourceInfo, error)) *MixCoord_GetFileResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetFlushAllState(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ret := _m.Called(_a0, _a1)

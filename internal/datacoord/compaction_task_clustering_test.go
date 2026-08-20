@@ -395,14 +395,7 @@ func (s *ClusteringCompactionTaskSuite) newNamespaceClusteringTask(enableNamespa
 	return newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler, newMockVersionManager())
 }
 
-// TestBuildCompactionRequest_NamespaceFileResourcesInRefMode verifies that a namespace-enabled
-// clustering plan carries both FileResources (for inline text-index analyzer resources in ref mode)
-// and CurrentScalarIndexVersion (issue #50145, PR #50140).
-func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFileResourcesInRefMode() {
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
-	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
-
+func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFileResources() {
 	expectedResources := []*internalpb.FileResourceInfo{
 		{Id: 7, Name: "dict", Path: "dict.jieba"},
 	}
@@ -410,18 +403,39 @@ func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFile
 	mockVer := mockey.Mock((*versionManagerImpl).ResolveScalarIndexVersion).Return(int32(42)).Build()
 	defer mockVer.UnPatch()
 
-	s.Run("namespace_enabled", func() {
-		s.NoError(s.meta.UpdateFileResources(context.TODO(), expectedResources, 1))
+	s.Run("namespace_enabled_ref_mode", func() {
+		paramtable.Get().Save(Params.CommonCfg.DNFileResourceMode.Key, "ref")
+		s.T().Cleanup(func() {
+			paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
+		})
+		resourceBroker := broker.NewMockBroker(s.T())
+		resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(expectedResources, nil)
+		s.meta.broker = resourceBroker
 		task := s.newNamespaceClusteringTask(true, []int64{7})
 		plan, err := task.BuildCompactionRequest()
 		s.Require().NoError(err)
-		s.Equal(expectedResources, plan.GetFileResources(),
-			"namespace clustering must carry FileResources in ref mode (issue #50145, PR #50140)")
+		s.Equal(expectedResources, plan.GetFileResources())
 		s.Equal(int32(42), plan.GetCurrentScalarIndexVersion(),
 			"clustering plan must carry CurrentScalarIndexVersion for inline text index metadata")
 	})
 
+	s.Run("namespace_enabled_sync_mode_skips_file_resources", func() {
+		paramtable.Get().Save(Params.CommonCfg.DNFileResourceMode.Key, "sync")
+		s.T().Cleanup(func() {
+			paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
+		})
+		task := s.newNamespaceClusteringTask(true, []int64{7})
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Empty(plan.GetFileResources())
+		s.Equal(int32(42), plan.GetCurrentScalarIndexVersion())
+	})
+
 	s.Run("namespace_disabled_skips_file_resources", func() {
+		paramtable.Get().Save(Params.CommonCfg.DNFileResourceMode.Key, "ref")
+		s.T().Cleanup(func() {
+			paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
+		})
 		task := s.newNamespaceClusteringTask(false, []int64{7})
 		plan, err := task.BuildCompactionRequest()
 		s.Require().NoError(err)

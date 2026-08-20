@@ -44,13 +44,13 @@ import (
 
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
 
-func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
+func (h *HandlersV1) checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
 	username, ok := c.Get(ContextUsername)
 	if !ok || username.(string) == "" {
 		HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		return RestRequestInterceptorErr
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	_, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
 	if authErr != nil {
 		HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		return RestRequestInterceptorErr
@@ -64,6 +64,7 @@ type RestRequestInterceptor func(ctx context.Context, ginCtx *gin.Context, req a
 // HandlersV1 handles http requests
 type HandlersV1 struct {
 	proxy        types.ProxyComponent
+	metaCache    func() proxy.Cache
 	interceptors []RestRequestInterceptor
 }
 
@@ -71,13 +72,14 @@ type HandlersV1 struct {
 func NewHandlersV1(proxyComponent types.ProxyComponent) *HandlersV1 {
 	h := &HandlersV1{
 		proxy:        proxyComponent,
+		metaCache:    getProxyMetaCache(proxyComponent),
 		interceptors: []RestRequestInterceptor{},
 	}
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		h.interceptors = append(h.interceptors,
 			// authorization
 			func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-				err := checkAuthorization(ctx, ginCtx, req)
+				err := h.checkAuthorization(ctx, ginCtx, req)
 				if err != nil {
 					return nil, err
 				}
@@ -111,7 +113,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 	if dbName == DefaultDbName {
 		return nil
 	}
-	if proxy.CheckDatabase(ctx, dbName) {
+	if proxy.CheckDatabase(ctx, h.metaCache(), dbName) {
 		return nil
 	}
 	response, err := h.proxy.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
@@ -135,7 +137,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 }
 
 func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache(), dbName, collectionName)
 	if err == nil {
 		return collSchema.CollectionSchema, nil
 	}
@@ -557,7 +559,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", response), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				HTTPReturnMessage: resultErrMessage(err),
 			})
 		} else {
 			HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
@@ -601,7 +603,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -618,6 +620,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, err
 		}
 		queryReq.Expr = filter
+		queryReq.ExprTemplateValues = idTemplateValues
 		return h.proxy.Query(reqCtx, queryReq)
 	})
 	if err == RestRequestInterceptorErr {
@@ -636,7 +639,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", response), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				HTTPReturnMessage: resultErrMessage(err),
 			})
 		} else {
 			HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
@@ -680,7 +683,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 		deleteReq.Expr = httpReq.Filter
 		if deleteReq.Expr == "" {
 			body, _ := c.Get(gin.BodyBytesKey)
-			filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+			filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 			if err != nil {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -689,6 +692,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 				return nil, RestRequestInterceptorErr
 			}
 			deleteReq.Expr = filter
+			deleteReq.ExprTemplateValues = idTemplateValues
 		}
 		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -1034,7 +1038,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+					HTTPReturnMessage: resultErrMessage(err),
 				})
 			} else {
 				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})

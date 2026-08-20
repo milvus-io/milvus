@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <vector>
 #include "common/Utils.h"
 #include "test_utils/DataGen.h"
@@ -1381,10 +1383,82 @@ TEST_P(QueryAggTest, GroupByEmptyResultMultipleAggs) {
 }
 
 // ============================================================
-// HashTable rehash and group limit tests
+// HashTable probe pipeline, rehash, and group limit tests
 // ============================================================
 
 namespace {
+std::unique_ptr<milvus::exec::HashTable>
+createInt64HashTable(
+    int64_t maxNumGroups =
+        milvus::segcore::SegcoreConfig::kDefaultMaxGroupByGroups) {
+    std::vector<milvus::exec::Accumulator> accumulators;
+    std::vector<std::unique_ptr<milvus::exec::VectorHasher>> hashers;
+    hashers.push_back(
+        milvus::exec::VectorHasher::create(milvus::DataType::INT64, 0));
+    return std::make_unique<milvus::exec::HashTable>(
+        std::move(hashers), accumulators, maxNumGroups);
+}
+
+milvus::RowVectorPtr
+makeInt64Input(const std::vector<int64_t>& values) {
+    auto column = std::make_shared<milvus::ColumnVector>(
+        milvus::DataType::INT64,
+        static_cast<milvus::vector_size_t>(values.size()));
+    auto* data = reinterpret_cast<int64_t*>(column->GetRawData());
+    for (size_t i = 0; i < values.size(); ++i) {
+        data[i] = values[i];
+    }
+    std::vector<milvus::VectorPtr> children = {column};
+    return std::make_shared<milvus::RowVector>(children);
+}
+
+void
+probeInt64Values(milvus::exec::HashTable& table,
+                 const std::vector<int64_t>& values,
+                 milvus::exec::HashLookup& lookup) {
+    auto input = makeInt64Input(values);
+    table.prepareForGroupProbe(lookup, input);
+    table.groupProbe(lookup);
+}
+
+void
+initializeEmptyHashTable(milvus::exec::HashTable& table) {
+    milvus::exec::HashLookup lookup(table.hashers());
+    probeInt64Values(table, {}, lookup);
+}
+
+std::vector<int64_t>
+findInt64KeysWithSameProbeSignature(milvus::exec::HashTable& table,
+                                    size_t count,
+                                    bool requireSameTag) {
+    constexpr int32_t kCandidateCount = 1 << 16;
+    std::vector<int64_t> candidates(kCandidateCount);
+    for (int32_t i = 0; i < kCandidateCount; ++i) {
+        candidates[i] = i;
+    }
+
+    auto input = makeInt64Input(candidates);
+    milvus::exec::HashLookup lookup(table.hashers());
+    table.prepareForGroupProbe(lookup, input);
+
+    std::unordered_map<uint64_t, std::vector<int64_t>> keysBySignature;
+    keysBySignature.reserve(kCandidateCount);
+    for (int32_t i = 0; i < kCandidateCount; ++i) {
+        const auto hash = lookup.hashes_[i];
+        auto signature = static_cast<uint64_t>(table.bucketOffset(hash));
+        if (requireSameTag) {
+            signature =
+                (signature << 8) | milvus::exec::HashTable::hashTag(hash);
+        }
+        auto& keys = keysBySignature[signature];
+        keys.push_back(candidates[i]);
+        if (keys.size() == count) {
+            return keys;
+        }
+    }
+    return {};
+}
+
 // Helper to create a HashTable with a single INT64 key column, no accumulators.
 // Inserts 'numGroups' distinct INT64 values via groupProbe in batches.
 // Returns the HashTable.
@@ -1422,6 +1496,182 @@ createAndInsertGroups(int64_t numGroups,
     return table;
 }
 }  // namespace
+
+TEST(HashTableProbePipelineTest, TestDuplicateKeysWithinBatch) {
+    auto table = createInt64HashTable();
+    const std::vector<int64_t> values = {42, 42, 42, 42};
+
+    milvus::exec::HashLookup lookup(table->hashers());
+    probeInt64Values(*table, values, lookup);
+
+    ASSERT_EQ(table->rows()->allRows().size(), 1);
+    ASSERT_EQ(lookup.newGroups_.size(), 1);
+    EXPECT_EQ(lookup.newGroups_[0], 0);
+    ASSERT_EQ(lookup.hits_.size(), values.size());
+    ASSERT_NE(lookup.hits_[0], nullptr);
+    for (size_t i = 1; i < lookup.hits_.size(); ++i) {
+        EXPECT_EQ(lookup.hits_[i], lookup.hits_[0]);
+    }
+
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeInt64Values(*table, values, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    for (auto* hit : reprobe.hits_) {
+        EXPECT_EQ(hit, lookup.hits_[0]);
+    }
+}
+
+TEST(HashTableProbePipelineTest, TestDifferentKeysSharingBucket) {
+    auto table = createInt64HashTable();
+    initializeEmptyHashTable(*table);
+    const auto values = findInt64KeysWithSameProbeSignature(*table, 4, false);
+    ASSERT_EQ(values.size(), 4);
+
+    milvus::exec::HashLookup lookup(table->hashers());
+    probeInt64Values(*table, values, lookup);
+
+    ASSERT_EQ(table->rows()->allRows().size(), values.size());
+    ASSERT_EQ(lookup.newGroups_.size(), values.size());
+    for (size_t i = 0; i < lookup.newGroups_.size(); ++i) {
+        EXPECT_EQ(lookup.newGroups_[i], i);
+    }
+    const std::vector<char*> firstHits(lookup.hits_.begin(),
+                                       lookup.hits_.end());
+
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeInt64Values(*table, values, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    ASSERT_EQ(reprobe.hits_.size(), firstHits.size());
+    for (size_t i = 0; i < firstHits.size(); ++i) {
+        EXPECT_EQ(reprobe.hits_[i], firstHits[i]);
+    }
+}
+
+TEST(HashTableProbePipelineTest, TestRefreshesStaleSameTagCandidate) {
+    auto table = createInt64HashTable();
+    initializeEmptyHashTable(*table);
+    const auto collidingKeys =
+        findInt64KeysWithSameProbeSignature(*table, 2, true);
+    ASSERT_EQ(collidingKeys.size(), 2);
+    const auto keyA = collidingKeys[0];
+    const auto keyB = collidingKeys[1];
+
+    milvus::exec::HashLookup preload(table->hashers());
+    probeInt64Values(*table, {keyA}, preload);
+    ASSERT_EQ(preload.newGroups_.size(), 1);
+    ASSERT_NE(preload.hits_[0], nullptr);
+    auto* groupA = preload.hits_[0];
+
+    const std::vector<int64_t> values = {keyB, keyB, keyA, keyB};
+    milvus::exec::HashLookup lookup(table->hashers());
+    probeInt64Values(*table, values, lookup);
+
+    ASSERT_EQ(table->rows()->allRows().size(), 2);
+    ASSERT_EQ(lookup.newGroups_.size(), 1);
+    EXPECT_EQ(lookup.newGroups_[0], 0);
+    ASSERT_EQ(lookup.hits_.size(), values.size());
+    ASSERT_NE(lookup.hits_[0], nullptr);
+    EXPECT_NE(lookup.hits_[0], groupA);
+    EXPECT_EQ(lookup.hits_[1], lookup.hits_[0]);
+    EXPECT_EQ(lookup.hits_[2], groupA);
+    EXPECT_EQ(lookup.hits_[3], lookup.hits_[0]);
+
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeInt64Values(*table, {keyA, keyB}, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    ASSERT_EQ(reprobe.hits_.size(), 2);
+    EXPECT_EQ(reprobe.hits_[0], groupA);
+    EXPECT_EQ(reprobe.hits_[1], lookup.hits_[0]);
+}
+
+TEST(HashTableProbePipelineTest, TestScalarTails) {
+    for (int32_t size = 1; size <= 8; ++size) {
+        SCOPED_TRACE(size);
+        auto table = createInt64HashTable();
+        std::vector<int64_t> values(size);
+        for (int32_t i = 0; i < size; ++i) {
+            values[i] = i;
+        }
+        if (size > 4) {
+            values[4] = values[3];
+        }
+
+        milvus::exec::HashLookup lookup(table->hashers());
+        probeInt64Values(*table, values, lookup);
+
+        const std::set<int64_t> distinct(values.begin(), values.end());
+        EXPECT_EQ(table->rows()->allRows().size(), distinct.size());
+        EXPECT_EQ(lookup.newGroups_.size(), distinct.size());
+        if (size > 4) {
+            EXPECT_EQ(lookup.hits_[3], lookup.hits_[4]);
+        }
+
+        milvus::exec::HashLookup reprobe(table->hashers());
+        probeInt64Values(*table, values, reprobe);
+        EXPECT_TRUE(reprobe.newGroups_.empty());
+    }
+}
+
+TEST(HashTableProbePipelineTest, TestExistingBatchDoesNotRehashNearThreshold) {
+    auto table = createInt64HashTable();
+    initializeEmptyHashTable(*table);
+    const auto threshold = table->rehashSize();
+    ASSERT_GT(threshold, 4);
+
+    std::vector<int64_t> initialValues(threshold - 1);
+    for (size_t i = 0; i < initialValues.size(); ++i) {
+        initialValues[i] = static_cast<int64_t>(i);
+    }
+    milvus::exec::HashLookup initialLookup(table->hashers());
+    probeInt64Values(*table, initialValues, initialLookup);
+    ASSERT_EQ(table->rows()->allRows().size(), initialValues.size());
+    ASSERT_EQ(table->rehashSize(), threshold);
+
+    const std::vector<int64_t> existingValues = {0, 1, 2, 3};
+    milvus::exec::HashLookup existingLookup(table->hashers());
+    probeInt64Values(*table, existingValues, existingLookup);
+
+    EXPECT_TRUE(existingLookup.newGroups_.empty());
+    EXPECT_EQ(table->rehashSize(), threshold);
+    for (auto* hit : existingLookup.hits_) {
+        EXPECT_NE(hit, nullptr);
+    }
+}
+
+TEST(HashTableProbePipelineTest, TestRehashWhenNewGroupsCrossBoundary) {
+    auto table = createInt64HashTable();
+    initializeEmptyHashTable(*table);
+    const auto threshold = table->rehashSize();
+    ASSERT_GT(threshold, 4);
+
+    std::vector<int64_t> initialValues(threshold - 3);
+    for (size_t i = 0; i < initialValues.size(); ++i) {
+        initialValues[i] = static_cast<int64_t>(i);
+    }
+    milvus::exec::HashLookup initialLookup(table->hashers());
+    probeInt64Values(*table, initialValues, initialLookup);
+    ASSERT_EQ(table->rows()->allRows().size(), initialValues.size());
+
+    std::vector<int64_t> boundaryValues(4);
+    for (size_t i = 0; i < boundaryValues.size(); ++i) {
+        boundaryValues[i] = static_cast<int64_t>(threshold + 100 + i);
+    }
+    milvus::exec::HashLookup boundaryLookup(table->hashers());
+    probeInt64Values(*table, boundaryValues, boundaryLookup);
+    EXPECT_EQ(boundaryLookup.newGroups_.size(), boundaryValues.size());
+    EXPECT_EQ(table->rows()->allRows().size(), threshold + 1);
+
+    std::vector<int64_t> allValues = initialValues;
+    allValues.insert(
+        allValues.end(), boundaryValues.begin(), boundaryValues.end());
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeInt64Values(*table, allValues, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    ASSERT_EQ(reprobe.hits_.size(), allValues.size());
+    for (auto* hit : reprobe.hits_) {
+        EXPECT_NE(hit, nullptr);
+    }
+}
 
 TEST(HashTableRehashTest, TestHashTableRehashBasic) {
     // Insert 5000 distinct groups (exceeds initial 2048 capacity),

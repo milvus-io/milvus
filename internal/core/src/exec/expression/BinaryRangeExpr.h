@@ -115,7 +115,7 @@ struct BinaryRangeElementFunc {
 // 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
 #define BinaryRangeJSONCompare(cmp)                                    \
     do {                                                               \
-        if (valid_data != nullptr && !valid_data[offset]) {            \
+        if (valid_data && !valid_data[offset]) {                       \
             res[i] = valid_res[i] = false;                             \
             break;                                                     \
         }                                                              \
@@ -162,7 +162,7 @@ struct BinaryRangeElementFuncForJson {
                const ValueType& val2,
                const std::string& pointer,
                const milvus::Json* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -201,7 +201,7 @@ struct BinaryRangeElementFuncForArray {
                const ValueType& val2,
                int index,
                const milvus::ArrayView* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -219,7 +219,7 @@ struct BinaryRangeElementFuncForArray {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }

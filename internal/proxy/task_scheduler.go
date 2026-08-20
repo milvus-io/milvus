@@ -211,7 +211,7 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	var id UniqueID
 	if t.CanSkipAllocTimestamp() {
 		ts = tsoutil.ComposeTS(time.Now().UnixMilli(), 0)
-		id, err = globalMetaCache.AllocID(t.TraceCtx())
+		id, err = t.getMetaCache().AllocID(t.TraceCtx())
 		if err != nil {
 			return err
 		}

@@ -34,6 +34,8 @@ var (
 	NewDecoder = json.NewDecoder
 	// NewEncoder is exported from bytedance/sonic package.
 	NewEncoder = json.NewEncoder
+	// Valid is exported from bytedance/sonic package.
+	Valid = json.Valid
 )
 
 type (

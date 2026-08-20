@@ -450,7 +450,6 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 		Version:     2001,
 	})
 
-	s.delegator.(*shardDelegator).distribution.Flush()
 	sealed, growing = s.delegator.GetSegmentInfo(false)
 	s.EqualValues([]SnapshotItem{
 		{
@@ -782,7 +781,6 @@ func (s *DelegatorSuite) TestSearch() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -971,7 +969,6 @@ func (s *DelegatorSuite) TestQuery() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1255,7 +1252,6 @@ func (s *DelegatorSuite) TestQueryStream() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
@@ -1284,6 +1280,89 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		s.Error(err)
 	})
+}
+
+func (s *DelegatorSuite) TestQueryStreamCloseWaitsForActiveRequest() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+
+	defer func() {
+		s.workerManager.AssertExpectations(s.T())
+		s.workerManager.ExpectedCalls = nil
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := streamrpc.NewLocalQueryClient(ctx)
+	server := client.CreateServer()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	queryDone := make(chan error, 1)
+	closeDone := make(chan struct{})
+	var enteredOnce sync.Once
+
+	worker1 := cluster.NewMockWorker(s.T())
+	worker2 := cluster.NewMockWorker(s.T())
+	workers := map[int64]cluster.Worker{
+		1: worker1,
+		2: worker2,
+	}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+		return workers[nodeID]
+	}, nil)
+
+	blockQueryStream := func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+		enteredOnce.Do(func() { close(entered) })
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).RunAndReturn(blockQueryStream)
+	worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).RunAndReturn(blockQueryStream)
+
+	go func() {
+		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		}, server)
+		queryDone <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		s.FailNow("QueryStream did not enter worker call")
+	}
+
+	go func() {
+		s.delegator.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+		s.FailNow("delegator Close returned while QueryStream was still active")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		s.FailNow("delegator Close did not return after QueryStream was released")
+	}
+	select {
+	case err := <-queryDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("QueryStream did not finish")
+	}
 }
 
 func (s *DelegatorSuite) TestGetStats() {
@@ -1433,7 +1512,6 @@ func (s *DelegatorSuite) TestGetStats() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
@@ -1569,7 +1647,6 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)

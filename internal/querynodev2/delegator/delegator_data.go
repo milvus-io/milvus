@@ -674,11 +674,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 		segmentID := req.GetInfos()[0].GetSegmentID()
 		nodeID := req.GetDstNodeID()
-		_, err, _ := sd.sf.Do(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
-			err := worker.LoadSegments(ctx, req)
-			return struct{}{}, err
-		})
-		return err
+		// Join any identical in-flight load, but stop waiting when this
+		// caller's ctx ends; the shared load keeps running for its initiator.
+		select {
+		case res := <-sd.sf.DoChan(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
+			return struct{}{}, worker.LoadSegments(ctx, req)
+		}):
+			return res.Err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	// separate infos into different load task
@@ -1483,6 +1488,11 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest, functionRu
 }
 
 func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return nil, err
+	}
+	defer sd.lifetime.Done()
+
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {

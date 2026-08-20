@@ -173,6 +173,7 @@ func (s *mixCoordImpl) initInternal() error {
 		mlog.Error(s.ctx, "rootCoord init failed", mlog.Err(err))
 		return err
 	}
+	s.fileResourceObserver.InitProxy(s.rootcoordServer.GetProxyClientManager())
 
 	if err := s.rootcoordServer.Start(); err != nil {
 		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
@@ -245,7 +246,9 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
-	return s.queryCoordServer.ServerExist(serverID) || s.datacoordServer.ServerExist(serverID)
+	return s.queryCoordServer.ServerExist(serverID) ||
+		s.datacoordServer.ServerExist(serverID) ||
+		s.rootcoordServer.ServerExist(serverID)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
@@ -1324,6 +1327,11 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 	return s.rootcoordServer.ListFileResources(ctx, req)
 }
 
+// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
+func (s *mixCoordImpl) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	return s.rootcoordServer.GetFileResources(ctx, resourceIDs...)
+}
+
 // TruncateCollection truncate collection
 func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.rootcoordServer.TruncateCollection(ctx, req)
@@ -1357,6 +1365,10 @@ func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *datapb.RestoreS
 
 func (s *mixCoordImpl) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
 	return s.datacoordServer.ExportSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	return s.datacoordServer.GetExportSnapshotState(ctx, req)
 }
 
 func (s *mixCoordImpl) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {

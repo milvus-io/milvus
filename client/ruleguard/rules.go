@@ -407,3 +407,29 @@ func badlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.RUnlock()`).Report(`maybe $mu.RLock() was intended?`)
 	m.Match(`$mu.RLock(); defer $mu.Unlock()`).Report(`maybe $mu.Lock() was intended?`)
 }
+
+// fieldDataValidDataAccess prevents client code from depending on protobuf
+// validity storage details. The compatibility implementation in
+// column/generic_base.go is the sole exception because the client module is
+// intentionally independent from the server's pkg/v3/typeutil module.
+func fieldDataValidDataAccess(m dsl.Matcher) {
+	m.Import("github.com/milvus-io/milvus-proto/go-api/v3/schemapb")
+	isFieldDataType := func(v dsl.Var) bool {
+		return v.Type.Is("schemapb.FieldData") || v.Type.Is("*schemapb.FieldData") ||
+			v.Type.Is("schemapb.ScalarField") || v.Type.Is("*schemapb.ScalarField") ||
+			v.Type.Is("schemapb.VectorField") || v.Type.Is("*schemapb.VectorField")
+	}
+	// Match selectors as expressions so reads, writes, getter calls, and getter
+	// method values are all rejected for both pointer and value receivers.
+	m.Match("$x.ValidData", "$x.GetValidData").
+		Where(isFieldDataType(m["x"])).
+		Report("do not access protobuf valid_data directly; use the validity helpers in column/generic_base.go")
+
+	// A keyed composite literal bypasses selector matching, so reject setting
+	// ValidData while constructing any of the three protobuf message types too.
+	m.Match(`$x{$*_, ValidData: $_, $*_}`).
+		Where(m["x"].Type.Is("schemapb.FieldData") ||
+			m["x"].Type.Is("schemapb.ScalarField") ||
+			m["x"].Type.Is("schemapb.VectorField")).
+		Report("do not access protobuf valid_data directly; use the validity helpers in column/generic_base.go")
+}

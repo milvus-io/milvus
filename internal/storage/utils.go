@@ -95,6 +95,9 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 			return merr.WrapErrParameterInvalidMsg("element nullable %s is not supported in V1 storage format, fieldName=%s",
 				field.GetDataType().String(), field.GetName())
 		}
+		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+			return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, fieldName=%s", field.GetName())
+		}
 		if isNullableArrayOfVectorField(field) {
 			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
@@ -106,6 +109,10 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 				(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
 				return merr.WrapErrParameterInvalidMsg("element nullable %s is not supported in V1 storage format, structName=%s, fieldName=%s",
 					field.GetDataType().String(), structField.GetName(), field.GetName())
+			}
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, structName=%s, fieldName=%s",
+					structField.GetName(), field.GetName())
 			}
 			if isNullableArrayOfVectorField(field) {
 				return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
@@ -596,9 +603,9 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
 	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
 	for _, fieldData := range msg.GetFieldsData() {
-		if typeutil.HasFieldDataValidDataConflict(fieldData) {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(fieldData) {
 			return merr.WrapErrParameterInvalidMsg(
-				"field %s cannot set both legacy and field-specific valid_data",
+				"field %s has different legacy and field-specific valid_data",
 				fieldData.GetFieldName(),
 			)
 		}
@@ -624,9 +631,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			// unreachable
 			panic("struct is not flattened")
 		}
-		if typeutil.HasFieldDataValidDataConflict(field) {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
 			return nil, merr.WrapErrParameterInvalidMsg(
-				"field %s cannot set both legacy and field-specific valid_data",
+				"field %s has different legacy and field-specific valid_data",
 				field.GetFieldName(),
 			)
 		}

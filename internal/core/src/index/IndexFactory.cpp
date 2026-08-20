@@ -186,7 +186,7 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
-OffsetMappingMmapDiskCost(const Config& config, int64_t num_rows) {
+IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
     }
@@ -672,12 +672,11 @@ IndexFactory::VecIndexLoadResource(
         request.max_memory_cost = 2 * res.memoryCost;
     }
     if (knowhere::UseDiskLoad(index_type, index_version)) {
-        const auto offset_mapping_disk_cost =
-            OffsetMappingMmapDiskCost(config, num_rows);
+        const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);
         request.final_disk_cost =
-            SaturatingAdd(request.final_disk_cost, offset_mapping_disk_cost);
+            SaturatingAdd(request.final_disk_cost, id_map_disk_cost);
         request.max_disk_cost =
-            SaturatingAdd(request.max_disk_cost, offset_mapping_disk_cost);
+            SaturatingAdd(request.max_disk_cost, id_map_disk_cost);
     }
     return request;
 }
@@ -1187,6 +1186,10 @@ IndexFactory::CreateNestedIndex(
     if (index_type == BITMAP_INDEX_TYPE) {
         return CreateNestedIndexBitmap(file_manager_context);
     }
+    if (index_type == HYBRID_INDEX_TYPE) {
+        return CreateNestedIndexHybrid(tantivy_index_version,
+                                       file_manager_context);
+    }
 
     return CreateNestedIndexScalarIndexSort(file_manager_context);
 }
@@ -1293,6 +1296,43 @@ IndexFactory::CreateNestedIndexScalarIndexSort(
         case DataType::VARCHAR:
             return std::make_unique<StringIndexSort>(file_manager_context,
                                                      true);
+        default:
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexHybrid(
+    int32_t tantivy_index_version,
+    const storage::FileManagerContext& file_manager_context) {
+    DataType element_type = static_cast<DataType>(
+        file_manager_context.fieldDataMeta.field_schema.element_type());
+    switch (element_type) {
+        case DataType::BOOL:
+            return std::make_unique<HybridScalarIndex<bool>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT8:
+            return std::make_unique<HybridScalarIndex<int8_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT16:
+            return std::make_unique<HybridScalarIndex<int16_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT32:
+            return std::make_unique<HybridScalarIndex<int32_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT64:
+            return std::make_unique<HybridScalarIndex<int64_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::FLOAT:
+            return std::make_unique<HybridScalarIndex<float>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::DOUBLE:
+            return std::make_unique<HybridScalarIndex<double>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<HybridScalarIndex<std::string>>(
+                tantivy_index_version, file_manager_context, true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

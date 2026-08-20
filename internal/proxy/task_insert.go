@@ -74,7 +74,7 @@ func (it *insertTask) EndTs() Timestamp {
 }
 
 func (it *insertTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -110,6 +110,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		},
 		Timestamp: it.EndTs(),
 	}
+	if err := validateAndNormalizeFieldDataValidData(it.insertMsg.GetFieldsData()); err != nil {
+		return err
+	}
 
 	collectionName := it.insertMsg.CollectionName
 	log := mlog.With(mlog.String("collectionName", collectionName))
@@ -125,32 +128,32 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	colInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
 
 	if it.schemaTimestamp != 0 {
-		if it.schemaTimestamp != colInfo.updateTimestamp {
+		if it.schemaTimestamp != colInfo.UpdateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
 			log.Info(ctx, "collection schema mismatch",
 				mlog.String("collectionName", collectionName),
 				mlog.Uint64("requestSchemaTs", it.schemaTimestamp),
-				mlog.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
+				mlog.Uint64("collectionSchemaTs", colInfo.UpdateTimestamp),
 				mlog.Err(err))
 			return err
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
+	schema, err := it.getMetaCache().GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -254,7 +257,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, it.getMetaCache(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -271,12 +274,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.insertMsg.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
+			pinfo, err := it.getMetaCache().GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
 			if err != nil {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
 			}
-			partitionTag = pinfo.name
+			partitionTag = pinfo.Name
 			it.insertMsg.PartitionName = partitionTag
 		}
 
@@ -287,7 +290,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.insertMsg.GetFieldsData(), schema.schemaHelper, it.insertMsg.NRows()); err != nil {
+		Validate(it.insertMsg.GetFieldsData(), schema.SchemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
 	}
 

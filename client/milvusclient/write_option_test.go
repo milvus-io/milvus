@@ -291,6 +291,41 @@ func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 	s.Equal(namespace, upsertReq.GetNamespace())
 }
 
+func (s *ColumnBasedDataOptionSuite) TestTextColumnInsertAndUpsertRequests() {
+	const collectionName = "text_write_option"
+	values := []string{"short text", "长文本", "large payload"}
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collectionName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("content").WithDataType(entity.FieldTypeText)),
+	}
+
+	opt := NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", []int64{1, 2, 3}).
+		WithTextColumn("content", values)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(3, insertReq.GetNumRows())
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(3, upsertReq.GetNumRows())
+
+	for _, fieldsData := range [][]*schemapb.FieldData{insertReq.GetFieldsData(), upsertReq.GetFieldsData()} {
+		var textData *schemapb.FieldData
+		for _, fd := range fieldsData {
+			if fd.GetFieldName() == "content" {
+				textData = fd
+				break
+			}
+		}
+		s.Require().NotNil(textData)
+		s.Equal(schemapb.DataType_Text, textData.GetType())
+		s.Equal(values, textData.GetScalars().GetStringData().GetData())
+	}
+}
+
 func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	collName := "namespace_row_write_option"
 	namespace := "tenant_a"
@@ -335,15 +370,47 @@ func (s *DeleteOptionSuite) TestBasic() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	opt := NewDeleteOption(collectionName)
 
-	s.Equal(collectionName, opt.Request().GetCollectionName())
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.Equal(collectionName, req.GetCollectionName())
 }
 
 func (s *DeleteOptionSuite) TestWithNamespace() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	namespace := "tenant_a"
 
-	req := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	req, err := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *DeleteOptionSuite) TestWithTemplateParam() {
+	blob, err := NewRoaringBitmapBlob([]int64{-1, 0, 42})
+	s.Require().NoError(err)
+
+	req, err := NewDeleteOption("collection").
+		WithExpr("roaring_match(id, {ids})").
+		WithTemplateParam("ids", blob).
+		Request()
+	s.Require().NoError(err)
+	value := req.GetExprTemplateValues()["ids"]
+	s.Require().NotNil(value)
+	bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
+	s.Require().True(ok)
+	s.Equal([]byte(blob), bytesValue.BytesVal)
+}
+
+func (s *DeleteOptionSuite) TestTemplateParamConversionError() {
+	// Request() surfaces the conversion failure instead of returning a request
+	// that silently lacks the template value. Before DeleteOption gained the
+	// error return this was dropped, and a caller building the protobuf
+	// directly would send an expression whose placeholder was never bound.
+	_, err := NewDeleteOption("collection").
+		WithExpr("roaring_match(id, {ids})").
+		WithTemplateParam("ids", struct{ Unsupported bool }{}).
+		Request()
+	s.Require().Error(err)
+	s.Contains(err.Error(), "ids")
 }
 
 func TestDeleteOption(t *testing.T) {

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
 #include <thread>
@@ -184,24 +185,32 @@ TEST(LoadCancellationUtility, ConcurrentCancellation) {
     OpContext op_ctx(source.getToken());
     std::atomic<int> iterations{0};
     std::atomic<bool> caught{false};
+    std::promise<void> worker_ready_promise;
+    auto worker_ready = worker_ready_promise.get_future();
+    std::promise<void> cancellation_requested_promise;
+    auto cancellation_requested = cancellation_requested_promise.get_future();
     std::thread worker([&]() {
         try {
             for (int i = 0; i < 1000; ++i) {
                 CheckCancellation(&op_ctx, 456, fmt::format("Iter{}", i));
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 iterations++;
+                if (i == 0) {
+                    worker_ready_promise.set_value();
+                    cancellation_requested.wait();
+                }
             }
         } catch (const SegcoreError& e) {
             caught = true;
             EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
         }
     });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto ready_status = worker_ready.wait_for(std::chrono::seconds(5));
     source.requestCancellation();
+    cancellation_requested_promise.set_value();
     worker.join();
+    ASSERT_EQ(ready_status, std::future_status::ready);
     EXPECT_TRUE(caught.load());
-    EXPECT_GT(iterations.load(), 0);
-    EXPECT_LT(iterations.load(), 1000);
+    EXPECT_EQ(iterations.load(), 1);
 }
 
 // Test that token is shared across contexts

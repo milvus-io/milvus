@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
@@ -88,12 +89,11 @@ func NewInt64FieldDataWithStart(fieldName string, numRows int, start int64) *sch
 
 func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *schemapb.FieldData {
 	validData, num := GenerateBoolArray(numRows)
-	return &schemapb.FieldData{
+	fieldData := &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
 		FieldName: fieldName,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				ValidData: validData,
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: GenerateInt64Array(num, int64(start)),
@@ -102,6 +102,8 @@ func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *s
 			},
 		},
 	}
+	typeutil.SetFieldDataValidData(fieldData, validData)
+	return fieldData
 }
 
 func NewInt64SameFieldData(fieldName string, numRows int, value int64) *schemapb.FieldData {
@@ -141,12 +143,11 @@ func NewVarCharFieldData(fieldName string, numRows int, nullable bool) *schemapb
 	if nullable {
 		numValid = numRows / 2
 	}
-	return &schemapb.FieldData{
+	fieldData := &schemapb.FieldData{
 		Type:      schemapb.DataType_String,
 		FieldName: fieldName,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				ValidData: testutils.GenerateBoolArray(numRows),
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: testutils.GenerateStringArray(numValid),
@@ -156,6 +157,8 @@ func NewVarCharFieldData(fieldName string, numRows int, nullable bool) *schemapb
 			},
 		},
 	}
+	typeutil.SetFieldDataValidData(fieldData, testutils.GenerateBoolArray(numRows))
+	return fieldData
 }
 
 func NewStringFieldData(fieldName string, numRows int) *schemapb.FieldData {

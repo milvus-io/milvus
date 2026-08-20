@@ -387,6 +387,10 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         } else {
             throw std::runtime_error("not implemented");
         }
+        if (nullable) {
+            raw_dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+                valid_data.data(), data_n));
+        }
     }
 
  public:
@@ -407,8 +411,9 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     }
 
     void
-    ApplyBinlogInterimIndexConfigForTest() {
+    ApplyBinlogInterimIndexConfigForTest(int32_t target_index_version = -1) {
         InterimIndexConfigForTest options;
+        options.target_index_version = target_index_version;
         options.chunk_rows = 1024;
         options.nlist = 16;
         options.nprobe = 16;
@@ -680,6 +685,66 @@ GenerateTestParams() {
 INSTANTIATE_TEST_SUITE_P(MetricTypeParameters,
                          BinlogIndexTest,
                          ::testing::ValuesIn(GenerateTestParams()));
+
+class SealedInterimIndexVersionTest : public BinlogIndexTest {};
+
+TEST_P(SealedInterimIndexVersionTest,
+       SupportsSindiWithConfiguredMaximumVersion) {
+    ScopedSegcoreConfigRestore config_restore;
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
+        {"metric_type", knowhere::metric::IP},
+        {knowhere::indexparam::INVERTED_INDEX_ALGO, "SINDI"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(data_d)}};
+    FieldIndexMeta field_index_meta(
+        vec_field_id, std::move(index_params), std::move(type_params));
+    auto collection_index_meta = std::make_shared<CollectionIndexMeta>(
+        226985,
+        std::map<FieldId, FieldIndexMeta>{{vec_field_id, field_index_meta}});
+
+    segment = CreateSealedSegment(schema, collection_index_meta);
+    LoadOtherFields();
+    ApplyBinlogInterimIndexConfigForTest(
+        knowhere::Version::GetMaximumVersion().VersionNumber());
+    LoadVectorField();
+    ASSERT_TRUE(segment->HasIndex(vec_field_id));
+    SegcoreConfig::default_config().set_interim_index_target_version(-1);
+
+    constexpr int64_t num_queries = 1;
+    milvus::proto::plan::PlanNode plan_node;
+    auto* vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(DataTypeToVectorType(data_type));
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(vec_field_id.get());
+    auto* query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(topk);
+    query_info->set_metric_type(metric_type);
+    query_info->set_search_params(R"({"drop_ratio_search": 0})");
+
+    auto plan_str = plan_node.SerializeAsString();
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_str.data(), plan_str.size());
+    auto ph_group_raw = CreatePlaceholderGroupForVectorType(
+        data_type, num_queries, data_d, GetQueryData(num_queries));
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    EXPECT_EQ(result->total_nq_, num_queries);
+    EXPECT_EQ(result->unity_topK_, topk);
+    EXPECT_EQ(result->distances_.size(), num_queries * topk);
+    EXPECT_EQ(result->seg_offsets_.size(), num_queries * topk);
+}
+
+INSTANTIATE_TEST_SUITE_P(KnowhereMaximumVersion,
+                         SealedInterimIndexVersionTest,
+                         ::testing::Values(std::make_tuple(
+                             DataType::VECTOR_SPARSE_U32_F32,
+                             knowhere::metric::IP,
+                             knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                             std::nullopt,
+                             false,
+                             0)));
 
 TEST(test_chunk_segment,
      NullableVectorProjectionFallsBackWhenLoadedIndexHasNoValidData) {
@@ -988,17 +1053,6 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
                 vec_indexing_for_serde->Load(binary_set, load_conf);
             }
 
-            if (nullable) {
-                auto vec_indexing =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing, nullptr);
-                std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-                for (int64_t i = 0; i < data_n; ++i) {
-                    valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-                }
-                vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
-            }
-
             LoadIndexInfo load_info;
             load_info.field_id = vec_field_id.get();
             load_info.index_params = GenIndexParams(indexing.get());
@@ -1271,17 +1325,6 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
                 vec_indexing_for_serde->Load(binary_set, load_conf);
             }
 
-            if (nullable) {
-                auto vec_indexing =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing, nullptr);
-                std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-                for (int64_t i = 0; i < data_n; ++i) {
-                    valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-                }
-                vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
-            }
-
             LoadIndexInfo load_info;
             load_info.field_id = vec_field_id.get();
             load_info.index_params = GenIndexParams(indexing.get());
@@ -1416,17 +1459,6 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
                 {knowhere::meta::METRIC_TYPE, metric_type}};
             auto binary_set = indexing->Serialize(load_conf);
             vec_indexing_for_serde->Load(binary_set, load_conf);
-        }
-
-        if (nullable) {
-            auto vec_indexing =
-                dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-            ASSERT_NE(vec_indexing, nullptr);
-            std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-            for (int64_t i = 0; i < data_n; ++i) {
-                valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-            }
-            vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
         }
 
         LoadIndexInfo load_info;

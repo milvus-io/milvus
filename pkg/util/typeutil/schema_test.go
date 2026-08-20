@@ -1454,6 +1454,46 @@ func TestEstimateEntitySize(t *testing.T) {
 	size, error := EstimateEntitySize(samples, int(0))
 	assert.NoError(t, error)
 	assert.True(t, size == 384)
+
+	t.Run("nested array", func(t *testing.T) {
+		intArray := func(values ...int32) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{Data: values},
+				},
+			}
+		}
+		array := func(values ...*schemapb.ScalarField) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        values,
+						ElementType: schemapb.DataType_Array,
+					},
+				},
+			}
+		}
+		field := &schemapb.FieldData{
+			Type: schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Array,
+							Data: []*schemapb.ScalarField{
+								array(array(intArray(1), intArray(2, 3))),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		row := field.GetScalars().GetArrayData().GetData()[0]
+		size, err := EstimateEntitySize([]*schemapb.FieldData{field}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, proto.Size(row), size)
+	})
 }
 
 func TestGetPrimaryFieldSchema(t *testing.T) {
@@ -3192,6 +3232,36 @@ func TestGetDataIterator(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A literal null unmarshals into a map as nil with no error, and the merge
+// then wrote into a nil map and panicked. A row whose dynamic field holds null
+// is insertable, so merging over it has to work rather than crash the proxy.
+func TestMergeDynamicJSONNullDocuments(t *testing.T) {
+	t.Run("null base is repaired by the update", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`null`), []byte(`{"a":1}`))
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"a":1}`, string(merged))
+	})
+
+	t.Run("null update says nothing", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`{"a":1}`), []byte(`null`))
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"a":1}`, string(merged))
+	})
+
+	t.Run("non-object documents still error", func(t *testing.T) {
+		_, err := mergeDynamicJSON([]byte(`[1]`), []byte(`{"a":1}`))
+		assert.Error(t, err)
+		_, err = mergeDynamicJSON([]byte(`{"a":1}`), []byte(`"x"`))
+		assert.Error(t, err)
+	})
+
+	t.Run("large integers survive an untouched key", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`{"big":9007199254740993}`), []byte(`{"b":2}`))
+		assert.NoError(t, err)
+		assert.Contains(t, string(merged), "9007199254740993")
+	})
 }
 
 func TestUpdateFieldData(t *testing.T) {
@@ -5335,6 +5405,27 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			},
 		}
 	}
+	recursiveArrayField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:          "nested_array",
+			DataType:      schemapb.DataType_Array,
+			ElementType:   schemapb.DataType_Array,
+			ExternalField: "nested_array_col",
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
 
 	t.Run("non external schema skipped", func(t *testing.T) {
 		// A non-external schema has no ExternalField set on any field
@@ -5507,10 +5598,11 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 
 	t.Run("invalid external spec rejected", func(t *testing.T) {
 		schema := buildSchema()
-		schema.ExternalSpec = `{`
+		schema.ExternalSpec = `{"format":"FORMAT_SCHEMA_SECRET_SENTINEL"}`
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid external spec JSON")
+		assert.Contains(t, err.Error(), "FORMAT_SCHEMA_SECRET_SENTINEL")
+		assert.Contains(t, err.Error(), "unsupported format")
 	})
 
 	t.Run("partition key disabled", func(t *testing.T) {
@@ -5558,20 +5650,24 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 
 	t.Run("source set without spec rejected", func(t *testing.T) {
 		schema := buildSchema()
-		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSource = "s3://SOURCE_ACCESS_SENTINEL:SOURCE_SECRET_SENTINEL@bucket/path"
 		schema.ExternalSpec = ""
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "both set or both empty")
+		assert.NotContains(t, err.Error(), "SOURCE_ACCESS_SENTINEL")
+		assert.NotContains(t, err.Error(), "SOURCE_SECRET_SENTINEL")
 	})
 
 	t.Run("spec set without source rejected", func(t *testing.T) {
 		schema := buildSchema()
 		schema.ExternalSource = ""
-		schema.ExternalSpec = `{"format":"parquet"}`
+		schema.ExternalSpec = `{"format":"parquet","extfs":{"access_key_id":"AKIA_ERROR_SENTINEL","access_key_value":"SECRET_ERROR_SENTINEL"}}`
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "both set or both empty")
+		assert.NotContains(t, err.Error(), "AKIA_ERROR_SENTINEL")
+		assert.NotContains(t, err.Error(), "SECRET_ERROR_SENTINEL")
 	})
 
 	t.Run("source/spec pair validated without external fields", func(t *testing.T) {
@@ -5726,6 +5822,25 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		err := ValidateExternalCollectionResolvedSchema(schema)
 		if assert.Error(t, err) {
 			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("recursive array rejected", func(t *testing.T) {
+		validators := []struct {
+			name     string
+			validate func(*schemapb.CollectionSchema) error
+		}{
+			{name: "create", validate: NormalizeAndValidateExternalCollectionSchema},
+			{name: "resolved", validate: ValidateExternalCollectionResolvedSchema},
+		}
+		for _, validator := range validators {
+			t.Run(validator.name, func(t *testing.T) {
+				schema := buildSchema()
+				schema.Fields = append(schema.Fields, recursiveArrayField())
+				err := validator.validate(schema)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "does not support recursive ARRAY field nested_array")
+			})
 		}
 	})
 
@@ -7115,4 +7230,16 @@ func TestGetTotalFieldsNumIncludesStructParent(t *testing.T) {
 
 	assert.Equal(t, 5, GetTotalFieldsNum(schema))
 	assert.Len(t, GetAllFieldSchemas(schema), 4)
+}
+
+// Decoding a dynamic field into map[string]interface{} rounds every number to
+// float64, so a partial update of one key silently rewrote the others.
+func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
+	merged, err := mergeDynamicJSON(
+		[]byte(`{"untouched":9007199254740993,"big":12345678901234567890,"tag":"old"}`),
+		[]byte(`{"tag":"new"}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(merged), `"untouched":9007199254740993`)
+	assert.Contains(t, string(merged), `"big":12345678901234567890`)
+	assert.Contains(t, string(merged), `"tag":"new"`)
 }

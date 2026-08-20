@@ -1617,13 +1617,14 @@ func TestColumnBasedInsertMsgToInsertDataValidDataSources(t *testing.T) {
 	}{
 		{name: "legacy fallback", legacy: validData},
 		{name: "field-specific", current: validData},
-		{name: "dual source", legacy: validData, current: validData, wantErr: true},
+		{name: "matching dual sources", legacy: validData, current: validData},
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			insertData, err := ColumnBasedInsertMsgToInsertData(makeMsg(test.legacy, test.current), schema)
 			if test.wantErr {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "both legacy and field-specific valid_data")
+				assert.Contains(t, err.Error(), "different legacy and field-specific valid_data")
 				return
 			}
 
@@ -3612,7 +3613,7 @@ func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
 	for _, fd := range record.FieldsData {
 		if fd.FieldId == 100 {
 			found = true
-			assert.False(t, typeutil.HasFieldDataValidDataConflict(fd))
+			assert.Nil(t, fd.GetValidData())
 			assert.Equal(t, []bool{true, false}, fd.GetVectors().GetValidData())
 			assert.NotNil(t, fd.GetVectors().GetVectorArray())
 			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))

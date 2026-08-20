@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -53,7 +54,7 @@ type RestfulInfo struct {
 	req    interface{}
 
 	// runtime set info
-	actualConsistencyLevel *commonpb.ConsistencyLevel
+	actualConsistencyLevel atomic.Pointer[commonpb.ConsistencyLevel]
 }
 
 func NewRestfulInfo(ctx *gin.Context) *RestfulInfo {
@@ -259,8 +260,8 @@ func (i *RestfulInfo) OutputFields() string {
 
 func (i *RestfulInfo) ConsistencyLevel() string {
 	// return actual consistency level if set
-	if i.actualConsistencyLevel != nil {
-		return i.actualConsistencyLevel.String()
+	if acl := i.actualConsistencyLevel.Load(); acl != nil {
+		return acl.String()
 	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
@@ -327,7 +328,7 @@ func (i *RestfulInfo) ClientRequestTime() string {
 }
 
 func (i *RestfulInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
-	i.actualConsistencyLevel = &acl
+	i.actualConsistencyLevel.Store(&acl)
 }
 
 func (i *RestfulInfo) TemplateValueLength() string {

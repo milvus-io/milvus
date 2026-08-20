@@ -122,7 +122,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 	t.Run("update_to_in_progress", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, Progress: 0},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, Progress: 0, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
@@ -151,7 +151,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 	t.Run("update_to_finished", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
@@ -180,7 +180,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 	t.Run("update_to_failed", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 50},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 50, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "connection timeout"},
@@ -209,7 +209,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 	t.Run("update_progress_only", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 30},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 30, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 60},
@@ -292,7 +292,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: oldStartTime},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: oldStartTime, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
@@ -501,7 +501,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed, EndTime: oldEndTime},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed, EndTime: oldEndTime, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed},
@@ -592,7 +592,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_UpdateStateFailed(t 
 
 	catalog := &stubCatalog{}
 	jobs := []*datapb.ExternalCollectionRefreshJob{
-		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, Progress: 0},
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, Progress: 0, TaskIds: []int64{1001}},
 	}
 	tasks := []*datapb.ExternalCollectionRefreshTask{
 		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
@@ -624,7 +624,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FailedWithProgressUp
 
 	catalog := &stubCatalog{}
 	jobs := []*datapb.ExternalCollectionRefreshJob{
-		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 10},
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 10, TaskIds: []int64{1001}},
 	}
 	tasks := []*datapb.ExternalCollectionRefreshTask{
 		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "worker error"},
@@ -656,7 +656,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FinishedApplyOnce(t 
 
 	catalog := &stubCatalog{}
 	jobs := []*datapb.ExternalCollectionRefreshJob{
-		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001, 1002}},
 	}
 	tasks := []*datapb.ExternalCollectionRefreshTask{
 		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
@@ -722,7 +722,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ClearsTaskResultsAft
 
 	catalog := &stubCatalog{}
 	jobs := []*datapb.ExternalCollectionRefreshJob{
-		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001, 1002}},
 	}
 	tasks := []*datapb.ExternalCollectionRefreshTask{
 		{
@@ -881,7 +881,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 	t.Run("callback_called_on_finished", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
@@ -922,7 +922,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 	t.Run("callback_not_called_on_failed", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 50},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 50, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "worker error"},
@@ -957,7 +957,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 	t.Run("callback_not_called_on_progress_only", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 30},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 30, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 60},
@@ -988,7 +988,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 	t.Run("nil_callback_no_panic", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
@@ -1022,7 +1022,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 	t.Run("onJobFailed_fired_on_aggregate_failed", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 42, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 40},
+			{JobId: 42, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 40, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 42, State: indexpb.JobState_JobStateFailed, Progress: 40, FailReason: "boom"},
@@ -1053,7 +1053,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 	t.Run("onJobFailed_not_fired_on_finished", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 43, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+			{JobId: 43, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
 		}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 43, State: indexpb.JobState_JobStateFinished, Progress: 100},
@@ -1121,7 +1121,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ProgressOnlyUpdateFa
 	catalog := &stubCatalog{}
 	// Job in InProgress with progress=10
 	jobs := []*datapb.ExternalCollectionRefreshJob{
-		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 10},
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 10, TaskIds: []int64{1001}},
 	}
 	// Task also in InProgress with higher progress — triggers progress-only update
 	tasks := []*datapb.ExternalCollectionRefreshTask{
