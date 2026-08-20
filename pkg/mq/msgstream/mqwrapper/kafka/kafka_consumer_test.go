@@ -162,9 +162,15 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
+	// GetLatestMsgID queries the watermark offsets without allowing topic
+	// auto-creation, so the topic must exist before the first call. The
+	// mock cluster bundled with older librdkafka (<= 1.9.x, Metadata API
+	// v2) created it implicitly; newer versions follow the request flag.
+	createTopic(t, topic)
+
 	latestMsgID, err := consumer.GetLatestMsgID()
-	assert.Equal(t, int64(0), latestMsgID.(*kafkaID).messageID)
 	assert.NoError(t, err)
+	assert.Equal(t, int64(0), latestMsgID.(*kafkaID).messageID)
 
 	data1 := []int{111, 222, 333}
 	data2 := []string{"111", "222", "333"}
@@ -246,6 +252,16 @@ func testKafkaConsumerProduceData(t *testing.T, topic string, data []int, arr []
 	producer.(*kafkaProducer).p.Flush(500)
 }
 
+// createTopic makes sure topic exists on the broker by issuing a metadata
+// request from a producer, which allows automatic topic creation by default.
+func createTopic(t *testing.T, topic string) {
+	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": getKafkaBrokerList()})
+	assert.NoError(t, err)
+	defer p.Close()
+	_, err = p.GetMetadata(&topic, false, 10000)
+	assert.NoError(t, err)
+}
+
 func createConfig(groupID string) *kafka.ConfigMap {
 	kafkaAddress := getKafkaBrokerList()
 	return &kafka.ConfigMap{
@@ -259,6 +275,10 @@ func TestKafkaConsumer_CheckPreTopicValid(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
+
+	// CheckTopicValid reports an error for a topic that does not exist on
+	// the broker, so make sure it exists first.
+	createTopic(t, topic)
 
 	config := createConfig(groupID)
 	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
