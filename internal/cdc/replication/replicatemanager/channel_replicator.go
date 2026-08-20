@@ -76,6 +76,7 @@ func NewChannelReplicator(channel *meta.ReplicateChannel) Replicator {
 }
 
 func (r *channelReplicator) StartReplication() {
+	r.initLastReplicatedTimeTickMetric()
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
 	logger.Info("start replicate channel")
 	go func() {
@@ -109,6 +110,21 @@ func (r *channelReplicator) StartReplication() {
 	}()
 }
 
+// initLastReplicatedTimeTickMetric seeds the lag series synchronously, before
+// any network dependency, so that the series exists even while init() keeps
+// failing against an unreachable target — an absent series reads as zero lag
+// on the dashboard. The initialized (creation-time) checkpoint is a
+// conservative bound: real progress is at or after it, so the seed can only
+// overstate the lag. init() overwrites it with the target-confirmed
+// checkpoint once the target is reachable.
+func (r *channelReplicator) initLastReplicatedTimeTickMetric() {
+	checkpoint := r.channel.Value.GetInitializedCheckpoint()
+	if checkpoint == nil {
+		return
+	}
+	replicatestream.InitLastReplicatedTimeTick(r.channel.Value, checkpoint.GetTimeTick())
+}
+
 func (r *channelReplicator) init() error {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
 	// init target client
@@ -138,6 +154,11 @@ func (r *channelReplicator) init() error {
 		})
 		r.msgScanner = scanner
 		r.msgChan = ch
+		// Seed the last replicated time tick from the resume checkpoint so that
+		// after a CDC pod restart the lag metric reports the real backlog
+		// immediately, instead of the series being absent (which reads as 0)
+		// until the first message is replicated.
+		replicatestream.InitLastReplicatedTimeTick(r.channel.Value, cp.TimeTick)
 		logger.Info("scanner initialized", zap.Any("checkpoint", cp))
 	}
 	// init replicate stream client
@@ -159,6 +180,17 @@ func (r *channelReplicator) startConsumeLoop() {
 			logger.Info("consume loop stopped")
 			return
 		case msg := <-r.msgChan:
+			// A topology change older than this task describes a past state, not an
+			// instruction. Forwarding it would make the secondary act on it — a
+			// configuration that no longer lists the secondary turns it back into a
+			// standalone primary — so it is dropped instead of replicated.
+			if msg.MessageType() == message.MessageTypeAlterReplicateConfig &&
+				util.IsStaleTopologyChange(msg, r.channel.Value) {
+				logger.Info("skip replicating topology change older than this replication task",
+					log.FieldMessage(msg),
+					zap.Uint64("initializedTimeTick", r.channel.Value.GetInitializedCheckpoint().GetTimeTick()))
+				continue
+			}
 			err := r.streamClient.Replicate(msg)
 			if err != nil {
 				if !errors.Is(err, replicatestream.ErrReplicateIgnored) {
@@ -171,6 +203,10 @@ func (r *channelReplicator) startConsumeLoop() {
 				if util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value) {
 					logger.Info("replication removed, stop consume loop")
 					r.streamClient.BlockUntilFinish()
+					// The replication is genuinely removed, delete its lag
+					// series. Deleting after BlockUntilFinish ensures no
+					// in-flight confirm re-creates the series afterwards.
+					replicatestream.DeleteLastReplicatedTimeTick(r.channel.Value)
 					return
 				}
 			}

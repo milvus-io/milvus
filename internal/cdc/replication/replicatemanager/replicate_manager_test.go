@@ -18,16 +18,45 @@ package replicatemanager
 
 import (
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
+	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
+
+type testReplicator struct {
+	stopped bool
+}
+
+func (*testReplicator) StartReplication() {}
+
+func (r *testReplicator) StopReplication() {
+	r.stopped = true
+}
+
+func newTestReplicateChannel(key string, revision int64, source, target string) *meta.ReplicateChannel {
+	return &meta.ReplicateChannel{
+		Key:         key,
+		ModRevision: revision,
+		Value: &streamingpb.ReplicatePChannelMeta{
+			SourceChannelName: source,
+			TargetChannelName: target,
+			TargetCluster: &commonpb.MilvusCluster{
+				ClusterId: "test-target-cluster",
+			},
+		},
+	}
+}
 
 func TestReplicateManager_CreateReplicator(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, "test-source")
@@ -90,4 +119,44 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 	replicator1, exists := manager.replicators[buildReplicatorKey(key, 0)]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator1)
+}
+
+func TestReplicateManagerRemoveReplicatorDeletesLagSeries(t *testing.T) {
+	source, target := "remove-source", "remove-target"
+	channel := newTestReplicateChannel("remove-key", 10, source, target)
+	manager := NewReplicateManager()
+	repKey := buildReplicatorKey(channel.Key, channel.ModRevision)
+	replicator := &testReplicator{}
+	manager.replicators[repKey] = replicator
+	manager.replicatorChannels[repKey] = channel
+	replicatestream.InitLastReplicatedTimeTick(
+		channel.Value,
+		tsoutil.ComposeTSByTime(time.Now(), 0),
+	)
+
+	manager.RemoveReplicator(channel.Key, channel.ModRevision)
+
+	assert.True(t, replicator.stopped)
+	assert.False(t, metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(source, target))
+}
+
+func TestRemoveOutdatedReplicatorsKeepsLiveLagSeries(t *testing.T) {
+	source, target := "replace-source", "replace-target"
+	oldChannel := newTestReplicateChannel("replace-key", 10, source, target)
+	newChannel := newTestReplicateChannel("replace-key", 11, source, target)
+	manager := NewReplicateManager()
+	oldKey := buildReplicatorKey(oldChannel.Key, oldChannel.ModRevision)
+	oldReplicator := &testReplicator{}
+	manager.replicators[oldKey] = oldReplicator
+	manager.replicatorChannels[oldKey] = oldChannel
+
+	newValue := tsoutil.ComposeTSByTime(time.Now(), 0)
+	replicatestream.InitLastReplicatedTimeTick(newChannel.Value, newValue)
+	defer metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(source, target)
+
+	manager.RemoveOutdatedReplicators([]*meta.ReplicateChannel{newChannel})
+
+	assert.True(t, oldReplicator.stopped)
+	got := testutil.ToFloat64(metrics.CDCLastReplicatedTimeTick.WithLabelValues(source, target))
+	assert.InDelta(t, tsoutil.PhysicalTimeSeconds(newValue), got, 1)
 }
