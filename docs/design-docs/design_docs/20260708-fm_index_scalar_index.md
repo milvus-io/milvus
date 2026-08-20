@@ -19,11 +19,11 @@
 ## Summary
 
 Introduce a new scalar index type, **`FMINDEX`**, for `VARCHAR` columns. This
-document describes the full FM-index design; **this PR delivers the first slice
-— VARCHAR columns and the three anchored `LIKE` forms (prefix/infix/suffix)**,
-with the rest of the string-predicate family (equality, general `LIKE`, regex,
-occurrence counting) and other data types (`TEXT`/`JSON`/`ARRAY`) called out
-below as deliberate follow-ups. The structure itself can serve the whole family:
+document describes the full FM-index design; **this PR delivers VARCHAR columns,
+the three anchored `LIKE` forms (prefix/infix/suffix), and general `Match`
+(interior `%`/`_`)**, with equality, regex, occurrence counting, and other data
+types (`TEXT`/`JSON`/`ARRAY`) called out below as deliberate follow-ups. The
+structure itself can serve the whole family:
 
 | predicate | today (no index / NGRAM) | with `FMINDEX` |
 |---|---|---|
@@ -307,17 +307,18 @@ handles UTF-8 character-vs-byte width).
 
 ```
 LIKE 'req-2026%GET%_500'
-  factors:  "req-2026" (prefix-anchored)   "GET" (infix)   "500" (suffix-anchored)
-  phase 1:  LocatePrefixDocs("req-2026") ∧ MatchingDocs("GET") ∧ LocateSuffixDocs("500")
-  phase 2:  RE2/LikePatternMatcher on surviving rows only
+  factors:  "req-2026"   "GET"   "500"
+  phase 1:  Count each factor; VisitMatchingDocs on the rarest one
+  phase 2:  LikePatternMatcher on those candidate rows only (via Extract)
 ```
 
-Phase-1 evaluation order: `CountBatch` all factors first (one batched backward
-search, ~1 µs/factor), then AND bitmaps in ascending-count order with
-short-circuit — the most selective factor prunes first, and factors whose
-count already exceeds the guard threshold are skipped as non-pruning rather
-than enumerated. A pattern whose factors are all unusable (e.g. `LIKE '%_%'`)
-declines to the scan path.
+`ShouldUseOp` uses the same count-first locate guard on the rarest factor
+(`MatchGuardAccepts`). A pattern with no usable factor (`LIKE '%'`, `LIKE '%_%'`)
+declines to the scan. Recheck reads the row through `fm_.Extract`, which builds
+the lazy ISA table on first use (about one extra heap byte per text byte at
+`sa_sample_rate=8`). That table is not in the load-time cache cell size.
+NGRAM-style recheck against sealed VARCHAR bytes, AND of every factor, and
+prefix/suffix anchoring of the first/last factor are follow-ups.
 
 *Deferred enhancement (measure first):* for `%`-only patterns (no `_`) the
 factor **order** constraint can be verified inside the index from
@@ -367,7 +368,7 @@ the library's `Count`/`CountPrefixDocs`/`CountSuffixDocs` (no suffix-array
 locate). The count-first guard lives INSIDE the single routing gate
 `ShouldUseOp(op, pattern)`: the executor's
 `PhyUnaryRangeFilterExpr::DetermineExecPath` passes the concrete literal for
-the anchored pattern ops, and FMINDEX's override runs the count and declines
+the anchored pattern ops and for general `Match`, and FMINDEX's override runs the count and declines
 when enumeration would lose to a scan (the expr downgrades to the RawData
 path — both paths are exact, the gate only picks the cheaper executor). An
 empty pattern means "no literal information" and is judged on the op alone:
@@ -480,11 +481,12 @@ All integration points verified against master (branch state of 2026-07-14).
     (`exec/expression/UnaryExpr.h:631-686`) then routes
     `PrefixMatch`/`PostfixMatch`/`InnerMatch`/`Match` automatically; the
     `RegexMatch` leg (`UnaryExpr.h:713-738`) likewise.
-  - `ShouldUseOp(op, pattern)`: `true` only for the three anchored pattern ops
-    (`PrefixMatch`/`PostfixMatch`/`InnerMatch`), gated by the count-first cost
-    guard when a literal is supplied; `false` (fall back to the scan / another
-    index) for **everything else, including the `Equal`/`NotEqual`/`IN`/`NOT IN`
-    equality family**, `Match`/`RegexMatch`, and `Range`. The default is `false`
+  - `ShouldUseOp(op, pattern)`: `true` for the three anchored pattern ops
+    (`PrefixMatch`/`PostfixMatch`/`InnerMatch`) and for general `Match`, gated
+    by the count-first cost guard when a literal is supplied (`Match` uses
+    `MatchGuardAccepts` on the rarest factor); `false` (fall back to the scan /
+    another index) for **everything else, including the `Equal`/`NotEqual`/`IN`/`NOT IN`
+    equality family**, `RegexMatch`, and `Range`. The default is `false`
     so any unhandled op safely downgrades rather than routing into a method that
     throws.
   - `In`/`NotIn` are required `ScalarIndex` overrides, but the equality family is
@@ -494,13 +496,12 @@ All integration points verified against master (branch state of 2026-07-14).
   - The count-first guard is folded into `ShouldUseOp(op, pattern)` above — there
     is **no** separate `CanAccelerate` method; a future two-phase executor
     (PR 3) would consult it the way NGRAM consults `CanHandleLiteral`.
-  - `HasRawData() = false`; `Reverse_Lookup` unsupported (phase-2 verification
-    reads raw data through the segment, as NGRAM's does; `Extract` could serve
-    this later — Future Work).
-  - general `Match` is answered by `PatternMatch` (rarest fragment candidates
-    plus `LikePatternMatcher` recheck via `Extract`). RegexMatch two-phase
-    entry points mirroring `NgramInvertedIndex::ExecutePhase1/2` are still
-    not wired; regex stays on the scan.
+  - `HasRawData() = false`; `Reverse_Lookup` unsupported. General `Match`
+    rechecks candidates with `LikePatternMatcher` over `fm_.Extract` (lazy ISA).
+    Recheck from sealed VARCHAR bytes the way NGRAM Phase2 does is a follow-up.
+  - RegexMatch two-phase entry points mirroring
+    `NgramInvertedIndex::ExecutePhase1/2` are still not wired; regex stays on
+    the scan.
 - **Registration**: `ScalarIndexType::FMINDEX` (`ScalarIndex.h:39-49` +
   To/FromString), `FMINDEX_INDEX_TYPE = "FMINDEX"` (`Meta.h`), param key
   `fm_sa_sample_rate` (`Meta.h`), `std::optional<FMIndexParams>` in
