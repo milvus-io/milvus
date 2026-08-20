@@ -132,8 +132,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedIntersects_r(ctx_, prepared_, other.GetGeometry()) ==
-               1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedIntersects_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_intersects");
     }
 
     bool
@@ -141,7 +142,9 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedIntersects_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedIntersects_r(ctx_, prepared_, other),
+            "prepared_intersects");
     }
 
     /**
@@ -153,8 +156,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedContains_r(ctx_, prepared_, other.GetGeometry()) ==
-               1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedContains_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_contains");
     }
 
     bool
@@ -162,7 +166,9 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedContains_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedContains_r(ctx_, prepared_, other),
+            "prepared_contains");
     }
 
     /**
@@ -174,8 +180,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedContainsProperly_r(
-                   ctx_, prepared_, other.GetGeometry()) == 1;
+        return GeosPredicateIsTrue(GEOSPreparedContainsProperly_r(
+                                       ctx_, prepared_, other.GetGeometry()),
+                                   "prepared_containsproperly");
     }
 
     bool
@@ -183,7 +190,9 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedContainsProperly_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedContainsProperly_r(ctx_, prepared_, other),
+            "prepared_containsproperly");
     }
 
     /**
@@ -194,7 +203,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedCovers_r(ctx_, prepared_, other.GetGeometry()) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedCovers_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_covers");
     }
 
     bool
@@ -202,7 +213,8 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedCovers_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(GEOSPreparedCovers_r(ctx_, prepared_, other),
+                                   "prepared_covers");
     }
 
     /**
@@ -213,8 +225,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedCoveredBy_r(ctx_, prepared_, other.GetGeometry()) ==
-               1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedCoveredBy_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_coveredby");
     }
 
     bool
@@ -222,7 +235,9 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedCoveredBy_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedCoveredBy_r(ctx_, prepared_, other),
+            "prepared_coveredby");
     }
 
     /**
@@ -233,7 +248,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedCrosses_r(ctx_, prepared_, other.GetGeometry()) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedCrosses_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_crosses");
     }
 
     bool
@@ -241,7 +258,8 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedCrosses_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedCrosses_r(ctx_, prepared_, other), "prepared_crosses");
     }
 
     /**
@@ -252,8 +270,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedDisjoint_r(ctx_, prepared_, other.GetGeometry()) ==
-               1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedDisjoint_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_disjoint");
     }
 
     bool
@@ -261,7 +280,9 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedDisjoint_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedDisjoint_r(ctx_, prepared_, other),
+            "prepared_disjoint");
     }
 
     /**
@@ -272,8 +293,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedOverlaps_r(ctx_, prepared_, other.GetGeometry()) ==
-               1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedOverlaps_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_overlaps");
     }
 
     bool
@@ -281,7 +303,9 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedOverlaps_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedOverlaps_r(ctx_, prepared_, other),
+            "prepared_overlaps");
     }
 
     /**
@@ -292,7 +316,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedTouches_r(ctx_, prepared_, other.GetGeometry()) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedTouches_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_touches");
     }
 
     bool
@@ -300,7 +326,8 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedTouches_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedTouches_r(ctx_, prepared_, other), "prepared_touches");
     }
 
     /**
@@ -313,7 +340,9 @@ class PreparedGeometry {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        return GEOSPreparedWithin_r(ctx_, prepared_, other.GetGeometry()) == 1;
+        return GeosPredicateIsTrue(
+            GEOSPreparedWithin_r(ctx_, prepared_, other.GetGeometry()),
+            "prepared_within");
     }
 
     bool
@@ -321,7 +350,8 @@ class PreparedGeometry {
         if (!IsValid() || other == nullptr) {
             return false;
         }
-        return GEOSPreparedWithin_r(ctx_, prepared_, other) == 1;
+        return GeosPredicateIsTrue(GEOSPreparedWithin_r(ctx_, prepared_, other),
+                                   "prepared_within");
     }
 
     // ============================================================================
@@ -341,7 +371,8 @@ class PreparedGeometry {
         if (geom == nullptr || !other.IsValid()) {
             return false;
         }
-        return GEOSEquals_r(ctx, geom, other.GetGeometry()) == 1;
+        return GeosPredicateIsTrue(GEOSEquals_r(ctx, geom, other.GetGeometry()),
+                                   "prepared_equals");
     }
 
  private:

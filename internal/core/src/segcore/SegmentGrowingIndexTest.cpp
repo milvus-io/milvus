@@ -12,6 +12,7 @@
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -709,6 +710,68 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     } else {
         throw std::invalid_argument("Unsupported data type");
     }
+}
+
+TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
+    constexpr int64_t dim = 2;
+
+    auto build_config =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::NLIST, "1"}};
+
+    milvus::index::VectorMemIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false,
+        milvus::storage::FileManagerContext());
+    index.SetIdMapType(knowhere::IdMap::Type::GROWING);
+
+    std::array<float, 4> initial_data = {0.0F, 0.0F, 2.0F, 0.0F};
+    std::array<bool, 3> initial_valid = {true, false, true};
+    auto initial_dataset = knowhere::GenDataSet(2, dim, initial_data.data());
+    initial_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        initial_valid.data(), initial_valid.size()));
+    index.BuildWithDataset(initial_dataset, build_config);
+
+    const auto* id_map = &index.GetIdMap();
+    ASSERT_EQ(id_map->OutCount(), 3);
+    ASSERT_EQ(id_map->InToOutIds().size(), 2);
+    EXPECT_EQ(id_map->MapInToOut(0), 0);
+    EXPECT_EQ(id_map->MapInToOut(1), 2);
+
+    std::array<bool, 2> all_null_tail = {false, false};
+    auto all_null_dataset = knowhere::GenDataSet(0, dim, nullptr);
+    all_null_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        all_null_tail.data(), all_null_tail.size()));
+    index.AddWithDataset(all_null_dataset, build_config);
+
+    id_map = &index.GetIdMap();
+    ASSERT_EQ(id_map->OutCount(), 5);
+    ASSERT_EQ(id_map->InToOutIds().size(), 2);
+    EXPECT_FALSE(index.IsRowValid(3));
+    EXPECT_FALSE(index.IsRowValid(4));
+
+    std::array<float, 4> appended_data = {5.0F, 0.0F, 7.0F, 0.0F};
+    std::array<bool, 3> appended_valid = {true, false, true};
+    auto appended_dataset = knowhere::GenDataSet(2, dim, appended_data.data());
+    appended_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        appended_valid.data(), appended_valid.size()));
+    index.AddWithDataset(appended_dataset, build_config);
+
+    id_map = &index.GetIdMap();
+    ASSERT_EQ(id_map->OutCount(), 8);
+    ASSERT_EQ(id_map->InToOutIds().size(), 4);
+    EXPECT_EQ(id_map->MapInToOut(0), 0);
+    EXPECT_EQ(id_map->MapInToOut(1), 2);
+    EXPECT_EQ(id_map->MapInToOut(2), 5);
+    EXPECT_EQ(id_map->MapInToOut(3), 7);
+    EXPECT_TRUE(index.IsRowValid(5));
+    EXPECT_FALSE(index.IsRowValid(6));
+    EXPECT_TRUE(index.IsRowValid(7));
+    EXPECT_EQ(index.Count(), 4);
 }
 
 TEST(GrowingIndexNullableVectorTest,

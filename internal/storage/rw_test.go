@@ -302,6 +302,34 @@ func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNullableArrayOfVectorWrite
 	s.Contains(err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
 }
 
+func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNestedArrayWriter() {
+	s.schema.Fields = append(s.schema.Fields, &schemapb.FieldSchema{
+		FieldID:     200,
+		Name:        "nested_array",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema: &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_ArrayElement{
+				ArrayElement: &schemapb.TypeSchema{
+					Kind: &schemapb.TypeSchema_ArrayElement{
+						ArrayElement: &schemapb.TypeSchema{
+							Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+		WithVersion(StorageV1),
+		WithUploader(func(context.Context, map[string][]byte) error { return nil }),
+		WithStorageConfig(s.storageConfig),
+	)
+	s.Error(err)
+	s.Contains(err.Error(), "nested Array is not supported in V1 storage format")
+}
+
 func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
 	s.schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},

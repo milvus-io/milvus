@@ -116,7 +116,9 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = LOCAL_FORMAT_RAW)
+              std::string local_format = LOCAL_FORMAT_RAW,
+              std::optional<milvus::proto::schema::TypeSchema> type_schema =
+                  std::nullopt)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -124,8 +126,23 @@ class FieldMeta {
           nullable_(nullable),
           default_value_(std::move(default_value)),
           external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
+          local_format_(std::move(local_format)),
+          type_schema_(std::move(type_schema)) {
         Assert(IsArrayDataType(type_));
+        if (type_schema_.has_value()) {
+            AssertInfo(
+                type_ == DataType::ARRAY && element_type_ == DataType::ARRAY,
+                "type_schema is only supported for nested ARRAY "
+                "FieldMeta");
+
+            // Temporary compatibility for schemas that still carry root
+            // nullability in FieldSchema.nullable. Runtime nested ARRAY code
+            // reads nullability uniformly from each TypeSchema node.
+            if (nullable_) {
+                type_schema_->set_nullable(true);
+            }
+            nullable_ = type_schema_->nullable();
+        }
     }
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
@@ -255,6 +272,18 @@ class FieldMeta {
         return element_type_;
     }
 
+    const milvus::proto::schema::TypeSchema&
+    get_array_type_schema() const {
+        Assert(is_nested_array());
+        return *type_schema_;
+    }
+
+    bool
+    is_nested_array() const {
+        return type_schema_.has_value() && type_schema_->has_array_element() &&
+               type_schema_->array_element().has_array_element();
+    }
+
     bool
     is_vector() const {
         return IsVectorDataType(type_);
@@ -369,6 +398,7 @@ class FieldMeta {
     int64_t main_field_id_ = INVALID_FIELD_ID;
     std::string external_field_mapping_;
     std::string local_format_ = LOCAL_FORMAT_RAW;
+    std::optional<milvus::proto::schema::TypeSchema> type_schema_;
 };
 
 }  // namespace milvus
