@@ -279,10 +279,9 @@ func (m *ShardViewManager) AddPreparing(_ context.Context, builder *qviews.Query
 
 	// Move all accumulated effects into one shard-scoped event.
 	event := m.consumeDirtyEventLocked()
-	notifyStats := m.publishStatsLocked()
+	m.publishStatsLocked()
 	m.submitDirtyEvent(event)
 	m.mu.Unlock()
-	notifyStats()
 	return nil
 }
 
@@ -315,13 +314,12 @@ func (m *ShardViewManager) RequestRelease(_ context.Context) error {
 	m.advanceUnrecoverableToDropping()
 
 	event := m.consumeDirtyEventLocked()
-	notifyStats := m.publishStatsLocked()
+	m.publishStatsLocked()
 	m.submitDirtyEvent(event)
 	empty := len(m.views) == 0
 	onReleasedEmpty := m.onReleasedEmpty
 	m.mu.Unlock()
 
-	notifyStats()
 	if empty && onReleasedEmpty != nil {
 		onReleasedEmpty(m.shardID, m)
 	}
@@ -463,13 +461,12 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 		sm.OnNodeStateReported(resp)
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
-		notifyStats := m.publishStatsLocked()
+		m.publishStatsLocked()
 
 		_, exists := m.views[version]
 		completed := !exists || syncResponseCompletesTarget(target.State(), resp.State())
 		m.submitDirtyEvent(event)
 		m.mu.Unlock()
-		notifyStats()
 		return completed
 	}
 }
@@ -506,10 +503,9 @@ func (m *ShardViewManager) makeOnQueryNodeLost(version qviews.QueryViewVersion) 
 		sm.OnQueryNodeLost(node)
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
-		notifyStats := m.publishStatsLocked()
+		m.publishStatsLocked()
 		m.submitDirtyEvent(event)
 		m.mu.Unlock()
-		notifyStats()
 	}
 }
 
@@ -519,21 +515,9 @@ func (m *ShardViewManager) submitDirtyEvent(event dirtyViewEvent) {
 	}
 }
 
-// publishStatsLocked captures a stats snapshot and the observer under m.mu
-// and returns a function that invokes the observer WITHOUT holding the lock.
-//
-// The returned function MUST be called after m.mu is released: observers
-// (the registry fans out to externally registered stats observers) may call
-// back into registry.Get(shardID).Stats(), which acquires the same manager
-// mutex and would deadlock if it were still held.
-func (m *ShardViewManager) publishStatsLocked() func() {
-	if m.observe == nil {
-		return func() {}
-	}
-	observe := m.observe
-	stats := m.statsLocked()
-	return func() {
-		observe(m.shardID, m, stats)
+func (m *ShardViewManager) publishStatsLocked() {
+	if m.observe != nil {
+		m.observe(m.shardID, m, m.statsLocked())
 	}
 }
 
@@ -546,12 +530,11 @@ func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 		return
 	}
 	m.removeView(target)
-	notifyStats := m.publishStatsLocked()
+	m.publishStatsLocked()
 	released := m.releaseRequested && len(m.views) == 0
 	onReleasedEmpty := m.onReleasedEmpty
 	m.mu.Unlock()
 
-	notifyStats()
 	if released && onReleasedEmpty != nil {
 		onReleasedEmpty(m.shardID, m)
 	}

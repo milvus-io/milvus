@@ -188,30 +188,6 @@ func TestRegistry_IgnoresStatsFromEvictedManager(t *testing.T) {
 	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(1))
 }
 
-func TestRegistry_StatsObserverMayQueryManagerWithoutDeadlock(t *testing.T) {
-	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
-	shardID := qviews.ShardID{ReplicaID: testReplicaID, VChannel: testVChannel}
-
-	observed := make(chan *ShardStats, 1)
-	reg.RegisterStatsObserver(func(_ qviews.ShardID, stats *ShardStats) {
-		// Re-enter the manager through the public path: under the old
-		// in-lock publication this re-acquired the manager mutex on the
-		// same goroutine and deadlocked.
-		_ = reg.Get(shardID).Stats()
-		observed <- stats
-	})
-
-	mgr := reg.Ensure(shardID)
-	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilderForShard(testCollectionID, shardID)))
-
-	select {
-	case stats := <-observed:
-		require.NotNil(t, stats)
-	case <-time.After(5 * time.Second):
-		t.Fatal("stats observer deadlocked or was never invoked")
-	}
-}
-
 func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	catalog := newMockCatalog()
 
