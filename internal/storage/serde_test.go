@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type MockRecordWriter struct {
@@ -224,6 +225,278 @@ func TestBuildRecordFloatVectorBuilderGrowthIsAmortized(t *testing.T) {
 			record := builder.NewRecord()
 			defer record.Release()
 			assert.Equal(t, test.rowsPerChunk*chunkCount, int(record.NumRows()))
+		})
+	}
+}
+
+func TestBuildRecordBatchSerialization(t *testing.T) {
+	validData := []bool{true, false, true}
+	sparseRow0 := typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1})
+	sparseRow2 := typeutil.CreateSparseFloatRow([]uint32{3}, []float32{2})
+	tests := []struct {
+		name     string
+		dataType schemapb.DataType
+		dim      int
+		data     FieldData
+		expected []any
+	}{
+		{
+			name:     "bool",
+			dataType: schemapb.DataType_Bool,
+			data:     &BoolFieldData{Data: []bool{true, false, false}, ValidData: validData, Nullable: true},
+			expected: []any{true, nil, false},
+		},
+		{
+			name:     "int8",
+			dataType: schemapb.DataType_Int8,
+			data:     &Int8FieldData{Data: []int8{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{int8(1), nil, int8(3)},
+		},
+		{
+			name:     "int16",
+			dataType: schemapb.DataType_Int16,
+			data:     &Int16FieldData{Data: []int16{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{int16(1), nil, int16(3)},
+		},
+		{
+			name:     "int32",
+			dataType: schemapb.DataType_Int32,
+			data:     &Int32FieldData{Data: []int32{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{int32(1), nil, int32(3)},
+		},
+		{
+			name:     "int64",
+			dataType: schemapb.DataType_Int64,
+			data:     &Int64FieldData{Data: []int64{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{int64(1), nil, int64(3)},
+		},
+		{
+			name:     "float",
+			dataType: schemapb.DataType_Float,
+			data:     &FloatFieldData{Data: []float32{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{float32(1), nil, float32(3)},
+		},
+		{
+			name:     "double",
+			dataType: schemapb.DataType_Double,
+			data:     &DoubleFieldData{Data: []float64{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{float64(1), nil, float64(3)},
+		},
+		{
+			name:     "timestamptz",
+			dataType: schemapb.DataType_Timestamptz,
+			data:     &TimestamptzFieldData{Data: []int64{1, 0, 3}, ValidData: validData, Nullable: true},
+			expected: []any{int64(1), nil, int64(3)},
+		},
+		{
+			name:     "varchar",
+			dataType: schemapb.DataType_VarChar,
+			data: &StringFieldData{
+				Data: []string{"one", "", "three"}, DataType: schemapb.DataType_VarChar,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{"one", nil, "three"},
+		},
+		{
+			name:     "string",
+			dataType: schemapb.DataType_String,
+			data: &StringFieldData{
+				Data: []string{"one", "", "three"}, DataType: schemapb.DataType_String,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{"one", nil, "three"},
+		},
+		{
+			name:     "json",
+			dataType: schemapb.DataType_JSON,
+			data: &JSONFieldData{
+				Data:      [][]byte{[]byte(`{"value":1}`), nil, []byte(`{"value":3}`)},
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]byte(`{"value":1}`), nil, []byte(`{"value":3}`)},
+		},
+		{
+			name:     "geometry",
+			dataType: schemapb.DataType_Geometry,
+			data: &GeometryFieldData{
+				Data: [][]byte{{1, 2}, nil, {3, 4}}, ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]byte{1, 2}, nil, []byte{3, 4}},
+		},
+		{
+			name:     "binary-vector",
+			dataType: schemapb.DataType_BinaryVector,
+			dim:      16,
+			data: &BinaryVectorFieldData{
+				Data: []byte{0x11, 0x12, 0x21, 0x22}, Dim: 16,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]byte{0x11, 0x12}, nil, []byte{0x21, 0x22}},
+		},
+		{
+			name:     "float-vector",
+			dataType: schemapb.DataType_FloatVector,
+			dim:      2,
+			data: &FloatVectorFieldData{
+				Data: []float32{1, 2, 3, 4}, Dim: 2,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]float32{1, 2}, nil, []float32{3, 4}},
+		},
+		{
+			name:     "float16-vector",
+			dataType: schemapb.DataType_Float16Vector,
+			dim:      2,
+			data: &Float16VectorFieldData{
+				Data: []byte{1, 2, 3, 4, 5, 6, 7, 8}, Dim: 2,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]byte{1, 2, 3, 4}, nil, []byte{5, 6, 7, 8}},
+		},
+		{
+			name:     "bfloat16-vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			dim:      2,
+			data: &BFloat16VectorFieldData{
+				Data: []byte{11, 12, 13, 14, 15, 16, 17, 18}, Dim: 2,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]byte{11, 12, 13, 14}, nil, []byte{15, 16, 17, 18}},
+		},
+		{
+			name:     "int8-vector",
+			dataType: schemapb.DataType_Int8Vector,
+			dim:      2,
+			data: &Int8VectorFieldData{
+				Data: []int8{1, 2, 3, 4}, Dim: 2,
+				ValidData: validData, Nullable: true,
+			},
+			expected: []any{[]int8{1, 2}, nil, []int8{3, 4}},
+		},
+		{
+			name:     "sparse-float-vector",
+			dataType: schemapb.DataType_SparseFloatVector,
+			dim:      8,
+			data: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{Dim: 8, Contents: [][]byte{sparseRow0, sparseRow2}},
+				ValidData:        validData, Nullable: true,
+			},
+			expected: []any{sparseRow0, nil, sparseRow2},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				FieldID: 100, Name: test.name, DataType: test.dataType, Nullable: true,
+			}
+			if test.dim > 0 {
+				field.TypeParams = []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", test.dim)},
+				}
+			}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+			arrowSchema, err := ConvertToArrowSchema(schema, false)
+			require.NoError(t, err)
+			builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+			defer builder.Release()
+
+			err = BuildRecord(builder, &InsertData{Data: map[FieldID]FieldData{100: test.data}}, schema)
+			require.NoError(t, err)
+			record := builder.NewRecord()
+			defer record.Release()
+
+			entry := serdeMap[test.dataType]
+			for i, expected := range test.expected {
+				actual, err := entry.deserialize(record.Column(0), i, schemapb.DataType_None, test.dim, true)
+				require.NoError(t, err)
+				assert.Equal(t, expected, actual)
+			}
+		})
+	}
+}
+
+func TestBuildRecordBatchSerializationRejectsNullabilityMismatch(t *testing.T) {
+	tests := []struct {
+		name           string
+		dataType       schemapb.DataType
+		dim            int
+		schemaNullable bool
+		data           FieldData
+	}{
+		{
+			name:           "primitive-data-nullable",
+			dataType:       schemapb.DataType_Bool,
+			schemaNullable: false,
+			data: &BoolFieldData{
+				Data: []bool{false}, ValidData: []bool{false}, Nullable: true,
+			},
+		},
+		{
+			name:           "primitive-schema-nullable",
+			dataType:       schemapb.DataType_Bool,
+			schemaNullable: true,
+			data:           &BoolFieldData{Data: []bool{true}},
+		},
+		{
+			name:           "dense-vector-data-nullable",
+			dataType:       schemapb.DataType_FloatVector,
+			dim:            2,
+			schemaNullable: false,
+			data: &FloatVectorFieldData{
+				ValidData: []bool{false}, Dim: 2, Nullable: true,
+			},
+		},
+		{
+			name:           "dense-vector-schema-nullable",
+			dataType:       schemapb.DataType_FloatVector,
+			dim:            2,
+			schemaNullable: true,
+			data:           &FloatVectorFieldData{Data: []float32{1, 2}, Dim: 2},
+		},
+		{
+			name:           "sparse-vector-data-nullable",
+			dataType:       schemapb.DataType_SparseFloatVector,
+			dim:            8,
+			schemaNullable: false,
+			data: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{Dim: 8},
+				ValidData:        []bool{false},
+				Nullable:         true,
+			},
+		},
+		{
+			name:           "sparse-vector-schema-nullable",
+			dataType:       schemapb.DataType_SparseFloatVector,
+			dim:            8,
+			schemaNullable: true,
+			data: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim:      8,
+					Contents: [][]byte{typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1})},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				FieldID: 100, Name: test.name, DataType: test.dataType, Nullable: test.schemaNullable,
+			}
+			if test.dim > 0 {
+				field.TypeParams = []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", test.dim)},
+				}
+			}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+			arrowSchema, err := ConvertToArrowSchema(schema, false)
+			require.NoError(t, err)
+			builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+			defer builder.Release()
+
+			err = BuildRecord(builder, &InsertData{Data: map[FieldID]FieldData{100: test.data}}, schema)
+			require.ErrorContains(t, err, "field nullable mismatch")
 		})
 	}
 }

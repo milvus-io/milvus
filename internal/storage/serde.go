@@ -125,7 +125,22 @@ type validFieldData interface {
 	GetValidData() []bool
 }
 
+func validateBatchNullability(data FieldData, nullable bool) error {
+	if data.GetNullable() != nullable {
+		return merr.WrapErrServiceInternalMsg(
+			"field nullable mismatch, schema=%t, data=%t, fieldData=%T",
+			nullable,
+			data.GetNullable(),
+			data,
+		)
+	}
+	return nil
+}
+
 func batchValidity(data FieldData, nullable bool, rowCount int) ([]bool, error) {
+	if err := validateBatchNullability(data, nullable); err != nil {
+		return nil, err
+	}
 	if !nullable {
 		return nil, nil
 	}
@@ -301,13 +316,8 @@ func serializeDenseVectorFieldData(
 	if dim <= 0 || byteWidth <= 0 {
 		return merr.WrapErrServiceInternalMsg("invalid %s dimension %d", dataType.String(), dim)
 	}
-	if data.GetNullable() != nullable {
-		return merr.WrapErrServiceInternalMsg(
-			"%s nullable mismatch, schema=%t, data=%t",
-			dataType.String(),
-			nullable,
-			data.GetNullable(),
-		)
+	if err := validateBatchNullability(data, nullable); err != nil {
+		return err
 	}
 
 	logicalRows := 0
