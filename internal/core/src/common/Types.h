@@ -19,6 +19,7 @@
 #include <boost/align/aligned_allocator.hpp>
 #include <folly/FBVector.h>
 #include <folly/hash/Hash.h>
+#include <folly/hash/SpookyHashV2.h>
 #include <folly/small_vector.h>
 #include <stdint.h>
 #include <array>
@@ -641,6 +642,13 @@ IsStringDataType(DataType data_type) {
     }
 }
 
+// UUID is fixed 16B FixedSizeBinary, not a variable-length string.
+// IsStringDataType(UUID)==false, IsFixedWidth(UUID)==true via TypeTraits, GetDataTypeSize(UUID)==16.
+inline bool
+IsUuidDataType(DataType data_type) {
+    return data_type == DataType::UUID;
+}
+
 inline bool
 IsJsonDataType(DataType data_type) {
     return data_type == DataType::JSON;
@@ -1084,11 +1092,43 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
         case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
             return DataType::DOUBLE;
         case milvus::proto::plan::GenericValue::ValCase::kStringVal:
+            // kStringVal carries both VARCHAR/STRING/TEXT and UUID literals.
+            // Distinguish via schema DataType: UUID literal is 36-char hex
+            // parsed via UUID::FromString (GetValueFromProto<UUID> asserts
+            // kStringVal). No dedicated UUID val case; storage is 16B FixedSizeBinary.
             return DataType::VARCHAR;
         case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
             return DataType::ARRAY;
         default:
             return DataType::NONE;
+    }
+}
+
+// Expected GenericValue ValCase for a given DataType literal.
+// UUID literal is carried as 36-char hex string via kStringVal (parsed to 16B
+// via UUID::FromString at expression construction); no string conversion for storage.
+inline milvus::proto::plan::GenericValue::ValCase
+ExpectedLiteralValCase(DataType data_type) {
+    switch (data_type) {
+        case DataType::BOOL:
+            return milvus::proto::plan::GenericValue::ValCase::kBoolVal;
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            return milvus::proto::plan::GenericValue::ValCase::kInt64Val;
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return milvus::proto::plan::GenericValue::ValCase::kFloatVal;
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::UUID:
+            return milvus::proto::plan::GenericValue::ValCase::kStringVal;
+        case DataType::ARRAY:
+            return milvus::proto::plan::GenericValue::ValCase::kArrayVal;
+        default:
+            return milvus::proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     }
 }
 
@@ -1124,12 +1164,11 @@ template <>
 struct hash<milvus::UUID> {
     size_t
     operator()(const milvus::UUID& uuid) const noexcept {
-        // FNV-1a over the 16 bytes.
-        size_t h = 14695981039346656037ULL;
-        for (uint8_t b : uuid.data) {
-            h = (h ^ b) * 1099511628211ULL;
-        }
-        return h;
+        // Avalanching hash over raw 16B FixedSizeBinary via SpookyHashV2.
+        // No string conversion; hashes uuid.data.data() directly.
+        return static_cast<size_t>(
+            folly::hash::SpookyHashV2::Hash64(
+                uuid.data.data(), uuid.data.size(), 0));
     }
 };
 }  // namespace std
@@ -1137,16 +1176,17 @@ struct hash<milvus::UUID> {
 namespace folly {
 template <>
 struct hasher<milvus::UUID> {
+    using folly_is_avalanching = std::true_type;
+    static constexpr bool IsAvalanching = true;
+
     size_t
     operator()(const milvus::UUID& uuid) const noexcept {
-        // FNV-1a over the 16 bytes, consistent with std::hash<UUID> but
-        // returned via folly::hasher API required by VectorHasher.
-        // Also compatible with folly::hash::hash_combine pattern.
-        size_t h = 14695981039346656037ULL;
-        for (uint8_t b : uuid.data) {
-            h = (h ^ b) * 1099511628211ULL;
-        }
-        return h;
+        // SpookyHashV2 avalanching hash over raw 16B, mirrors
+        // hasher<std::string> (Hash64 with seed 0) and enables F14
+        // fast-path (skips CRC) via IsAvalanching=true.
+        return static_cast<size_t>(
+            hash::SpookyHashV2::Hash64(
+                uuid.data.data(), uuid.data.size(), 0));
     }
 };
 }  // namespace folly
@@ -1356,6 +1396,9 @@ struct fmt::formatter<milvus::proto::schema::DataType>
                 break;
             case milvus::proto::schema::DataType::Text:
                 name = "Text";
+                break;
+            case milvus::proto::schema::DataType::UUID:
+                name = "UUID";
                 break;
             case milvus::proto::schema::DataType::BinaryVector:
                 name = "BinaryVector";

@@ -110,34 +110,35 @@ struct CompareElementFunc {
                 }
             }
             return;
-        }
-        // This is the original code, kept here for the documentation purposes
-        // also, used for iterative filter
-        if constexpr (filter_type == FilterType::random) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = (offsets != nullptr) ? offsets[i] : i;
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = left[offset] == right[offset];
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = left[offset] != right[offset];
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = left[offset] > right[offset];
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = left[offset] < right[offset];
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = left[offset] >= right[offset];
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = left[offset] <= right[offset];
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported op_type:{} for CompareElementFunc",
-                            op));
+        } else {
+            // Homogeneous or both non-UUID: safe to instantiate operator== etc.
+            // This else is required so heterogeneous T vs UUID never
+            // instantiates a==b for incomparable types (would be ill-formed).
+            if constexpr (filter_type == FilterType::random) {
+                for (int i = 0; i < size; ++i) {
+                    auto offset = (offsets != nullptr) ? offsets[i] : i;
+                    if constexpr (op == proto::plan::OpType::Equal) {
+                        res[i] = left[offset] == right[offset];
+                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                        res[i] = left[offset] != right[offset];
+                    } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                        res[i] = left[offset] > right[offset];
+                    } else if constexpr (op == proto::plan::OpType::LessThan) {
+                        res[i] = left[offset] < right[offset];
+                    } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                        res[i] = left[offset] >= right[offset];
+                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                        res[i] = left[offset] <= right[offset];
+                    } else {
+                        ThrowInfo(
+                            UnexpectedError,
+                            fmt::format(
+                                "unsupported op_type:{} for CompareElementFunc",
+                                op));
+                    }
                 }
+                return;
             }
-            return;
-        }
 
         if (!bitmap_input.empty()) {
             for (int i = 0; i < size; ++i) {
@@ -190,6 +191,7 @@ struct CompareElementFunc {
                       fmt::format(
                           "unsupported op_type:{} for CompareElementFunc", op));
         }
+        }  // else: homogeneous branch
     }
 };
 

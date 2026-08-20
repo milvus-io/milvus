@@ -1095,6 +1095,9 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         } else if constexpr (std::is_same_v<T, bool>) {
             // Bool: use specialized SetElement<bool> (two flags, O(1)).
             arg_set_ = std::make_shared<SetElement<T>>(vals);
+        } else if constexpr (std::is_same_v<T, milvus::UUID>) {
+            // UUID is 16B fixed, non-numeric — use hash set, not SIMD
+            arg_set_ = std::make_shared<SetElement<T>>(vals);
         } else {
             // All numeric types: SIMD for small IN, hash for large IN.
             // Crossover benchmarked with ankerl hash at load_factor=0.5.
@@ -1117,7 +1120,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         // masks — avoids per-row variant construction entirely.
         if constexpr (!std::is_same_v<T, bool> &&
                       !std::is_same_v<T, std::string> &&
-                      !std::is_same_v<T, std::string_view>) {
+                      !std::is_same_v<T, std::string_view> &&
+                      !std::is_same_v<T, milvus::UUID>) {
             if (auto simd_elem =
                     std::dynamic_pointer_cast<SimdBatchElement<T>>(arg_set_)) {
                 cached_filter_chunk_ = [simd_elem](const void* data,

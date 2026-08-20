@@ -540,7 +540,8 @@ GetElementValues(const std::shared_ptr<MultiElement>& ptr) {
         return p->GetElements();
     }
     if constexpr (!std::is_same_v<T, bool> && !std::is_same_v<T, std::string> &&
-                  !std::is_same_v<T, std::string_view>) {
+                  !std::is_same_v<T, std::string_view> &&
+                  !std::is_same_v<T, milvus::UUID>) {
         if (auto p = std::dynamic_pointer_cast<SimdBatchElement<T>>(ptr)) {
             return p->GetElements();
         }

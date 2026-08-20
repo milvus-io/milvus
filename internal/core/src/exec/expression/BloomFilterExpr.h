@@ -151,14 +151,19 @@ class SplitBlockBloomFilterView {
     }
 
     // Single probe dispatch for a typed scalar value: strings by raw bytes,
-    // integers widened to int64. Shared by the raw-data and index-fallback
-    // paths so their probe semantics cannot diverge.
+    // integers widened to int64, UUID by 16B FixedSizeBinary. Shared by the
+    // raw-data and index-fallback paths so their probe semantics cannot
+    // diverge. UUID path hashes 16 raw bytes via TestBytes (XXH64 seed 0)
+    // consistent with FixedSizeBinary(16) Arrow encoding; no string
+    // conversion.
     template <typename T>
     bool
     TestScalar(const T& v) const {
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
             return TestBytes(v.data(), v.size());
+        } else if constexpr (std::is_same_v<T, milvus::UUID>) {
+            return TestBytes(v.data.data(), 16);
         } else {
             return TestInt64(static_cast<int64_t>(v));
         }
