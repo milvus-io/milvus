@@ -326,6 +326,36 @@ func TestDirtyViewFlushSchedulerSerializesSameShard(t *testing.T) {
 	require.NoError(t, scheduler.Flush(context.Background()))
 }
 
+func TestDirtyViewFlushSchedulerChunksOversizedSingleShardPersists(t *testing.T) {
+	catalog := newMockCatalog()
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, newMockSyncer(), 2)
+	t.Cleanup(scheduler.Close)
+
+	// A single shard accumulates more persists than maxTxnOps while earlier
+	// flushes are in flight; one transaction must not carry them all.
+	views := []*viewpb.QueryViewOfShard{
+		buildTestViewWithVersion(1, 1, 1, 1),
+		buildTestViewWithVersion(1, 1, 1, 2),
+		buildTestViewWithVersion(1, 1, 1, 3),
+		buildTestViewWithVersion(1, 1, 1, 4),
+		buildTestViewWithVersion(1, 1, 1, 5),
+	}
+	scheduler.Submit(dirtyViewEvent{shardID: testShardID, persists: views})
+
+	require.NoError(t, scheduler.Flush(context.Background()))
+
+	catalog.mu.Lock()
+	batches := catalog.saveCalls
+	catalog.mu.Unlock()
+	require.Len(t, batches, 3) // 2 + 2 + 1
+	total := 0
+	for i, b := range batches {
+		require.LessOrEqual(t, len(b), 2, "batch %d exceeds maxTxnOps", i)
+		total += len(b)
+	}
+	require.Equal(t, len(views), total)
+}
+
 func TestDirtyViewFlushSchedulerPersistsBeforeSync(t *testing.T) {
 	catalog := &blockingFlushCatalog{
 		mockCatalog: newMockCatalog(),

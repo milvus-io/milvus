@@ -352,7 +352,7 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 		afterPersist = append(afterPersist, event.afterPersist...)
 	}
 	if len(persists) > 0 {
-		if err := s.catalog.SaveQueryViews(ctx, persists); err != nil {
+		if err := s.saveQueryViewsChunked(ctx, persists); err != nil {
 			return err
 		}
 	}
@@ -363,6 +363,24 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 		if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{ViewsByNode: viewsByNode}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// saveQueryViewsChunked persists views in per-transaction chunks of at most
+// maxTxnOps operations. A single shard can accumulate an unbounded number of
+// persists while earlier flushes are in flight, so sending the whole batch
+// through one transaction can exceed the backend's per-transaction op limit
+// (etcd rejects with ErrTooManyOps) and stall the shard forever. Chunking
+// keeps every transaction within maxTxnOps; each chunk is a deterministic
+// pure-Set write, so partial progress followed by a retry converges.
+func (s *DirtyViewFlushScheduler) saveQueryViewsChunked(ctx context.Context, views []*viewpb.QueryViewOfShard) error {
+	for len(views) > 0 {
+		n := min(len(views), s.maxTxnOps)
+		if err := s.catalog.SaveQueryViews(ctx, views[:n]); err != nil {
+			return err
+		}
+		views = views[n:]
 	}
 	return nil
 }
