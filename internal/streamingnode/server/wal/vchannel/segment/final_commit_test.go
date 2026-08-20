@@ -59,6 +59,35 @@ func TestFinalCommitPersistsStorageOwnedCompletionMarker(t *testing.T) {
 	require.True(t, recovered.EnsureFinalCommit())
 }
 
+func TestFinalCommitRejectsReplayInsert(t *testing.T) {
+	// A FLUSHED segment whose final commit is done can never persist new data
+	// again: no flush task is ever scheduled for it. Replay inserts must be
+	// rejected so their handles are released instead of stalling the
+	// checkpoint, and before the commit completes re-deliveries of data
+	// already covered by the L1 commit (timetick <= checkpoint) stay accepted.
+	view := NewSegmentView(
+		&streamingpb.SegmentAssignmentMeta{
+			SegmentId:          1,
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick: 10,
+		},
+		10,
+		false,
+		writeOnlyInsertBuffer{},
+		nil,
+		runtimeConfig{lifecycle: &testSegmentLifecycle{}, owner: testSegmentOwner{}},
+	)
+
+	view.mu.Lock()
+	defer view.mu.Unlock()
+	assert.False(t, view.finalCommitDone)
+	assert.True(t, view.canReplayInsertLocked(5), "pre-commit re-delivery within flushed window should be accepted")
+	assert.False(t, view.canReplayInsertLocked(11), "data beyond the flushed window should never be accepted")
+
+	view.finalCommitDone = true
+	assert.False(t, view.canReplayInsertLocked(5), "post-commit nothing may be accepted into the buffer")
+}
+
 func TestFinalCommitFailureKeepsMessageDurabilityPending(t *testing.T) {
 	lifecycle := &testSegmentLifecycle{err: errors.New("commit failed")}
 	view := NewSegmentView(

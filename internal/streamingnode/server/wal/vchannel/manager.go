@@ -221,6 +221,9 @@ func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetT
 	module.RequestPersistThrough(targetTimeTick)
 }
 
+// Close is intentionally a no-op: every module task runs on the recovery
+// storage's scopedTaskScheduler, which recoveryStorageImpl.Close cancels and
+// drains. No resource owned by the manager survives beyond that teardown.
 func (m *PChannelRecoveryManager) Close() {}
 
 func (m *PChannelRecoveryManager) shouldBroadcast(msg message.ImmutableMessage) bool {

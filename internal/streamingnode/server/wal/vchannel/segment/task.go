@@ -6,6 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -111,6 +112,18 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 			segment.durableMeta.Stat.LastModifiedTimestamp = segment.meta.GetStat().GetLastModifiedTimestamp()
 		}
 		segment.dirty = true
+		// After the final commit no flush task can ever cover the buffer again.
+		// A non-empty buffer here means out-of-timetick-order inserts slipped
+		// past the replay guards: their handles were released without their
+		// rows being persisted. Warn loudly so the anomaly is observable.
+		if len(segment.pending.entries) > 0 {
+			mlog.Warn(ctx, "final commit leaves pending insert data unpersisted",
+				mlog.Int64("segmentID", segment.meta.GetSegmentId()),
+				mlog.String("vchannel", segment.meta.GetVchannel()),
+				mlog.Int("pendingEntries", len(segment.pending.entries)),
+				mlog.Uint64("pendingFromTimeTick", segment.pending.fromTimeTick),
+				mlog.Uint64("commitTimeTick", t.timetick))
+		}
 		segment.mu.Unlock()
 		segment.NotifyDataUpdated()
 		releaseMessages(handles)

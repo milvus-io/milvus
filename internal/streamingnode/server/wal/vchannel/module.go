@@ -395,6 +395,15 @@ func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
 			schema = m.vchannelView.CreateSegmentSchema(raw.Header().GetPartitionId(), raw.TimeTick())
 		}
 		if schema == nil {
+			// The collection schema is unresolvable for this segment. Skipping
+			// the create-segment message silently would make every later insert
+			// of the segment disappear without a trace, so surface it.
+			mlog.Warn(ctx, "create segment message skipped: collection schema unresolvable",
+				mlog.String("pchannel", m.pchannel),
+				mlog.String("vchannel", m.vchannel),
+				mlog.Int64("segmentID", id),
+				mlog.Int64("partitionID", raw.Header().GetPartitionId()),
+				mlog.Uint64("timetick", raw.TimeTick()))
 			return
 		}
 		view = segment.NewSegmentViewFromCreateSegmentMessageWithConfig(raw, schema, m.segmentViewConfig())
@@ -421,6 +430,14 @@ func (m *VChannelRecoveryModule) handleInsertMessage(
 	for segmentID, batch := range batches {
 		view := m.segments[segmentID]
 		if view == nil {
+			// The insert targets a segment this module does not track (e.g.
+			// already dropped/cleaned up). Its rows are intentionally skipped,
+			// but log it so a legitimate segment is never silently starved.
+			mlog.Warn(ctx, "insert message skipped: segment view not found",
+				mlog.String("pchannel", m.pchannel),
+				mlog.String("vchannel", m.vchannel),
+				mlog.Int64("segmentID", segmentID),
+				mlog.Uint64("timetick", owned.Message().TimeTick()))
 			continue
 		}
 		if view.ObserveInsert(ctx, owned, batch) {

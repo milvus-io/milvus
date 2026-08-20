@@ -485,7 +485,17 @@ func (info *SegmentView) canReplayInsertLocked(timetick uint64) bool {
 	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
 		return true
 	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
-		return timetick <= info.meta.GetCheckpointTimeTick()
+		// meta.CheckpointTimeTick is only ever written together with
+		// durableMeta.CheckpointTimeTick (markCheckpointDurableLocked), so in
+		// live operation ObserveInsert's durable-checkpoint guard already
+		// rejects the whole acceptance window of this branch. The branch only
+		// admits re-delivered inserts (timetick <= checkpoint) whose data the
+		// L1 commit already covers, i.e. while recovery replays before the
+		// commit task completes. Once finalCommitDone is set no flush task can
+		// ever cover pending data again, so accept nothing: a late out-of-order
+		// insert would otherwise sit in the buffer forever (handle never
+		// released, checkpoint stalled) or be released without being persisted.
+		return !info.finalCommitDone && timetick <= info.meta.GetCheckpointTimeTick()
 	default:
 		return false
 	}

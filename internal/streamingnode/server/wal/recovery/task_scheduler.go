@@ -19,9 +19,11 @@ package recovery
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -95,11 +97,21 @@ func (s *scopedTaskScheduler) WaitIdle(ctx context.Context) error {
 	}
 }
 
+// closeWaitTimeout bounds how long Close waits for already-canceled tasks to
+// drain. Tasks are canceled before waiting, so this only fires when a task
+// ignores cancellation (e.g. blocked in a non-context-aware call) and would
+// otherwise hang Close forever.
+const closeWaitTimeout = 30 * time.Second
+
 func (s *scopedTaskScheduler) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), closeWaitTimeout)
+	defer cancel()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		_ = s.WaitIdle(context.Background())
+		if err := s.WaitIdle(ctx); err != nil {
+			mlog.Warn(ctx, "scoped task scheduler close: wait idle timeout", mlog.Err(err))
+		}
 		return
 	}
 	s.closed = true
@@ -121,7 +133,9 @@ func (s *scopedTaskScheduler) Close() {
 	}
 	for id, handle := range handles {
 		if handle != nil {
-			_ = handle.Wait(context.Background())
+			if err := handle.Wait(ctx); err != nil {
+				mlog.Warn(ctx, "scoped task scheduler close: wait task timeout", mlog.Uint64("taskID", id), mlog.Err(err))
+			}
 		}
 		s.finish(id)
 	}
