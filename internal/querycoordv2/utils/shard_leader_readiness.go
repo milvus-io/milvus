@@ -49,7 +49,10 @@ const (
 //
 // This function therefore keeps the replica in hand throughout: it selects the
 // replicas whose own resource group is rgName, and asks whether each shard has
-// a serviceable leader inside one of THOSE replicas.
+// a serviceable leader inside one of THOSE replicas. Only query-visible
+// replicas count as able to serve, matching the IsQueryVisible filter every
+// GetShardLeaders path applies -- a leader the proxy can never be routed to
+// must not make its resource group look ready.
 //
 // It does not reuse checkLoadStatus, which gates the GetShardLeaders path.
 // That gate is collection-wide by construction - it reads
@@ -97,13 +100,27 @@ func ShardLeaderReadinessByResourceGroup(
 			meta.GlobalFailedLoadCache.Get(collectionID)
 	}
 
+	inRG := 0
 	var replicas []*meta.Replica
 	for _, replica := range m.GetByCollection(ctx, collectionID) {
-		if rgName == "" || replica.GetResourceGroup() == rgName {
+		if rgName != "" && replica.GetResourceGroup() != rgName {
+			continue
+		}
+		inRG++
+		// Only query-visible replicas can serve: both the native and the
+		// resource-group-scoped GetShardLeaders filter on IsQueryVisible, so
+		// a leader on a not-yet-promoted load-config replica is one no query
+		// can be routed to, and counting it would report Ready for a resource
+		// group whose scoped GetShardLeaders answer is empty. The replica
+		// still counts as "living here" -- its shards are merely unready
+		// until tryPromoteReadyLoadConfigReplicas flips it visible -- so it
+		// keeps the resource group out of the no-replica bucket below, whose
+		// meaning is "waiting will never help".
+		if replica.IsQueryVisible() {
 			replicas = append(replicas, replica)
 		}
 	}
-	if len(replicas) == 0 {
+	if inRG == 0 {
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoReplicaInResourceGroup}, nil
 	}
 

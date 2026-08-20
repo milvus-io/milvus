@@ -87,6 +87,12 @@ func LoadPercentageByResourceGroup(
 		return -1, nil
 	}
 
+	// Query-invisible replicas (load-config updates spawn replicas invisible
+	// until every one of them is serviceable) are deliberately included: this
+	// is a progress figure, and those replicas are exactly the ones whose
+	// progress the load-config path is waiting on.
+	// ShardLeaderReadinessByResourceGroup, by contrast, excludes them to
+	// match the routing surface.
 	var replicas []*meta.Replica
 	for _, replica := range m.GetByCollection(ctx, collectionID) {
 		if rgName == "" || replica.GetResourceGroup() == rgName {
