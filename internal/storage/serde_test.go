@@ -73,7 +73,7 @@ func (w *MockRecordWriter) GetWrittenUncompressed() uint64 {
 	return 0
 }
 
-func TestBuildRecordFloatVectorReservesAndUsesSourceBytes(t *testing.T) {
+func TestBuildRecordFloatVectorBatchAppendUsesSourceBytes(t *testing.T) {
 	const dim = 4
 	tests := []struct {
 		name      string
