@@ -43,6 +43,7 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
@@ -370,6 +371,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_set<FieldId> mmap_field_ids;
         std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
             variable_fields_avg_size;
+        // Sealed geometry caches are part of the immutable runtime snapshot.
+        // A replace/reopen stages the new column and cache in the same clone,
+        // then publishes both with one atomic PublishedSegmentState swap.
+        std::unordered_map<FieldId,
+                           std::shared_ptr<milvus::exec::SimpleGeometryCache>>
+            geometry_caches;
         int64_t row_count{0};
     };
 
@@ -599,6 +606,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
+    std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const override;
+
     void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
                         FieldId field_id,
@@ -734,10 +744,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   "sealed segment does not support get_timestamps()");
     }
 
-    // Load Geometry cache for a field
-    void
-    LoadGeometryCache(FieldId field_id,
-                      const std::shared_ptr<ChunkedColumnInterface>& column);
+    // Build a DETACHED geometry cache for a field. The caller stages it in the
+    // same immutable RuntimeResourceState as the column it describes, so one
+    // PublishedSegmentState swap exposes both and a failed reopen exposes
+    // neither. Returns nullptr only if the caller decides not to build.
+    std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    BuildGeometryCacheDetached(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column);
 
  private:
     void
@@ -1246,7 +1260,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               ChunkedColumnInterface* column,
                               const int64_t* seg_offsets,
                               int64_t count,
-                              google::protobuf::RepeatedPtrField<T>* dst);
+                              google::protobuf::RepeatedPtrField<T>* dst,
+                              bool nested_array);
 
     template <typename T>
     static void
@@ -2431,6 +2446,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     TestFreezeRuntimeResourceState(
         std::shared_ptr<RuntimeResourceState> runtime) const {
         return ToConstRuntimeState(std::move(runtime));
+    }
+
+    // Reaches FreezeRuntimeResourceState itself, which copies the state
+    // field by field -- unlike TestFreezeRuntimeResourceState above, which
+    // only re-wraps a state that is already fully populated and therefore
+    // cannot catch a field the copy forgets.
+    static std::shared_ptr<const RuntimeResourceState>
+    TestFreezeRuntimeResourceStateCopy(const RuntimeResourceState& current) {
+        return FreezeRuntimeResourceState(current);
     }
 
     void

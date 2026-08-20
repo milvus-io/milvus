@@ -69,7 +69,8 @@ ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
     const std::string suffix = "_index.v3";
     if (filename.size() < prefix.size() + suffix.size() ||
         filename.compare(0, prefix.size(), prefix) != 0 ||
-        filename.compare(filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        filename.compare(
+            filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
         return std::nullopt;
     }
     auto type_str = filename.substr(

@@ -1018,6 +1018,10 @@ func (s *mockMixCoord) ListFileResources(ctx context.Context, req *milvuspb.List
 	panic("implement me")
 }
 
+func (s *mockMixCoord) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	panic("implement me")
 }
@@ -1080,6 +1084,10 @@ func (s *mockMixCoord) ClientHeartbeat(ctx context.Context, req *milvuspb.Client
 }
 
 func (s *mockMixCoord) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
 	panic("implement me")
 }
 

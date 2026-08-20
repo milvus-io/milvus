@@ -1165,6 +1165,129 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 	return nil
 }
 
+func arraySchemaElementType(arrayType *schemapb.TypeSchema) schemapb.DataType {
+	element := arrayType.GetArrayElement()
+	if element.GetArrayElement() != nil {
+		return schemapb.DataType_Array
+	}
+	return element.GetLeafType()
+}
+
+func normalizeNestedArrayElementType(
+	array *schemapb.ArrayArray,
+	expectedType schemapb.DataType,
+	fieldName string,
+) error {
+	elementType := array.GetElementType()
+	if elementType != schemapb.DataType_None && elementType != expectedType {
+		return merr.WrapErrParameterInvalidMsg(
+			"nested array field %s expects %s element type, got %s",
+			fieldName,
+			expectedType.String(),
+			elementType.String(),
+		)
+	}
+	array.ElementType = expectedType
+	return nil
+}
+
+func (v *validateUtil) checkNestedArrayValue(
+	row *schemapb.ScalarField,
+	arrayType *schemapb.TypeSchema,
+	fieldName string,
+	level int,
+) error {
+	if row == nil || row.GetData() == nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"nested array field %s has an undeclared null value at level %d",
+			fieldName,
+			level,
+		)
+	}
+
+	elementSchema := arrayType.GetArrayElement()
+	if elementSchema.GetArrayElement() != nil {
+		arrayData := row.GetArrayData()
+		if arrayData == nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"nested array field %s level %d expects Array data",
+				fieldName,
+				level,
+			)
+		}
+		expectedType := arraySchemaElementType(elementSchema)
+		if err := normalizeNestedArrayElementType(arrayData, expectedType, fieldName); err != nil {
+			return err
+		}
+		if v.checkMaxCap {
+			maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(arrayType)
+			if err != nil {
+				return err
+			}
+			if int64(len(arrayData.GetData())) > maxCapacity {
+				return merr.WrapErrParameterInvalidMsg(
+					"the length (%d) of nested array field %s at level %d exceeds max capacity (%d)",
+					len(arrayData.GetData()),
+					fieldName,
+					level,
+					maxCapacity,
+				)
+			}
+		}
+		for index, child := range arrayData.GetData() {
+			if err := v.checkNestedArrayValue(
+				child,
+				elementSchema,
+				fieldName,
+				level+1,
+			); err != nil {
+				return merr.Wrapf(err, "nested array element %d", index)
+			}
+		}
+		return nil
+	}
+
+	elementType := elementSchema.GetLeafType()
+	leafField := &schemapb.FieldSchema{
+		Name:        fieldName,
+		DataType:    schemapb.DataType_Array,
+		ElementType: elementType,
+		TypeParams:  elementSchema.GetTypeParams(),
+	}
+	leafArray := &schemapb.ArrayArray{
+		Data:        []*schemapb.ScalarField{row},
+		ElementType: elementType,
+	}
+	if v.checkMaxCap {
+		maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(arrayType)
+		if err != nil {
+			return err
+		}
+		if err := verifyCapacityPerRow(leafArray.GetData(), maxCapacity, elementType); err != nil {
+			return err
+		}
+	}
+	return v.checkArrayElement(leafArray, leafField)
+}
+
+func (v *validateUtil) checkNestedArrayFieldData(
+	data *schemapb.ArrayArray,
+	fieldSchema *schemapb.FieldSchema,
+) error {
+	rootType := fieldSchema.GetTypeSchema()
+	if err := normalizeNestedArrayElementType(
+		data, arraySchemaElementType(rootType), fieldSchema.GetName(),
+	); err != nil {
+		return err
+	}
+	for rowIndex, row := range data.GetData() {
+		if err := v.checkNestedArrayValue(row, rootType, fieldSchema.GetName(), 0); err != nil {
+			return merr.Wrapf(err, "nested array row %d", rowIndex)
+		}
+	}
+	return nil
+}
+
 func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetArrayData()
 	if data == nil {
@@ -1172,6 +1295,9 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		msg := fmt.Sprintf("array field '%v' is illegal, array type mismatch", field.GetFieldName())
 		expectStr := fmt.Sprintf("need %s array", elementTypeStr)
 		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
+	}
+	if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+		return v.checkNestedArrayFieldData(data, fieldSchema)
 	}
 	if v.checkMaxCap {
 		maxCapacity, err := parameterutil.GetMaxCapacity(fieldSchema)

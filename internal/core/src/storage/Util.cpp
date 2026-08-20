@@ -1028,25 +1028,32 @@ std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files,
               milvus::ThreadPoolPriority priority,
-              bool is_field_data) {
+              bool is_field_data,
+              std::optional<proto::schema::TypeSchema> array_type) {
     auto& pool = ThreadPools::GetThreadPool(priority);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager,
-                                     bool is_field_data,
-                                     const std::string file) {
-        // TODO remove this Size() cost
-        auto fileSize = chunk_manager->Size(file);
-        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-        chunk_manager->Read(file, buf.get(), fileSize);
-        auto res = DeserializeFileData(buf, fileSize, is_field_data);
-        return res;
-    };
+    auto DownloadAndDeserialize =
+        [](ChunkManager* chunk_manager,
+           bool is_field_data,
+           std::optional<proto::schema::TypeSchema> array_type,
+           const std::string file) {
+            // TODO remove this Size() cost
+            auto fileSize = chunk_manager->Size(file);
+            auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+            chunk_manager->Read(file, buf.get(), fileSize);
+            auto res = DeserializeFileData(
+                buf, fileSize, is_field_data, std::move(array_type));
+            return res;
+        };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(
-            DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
+        futures.emplace_back(pool.Submit(DownloadAndDeserialize,
+                                         remote_chunk_manager,
+                                         is_field_data,
+                                         array_type,
+                                         file));
     }
     return futures;
 }
@@ -1229,7 +1236,8 @@ CreateFieldData(const DataType& type,
                 const DataType& element_type,
                 bool nullable,
                 int64_t dim,
-                int64_t total_num_rows) {
+                int64_t total_num_rows,
+                std::optional<proto::schema::TypeSchema> array_type) {
     switch (type) {
         case DataType::BOOL:
             return std::make_shared<FieldData<bool>>(
@@ -1267,6 +1275,10 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<Geometry>>(
                 type, nullable, total_num_rows);
         case DataType::ARRAY:
+            if (array_type.has_value()) {
+                return std::make_shared<FieldData<ArrayValue>>(
+                    std::move(*array_type), nullable, total_num_rows);
+            }
             return std::make_shared<FieldData<Array>>(
                 type, nullable, total_num_rows);
         case DataType::VECTOR_FLOAT:
@@ -1333,15 +1345,24 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     }
 
     auto element_type = DataType::NONE;
+    std::optional<proto::schema::TypeSchema> array_type;
     auto vector_array_data =
         dynamic_cast<FieldData<VectorArray>*>(data_array[0].get());
     if (vector_array_data) {
         element_type = vector_array_data->get_element_type();
     }
+    auto nested_array_data =
+        dynamic_cast<FieldData<ArrayValue>*>(data_array[0].get());
+    if (nested_array_data != nullptr) {
+        array_type = nested_array_data->get_array_type_schema();
+    }
 
     auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type(),
                                                 element_type,
-                                                data_array[0]->IsNullable());
+                                                data_array[0]->IsNullable(),
+                                                1,
+                                                0,
+                                                std::move(array_type));
     merged_data->Reserve(total_length);
     for (const auto& data : data_array) {
         if (merged_data->IsNullable()) {
@@ -2977,8 +2998,14 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
 
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    AssertInfo(ctx != nullptr, "Failed to initialize GEOS context");
+    // Scoped GEOS context: InitGEOSContext throws a retriable
+    // MemAllocateFailed on OOM (GEOS_init_r never returns nullptr -- see the
+    // helper's comment), and the RAII guard releases the context on every
+    // exit -- the throwing Geometry(ctx, wkt) constructor on malformed WKT
+    // and the arrow-status AssertInfo calls below would otherwise skip a
+    // trailing GEOS_finish_r and leak one context per failure.
+    ScopedGeosResources geos("WKT to WKB conversion");
+    GEOSContextHandle_t ctx = geos.ctx;
 
     for (const auto& arr : arrays) {
         const auto tid = arr->type_id();
@@ -3023,7 +3050,6 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         result.push_back(wkb_array);
     }
 
-    GEOS_finish_r(ctx);
     return result;
 }
 
