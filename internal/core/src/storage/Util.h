@@ -55,6 +55,7 @@
 #include "storage/PayloadReader.h"
 #include "storage/PayloadStream.h"
 #include "storage/ThreadPools.h"
+#include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -399,6 +400,22 @@ ReleaseArrowUnused();
 
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
+
+// Process-wide switch selecting the remote ChunkManager backend built by
+// CreateChunkManager: legacy AWS-SDK based managers (default) vs the
+// milvus-storage ArrowFileSystem backed ArrowFileSystemChunkManager.
+// Delivered from Go via SetArrowFileSystemChunkManagerEnabled (storage_c.h),
+// sourced from `common.storage.useArrowFileSystemChunkManager`.
+void
+SetUseArrowFileSystemChunkManager(bool use);
+
+bool
+UseArrowFileSystemChunkManager();
+
+// Translate a segcore StorageConfig into the StorageV2FSCache key used to
+// build/lookup the shared milvus-storage ArrowFileSystem.
+StorageV2FSCache::Key
+ToStorageV2FSCacheKey(const StorageConfig& storage_config);
 
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config);

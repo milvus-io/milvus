@@ -266,6 +266,7 @@ type commonConfig struct {
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	UseArrowFSChunkManager        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -701,6 +702,18 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ManifestTransactionRetryLimit.Init(base.mgr)
+
+	p.UseArrowFSChunkManager = ParamItem{
+		Key:          "common.storage.useArrowFileSystemChunkManager",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc: "Whether segcore routes remote chunk manager IO (segment load, index build/load) " +
+			"through the milvus-storage Arrow FileSystem, unified with storage v2. " +
+			"When false, the legacy AWS-SDK based chunk managers are used. " +
+			"Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.",
+		Export: true,
+	}
+	p.UseArrowFSChunkManager.Init(base.mgr)
 
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",

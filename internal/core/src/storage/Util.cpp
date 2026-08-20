@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -49,6 +50,7 @@
 #ifdef ENABLE_GCP_NATIVE
 #include "storage/gcp-native-storage/GcpNativeChunkManager.h"
 #endif
+#include "storage/ArrowFileSystemChunkManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
@@ -1141,6 +1143,40 @@ ReleaseArrowUnused() {
     }
 }
 
+static std::atomic<bool> use_arrow_fs_chunk_manager{false};
+
+void
+SetUseArrowFileSystemChunkManager(bool use) {
+    use_arrow_fs_chunk_manager.store(use);
+    LOG_INFO("remote chunk manager backend set to {}",
+             use ? "ArrowFileSystemChunkManager" : "legacy");
+}
+
+bool
+UseArrowFileSystemChunkManager() {
+    return use_arrow_fs_chunk_manager.load();
+}
+
+// Route a remote storage config to the ArrowFileSystem backed chunk manager
+// when the switch is on and milvus-storage has a producer for the provider;
+// otherwise stay on the legacy implementation.
+static ChunkManagerPtr
+TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
+    if (!UseArrowFileSystemChunkManager()) {
+        return nullptr;
+    }
+    if (!ArrowFileSystemChunkManager::SupportsCloudProvider(
+            storage_config.cloud_provider)) {
+        LOG_WARN(
+            "cloud provider {} is not supported by "
+            "ArrowFileSystemChunkManager, falling back to the legacy chunk "
+            "manager",
+            storage_config.cloud_provider);
+        return nullptr;
+    }
+    return std::make_shared<ArrowFileSystemChunkManager>(storage_config);
+}
+
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config) {
     auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
@@ -1151,9 +1187,17 @@ CreateChunkManager(const StorageConfig& storage_config) {
                 storage_config.root_path);
         }
         case ChunkManagerType::Minio: {
+            if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
+                cm != nullptr) {
+                return cm;
+            }
             return std::make_shared<MinioChunkManager>(storage_config);
         }
         case ChunkManagerType::Remote: {
+            if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
+                cm != nullptr) {
+                return cm;
+            }
             auto cloud_provider_type =
                 CloudProviderType_Map[storage_config.cloud_provider];
             switch (cloud_provider_type) {
@@ -1198,8 +1242,8 @@ CreateChunkManager(const StorageConfig& storage_config) {
     }
 }
 
-milvus_storage::ArrowFileSystemPtr
-InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
+StorageV2FSCache::Key
+ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
     StorageV2FSCache::Key conf;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
@@ -1211,7 +1255,11 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.access_key_id = std::string(storage_config.access_key_id);
         conf.access_key_value = std::string(storage_config.access_key_value);
         conf.root_path = std::string(storage_config.root_path);
-        conf.storage_type = std::string(storage_config.storage_type);
+        // milvus-storage only understands "remote"; "minio" is the
+        // deprecated alias of it in `common.storageType`.
+        conf.storage_type = storage_config.storage_type == "minio"
+                                ? "remote"
+                                : std::string(storage_config.storage_type);
         conf.cloud_provider = std::string(storage_config.cloud_provider);
         conf.iam_endpoint = std::string(storage_config.iam_endpoint);
         conf.log_level = std::string(storage_config.log_level);
@@ -1228,7 +1276,13 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.tls_min_version = storage_config.tls_min_version;
         conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
     }
-    return StorageV2FSCache::Instance().Get(conf);
+    return conf;
+}
+
+milvus_storage::ArrowFileSystemPtr
+InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
+    return StorageV2FSCache::Instance().Get(
+        ToStorageV2FSCacheKey(storage_config));
 }
 
 FieldDataPtr
