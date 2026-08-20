@@ -279,4 +279,5 @@ template class ScalarIndex<uint64_t>;
 template class ScalarIndex<float>;
 template class ScalarIndex<double>;
 template class ScalarIndex<std::string>;
+template class ScalarIndex<milvus::UUID>;
 }  // namespace milvus::index
