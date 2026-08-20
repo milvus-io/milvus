@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include <roaring/roaring.hh>
+
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/JsonCastFunction.h"
@@ -55,7 +57,7 @@ struct JsonToTypedResult {
     // in field_data — rows that exist but fail to cast are NOT included.
     // Used for EXISTS queries: Exists() should return true for rows where
     // the path exists, even if the value can't be cast to the index type.
-    std::vector<size_t> non_exist_offsets;
+    roaring::Roaring non_exist_offsets;
 };
 
 // Convert JSON field data into typed FieldData by extracting values at

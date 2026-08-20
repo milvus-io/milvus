@@ -184,6 +184,47 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
+ScalarRowMaskResidentBytes(
+    DataType field_type,
+    const std::string& index_type,
+    const std::map<std::string, std::string>& index_params,
+    int64_t num_rows,
+    std::optional<bool> field_nullable) {
+    const auto is_json_path =
+        field_type == DataType::JSON &&
+        index_params.find(JSON_PATH) != index_params.end();
+    auto cast_type_it = index_params.find(JSON_CAST_TYPE);
+    const bool is_flat_json =
+        cast_type_it == index_params.end() || cast_type_it->second == "JSON";
+    // Typed JSON path indexes additionally keep the non-existing rows for
+    // EXISTS semantics (plus one dense exists bitmap). NGRAM never applies.
+    const bool typed_json_path =
+        is_json_path && !is_flat_json && index_type != NGRAM_INDEX_TYPE;
+
+    // Tantivy does not retain null rows, so the wrapper keeps a CRoaring null
+    // offset set beside the mmap'd index. JSON path extraction can produce
+    // null rows even when the source field is non-nullable. An unresolved
+    // HYBRID may select INVERTED, so reserve its null mask conservatively.
+    const bool keeps_null_mask =
+        ((index_type == INVERTED_INDEX_TYPE ||
+          index_type == NGRAM_INDEX_TYPE) &&
+         (is_json_path || field_nullable.value_or(true))) ||
+        (typed_json_path && index_type == HYBRID_INDEX_TYPE);
+
+    const uint64_t mask_count =
+        (keeps_null_mask ? 1 : 0) + (typed_json_path ? 1 : 0);
+    const uint64_t dense_bitmap_count = typed_json_path ? 1 : 0;
+
+    // A CRoaring container is at most roughly one dense bitset plus container
+    // metadata. Reserve 2x the dense bytes per row set to cover that overhead.
+    auto roaring_bytes =
+        SaturatingMul(SaturatingMul(BitsetBytes(num_rows), 2), mask_count);
+    auto dense_bitmap_bytes =
+        SaturatingMul(BitsetBytes(num_rows), dense_bitmap_count);
+    return SaturatingAdd(roaring_bytes, dense_bitmap_bytes);
+}
+
+uint64_t
 IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
@@ -693,7 +734,27 @@ IndexFactory::ScalarIndexLoadResource(
                                        index_params,
                                        mmap_enable,
                                        num_rows,
+                                       std::nullopt,
                                        std::nullopt);
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    bool field_nullable) {
+    return ScalarIndexLoadResourceImpl(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows,
+                                       std::nullopt,
+                                       field_nullable);
 }
 
 LoadResourceRequest
@@ -704,7 +765,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info) {
+    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
+    std::optional<bool> field_nullable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -827,6 +889,12 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             index_type);
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
+    auto row_mask_resident_bytes = ScalarRowMaskResidentBytes(
+        field_type, index_type, index_params, num_rows, field_nullable);
+    request.final_memory_cost =
+        SaturatingAdd(request.final_memory_cost, row_mask_resident_bytes);
+    request.max_memory_cost =
+        SaturatingAdd(request.max_memory_cost, row_mask_resident_bytes);
     request.has_raw_data =
         CanUseIndexRawDataForField(field_type, request.has_raw_data);
     return request;
@@ -902,13 +970,15 @@ IndexFactory::ScalarIndexLoadResource(
         *use_shared_memory_overhead_group = use_shared_group;
     }
 
-    return ScalarIndexLoadResourceImpl(field_type,
-                                       index_version,
-                                       index_size_in_bytes,
-                                       resolved_params,
-                                       mmap_enable,
-                                       num_rows,
-                                       inspected_stream_load_info);
+    return ScalarIndexLoadResourceImpl(
+        field_type,
+        index_version,
+        index_size_in_bytes,
+        resolved_params,
+        mmap_enable,
+        num_rows,
+        inspected_stream_load_info,
+        file_manager_context.fieldDataMeta.field_schema.nullable());
 }
 
 IndexBasePtr

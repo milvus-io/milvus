@@ -182,13 +182,14 @@ NgramInvertedIndex::BuildWithJsonFieldData(
             }
         },
         // handle null
-        [this](int64_t offset) { this->null_offset_.push_back(offset); },
+        [this](int64_t offset) { this->AddNullOffset(offset); },
         // handle non exist
         [](int64_t offset) {},
         // handle error (silently skip — error stats not tracked)
         [](const Json&, const std::string&, simdjson::error_code) {});
 
     avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
+    OptimizeNullOffsets();
     LOG_INFO("Ngram index (JSON) avg_row_size: {} bytes", avg_row_size_);
 }
 
