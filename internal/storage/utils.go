@@ -1379,12 +1379,15 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 		realPfData, ok = pfData.(*Int64FieldData)
 	case schemapb.DataType_VarChar:
 		realPfData, ok = pfData.(*StringFieldData)
+	case schemapb.DataType_UUID:
+		realPfData, ok = pfData.(*UUIDFieldData)
 	default:
 		// TODO
+		ok = false
 	}
 	if !ok {
-		mlog.Warn(context.TODO(), "primary field not in Int64 or VarChar format", mlog.Int64("fieldID", pf.FieldID))
-		return nil, merr.WrapErrServiceInternalMsg("primary field not in Int64 or VarChar format")
+		mlog.Warn(context.TODO(), "primary field not in Int64, VarChar or UUID format", mlog.Int64("fieldID", pf.FieldID))
+		return nil, merr.WrapErrServiceInternalMsg("primary field not in Int64, VarChar or UUID format")
 	}
 
 	return realPfData, nil
