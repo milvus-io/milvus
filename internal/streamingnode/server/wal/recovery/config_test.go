@@ -92,8 +92,7 @@ func TestSanitizeIdempotencyFallsBack(t *testing.T) {
 	cfg.sanitizeIdempotency()
 	assert.Equal(t, 10*time.Second, cfg.idempotencyGCInterval)
 	assert.Equal(t, 64*1024*1024, cfg.idempotencyMinRetainedBytes)
-	assert.Positive(t, cfg.idempotencyChunkTargetBytes)
-	assert.Positive(t, cfg.idempotencyManifestChunkInterval)
+	assert.Positive(t, cfg.idempotencyMaxRetainedChunks)
 
 	// The retention floor is what keeps the store non-empty after an outage, so
 	// a non-positive value is repaired rather than honoured.
@@ -103,19 +102,26 @@ func TestSanitizeIdempotencyFallsBack(t *testing.T) {
 
 	// Explicit values are left alone.
 	cfg = &config{
-		idempotencyEnabled:               true,
-		idempotencyGCInterval:            5 * time.Second,
-		idempotencyMinRetainedBytes:      100,
-		idempotencyChunkTargetBytes:      200,
-		idempotencyManifestChunkInterval: 3,
+		idempotencyEnabled:           true,
+		idempotencyGCInterval:        5 * time.Second,
+		idempotencyMinRetainedBytes:  100,
+		idempotencyMaxRetainedChunks: 3,
 	}
 	cfg.sanitizeIdempotency()
 	assert.Equal(t, 5*time.Second, cfg.idempotencyGCInterval)
 	assert.Equal(t, 100, cfg.idempotencyMinRetainedBytes)
+	assert.Equal(t, 3, cfg.idempotencyMaxRetainedChunks)
+
+	// The chunk cap is what bounds recovery time, so a non-positive value is
+	// repaired rather than honoured as "unlimited".
+	cfg = &config{idempotencyEnabled: true, idempotencyMaxRetainedChunks: 0}
+	cfg.sanitizeIdempotency()
+	assert.Positive(t, cfg.idempotencyMaxRetainedChunks)
 
 	// Disabled idempotency is left untouched.
 	cfg = &config{idempotencyEnabled: false}
 	cfg.sanitizeIdempotency()
 	assert.Zero(t, cfg.idempotencyGCInterval)
 	assert.Zero(t, cfg.idempotencyMinRetainedBytes)
+	assert.Zero(t, cfg.idempotencyMaxRetainedChunks)
 }

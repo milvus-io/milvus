@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -119,15 +118,8 @@ func TestCatalogPChannelSummaryMeta(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 		meta := &streamingpb.PChannelSummaryMeta{
-			Pchannel:                 "p1",
-			SourceCheckpointTimetick: 120,
-			LatestGeneration:         3,
-			MinAvailableGeneration:   1,
-			SourceCheckpointMessageId: &commonpb.MessageID{
-				WALName: commonpb.WALName_Test,
-				Id:      "120",
-			},
-			MinInUseGeneration: 2,
+			Pchannel: "p1",
+			Term:     3,
 		}
 		data, err := proto.Marshal(meta)
 		assert.NoError(t, err)
@@ -140,11 +132,7 @@ func TestCatalogPChannelSummaryMeta(t *testing.T) {
 		got, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
 		assert.NoError(t, err)
 		assert.Equal(t, meta.GetPchannel(), got.GetPchannel())
-		assert.Equal(t, meta.GetSourceCheckpointTimetick(), got.GetSourceCheckpointTimetick())
-		assert.Equal(t, meta.GetMinAvailableGeneration(), got.GetMinAvailableGeneration())
-		assert.Equal(t, meta.GetLatestGeneration(), got.GetLatestGeneration())
-		assert.Equal(t, meta.GetSourceCheckpointMessageId().GetId(), got.GetSourceCheckpointMessageId().GetId())
-		assert.Equal(t, meta.GetMinInUseGeneration(), got.GetMinInUseGeneration())
+		assert.Equal(t, meta.GetTerm(), got.GetTerm())
 	})
 
 	t.Run("save_rejects_pchannel_mismatch", func(t *testing.T) {
@@ -170,16 +158,14 @@ func TestCatalogPChannelSummaryMeta(t *testing.T) {
 		catalog := NewCataLog(kv).(*catalog)
 		key := buildPChannelSummaryMetaKey("p1")
 		current := &streamingpb.PChannelSummaryMeta{
-			Pchannel:                 "p1",
-			SourceCheckpointTimetick: 100,
-			LatestGeneration:         1,
+			Pchannel: "p1",
+			Term:     1,
 		}
 		currentData, err := proto.Marshal(current)
 		assert.NoError(t, err)
 		target := &streamingpb.PChannelSummaryMeta{
-			Pchannel:                 "p1",
-			SourceCheckpointTimetick: 200,
-			LatestGeneration:         2,
+			Pchannel: "p1",
+			Term:     2,
 		}
 		targetData, err := proto.Marshal(target)
 		assert.NoError(t, err)

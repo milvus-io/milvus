@@ -14,8 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func TestIdempotencyWindowBeginCompleteAndDuplicate(t *testing.T) {
@@ -37,83 +35,8 @@ func TestIdempotencyWindowBeginCompleteAndDuplicate(t *testing.T) {
 	duplicate := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
 	require.NotNil(t, duplicate.Entry)
-	assert.Equal(t, "key-1", duplicate.Entry.GetIdempotency().GetKey())
-	assert.Equal(t, uint64(100), duplicate.Entry.GetSourceTimetick())
-}
-
-// The TTL eviction bound derives from the committing entry's timetick, not the
-// local wall clock, so the live window and the clock-free recovery-side window
-// retain the same key set under NTP skew.
-func TestWindowTTLEvictionUsesCommitTimetick(t *testing.T) {
-	window := NewWindow(WindowConfig{WindowTTL: 5 * time.Second})
-	oldTT := tsoutil.ComposeTS(1_000, 0)
-	newTT := tsoutil.ComposeTS(100_000, 0)
-
-	completeKey(t, window, "old", oldTT)
-	require.Contains(t, window.entries, IdempotencyKey("old"))
-
-	// An entry older than TTL relative to the NEW commit's timetick is evicted,
-	// with no wall clock involved.
-	completeKey(t, window, "new", newTT)
-	require.NotContains(t, window.entries, IdempotencyKey("old"))
-	require.Contains(t, window.entries, IdempotencyKey("new"))
-
-	// A commit timetick younger than the TTL must not underflow into an
-	// evict-everything bound.
-	tiny := NewWindow(WindowConfig{WindowTTL: 10 * time.Minute})
-	completeKey(t, tiny, "a", tsoutil.ComposeTS(1_000, 0))
-	completeKey(t, tiny, "b", tsoutil.ComposeTS(2_000, 0))
-	require.Len(t, tiny.entries, 2)
-}
-
-// One client idempotency key fans out to a window per vchannel, so the
-// minEntries floor must not extend duplicate visibility past TTL on quiet
-// shards after busy shards have dropped the same key. Hard capacity caps are a
-// separate retention limit and may shorten the effective horizon before TTL.
-func TestWindowDuplicateVisibilityIsUniformAcrossSkewedShards(t *testing.T) {
-	const ttl = 10 * time.Minute
-	// Both shards run the SAME config; only their load differs.
-	newShard := func() *Window { return NewWindow(WindowConfig{WindowTTL: ttl, MinEntries: 2}) }
-	busy, quiet := newShard(), newShard()
-
-	commitTT := tsoutil.ComposeTS(1_000_000, 0)
-	completeKey(t, busy, "shared-key", commitTT)
-	completeKey(t, quiet, "shared-key", commitTT)
-	// The busy shard carries unrelated traffic that lifts it above the floor.
-	completeKey(t, busy, "other-1", commitTT+1)
-	completeKey(t, busy, "other-2", commitTT+2)
-	completeKey(t, busy, "other-3", commitTT+3)
-
-	// Within the TTL, while the entries are still retained, both shards
-	// deduplicate the retry.
-	require.Equal(t, BeginDecisionDuplicate, busy.Begin("shared-key", nil).Decision)
-	require.Equal(t, BeginDecisionDuplicate, quiet.Begin("shared-key", nil).Decision)
-
-	// Past the TTL, the periodic timetick sweep hits every window of the pchannel
-	// with the same bound.
-	expiredBound := evictBeforeCommitTT(commitTT+tsoutil.ComposeTS(ttl.Milliseconds()+1_000, 0), ttl)
-	require.NotZero(t, expiredBound)
-	busy.Evict(expiredBound, "")
-	quiet.Evict(expiredBound, "")
-
-	// The floor still holds the quiet shard's entry in memory...
-	require.Contains(t, quiet.entries, IdempotencyKey("shared-key"))
-	require.NotContains(t, busy.entries, IdempotencyKey("shared-key"))
-	// ...but it no longer answers the retry, so both shards agree it is a new write.
-	require.Equal(t, BeginDecisionOwner, busy.Begin("shared-key", nil).Decision)
-	begin := quiet.Begin("shared-key", nil)
-	require.Equal(t, BeginDecisionOwner, begin.Decision)
-
-	// The dropped entry leaves no stale commitOrder slot behind: the re-append
-	// owns exactly one entry, at its new commit timetick.
-	retryTT := commitTT + tsoutil.ComposeTS(ttl.Milliseconds()+2_000, 0)
-	completed, _ := quiet.Complete(begin.Pending, CommitResult{CommitTimeTick: retryTT}, nil)
-	require.True(t, completed)
-	require.Equal(t, 1, quiet.Len())
-	require.Len(t, quiet.commitOrder, 1)
-	duplicate := quiet.Begin("shared-key", nil)
-	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
-	require.Equal(t, retryTT, duplicate.Entry.GetSourceTimetick())
+	assert.Equal(t, "key-1", duplicate.Entry.IdempotencyKey)
+	assert.Equal(t, uint64(100), duplicate.Entry.SourceTimeTick)
 }
 
 // Complete order is append-completion order, not commit-timetick order: the
@@ -129,18 +52,14 @@ func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
 	completeKey(t, window, "c", 95)
 
 	require.Equal(t, []IdempotencyKey{"b", "c", "a"}, window.commitOrder)
-	// The watermark points at the oldest retained commit timetick, regardless of
-	// completion order.
-	require.Equal(t, uint64(90), window.EvictedWatermarkTT())
 
 	// Byte-cap eviction drops the oldest entry by commit timetick ("b"), not
-	// the first-completed one ("a"). The cap is hard: it may evict a key that is
-	// still within TTL.
+	// the first-completed one ("a").
 	probe := NewWindow(WindowConfig{})
 	completeKey(t, probe, "a", 100)
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
-	capped := NewWindow(WindowConfig{WindowTTL: time.Hour, MaxBytes: entrySize * 2})
+	capped := NewWindow(WindowConfig{MaxBytes: entrySize * 2})
 	completeKey(t, capped, "a", 100)
 	completeKey(t, capped, "b", 90)
 	completeKey(t, capped, "c", 95)
@@ -150,24 +69,23 @@ func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
 	require.Equal(t, BeginDecisionOwner, capped.Begin("b", nil).Decision)
 }
 
-// The byte cap bounds retained memory where entry count cannot: each entry
-// carries the per-row PKs of its insert, so the cap overrides the minEntries
-// floor and evicts oldest-first until the window fits. Like the count cap, this
-// may shorten the effective dedup horizon before TTL on a hot vchannel.
+// The byte cap is the window's only retention bound. Age is deliberately not
+// one: an entry the store handed over is servable however old it is, because an
+// upstream resuming after an outage is exactly who must be deduplicated. What
+// bounds the window instead is memory, since each entry carries the per-row
+// primary keys of its insert.
 func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
-	// Measure the serialized size of one entry so the cap below admits exactly
-	// one. Keys and commit timeticks are chosen so both entries serialize to
-	// the same number of bytes.
-	probe := NewWindow(WindowConfig{MinEntries: 1000})
+	// Measure the size of one entry so the cap below admits exactly one. Keys and
+	// commit timeticks are chosen so both entries account the same.
+	probe := NewWindow(WindowConfig{})
 	completeKey(t, probe, "a", 100)
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{WindowTTL: time.Hour, MinEntries: 1000, MaxBytes: entrySize})
+	window := NewWindow(WindowConfig{MaxBytes: entrySize})
 	completeKey(t, window, "a", 100)
 	require.Contains(t, window.entries, IdempotencyKey("a"))
-	// The second entry pushes the window over the byte cap; the oldest entry
-	// is evicted despite the huge minEntries floor.
+	// The second entry pushes the window over the byte cap; the oldest goes.
 	completeKey(t, window, "b", 101)
 	require.NotContains(t, window.entries, IdempotencyKey("a"))
 	require.Contains(t, window.entries, IdempotencyKey("b"))
@@ -210,7 +128,7 @@ func TestIdempotencyWindowWaitsForInflightResult(t *testing.T) {
 	result := waiter.Pending.Wait(context.Background(), nil)
 	require.NoError(t, result.Err)
 	require.NotNil(t, result.Entry)
-	assert.Equal(t, uint64(100), result.Entry.GetSourceTimetick())
+	assert.Equal(t, uint64(100), result.Entry.SourceTimeTick)
 }
 
 func TestIdempotencyWindowMultipleWaitersAllReceiveResult(t *testing.T) {
@@ -244,7 +162,7 @@ func TestIdempotencyWindowMultipleWaitersAllReceiveResult(t *testing.T) {
 	for i := range results {
 		require.NoErrorf(t, results[i].Err, "waiter %d", i)
 		require.NotNilf(t, results[i].Entry, "waiter %d", i)
-		assert.Equal(t, uint64(100), results[i].Entry.GetSourceTimetick())
+		assert.Equal(t, uint64(100), results[i].Entry.SourceTimeTick)
 	}
 }
 
@@ -297,37 +215,19 @@ func TestIdempotencyWindowFailureRemovesInflight(t *testing.T) {
 	assert.Equal(t, BeginDecisionOwner, retry.Decision)
 }
 
-func TestIdempotencyWindowEvictRespectsMinEntries(t *testing.T) {
-	window := NewWindow(WindowConfig{MinEntries: 2})
-
-	completeKey(t, window, "key-1", 10)
-	completeKey(t, window, "key-2", 20)
-	completeKey(t, window, "key-3", 30)
-
-	window.Evict(100, "")
-	assert.Equal(t, 2, window.Len())
-	assert.Equal(t, uint64(20), window.EvictedWatermarkTT())
-
-	assert.Equal(t, BeginDecisionOwner, window.Begin("key-1", nil).Decision)
-	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-2", nil).Decision)
-	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-3", nil).Decision)
-}
-
 func TestIdempotencyWindowEvictAppliesMaxBytes(t *testing.T) {
 	probe := NewWindow(WindowConfig{})
 	completeKey(t, probe, "key-1", 10)
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{MinEntries: 1, MaxBytes: entrySize * 2})
+	window := NewWindow(WindowConfig{MaxBytes: entrySize * 2})
 
 	completeKey(t, window, "key-1", 10)
 	completeKey(t, window, "key-2", 20)
 	completeKey(t, window, "key-3", 30)
 
-	window.Evict(0, "")
 	assert.Equal(t, 2, window.Len())
-	assert.Equal(t, uint64(20), window.EvictedWatermarkTT())
 	assert.Equal(t, BeginDecisionOwner, window.Begin("key-1", nil).Decision)
 	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-2", nil).Decision)
 	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-3", nil).Decision)
@@ -339,7 +239,7 @@ func TestIdempotencyWindowCompleteReportsEvictionCount(t *testing.T) {
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{MinEntries: 0, MaxBytes: entrySize})
+	window := NewWindow(WindowConfig{MaxBytes: entrySize})
 
 	begin := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionOwner, begin.Decision)
@@ -357,62 +257,36 @@ func TestIdempotencyWindowCompleteReportsEvictionCount(t *testing.T) {
 	require.Equal(t, BeginDecisionDuplicate, window.Begin("key-2", nil).Decision)
 }
 
-func TestIdempotencyWindowWatermarkFallsBackToSnapshotCheckpoint(t *testing.T) {
-	window := NewWindow(WindowConfig{})
-	window.SetSnapshotCheckpointTT(100)
-	assert.Equal(t, uint64(100), window.SnapshotCheckpointTT())
-	assert.Equal(t, uint64(100), window.EvictedWatermarkTT())
-}
-
-// The recovery-side store retains past-TTL entries via the minEntries floor, so
-// a restored window can hold entries whose TTL has already elapsed. The restore
-// must seed the TTL visibility bound from the snapshot checkpoint so such an
-// entry stops answering duplicates at WAL open, not only after the first
-// TimeTick-driven sweep.
-func TestIdempotencyWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.T) {
-	ttl := 10 * time.Minute
-	checkpointTT := tsoutil.ComposeTS(time.Hour.Milliseconds(), 0)
-	expiredTT := tsoutil.ComposeTS((30 * time.Minute).Milliseconds(), 0)
-	freshTT := tsoutil.ComposeTS((59 * time.Minute).Milliseconds(), 0)
-
-	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &recovery.VChannelSummarySnapshot{
-		SnapshotCheckpointTimetick: checkpointTT,
-		Entries: []*streamingpb.SummaryEntry{
-			{SourceTimetick: expiredTT, Idempotency: &streamingpb.IdempotencyContent{Key: "expired"}},
-			{SourceTimetick: freshTT, Idempotency: &streamingpb.IdempotencyContent{Key: "fresh"}},
-		},
-	})
-
-	// The expired entry is retained by the floor but must not be servable: the
-	// retry becomes a fresh Owner, matching post-TTL semantics on every shard.
-	begin := window.Begin("expired", nil)
-	require.Equal(t, BeginDecisionOwner, begin.Decision)
-
-	// An in-TTL entry keeps answering duplicates.
-	dup := window.Begin("fresh", nil)
-	require.Equal(t, BeginDecisionDuplicate, dup.Decision)
-}
-
 func TestIdempotencyWindowRestoreFromSnapshot(t *testing.T) {
+	// Everything the store hands over is immediately servable, however old it is.
 	window := NewWindowFromSnapshot(WindowConfig{}, &recovery.VChannelSummarySnapshot{
-		SnapshotCheckpointTimetick: 100,
-		EvictedWatermarkTimetick:   90,
-		Entries: []*streamingpb.SummaryEntry{
-			{SourceMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "10"}, SourceTimetick: 90, LastConfirmedMessageId: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "9"}, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1", InsertResult: &messagespb.IdempotentInsertResult{
-				RowOffsets: []uint32{1, 0},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11, 10}}},
+		Records: []*recovery.SummaryRecord{
+			{
+				SourceMessageID:        &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "10"},
+				SourceTimeTick:         90,
+				LastConfirmedMessageID: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "9"},
+				IdempotencyKey:         "key-1",
+				InsertResult: &messagespb.IdempotentInsertResult{
+					RowOffsets: []uint32{1, 0},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11, 10}}},
+					},
 				},
-			}}},
+			},
+			// A keyless record materializes nothing: it is not a dedup entry.
+			{SourceMessageID: &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "11"}, SourceTimeTick: 91},
 		},
 	})
 
+	require.Equal(t, 1, window.Len())
 	duplicate := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
-	require.Equal(t, []uint32{1, 0}, duplicate.Entry.GetIdempotency().GetInsertResult().GetRowOffsets())
-	require.Equal(t, []int64{11, 10}, duplicate.Entry.GetIdempotency().GetInsertResult().GetIds().GetIntId().GetData())
-	require.Equal(t, uint64(90), window.EvictedWatermarkTT())
-	require.Equal(t, uint64(100), window.SnapshotCheckpointTT())
+	// The two halves of the duplicate response were stored in different chunk
+	// sections and must arrive rejoined.
+	require.Equal(t, []uint32{1, 0}, duplicate.Entry.InsertResult.GetRowOffsets())
+	require.Equal(t, []int64{11, 10}, duplicate.Entry.InsertResult.GetIds().GetIntId().GetData())
+	require.Equal(t, uint64(90), duplicate.Entry.SourceTimeTick)
+	require.Equal(t, "9", duplicate.Entry.LastConfirmedMessageID.GetId())
 }
 
 func completeKey(t *testing.T, window *Window, key IdempotencyKey, commitTT uint64) {

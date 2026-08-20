@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -74,6 +75,9 @@ func TestInterceptorDuplicateDoesNotAppend(t *testing.T) {
 
 	extra := utility.GetExtraAppendResult(ctx)
 	require.Equal(t, uint64(100), extra.TimeTick)
+	// A duplicate answers with exactly what the first append answered, including
+	// the original last-confirmed position: the store records it, so nothing has
+	// to be substituted.
 	require.True(t, firstLastConfirmed.EQ(extra.LastConfirmedMessageID))
 }
 
@@ -467,37 +471,6 @@ func TestInterceptorWaitCtxCancelKeepsTxnBuffer(t *testing.T) {
 
 	close(releaseOwner)
 	require.NoError(t, (<-ownerDone).err)
-}
-
-// A quiet vchannel must release its TTL-expired entries on the periodic
-// TimeTick append instead of waiting for its next write.
-func TestInterceptorTimeTickSweepEvictsIdleWindows(t *testing.T) {
-	interceptor := newInterceptor(WindowConfig{WindowTTL: 5 * time.Second})
-
-	oldTT := tsoutil.ComposeTS(1_000, 0)
-	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-idle"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		utility.ReplaceAppendResultTimeTick(ctx, oldTT)
-		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
-		return newTestMessageID(10), nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, interceptor.window("v1").Len())
-
-	// The vchannel then goes idle; a TimeTick append far past the TTL sweeps it.
-	ttMsg := message.NewTimeTickMessageBuilderV1().
-		WithHeader(&message.TimeTickMessageHeader{}).
-		WithBody(&msgpb.TimeTickMsg{}).
-		WithAllVChannel().
-		MustBuildMutable()
-	newTT := tsoutil.ComposeTS(100_000, 0)
-	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err = interceptor.DoAppend(ctx, ttMsg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		utility.ReplaceAppendResultTimeTick(ctx, newTT)
-		return newTestMessageID(11), nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, 0, interceptor.window("v1").Len())
 }
 
 // A keyed commit whose txn insert-result buffer expired (nil Build) must FAIL
@@ -909,12 +882,18 @@ func TestFillDuplicateResultClearsStaleExtra(t *testing.T) {
 	ctx := utility.WithExtraAppendResult(context.Background(), extra)
 
 	// A keyed duplicate that committed without an idempotent insert payload.
-	entry := &streamingpb.SummaryEntry{SourceMessageId: message.MustMarshalMessageID(newTestMessageID(10)), SourceTimetick: 100, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}
+	entry := &recovery.SummaryRecord{
+		SourceMessageID:        message.MustMarshalMessageID(newTestMessageID(10)),
+		SourceTimeTick:         100,
+		LastConfirmedMessageID: message.MustMarshalMessageID(newTestMessageID(9)),
+		IdempotencyKey:         "key-1",
+	}
 	msgID, err := fillDuplicateResult(ctx, entry)
 	require.NoError(t, err)
 	require.True(t, newTestMessageID(10).EQ(msgID))
 	require.Equal(t, uint64(100), extra.TimeTick)
 	require.Nil(t, extra.Extra, "stale extra must be cleared when the duplicate carries no insert result")
+	require.True(t, newTestMessageID(9).EQ(extra.LastConfirmedMessageID))
 }
 
 func TestTxnInsertResultBufferReclaimsUntrackedTxn(t *testing.T) {
@@ -1060,7 +1039,7 @@ func TestInterceptorIdempotencyMetrics(t *testing.T) {
 		maxBytes = probeNext.bytes
 	}
 
-	interceptor := newInterceptor(WindowConfig{MinEntries: 0, MaxBytes: maxBytes})
+	interceptor := newInterceptor(WindowConfig{MaxBytes: maxBytes})
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
 
 	nodeID := paramtable.GetStringNodeID()

@@ -6,15 +6,35 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func disableRecoveryIdempotency(t *testing.T) {
+	t.Helper()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false"))
+	t.Cleanup(func() { _ = params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+}
+
+func newTestRecoveryStorageForSummary(t *testing.T, timetick uint64, vchannels ...string) *recoveryStorageImpl {
+	t.Helper()
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(int64(timetick), timetick))
+	if len(vchannels) > 0 {
+		metas := make([]*streamingpb.VChannelMeta, 0, len(vchannels))
+		for _, vchannel := range vchannels {
+			metas = append(metas, &streamingpb.VChannelMeta{
+				Vchannel: vchannel,
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			})
+		}
+		rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta(metas)
+	}
+	rs.SetLogger(resource.Resource().Logger())
+	return rs
+}
 
 // When idempotency is disabled, summary-store recovery is skipped: the summary
 // cache is never consulted, so the recovery path must not bootstrap any state.
@@ -22,111 +42,71 @@ import (
 // run; with nothing persisted, no writes happen at all.
 func TestRecoverSummariesSkipsWhenIdempotencyDisabled(t *testing.T) {
 	ctx := context.Background()
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
-	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+	disableRecoveryIdempotency(t)
 
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(1),
-		TimeTick:  1,
-	})
-	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
-		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
-	})
-	rs.SetLogger(resource.Resource().Logger())
-
+	rs := newTestRecoveryStorageForSummary(t, 1, "v1")
 	_, err := rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.NoError(t, err)
 
-	// No summary state is set up, no active views are marked initialized, and no
-	// bootstrap chunk or catalog meta is written.
 	require.Empty(t, rs.summaryManager.summaries())
 	require.False(t, rs.summaryManager.activeViewsInitialized)
 	require.Nil(t, catalogState.storeMeta)
-	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, false)
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, 0, false)
 }
 
 // Disabling idempotency drops any summary store left behind by an earlier
-// enabled run: while disabled nothing is recorded into the store, checkpoints
-// advance freely and the WAL truncates past the stored SourceCheckpoint, so a
-// kept store would rewind recovery to a truncated position on re-enable.
+// enabled run: while disabled nothing is recorded, checkpoints advance freely
+// and the WAL truncates past what the store covers, so a kept store would be
+// stale by definition on re-enable.
 func TestRecoverSummariesDropsStaleStoreWhenIdempotencyDisabled(t *testing.T) {
 	ctx := context.Background()
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
-	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+	disableRecoveryIdempotency(t)
 
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	// A store persisted by an earlier enabled run: one chunk, the pchannel meta,
-	// and one vchannel summary meta.
-	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(10),
-		TimeTick:  10,
-	}, nil)
+	writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("key-1", 10, 1)},
+	})
 	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(100),
-		TimeTick:  100,
-	})
-	rs.SetLogger(resource.Resource().Logger())
-
+	rs := newTestRecoveryStorageForSummary(t, 100)
 	checkpoint, err := rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.NoError(t, err)
-	// The checkpoint is returned unchanged: no summary replay rewind while disabled.
+	// The checkpoint is returned unchanged; nothing about the store moves it.
 	require.Equal(t, uint64(100), checkpoint.TimeTick)
-	// The stale store is fully dropped: both metas and the chunk are gone, so a
-	// later re-enable bootstraps from the then-current checkpoint.
 	require.Nil(t, catalogState.storeMeta)
-	require.Empty(t, catalogState.summaryMetas)
-	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, false)
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, 0, false)
 }
 
-// A persist writes the chunk before the pchannel meta, so a crash in between
-// leaves an orphan chunk above LatestGeneration. Dropping the store must reap
-// that orphan too: a chunk kept behind outlives the metas that referenced the
-// store, and permanently fails the write-if-absent of the same generation once
-// idempotency is re-enabled.
-func TestRecoverSummariesDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) {
+// A chunk is written before the manifest that names it, so a crash in between
+// leaves an object no manifest references. Dropping the store must reap those
+// too -- the enabled path reaps them when retention passes, but the drop path
+// has no later pass.
+func TestRecoverSummariesDropsUnreferencedChunksWhenIdempotencyDisabled(t *testing.T) {
 	ctx := context.Background()
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
-	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+	disableRecoveryIdempotency(t)
 
 	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(10),
-		TimeTick:  10,
-	}, nil)
-	// The meta only ever referenced generation 0; generation 1 is the orphan of a
-	// persist that crashed after writing the chunk.
-	writeTestPChannelSummaryChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(20),
-		TimeTick:  20,
-	}, nil)
+	records := map[string][]*SummaryRecord{"v1": {newTestSummaryRecord("key-1", 10, 1)}}
+	writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, records)
+	writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 1, 0, records)
 	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(100),
-		TimeTick:  100,
-	})
-	rs.SetLogger(resource.Resource().Logger())
-
+	rs := newTestRecoveryStorageForSummary(t, 100)
 	_, err := rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.NoError(t, err)
 	require.Nil(t, catalogState.storeMeta)
-	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, false)
-	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 1, false)
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, 0, false)
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 1, 0, false)
 }
 
 // Summary lifecycle (creation) belongs on vchannel events, not the per-message
@@ -135,23 +115,13 @@ func TestRecoverSummariesDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) 
 func TestIdempotencySummaryLifecycleMovedToVChannelEvents(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	catalog, _ := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(newTestSummaryStoreChunkManager(t)))
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(1),
-		TimeTick:  1,
-	})
-	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
-		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
-	})
-	rs.SetLogger(resource.Resource().Logger())
+	rs := newTestRecoveryStorageForSummary(t, 1, "v1")
 
-	// Message observation must not create summaries for active vchannels.
 	rs.summaryManager.observeMessage(buildTimeTickMessage(t, 2))
 	require.Empty(t, rs.summaryManager.summaries())
 
-	// Summary creation happens on the vchannel lifecycle event.
 	rs.summaryManager.ensureSummary("v1", rs.checkpoint)
 	require.Len(t, rs.summaryManager.summaries(), 1)
 	require.Contains(t, rs.summaryManager.summaries(), "v1")
@@ -161,100 +131,69 @@ func TestIdempotencySummaryLifecycleMovedToVChannelEvents(t *testing.T) {
 	require.Len(t, rs.summaryManager.summaries(), 1)
 }
 
-// A corrupted chunk the meta references fails the WAL open: the summary
-// snapshot checkpoint gated WAL truncation, so a referenced chunk is the only
-// durable copy of the idempotency keys below the consume checkpoint. Silently
-// resetting to an empty summary would accept in-TTL client retries as fresh
-// writes — duplicate data with no error anywhere. Here the
-// consume checkpoint (120) has advanced together with the chunk, modeling the
-// truncated-WAL reality where key-1@99 is not replayable.
-func TestRecoverSummariesFailsOnReferencedChunkCorruption(t *testing.T) {
+// A corrupt chunk the manifest RETAINS fails the WAL open. The WAL is truncated
+// on the consume checkpoint, which advanced only after that chunk was durable,
+// so the chunk is the only remaining copy of those keys. Silently starting with
+// an empty window would accept in-retention client retries as fresh writes --
+// duplicate data with no error anywhere.
+func TestRecoverSummariesFailsOnRetainedChunkCorruption(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	catalog, _ := newTestPChannelSummaryCatalog(t)
+	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records := map[string][]*streamingpb.SummaryEntry{
-		"v1": {
-			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(99).IntoProto(), SourceTimetick: 99, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}),
-		},
-	}
-	footer, key, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(120),
-		TimeTick:  120,
-	}, records)
-	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
+	footer := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("key-1", 99, 1)},
+	})
+	writeTestPChannelSummaryManifest(ctx, t, "p1", 0, chunkIndexEntryFromFooter(footer))
 
-	// Corrupt the persisted chunk header magic so recovery hits a decode failure.
+	key := buildPChannelSummaryChunkKey(chunkManager, "p1", 0, 0)
 	payload, err := chunkManager.Read(ctx, key)
 	require.NoError(t, err)
 	payload[0] ^= 0x01
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(120),
-		TimeTick:  120,
-	})
-	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
-		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
-	})
-	rs.SetLogger(resource.Resource().Logger())
-
+	rs := newTestRecoveryStorageForSummary(t, 120, "v1")
 	_, err = rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.ErrorIs(t, err, ErrPChannelSummaryStoreCorrupted)
 	require.ErrorContains(t, err, "streaming.idempotency.enabled=false")
 	require.False(t, rs.summaryManager.activeViewsInitialized)
 }
 
-// A corrupt chunk ABOVE the durable LatestGeneration is an orphan: the meta
-// never referenced it, its source data is still in the WAL, and the recovery
-// probe drops it inline — recovery must still succeed with the referenced
-// summary intact.
-func TestRecoverSummariesSelfHealsCorruptOrphanChunk(t *testing.T) {
+// A corrupt chunk ABOVE what the manifest records is the opposite case. The
+// persist that wrote it had to write the manifest next, and failing that fails
+// the whole checkpoint persist -- so its writes are still in the WAL. Recovery
+// drops it and succeeds, with the retained summary intact.
+func TestRecoverSummariesSelfHealsCorruptChunkAboveManifest(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	catalog, _ := newTestPChannelSummaryCatalog(t)
+	chunkManager := newTestSummaryStoreChunkManager(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	records := map[string][]*streamingpb.SummaryEntry{
-		"v1": {
-			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(99).IntoProto(), SourceTimetick: 99, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}),
-		},
-	}
-	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(120),
-		TimeTick:  120,
-	}, records)
-	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
+	footer := writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 0, 0, map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("key-1", 99, 1)},
+	})
+	writeTestPChannelSummaryManifest(ctx, t, "p1", 0, chunkIndexEntryFromFooter(footer))
 
-	// An orphan at generation 1 from a persist that crashed before the meta
-	// advanced; corrupt it.
-	_, orphanKey, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(130),
-		TimeTick:  130,
-	}, nil)
+	writeTestPChannelSummaryChunk(ctx, t, chunkManager, "p1", 1, 0, map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("key-2", 130, 2)},
+	})
+	orphanKey := buildPChannelSummaryChunkKey(chunkManager, "p1", 1, 0)
 	payload, err := chunkManager.Read(ctx, orphanKey)
 	require.NoError(t, err)
 	payload[0] ^= 0x01
 	require.NoError(t, chunkManager.Write(ctx, orphanKey, payload))
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(120),
-		TimeTick:  120,
-	})
-	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
-		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
-	})
-	rs.SetLogger(resource.Resource().Logger())
-
+	rs := newTestRecoveryStorageForSummary(t, 120, "v1")
 	_, err = rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.NoError(t, err)
 	require.True(t, rs.summaryManager.activeViewsInitialized)
-	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 1, false)
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 1, 0, false)
+
 	summary, ok := rs.summaryManager.summaries()["v1"]
 	require.True(t, ok)
-	require.Len(t, summary.entries, 1)
-	require.Contains(t, summary.entries, "key-1")
+	require.Len(t, summary.records, 1)
+	require.Contains(t, summary.records, "key-1")
 }

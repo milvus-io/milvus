@@ -882,12 +882,21 @@ message VChannelSummaryInsertSection {
 }
 
 message VChannelSummaryInsertRecord {
-    common.MessageID source_message_id = 1;
-    uint64 source_timetick             = 2;
-    // The primary keys this vchannel took from the insert. No last-confirmed
-    // position is recorded: the only reader is a duplicate append, whose response
-    // is not a resumable read position.
-    schema.IDs ids                     = 3;
+    common.MessageID source_message_id         = 1;
+    uint64 source_timetick                     = 2;
+    // The last-confirmed position stamped on the original message.
+    //
+    // It is recorded because an append response carries one and the producer
+    // client treats it as mandatory -- an empty value fails to decode and tears
+    // down the whole producer stream, not just the one request. Replaying the
+    // original value keeps a duplicate response identical to the first one;
+    // substituting the message's own id instead would put a plausible but wrong
+    // read position on the wire, since the true last-confirmed is at or before
+    // it. It also keeps the record a faithful account of the write for anyone
+    // reading the store to diagnose one.
+    common.MessageID last_confirmed_message_id = 3;
+    // The primary keys this vchannel took from the insert.
+    schema.IDs ids                             = 4;
 }
 
 // A delete section would be added here, indexed by its own section ref, once

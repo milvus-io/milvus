@@ -75,9 +75,10 @@ type BeginResult struct {
 }
 
 type CommitResult struct {
-	CommitTimeTick   uint64
-	MessageID        *commonpb.MessageID
-	IdempotentResult *messagespb.IdempotentInsertResult
+	CommitTimeTick         uint64
+	MessageID              *commonpb.MessageID
+	LastConfirmedMessageID *commonpb.MessageID
+	IdempotentResult       *messagespb.IdempotentInsertResult
 }
 
 type PendingResult struct {
@@ -163,10 +164,11 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	}
 
 	entry := &recovery.SummaryRecord{
-		SourceMessageID: result.MessageID,
-		SourceTimeTick:  result.CommitTimeTick,
-		IdempotencyKey:  string(pending.Key),
-		InsertResult:    result.IdempotentResult,
+		SourceMessageID:        result.MessageID,
+		SourceTimeTick:         result.CommitTimeTick,
+		LastConfirmedMessageID: result.LastConfirmedMessageID,
+		IdempotencyKey:         string(pending.Key),
+		InsertResult:           result.IdempotentResult,
 	}
 	delete(w.inflight, pending.Key)
 	w.entries[pending.Key] = entry

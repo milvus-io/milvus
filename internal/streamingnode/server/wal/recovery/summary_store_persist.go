@@ -183,6 +183,7 @@ func summaryRecordEqual(left, right *SummaryRecord) bool {
 	return left.SourceTimeTick == right.SourceTimeTick &&
 		left.IdempotencyKey == right.IdempotencyKey &&
 		proto.Equal(left.SourceMessageID, right.SourceMessageID) &&
+		proto.Equal(left.LastConfirmedMessageID, right.LastConfirmedMessageID) &&
 		proto.Equal(left.InsertResult, right.InsertResult)
 }
 

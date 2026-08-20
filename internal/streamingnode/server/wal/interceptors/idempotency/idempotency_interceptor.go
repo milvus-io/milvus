@@ -482,6 +482,7 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 	}
 	if extra != nil {
 		result.CommitTimeTick = extra.TimeTick
+		result.LastConfirmedMessageID = message.MustMarshalMessageID(extra.LastConfirmedMessageID)
 	}
 	if insertResult != nil {
 		result.IdempotentResult = insertResult
@@ -496,15 +497,20 @@ func fillDuplicateResult(ctx context.Context, entry *recovery.SummaryRecord) (me
 		return nil, status.NewInner("missing duplicate idempotency entry result")
 	}
 	msgID := message.MustUnmarshalMessageID(entry.SourceMessageID)
+	// The response must carry a last-confirmed position: the producer client
+	// treats it as mandatory and fails the whole stream on an empty one. The
+	// record keeps the original, so a duplicate answers exactly what the first
+	// append answered. The fallback covers a record written before the store
+	// carried the field; the message's own id is at or after the true
+	// last-confirmed, which makes it usable as an identifier but not as a read
+	// position.
+	lastConfirmed := message.MustUnmarshalMessageID(entry.LastConfirmedMessageID)
+	if lastConfirmed == nil {
+		lastConfirmed = msgID
+	}
 	if extra := utility.GetExtraAppendResult(ctx); extra != nil {
 		extra.TimeTick = entry.SourceTimeTick
-		// The store records no last-confirmed position, so the original message's
-		// own id stands in. It is NOT a resumable read position -- the true
-		// last-confirmed is at or before it, so a reader starting here could miss
-		// messages below this response's timetick. Nothing on the idempotent
-		// append path consumes it as one; the field exists because the append
-		// result always carries it.
-		extra.LastConfirmedMessageID = msgID
+		extra.LastConfirmedMessageID = lastConfirmed
 		// A duplicate response never carries a txn context; clear whatever an
 		// intervening inner append (e.g. the synthesized retried-txn rollback)
 		// left behind.

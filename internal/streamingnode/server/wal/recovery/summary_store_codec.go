@@ -102,9 +102,10 @@ func marshalPChannelSummaryChunk(
 		}
 		for _, record := range records {
 			insertSection.Records = append(insertSection.Records, &streamingpb.VChannelSummaryInsertRecord{
-				SourceMessageId: record.SourceMessageID,
-				SourceTimetick:  record.SourceTimeTick,
-				Ids:             record.InsertResult.GetIds(),
+				SourceMessageId:        record.SourceMessageID,
+				SourceTimetick:         record.SourceTimeTick,
+				LastConfirmedMessageId: record.LastConfirmedMessageID,
+				Ids:                    record.InsertResult.GetIds(),
 			})
 		}
 		ref, err := appendPChannelSummarySection(buf, insertSection, len(records))
@@ -248,6 +249,9 @@ func unmarshalVChannelSummarySections(
 		if err := proto.Unmarshal(idempotencyPayload, idempotency); err != nil {
 			return nil, pchannelSummaryStoreCorruptedf("failed to decode idempotency section for vchannel %s: %s", vchannel, err.Error())
 		}
+		if uint64(len(idempotency.GetRecords())) != ref.GetRecordCount() {
+			return nil, pchannelSummaryStoreCorruptedf("idempotency section record count mismatch for vchannel %s", vchannel)
+		}
 		// Position is the only link between the sections, so an unequal length is
 		// not a recoverable mismatch: every pairing below it would be wrong.
 		if len(idempotency.GetRecords()) != len(inserts.GetRecords()) {
@@ -258,8 +262,9 @@ func unmarshalVChannelSummarySections(
 	records := make([]*SummaryRecord, 0, len(inserts.GetRecords()))
 	for i, insert := range inserts.GetRecords() {
 		record := &SummaryRecord{
-			SourceMessageID: insert.GetSourceMessageId(),
-			SourceTimeTick:  insert.GetSourceTimetick(),
+			SourceMessageID:        insert.GetSourceMessageId(),
+			SourceTimeTick:         insert.GetSourceTimetick(),
+			LastConfirmedMessageID: insert.GetLastConfirmedMessageId(),
 		}
 		var rowOffsets []uint32
 		if idempotency != nil {

@@ -3,13 +3,9 @@ package recovery
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 // The footer integrity check must cover the exact stored footer bytes, carried
@@ -20,21 +16,18 @@ import (
 // re-encoding the footer into a byte-different but semantically identical form
 // and refreshing the trailer checksum: decode must still accept it.
 func TestPChannelSummaryFooterChecksumCoversStoredBytes(t *testing.T) {
-	payload, _, checksum, err := marshalPChannelSummaryChunk("p1", 3, 0, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(200),
-		TimeTick:  200,
-	}, nil)
+	payload, _, err := marshalPChannelSummaryChunk("p1", 3, 0, map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("key-1", 200, 7)},
+	})
 	require.NoError(t, err)
-	require.NotEmpty(t, checksum)
 
-	rebuilt, newChecksum := repackChunkWithPaddedFooter(t, payload)
+	rebuilt, _ := repackChunkWithPaddedFooter(t, payload)
 	require.NotEqual(t, payload, rebuilt)
 
-	records, footer, decodedChecksum, err := unmarshalPChannelSummaryChunk(rebuilt)
+	records, footer, err := unmarshalPChannelSummaryChunk(rebuilt)
 	require.NoError(t, err)
-	require.Empty(t, records)
-	require.Equal(t, uint64(3), footer.Generation)
-	require.Equal(t, hex.EncodeToString(newChecksum), decodedChecksum)
+	require.Len(t, records["v1"], 1)
+	require.Equal(t, uint64(3), footer.GetGeneration())
 }
 
 // repackChunkWithPaddedFooter re-frames a chunk with an unknown proto field

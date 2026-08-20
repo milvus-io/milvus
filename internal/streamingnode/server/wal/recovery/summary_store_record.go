@@ -24,6 +24,12 @@ type SummaryRecord struct {
 	SourceMessageID *commonpb.MessageID
 	SourceTimeTick  uint64
 
+	// LastConfirmedMessageID is the position stamped on the original message. It
+	// is carried so a duplicate append can answer with exactly what the first
+	// append answered: the append response always has this field, and the
+	// producer client rejects a response without it.
+	LastConfirmedMessageID *commonpb.MessageID
+
 	// IdempotencyKey is empty for a write no view remembers. Such a record is
 	// never staged for a chunk: it materializes nothing for any consumer, and the
 	// WAL consume checkpoint -- not a chunk -- is what records how far the vchannel
@@ -47,6 +53,9 @@ func (r *SummaryRecord) Size() int {
 	if r.SourceMessageID != nil {
 		size += proto.Size(r.SourceMessageID)
 	}
+	if r.LastConfirmedMessageID != nil {
+		size += proto.Size(r.LastConfirmedMessageID)
+	}
 	if r.InsertResult != nil {
 		size += proto.Size(r.InsertResult)
 	}
@@ -64,8 +73,9 @@ func newSummaryRecordFromMessage(pchannel string, msg message.ImmutableMessage) 
 		return nil, false
 	}
 	record := &SummaryRecord{
-		SourceMessageID: safeMessageIDProto(msg.MessageID()),
-		SourceTimeTick:  msg.TimeTick(),
+		SourceMessageID:        safeMessageIDProto(msg.MessageID()),
+		SourceTimeTick:         msg.TimeTick(),
+		LastConfirmedMessageID: safeMessageIDProto(msg.LastConfirmedMessageID()),
 	}
 
 	// The result is only worth storing alongside a key: without one it can never
@@ -85,8 +95,9 @@ func newSummaryRecordFromTxnMessage(pchannel string, msg message.ImmutableTxnMes
 		return nil, false
 	}
 	record := &SummaryRecord{
-		SourceMessageID: safeMessageIDProto(msg.MessageID()),
-		SourceTimeTick:  msg.TimeTick(),
+		SourceMessageID:        safeMessageIDProto(msg.MessageID()),
+		SourceTimeTick:         msg.TimeTick(),
+		LastConfirmedMessageID: safeMessageIDProto(msg.LastConfirmedMessageID()),
 	}
 
 	insertResults := make([]*messagespb.IdempotentInsertResult, 0, msg.Size())

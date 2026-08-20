@@ -225,6 +225,22 @@ func (m *summaryManager) probeForwardFromManifest(
 			break
 		}
 		_, footer, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, manifestTerm)
+		if errors.Is(err, ErrPChannelSummaryStoreCorrupted) {
+			// A probed chunk is by construction one whose WAL checkpoint never
+			// advanced: the persist that wrote it had to write the manifest next,
+			// and failing that fails the whole checkpoint persist. So its writes are
+			// still in the WAL and replay will redo them -- dropping it is safe, and
+			// escalating would refuse the open over data that is not lost. Nothing
+			// above it can be sound either, so the probe stops here.
+			m.Logger().Warn(ctx, "dropping corrupt summary chunk found above the manifest; its writes are replayed from the WAL",
+				mlog.Uint64("generation", generation),
+				mlog.Int64("term", manifestTerm),
+				mlog.Err(err))
+			if removeErr := cm.Remove(ctx, buildPChannelSummaryChunkKey(cm, pchannel, generation, manifestTerm)); removeErr != nil {
+				m.Logger().Warn(ctx, "failed to drop corrupt summary chunk; the object leaks", mlog.Err(removeErr))
+			}
+			break
+		}
 		if err != nil {
 			return nil, err
 		}

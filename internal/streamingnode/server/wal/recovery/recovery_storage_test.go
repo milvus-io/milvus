@@ -118,13 +118,8 @@ func TestRecoveryStorage(t *testing.T) {
 	f.Set(mixCoord)
 
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	pchannelSummaryMeta = writeTestBootstrapPChannelSummaryMeta(
-		context.Background(),
-		t,
-		"test_channel",
-		chunkManager,
-		utility.NewWALCheckpointFromProto(cp),
-	)
+	// The store starts empty: there is no bootstrap chunk. Recovery publishes
+	// this term's manifest and only then may write anything.
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f), resource.OptChunkManager(chunkManager))
 	b := &streamBuilder{
 		channel:                types.PChannelInfo{Name: "test_channel"},

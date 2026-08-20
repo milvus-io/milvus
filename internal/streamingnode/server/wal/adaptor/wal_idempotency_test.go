@@ -85,6 +85,9 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	require.NotNil(t, duplicate)
 	require.True(t, first.MessageID.EQ(duplicate.MessageID))
 	require.Equal(t, first.TimeTick, duplicate.TimeTick)
+	// A duplicate response is identical to the first one, position included: the
+	// summary record carries the original last-confirmed, so nothing is
+	// substituted and the producer client decodes it the same way either time.
 	require.True(t, first.LastConfirmedMessageID.EQ(duplicate.LastConfirmedMessageID))
 
 	second, err := rwWAL.Append(ctx, newIdempotencyWALAppendMessage("key-2"))
@@ -117,7 +120,6 @@ func initIdempotencyResourceForTest(t *testing.T) {
 	var consumeCheckpoint *streamingpb.WALCheckpoint
 	segmentAssignments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
-	summaryMetas := make(map[string]*streamingpb.VChannelSummaryMeta)
 	var pchannelSummaryMeta *streamingpb.PChannelSummaryMeta
 
 	rc := mocks.NewMockMixCoordClient(t)
@@ -176,25 +178,6 @@ func initIdempotencyResourceForTest(t *testing.T) {
 			values = append(values, proto.Clone(meta).(*streamingpb.VChannelMeta))
 		}
 		return values, nil
-	}).Maybe()
-	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
-		values := make([]*streamingpb.VChannelSummaryMeta, 0, len(summaryMetas))
-		for _, meta := range summaryMetas {
-			values = append(values, proto.Clone(meta).(*streamingpb.VChannelSummaryMeta))
-		}
-		return values, nil
-	}).Maybe()
-	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelSummaryMeta) error {
-		for key, meta := range saved {
-			summaryMetas[key] = proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
-		}
-		return nil
-	}).Maybe()
-	catalog.EXPECT().RemoveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, removed []string) error {
-		for _, key := range removed {
-			delete(summaryMetas, key)
-		}
-		return nil
 	}).Maybe()
 	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
 		if pchannelSummaryMeta == nil {
