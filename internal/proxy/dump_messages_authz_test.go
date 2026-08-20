@@ -172,7 +172,7 @@ func TestAuthorizeWALRead(t *testing.T) {
 			_, err := initMetaCache(context.Background(), rootClient)
 			require.NoError(t, err)
 
-			_, err := authorizeWALRead(GetContext(context.Background(), "root:pwd"))
+			_, err = authorizeWALRead(GetContext(context.Background(), "root:pwd"))
 			assert.NoError(t, err)
 			_, err = authorizeWALRead(GetContext(context.Background(), "plain:pwd"))
 			require.Error(t, err)
@@ -205,7 +205,7 @@ func TestDumpMessages_UnauthorizedUserDenied(t *testing.T) {
 	handlerCalled := false
 	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:mockPass")}
-	err := interceptor(nil, stream, &grpc.StreamServerInfo{
+	err = interceptor(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
 	}, func(srv interface{}, ss grpc.ServerStream) error {
 		handlerCalled = true
@@ -232,7 +232,7 @@ func TestDumpMessages_UnauthenticatedUserDenied(t *testing.T) {
 	handlerCalled := false
 	authInterceptor := GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() }))
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:wrongPass")}
-	err := authInterceptor(nil, stream, &grpc.StreamServerInfo{
+	err = authInterceptor(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
 	}, func(srv interface{}, ss grpc.ServerStream) error {
 		handlerCalled = true
@@ -414,7 +414,7 @@ func TestGrpcAuthStreamInterceptorChain(t *testing.T) {
 	)
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "root:pwd")}
 	handlerCalled := false
-	err := chain(nil, stream, &grpc.StreamServerInfo{
+	err = chain(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
 	}, func(srv interface{}, ss grpc.ServerStream) error {
 		handlerCalled = true

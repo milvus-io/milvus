@@ -40,49 +40,6 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return RateLimitInterceptorWithMetaCache(func() Cache { return nil }, limiter)
 }
 
-// streamMethodRateTypes maps a streaming RPC's full method name to the cluster
-// rate-limit bucket charged at stream establishment. CreateReplicateStream
-// (writes into the WAL) and DumpMessages (streams raw WAL out) are cluster-scoped
-// data-plane operations, so a stream open is charged once against the
-// cluster-level DDLCollection bucket.
-var streamMethodRateTypes = map[string]internalpb.RateType{
-	milvuspb.MilvusService_CreateReplicateStream_FullMethodName: internalpb.RateType_DDLCollection,
-	milvuspb.MilvusService_DumpMessages_FullMethodName:          internalpb.RateType_DDLCollection,
-}
-
-// RateLimitStreamInterceptor returns a new stream server interceptor that
-// performs a rate-limit check at stream establishment. Streaming RPCs carry no
-// request object at the interceptor layer and flow arbitrary data after the
-// stream opens, so this is an ESTABLISHMENT GATE only: it throttles how many
-// concurrent WAL data-plane streams can be opened (charged once against the
-// cluster bucket, InvalidDBID), it does NOT throttle the per-message data flow
-// inside an open stream the way the unary path throttles per request. It also
-// shares the DDLCollection bucket with cluster DDL operations, so a configured
-// DDLCollection limit gates stream opens alongside CreateCollection/DropCollection.
-// Per-message flow throttling for these streams would require a dedicated rate
-// type and is left as a follow-up.
-func RateLimitStreamInterceptor(limiter types.Limiter) grpc.StreamServerInterceptor {
-	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		rt, ok := streamMethodRateTypes[info.FullMethod]
-		if !ok {
-			// Unknown streaming method: no dedicated rate-limit bucket. The
-			// authorization chain still fail-closes on it via
-			// StreamPrivilegeInterceptor.
-			return handler(srv, ss)
-		}
-		err := limiter.Check(util.InvalidDBID, map[int64][]int64{}, rt, 1)
-		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
-		if err != nil {
-			metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.FailLabel).Inc()
-			mlog.Warn(context.TODO(), "stream rate limit exceeded", mlog.String("method", info.FullMethod), mlog.Err(err))
-			return err
-		}
-		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
-		return handler(srv, ss)
-	}
-}
-
 // RateLimitInterceptorWithMetaCache returns a new unary server interceptor that performs
 // request rate limiting. getMetaCache is resolved per request so the interceptor observes
 // the meta cache initialized by the proxy after startup instead of a construction-time snapshot.

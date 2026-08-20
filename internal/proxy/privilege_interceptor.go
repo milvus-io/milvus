@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -342,13 +342,12 @@ func authorizeWALRead(ctx context.Context) (context.Context, error) {
 // statically per full-method name.
 type StreamPrivilegeFunc func(ctx context.Context, fullMethod string) (context.Context, error)
 
-// streamHealthServicePrefix is the full-method-name prefix of the gRPC health
-// service. Health probing (grpc.health.v1.Health/Watch) is exempt from RBAC
-// authorization, but the stream is STILL authenticated by
-// GrpcAuthStreamInterceptor (matching the unary health.Check path) — so when
-// authorization is enabled, health probes must carry valid credentials, and the
-// exemption only skips the casbin check.
-const streamHealthServicePrefix = "/grpc.health.v1.Health/"
+// The gRPC health stream method is exempt from RBAC authorization, but the
+// stream is STILL authenticated by GrpcAuthStreamInterceptor (matching the
+// unary health.Check path) — so when authorization is enabled, health probes
+// must carry valid credentials, and the exemption only skips the casbin check.
+// It is matched exactly so a future health service stream method cannot be
+// accidentally exempted by a prefix match.
 
 // streamMethodAuthorizers is the static authorization table for streaming RPCs
 // on the external gRPC server. It maps a streaming RPC's full method name to the
@@ -399,7 +398,7 @@ func StreamPrivilegeInterceptor(ctx context.Context, fullMethod string) (context
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return ctx, nil
 	}
-	if strings.HasPrefix(fullMethod, streamHealthServicePrefix) {
+	if fullMethod == grpc_health_v1.Health_Watch_FullMethodName {
 		return ctx, nil
 	}
 	authorize, ok := streamMethodAuthorizers[fullMethod]

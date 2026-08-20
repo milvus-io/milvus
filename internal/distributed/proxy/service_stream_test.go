@@ -18,6 +18,7 @@ package grpcproxy
 
 import (
 	"context"
+	"io"
 	"net"
 	"testing"
 
@@ -30,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -43,13 +43,6 @@ type streamAuthTestServer struct {
 }
 
 func (s *streamAuthTestServer) DumpMessages(*milvuspb.DumpMessagesRequest, milvuspb.MilvusService_DumpMessagesServer) error {
-	return nil
-}
-
-type noopLimiter struct{}
-
-func (l *noopLimiter) Check(int64, map[int64][]int64, internalpb.RateType, int) error { return nil }
-func (l *noopLimiter) Alloc(context.Context, int64, map[int64][]int64, internalpb.RateType, int) error {
 	return nil
 }
 
@@ -67,7 +60,7 @@ func TestExternalStreamInterceptor_Wiring(t *testing.T) {
 	// path below is rejected on the missing authorization header, before any
 	// credential lookup.
 	getMetaCache := func() proxy.Cache { return proxy.InitEmptyMetaCacheForTest() }
-	opt := newStreamInterceptorOption(getMetaCache, &noopLimiter{})
+	opt := newStreamInterceptorOption(getMetaCache)
 
 	lis := bufconn.Listen(streamBufSize)
 	srv := grpc.NewServer(opt)
@@ -92,8 +85,17 @@ func TestExternalStreamInterceptor_Wiring(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, codes.Unauthenticated, status.Code(err))
 	})
-}
 
-func withOutgoingAuth(ctx context.Context, cred string) context.Context {
-	return metadata.AppendToOutgoingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode(cred))
+	t.Run("authorization-disabled stream reaches handler", func(t *testing.T) {
+		proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+		// With authorization disabled both the auth and RBAC interceptors
+		// pass through, so the request must reach the handler. This guards
+		// against a chain that is too strict or mis-ordered.
+		stream, err := client.DumpMessages(context.Background(), &milvuspb.DumpMessagesRequest{Pchannel: "ch"})
+		require.NoError(t, err)
+		_, err = stream.Recv()
+		require.Equal(t, io.EOF, err)
+	})
 }

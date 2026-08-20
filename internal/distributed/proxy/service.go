@@ -327,7 +327,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		// would accept unauthenticated/unauthorized streaming calls on the
 		// client port. The order mirrors the unary chain: first authenticate
 		// (resolve the user into ctx), then enforce authorization on that user.
-		streamServerOption = newStreamInterceptorOption(getMetaCache, limiter)
+		streamServerOption = newStreamInterceptorOption(getMetaCache)
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
 		streamServerOption = grpc.EmptyServerOption{}
@@ -419,18 +419,18 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 }
 
 // newStreamInterceptorOption builds the security-critical stream interceptor
-// chain for the external gRPC server: authentication, RBAC (fail-closed),
-// cluster-level rate limiting, access logging, and mlog context enrichment.
-// It is extracted so the wiring is testable independently of the full Server
-// lifecycle — a regression here would silently reopen the stream auth bypass
-// (#52387), so the chain is covered by a dedicated test.
-func newStreamInterceptorOption(getMetaCache func() proxy.Cache, limiter types.Limiter) grpc.ServerOption {
+// chain for the external gRPC server: authentication, then RBAC (fail-closed).
+// It mirrors the unary chain's auth-before-RBAC ordering; streaming RPCs carry
+// no request object at the interceptor layer, so the required authorization is
+// resolved per full-method name by StreamPrivilegeInterceptor and unregistered
+// stream methods are denied by default. It is extracted so the wiring is
+// testable independently of the full Server lifecycle — a regression here would
+// silently reopen the stream auth bypass (#52387), so the chain is covered by a
+// dedicated test.
+func newStreamInterceptorOption(getMetaCache func() proxy.Cache) grpc.ServerOption {
 	return grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-		accesslog.StreamAccessLogInterceptor,
 		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
-		accesslog.StreamUpdateAccessInfoInterceptor,
 		proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
-		proxy.RateLimitStreamInterceptor(limiter),
 		mlog.StreamServerInterceptor(typeutil.ProxyRole),
 	))
 }
