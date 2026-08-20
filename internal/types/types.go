@@ -311,6 +311,9 @@ type MixCoord interface {
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 
 	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
+
+	// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
+	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 }
 
 // MixCoordComponent is used by grpc server of MixCoord
