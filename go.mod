@@ -319,7 +319,7 @@ require (
 )
 
 replace (
-	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.0
+	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.2
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93
