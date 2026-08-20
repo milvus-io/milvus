@@ -137,6 +137,19 @@ func indexAndLoadFMIndex(t *testing.T, ctx CtxT, mc MC, collectionName string) {
 	require.NoError(t, loadTask.Await(ctx))
 }
 
+// createFMIndex issues CreateIndex and waits for the build to reach a terminal
+// state. Build-param validation may be reported either synchronously (in the
+// CreateIndex RPC) or asynchronously (as an IndexState_Failed during the build),
+// so the error is surfaced from whichever path reports it. The returned task is
+// nil on a synchronous error, hence Await is only called when CreateIndex succeeds.
+func createFMIndex(ctx CtxT, mc MC, collectionName, field string, idx index.Index) error {
+	task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, field, idx))
+	if err != nil {
+		return err
+	}
+	return task.Await(ctx)
+}
+
 func queryFMIndexIDs(t *testing.T, ctx CtxT, mc MC, collectionName, expr string) []int64 {
 	t.Helper()
 
@@ -257,13 +270,13 @@ func TestFMIndexBuildParamErrors(t *testing.T) {
 	flushFMIndexRows(t, ctx, mc, collectionName)
 
 	// fm_sa_sample_rate out of [4, 256]
-	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, fmIndexContentField,
-		index.NewFMIndex().WithIndexName("fm_bad_rate").WithSaSampleRate(257)))
+	err = createFMIndex(ctx, mc, collectionName, fmIndexContentField,
+		index.NewFMIndex().WithIndexName("fm_bad_rate").WithSaSampleRate(257))
 	common.CheckErr(t, err, false, "fm_sa_sample_rate for FM-index must be in [4, 256]")
 
 	// fm_block_bytes not a power of two in [8, 128]
-	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, fmIndexContentField,
-		index.NewFMIndex().WithIndexName("fm_bad_block").WithBlockBytes(24)))
+	err = createFMIndex(ctx, mc, collectionName, fmIndexContentField,
+		index.NewFMIndex().WithIndexName("fm_bad_block").WithBlockBytes(24))
 	common.CheckErr(t, err, false, "fm_block_bytes for FM-index must be a power of two in [8, 128]")
 }
 
@@ -650,33 +663,36 @@ func TestFMIndexBuildParamBoundaries(t *testing.T) {
 			WithVarcharColumn(fmIndexContentField, []string{"abc"}).
 			WithFloatVectorColumn(fmIndexVectorField, fmIndexVectorDim, [][]float32{{1, 0, 0, 0, 0, 0, 0, 0}}))
 		require.NoError(t, err)
+		// Flush so the index build reaches a terminal state (rather than staying
+		// InProgress on an empty growing segment) and createFMIndex can Await it.
+		flushFMIndexRows(t, ctx, mc, collectionName)
 		return collectionName
 	}
 
 	// Valid boundaries for fm_sa_sample_rate.
 	for _, rate := range []int{4, 256} {
 		coll := newCollection(fmt.Sprintf("rate%d", rate))
-		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(coll, fmIndexContentField,
-			index.NewFMIndex().WithIndexName("fm_rate").WithSaSampleRate(rate)))
+		err := createFMIndex(ctx, mc, coll, fmIndexContentField,
+			index.NewFMIndex().WithIndexName("fm_rate").WithSaSampleRate(rate))
 		common.CheckErr(t, err, true)
 	}
 	// 3 is below the valid range.
 	coll := newCollection("rate3")
-	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(coll, fmIndexContentField,
-		index.NewFMIndex().WithIndexName("fm_rate_bad").WithSaSampleRate(3)))
+	err := createFMIndex(ctx, mc, coll, fmIndexContentField,
+		index.NewFMIndex().WithIndexName("fm_rate_bad").WithSaSampleRate(3))
 	common.CheckErr(t, err, false, "fm_sa_sample_rate for FM-index must be in [4, 256]")
 
 	// Valid boundaries for fm_block_bytes.
 	for _, bb := range []int{8, 128} {
 		coll := newCollection(fmt.Sprintf("bb%d", bb))
-		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(coll, fmIndexContentField,
-			index.NewFMIndex().WithIndexName("fm_bb").WithBlockBytes(bb)))
+		err := createFMIndex(ctx, mc, coll, fmIndexContentField,
+			index.NewFMIndex().WithIndexName("fm_bb").WithBlockBytes(bb))
 		common.CheckErr(t, err, true)
 	}
 	// 4 is below the valid range.
 	coll = newCollection("bb4")
-	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(coll, fmIndexContentField,
-		index.NewFMIndex().WithIndexName("fm_bb_bad").WithBlockBytes(4)))
+	err = createFMIndex(ctx, mc, coll, fmIndexContentField,
+		index.NewFMIndex().WithIndexName("fm_bb_bad").WithBlockBytes(4))
 	common.CheckErr(t, err, false, "fm_block_bytes for FM-index must be a power of two in [8, 128]")
 }
 

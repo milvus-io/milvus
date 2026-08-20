@@ -131,6 +131,35 @@ class _MembershipBase(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         return collection_name
 
+    def _build_custom_collection(self, client, fields, row_mutator, enable_dynamic_field=False):
+        """Create + insert + flush + index + load a collection with a custom set of
+        scalar fields.
+
+        `fields` is a list of (name, DataType) tuples; the int64 primary key is
+        added first and the float-vector field last. `row_mutator(i, row)` fills
+        the non-default values for the i-th row. Returns the collection name.
+        """
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)
+        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        for name, datatype in fields:
+            schema.add_field(name, datatype=datatype)
+        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
+        for i, row in enumerate(rows):
+            row_mutator(i, row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
+        self.load_collection(client, collection_name)
+        return collection_name
+
 
 class TestBloomMatch(_MembershipBase):
     @pytest.mark.tags(CaseLabel.L1)
@@ -159,27 +188,13 @@ class TestBloomMatch(_MembershipBase):
     def test_bloom_match_int_type_matrix(self):
         """One int64 blob probes every integer width (widened to int64 before hashing)."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("i8", datatype=DataType.INT8)
-        schema.add_field("i16", datatype=DataType.INT16)
-        schema.add_field("i32", datatype=DataType.INT32)
-        schema.add_field("i64", datatype=DataType.INT64)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+        def mutate(i, row):
             v = i % domain
             row["i8"], row["i16"], row["i32"], row["i64"] = v, v, v, v
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+
+        fields = [("i8", DataType.INT8), ("i16", DataType.INT16), ("i32", DataType.INT32), ("i64", DataType.INT64)]
+        collection_name = self._build_custom_collection(client, fields, mutate)
 
         blob = build_bloom_filter([0, 1, 2, 3, 4], fpr=0.001)
         for field in ["i8", "i16", "i32", "i64"]:
@@ -192,28 +207,16 @@ class TestBloomMatch(_MembershipBase):
         """JSON path membership is strictly typed: int matches, float (5.0) and
         missing key never match an int64 member, diverging from exact `in`."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("meta", datatype=DataType.JSON)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+        def mutate(i, row):
             if i % 11 == 0:
                 row["meta"] = {"other": 1}  # missing key
             elif i % 3 == 0:
                 row["meta"] = {"uid": float(i % 10)}  # float-encoded
             else:
                 row["meta"] = {"uid": i % 10}  # int-encoded
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+
+        collection_name = self._build_custom_collection(client, [("meta", DataType.JSON)], mutate)
 
         blob = build_bloom_filter(list(range(10)), fpr=0.001)
         res = self.query(
@@ -304,7 +307,12 @@ class TestBloomMatch(_MembershipBase):
     @pytest.mark.parametrize("val_mod", [200, 50])
     def test_bloom_match_auto_index(self, val_mod):
         """bloom_match stays zero-false-negative under AUTOINDEX (HYBRID selects
-        STLSORT for high-cardinality data, BITMAP for low-cardinality data)."""
+        STLSORT for high-cardinality data, BITMAP for low-cardinality data).
+
+        The 200/50 split assumes HYBRID's internal ~100 cardinality cutoff; if
+        that changes, the test still passes but its two-path coverage silently
+        degrades.
+        """
         client = self._client()
         collection_name = self._build_indexed_int_collection(client, "AUTOINDEX", val_mod=val_mod)
 
@@ -321,29 +329,16 @@ class TestBloomMatch(_MembershipBase):
         """JSON-path forms beyond a single key: nested path and whole document.
         Strict typing means float-encoded values never match an int64 member."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("meta", datatype=DataType.JSON)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+        def mutate(i, row):
             if i % 3 == 0:
                 row["meta"] = {"a": {"b": i % 10}}  # nested int
             elif i % 3 == 1:
                 row["meta"] = {"a": {"b": float(i % 10)}}  # nested float
             else:
                 row["meta"] = i % 10  # bare scalar int
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
 
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+        collection_name = self._build_custom_collection(client, [("meta", DataType.JSON)], mutate)
 
         blob = build_bloom_filter(list(range(10)), fpr=0.001)
 
@@ -364,23 +359,11 @@ class TestBloomMatch(_MembershipBase):
         """bloom_match over a dynamic field: an unknown identifier resolves to a
         $meta path, strictly typed per row value."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client, enable_dynamic_field=True)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+        def mutate(i, row):
             row["uid"] = i % 10
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
 
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+        collection_name = self._build_custom_collection(client, [], mutate, enable_dynamic_field=True)
 
         blob = build_bloom_filter(list(range(10)), fpr=0.001)
         got = self._query_ids(client, collection_name, "bloom_match(uid, {bf})", filter_params={"bf": blob})
@@ -432,25 +415,14 @@ class TestRoaringMatch(_MembershipBase):
         """Negative ids round-trip through two's-complement; a zero-extending
         build/probe would still pass all-positive tests, so this pins negatives."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(creator_field, datatype=DataType.INT64)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
         shift = 50
         d = 100
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+
+        def mutate(i, row):
             row[creator_field] = i % d - shift
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+
+        collection_name = self._build_custom_collection(client, [(creator_field, DataType.INT64)], mutate)
 
         members = [-shift, -30, -1, 0, 1, 17, 49, 1 << 20, -(1 << 20)]
         blob = build_roaring_bitmap(members)
@@ -496,6 +468,9 @@ class TestRoaringMatch(_MembershipBase):
             filter=f"roaring_match({creator_field}, {{rb}})",
             filter_params={"rb": blob},
         )[0]
+        # Fixture couples pk == row index i and creator == i % domain, so each
+        # creator value appears nb // domain times; deleting len(victims) distinct
+        # values removes len(victims) * nb // domain rows.
         assert res["delete_count"] == len(victims) * nb // domain
 
         remaining = self._query_ids(
@@ -517,29 +492,16 @@ class TestRoaringMatch(_MembershipBase):
         """One int64 bitmap probes every integer width including sign-extended
         narrow negatives."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("i8", datatype=DataType.INT8)
-        schema.add_field("i16", datatype=DataType.INT16)
-        schema.add_field("i32", datatype=DataType.INT32)
-        schema.add_field("i64", datatype=DataType.INT64)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
         shift = 50
         d = 100
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+
+        def mutate(i, row):
             v = i % d - shift
             row["i8"], row["i16"], row["i32"], row["i64"] = v, v, v, v
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+
+        fields = [("i8", DataType.INT8), ("i16", DataType.INT16), ("i32", DataType.INT32), ("i64", DataType.INT64)]
+        collection_name = self._build_custom_collection(client, fields, mutate)
 
         members = [-shift, -30, -1, 0, 1, 17, 49]
         blob = build_roaring_bitmap(members)
@@ -555,24 +517,13 @@ class TestRoaringMatch(_MembershipBase):
     def test_roaring_match_int64_bounds(self):
         """INT64_MIN/MAX round-trip through the two's-complement mapping."""
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema, _ = self.create_schema(client)
-        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(creator_field, datatype=DataType.INT64)
-        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
 
         vals = [(1 << 63) - 1, -(1 << 63), -1, 42]
-        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
-        for i, row in enumerate(rows):
+
+        def mutate(i, row):
             row[creator_field] = vals[i % len(vals)]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
-        self.load_collection(client, collection_name)
+
+        collection_name = self._build_custom_collection(client, [(creator_field, DataType.INT64)], mutate)
 
         blob = build_roaring_bitmap(vals)
         got = self._query_ids(
@@ -625,7 +576,12 @@ class TestRoaringMatch(_MembershipBase):
     @pytest.mark.parametrize("val_mod", [200, 50])
     def test_roaring_match_auto_index(self, val_mod):
         """roaring_match stays exact under AUTOINDEX (HYBRID selects STLSORT for
-        high-cardinality data, BITMAP for low-cardinality data)."""
+        high-cardinality data, BITMAP for low-cardinality data).
+
+        The 200/50 split assumes HYBRID's internal ~100 cardinality cutoff; if
+        that changes, the test still passes but its two-path coverage silently
+        degrades.
+        """
         client = self._client()
         collection_name = self._build_indexed_int_collection(client, "AUTOINDEX", val_mod=val_mod)
 
@@ -650,6 +606,8 @@ class TestRoaringMatch(_MembershipBase):
             filter=f"not roaring_match({creator_field}, {{rb}})",
             filter_params={"rb": blob},
         )[0]
+        # Negating the set deletes every creator value except len(keep), i.e.
+        # (domain - len(keep)) values; each value spans nb // domain rows.
         assert res["delete_count"] == (domain - len(keep)) * nb // domain
 
         remaining = self._query_ids(

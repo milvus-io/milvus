@@ -33,102 +33,14 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-const (
-	bloomCreatorField = "creator_id"
-	bloomVectorField  = "vector"
-	bloomVectorDim    = 8
-	// Keep the row count above indexCoord.segment.minSegmentNumRowsToEnableIndex
-	// (1024) so scalar indexes are really built, not fake-finished.
-	bloomTotalRows = 2000
-	bloomDomain    = 50
-)
-
-func bloomIntSchema(collectionName string) *entity.Schema {
-	return entity.NewSchema().WithName(collectionName).
-		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-		WithField(entity.NewField().WithName(bloomCreatorField).WithDataType(entity.FieldTypeInt64)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
-}
-
-func createBloomIntCollection(t *testing.T, ctx CtxT, mc MC, collectionName string) {
-	t.Helper()
-
-	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, bloomIntSchema(collectionName)).
-		WithConsistencyLevel(entity.ClStrong)))
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
-	})
-}
-
-func insertBloomIntRows(t *testing.T, ctx CtxT, mc MC, collectionName string) {
-	t.Helper()
-
-	ids := make([]int64, bloomTotalRows)
-	creators := make([]int64, bloomTotalRows)
-	vectors := make([][]float32, bloomTotalRows)
-	for i := 0; i < bloomTotalRows; i++ {
-		ids[i] = int64(i)
-		creators[i] = int64(i % bloomDomain)
-		v := make([]float32, bloomVectorDim)
-		v[0] = float32(i)
-		vectors[i] = v
-	}
-	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
-		WithInt64Column("id", ids).
-		WithInt64Column(bloomCreatorField, creators).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
-	require.NoError(t, err)
-}
-
-func flushAndLoadBloom(t *testing.T, ctx CtxT, mc MC, collectionName string) {
-	t.Helper()
-
-	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collectionName))
-	require.NoError(t, err)
-	require.NoError(t, flushTask.Await(ctx))
-
-	vecTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, bloomVectorField,
-		index.NewFlatIndex(entity.L2)))
-	require.NoError(t, err)
-	require.NoError(t, vecTask.Await(ctx))
-
-	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
-	require.NoError(t, err)
-	require.NoError(t, loadTask.Await(ctx))
-}
-
 func queryBloomIDs(t *testing.T, ctx CtxT, mc MC, collectionName, expr string, blob any) []int64 {
 	t.Helper()
-
-	opt := client.NewQueryOption(collectionName).
-		WithFilter(expr).WithOutputFields("id").
-		WithConsistencyLevel(entity.ClStrong)
-	if blob != nil {
-		opt.WithTemplateParam("bf", blob)
-	}
-	rs, err := mc.Query(ctx, opt)
-	require.NoError(t, err, "query %q", expr)
-
-	col, ok := rs.GetColumn("id").(*column.ColumnInt64)
-	require.True(t, ok)
-	out := make([]int64, 0, col.Len())
-	for i := 0; i < col.Len(); i++ {
-		v, err := col.GetAsInt64(i)
-		require.NoError(t, err)
-		out = append(out, v)
-	}
-	return out
+	return queryMembershipIDs(t, ctx, mc, collectionName, expr, "bf", blob)
 }
 
 func queryBloomIDSet(t *testing.T, ctx CtxT, mc MC, collectionName, expr string, blob any) map[int64]struct{} {
 	t.Helper()
-	m := make(map[int64]struct{})
-	for _, id := range queryBloomIDs(t, ctx, mc, collectionName, expr, blob) {
-		m[id] = struct{}{}
-	}
-	return m
+	return queryMembershipIDSet(t, ctx, mc, collectionName, expr, "bf", blob)
 }
 
 // TestBloomMatchZeroFalseNegatives verifies bloom_match has no row-level false
@@ -139,18 +51,18 @@ func TestBloomMatchZeroFalseNegatives(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("bloom_zero_fn", 6)
 
-	createBloomIntCollection(t, ctx, mc, collectionName)
-	insertBloomIntRows(t, ctx, mc, collectionName)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	createIntMembershipCollection(t, ctx, mc, collectionName, false)
+	insertIntMembershipRows(t, ctx, mc, collectionName, false)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	members := []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	blob, err := client.NewBloomFilterBlob(members, 0.001)
 	require.NoError(t, err)
 
 	exact := queryBloomIDSet(t, ctx, mc, collectionName,
-		fmt.Sprintf("%s in [0,1,2,3,4,5,6,7,8,9]", bloomCreatorField), nil)
+		fmt.Sprintf("%s in [0,1,2,3,4,5,6,7,8,9]", membershipCreatorField), nil)
 	got := queryBloomIDSet(t, ctx, mc, collectionName,
-		fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 	require.NotEmpty(t, exact)
 	for pk := range exact {
 		_, ok := got[pk]
@@ -158,10 +70,10 @@ func TestBloomMatchZeroFalseNegatives(t *testing.T) {
 	}
 
 	notRs := queryBloomIDs(t, ctx, mc, collectionName,
-		fmt.Sprintf("not bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("not bloom_match(%s, {bf})", membershipCreatorField), blob)
 	require.NotEmpty(t, notRs)
 	for _, id := range notRs {
-		creator := id % bloomDomain
+		creator := id % membershipDomain
 		require.GreaterOrEqualf(t, creator, int64(10), "not bloom_match leaked a true member id=%d", id)
 	}
 }
@@ -176,8 +88,8 @@ func TestBloomMatchVarcharAndDomainMismatch(t *testing.T) {
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
-		WithField(entity.NewField().WithName(bloomCreatorField).WithDataType(entity.FieldTypeInt64)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+		WithField(entity.NewField().WithName(membershipCreatorField).WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim))
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 		WithConsistencyLevel(entity.ClStrong)))
 	t.Cleanup(func() {
@@ -186,25 +98,25 @@ func TestBloomMatchVarcharAndDomainMismatch(t *testing.T) {
 		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 	})
 
-	ids := make([]int64, bloomTotalRows)
-	tags := make([]string, bloomTotalRows)
-	creators := make([]int64, bloomTotalRows)
-	vectors := make([][]float32, bloomTotalRows)
-	for i := 0; i < bloomTotalRows; i++ {
+	ids := make([]int64, membershipTotalRows)
+	tags := make([]string, membershipTotalRows)
+	creators := make([]int64, membershipTotalRows)
+	vectors := make([][]float32, membershipTotalRows)
+	for i := 0; i < membershipTotalRows; i++ {
 		ids[i] = int64(i)
-		tags[i] = fmt.Sprintf("tag%d", i%bloomDomain)
-		creators[i] = int64(i % bloomDomain)
-		v := make([]float32, bloomVectorDim)
+		tags[i] = fmt.Sprintf("tag%d", i%membershipDomain)
+		creators[i] = int64(i % membershipDomain)
+		v := make([]float32, membershipVectorDim)
 		v[0] = float32(i)
 		vectors[i] = v
 	}
 	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 		WithInt64Column("id", ids).
 		WithVarcharColumn("tag", tags).
-		WithInt64Column(bloomCreatorField, creators).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+		WithInt64Column(membershipCreatorField, creators).
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 	require.NoError(t, err)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	strMembers := []string{"tag0", "tag1", "tag2", "tag3", "tag4"}
 	strBlob, err := client.NewBloomFilterBlob(strMembers, 0.001)
@@ -229,7 +141,7 @@ func TestBloomMatchVarcharAndDomainMismatch(t *testing.T) {
 
 	// utf8-domain blob on an int64 field must be rejected
 	_, err = mc.Query(ctx, client.NewQueryOption(collectionName).
-		WithFilter(fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField)).WithOutputFields("id").
+		WithFilter(fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField)).WithOutputFields("id").
 		WithTemplateParam("bf", strBlob).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "value domain but field")
@@ -242,20 +154,20 @@ func TestBloomMatchMalformedBlobRejected(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("bloom_malformed", 6)
 
-	createBloomIntCollection(t, ctx, mc, collectionName)
-	insertBloomIntRows(t, ctx, mc, collectionName)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	createIntMembershipCollection(t, ctx, mc, collectionName, false)
+	insertIntMembershipRows(t, ctx, mc, collectionName, false)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	// malformed MBF1 blob
 	_, err := mc.Query(ctx, client.NewQueryOption(collectionName).
-		WithFilter(fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField)).WithOutputFields("id").
+		WithFilter(fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField)).WithOutputFields("id").
 		WithTemplateParam("bf", client.BloomFilterBlob([]byte("not-a-real-blob"))).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "bloom_match filter blob is invalid")
 
 	// literal array argument is not a pre-built blob
 	_, err = mc.Query(ctx, client.NewQueryOption(collectionName).
-		WithFilter(fmt.Sprintf("bloom_match(%s, [1,2,3])", bloomCreatorField)).WithOutputFields("id").
+		WithFilter(fmt.Sprintf("bloom_match(%s, [1,2,3])", membershipCreatorField)).WithOutputFields("id").
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "must be a {template} placeholder")
 }
@@ -269,8 +181,8 @@ func TestBloomMatchNullRowsFoldToFalse(t *testing.T) {
 
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-		WithField(entity.NewField().WithName(bloomCreatorField).WithDataType(entity.FieldTypeInt64).WithNullable(true)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+		WithField(entity.NewField().WithName(membershipCreatorField).WithDataType(entity.FieldTypeInt64).WithNullable(true)).
+		WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim))
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 		WithConsistencyLevel(entity.ClStrong)))
 	t.Cleanup(func() {
@@ -279,13 +191,13 @@ func TestBloomMatchNullRowsFoldToFalse(t *testing.T) {
 		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 	})
 
-	ids := make([]int64, bloomTotalRows)
-	values := make([]int64, 0, bloomTotalRows)
-	valid := make([]bool, bloomTotalRows)
-	vectors := make([][]float32, bloomTotalRows)
-	for i := 0; i < bloomTotalRows; i++ {
+	ids := make([]int64, membershipTotalRows)
+	values := make([]int64, 0, membershipTotalRows)
+	valid := make([]bool, membershipTotalRows)
+	vectors := make([][]float32, membershipTotalRows)
+	for i := 0; i < membershipTotalRows; i++ {
 		ids[i] = int64(i)
-		v := make([]float32, bloomVectorDim)
+		v := make([]float32, membershipVectorDim)
 		v[0] = float32(i)
 		vectors[i] = v
 		if i%8 == 7 {
@@ -293,32 +205,32 @@ func TestBloomMatchNullRowsFoldToFalse(t *testing.T) {
 			continue
 		}
 		valid[i] = true
-		values = append(values, int64(i%bloomDomain))
+		values = append(values, int64(i%membershipDomain))
 	}
-	col, err := column.NewNullableColumnInt64(bloomCreatorField, values, valid)
+	col, err := column.NewNullableColumnInt64(membershipCreatorField, values, valid)
 	require.NoError(t, err)
 	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 		WithInt64Column("id", ids).
 		WithColumns(col).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 	require.NoError(t, err)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
-	members := make([]int64, 0, bloomDomain)
-	for v := 0; v < bloomDomain; v++ {
+	members := make([]int64, 0, membershipDomain)
+	for v := 0; v < membershipDomain; v++ {
 		members = append(members, int64(v))
 	}
 	blob, err := client.NewBloomFilterBlob(members, 0.001)
 	require.NoError(t, err)
 
 	got := queryBloomIDs(t, ctx, mc, collectionName,
-		fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 	for _, id := range got {
 		require.NotEqualf(t, int64(7), id%8, "bloom_match matched a NULL row id=%d", id)
 	}
 
 	notRs := queryBloomIDs(t, ctx, mc, collectionName,
-		fmt.Sprintf("not bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("not bloom_match(%s, {bf})", membershipCreatorField), blob)
 	for _, id := range notRs {
 		require.NotEqualf(t, int64(7), id%8, "not bloom_match matched a NULL row id=%d", id)
 	}
@@ -340,8 +252,8 @@ func TestBloomMatchScalarIndexTypeMatrix(t *testing.T) {
 	for _, indexType := range []string{"STL_SORT", "INVERTED"} {
 		t.Run(indexType, func(t *testing.T) {
 			collectionName := common.GenRandomString("bloom_idx_"+indexType, 6)
-			createBloomIntCollection(t, ctx, mc, collectionName)
-			insertBloomIntRows(t, ctx, mc, collectionName)
+			createIntMembershipCollection(t, ctx, mc, collectionName, false)
+			insertIntMembershipRows(t, ctx, mc, collectionName, false)
 
 			flushTask, err := mc.Flush(ctx, client.NewFlushOption(collectionName))
 			require.NoError(t, err)
@@ -356,12 +268,12 @@ func TestBloomMatchScalarIndexTypeMatrix(t *testing.T) {
 			case "INVERTED":
 				scalarIndex = index.NewInvertedIndex()
 			}
-			idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, bloomCreatorField,
+			idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, membershipCreatorField,
 				scalarIndex))
 			require.NoError(t, err)
 			require.NoError(t, idxTask.Await(ctx))
 
-			vecTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, bloomVectorField,
+			vecTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, membershipVectorField,
 				index.NewFlatIndex(entity.L2)))
 			require.NoError(t, err)
 			require.NoError(t, vecTask.Await(ctx))
@@ -371,9 +283,9 @@ func TestBloomMatchScalarIndexTypeMatrix(t *testing.T) {
 			require.NoError(t, loadTask.Await(ctx))
 
 			exact := queryBloomIDSet(t, ctx, mc, collectionName,
-				fmt.Sprintf("%s in [0,1,2,3,4,5,6,7,8,9]", bloomCreatorField), nil)
+				fmt.Sprintf("%s in [0,1,2,3,4,5,6,7,8,9]", membershipCreatorField), nil)
 			got := queryBloomIDSet(t, ctx, mc, collectionName,
-				fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+				fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 			require.NotEmpty(t, exact)
 			for pk := range exact {
 				_, ok := got[pk]
@@ -397,13 +309,16 @@ func TestBloomMatchAutoIndex(t *testing.T) {
 	blob, err := client.NewBloomFilterBlob(members, 0.001)
 	require.NoError(t, err)
 
-	for _, domain := range []int{200, 50} { // 200 >= 100 -> STLSORT; 50 < 100 -> BITMAP
+	// 200 >= 100 -> STLSORT, 50 < 100 -> BITMAP. The 100-cardinality cutoff is
+	// an internal HYBRID-index detail: if it changes, this test still passes but
+	// its two-path (STLSORT/BITMAP) coverage silently degrades.
+	for _, domain := range []int{200, 50} {
 		t.Run(fmt.Sprintf("domain_%d", domain), func(t *testing.T) {
 			collectionName := common.GenRandomString("bloom_auto", 6)
 			schema := entity.NewSchema().WithName(collectionName).
 				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-				WithField(entity.NewField().WithName(bloomCreatorField).WithDataType(entity.FieldTypeInt64)).
-				WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+				WithField(entity.NewField().WithName(membershipCreatorField).WithDataType(entity.FieldTypeInt64)).
+				WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim))
 			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 				WithConsistencyLevel(entity.ClStrong)))
 			t.Cleanup(func() {
@@ -412,32 +327,32 @@ func TestBloomMatchAutoIndex(t *testing.T) {
 				require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 			})
 
-			ids := make([]int64, bloomTotalRows)
-			creators := make([]int64, bloomTotalRows)
-			vectors := make([][]float32, bloomTotalRows)
-			for i := 0; i < bloomTotalRows; i++ {
+			ids := make([]int64, membershipTotalRows)
+			creators := make([]int64, membershipTotalRows)
+			vectors := make([][]float32, membershipTotalRows)
+			for i := 0; i < membershipTotalRows; i++ {
 				ids[i] = int64(i)
 				creators[i] = int64(i % domain)
-				v := make([]float32, bloomVectorDim)
+				v := make([]float32, membershipVectorDim)
 				v[0] = float32(i)
 				vectors[i] = v
 			}
 			_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 				WithInt64Column("id", ids).
-				WithInt64Column(bloomCreatorField, creators).
-				WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+				WithInt64Column(membershipCreatorField, creators).
+				WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 			require.NoError(t, err)
 
 			flushTask, err := mc.Flush(ctx, client.NewFlushOption(collectionName))
 			require.NoError(t, err)
 			require.NoError(t, flushTask.Await(ctx))
 
-			idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, bloomCreatorField,
+			idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, membershipCreatorField,
 				index.NewAutoIndex(entity.L2)))
 			require.NoError(t, err)
 			require.NoError(t, idxTask.Await(ctx))
 
-			vecTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, bloomVectorField,
+			vecTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, membershipVectorField,
 				index.NewFlatIndex(entity.L2)))
 			require.NoError(t, err)
 			require.NoError(t, vecTask.Await(ctx))
@@ -447,9 +362,9 @@ func TestBloomMatchAutoIndex(t *testing.T) {
 			require.NoError(t, loadTask.Await(ctx))
 
 			exact := queryBloomIDSet(t, ctx, mc, collectionName,
-				fmt.Sprintf("%s in [0,1,2,3,4,5,6,7,8,9]", bloomCreatorField), nil)
+				fmt.Sprintf("%s in [0,1,2,3,4,5,6,7,8,9]", membershipCreatorField), nil)
 			got := queryBloomIDSet(t, ctx, mc, collectionName,
-				fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+				fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 			require.NotEmpty(t, exact)
 			for pk := range exact {
 				_, ok := got[pk]
@@ -467,15 +382,15 @@ func TestBloomMatchRejectedInDelete(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("bloom_delete", 6)
 
-	createBloomIntCollection(t, ctx, mc, collectionName)
-	insertBloomIntRows(t, ctx, mc, collectionName)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	createIntMembershipCollection(t, ctx, mc, collectionName, false)
+	insertIntMembershipRows(t, ctx, mc, collectionName, false)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2}, 0.001)
 	require.NoError(t, err)
 
 	_, err = mc.Delete(ctx, client.NewDeleteOption(collectionName).
-		WithExpr(fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField)).
+		WithExpr(fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField)).
 		WithTemplateParam("bf", blob))
 	common.CheckErr(t, err, false, "bloom_match is approximate and cannot be used in delete expressions")
 }
@@ -493,7 +408,7 @@ func TestBloomMatchIntTypeMatrix(t *testing.T) {
 		WithField(entity.NewField().WithName("i16").WithDataType(entity.FieldTypeInt16)).
 		WithField(entity.NewField().WithName("i32").WithDataType(entity.FieldTypeInt32)).
 		WithField(entity.NewField().WithName("i64").WithDataType(entity.FieldTypeInt64)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+		WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim))
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 		WithConsistencyLevel(entity.ClStrong)))
 	t.Cleanup(func() {
@@ -502,19 +417,19 @@ func TestBloomMatchIntTypeMatrix(t *testing.T) {
 		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 	})
 
-	ids := make([]int64, bloomTotalRows)
-	i8 := make([]int8, bloomTotalRows)
-	i16 := make([]int16, bloomTotalRows)
-	i32 := make([]int32, bloomTotalRows)
-	i64 := make([]int64, bloomTotalRows)
-	vectors := make([][]float32, bloomTotalRows)
-	for i := 0; i < bloomTotalRows; i++ {
+	ids := make([]int64, membershipTotalRows)
+	i8 := make([]int8, membershipTotalRows)
+	i16 := make([]int16, membershipTotalRows)
+	i32 := make([]int32, membershipTotalRows)
+	i64 := make([]int64, membershipTotalRows)
+	vectors := make([][]float32, membershipTotalRows)
+	for i := 0; i < membershipTotalRows; i++ {
 		ids[i] = int64(i)
-		i8[i] = int8(i % bloomDomain)
-		i16[i] = int16(i % bloomDomain)
-		i32[i] = int32(i % bloomDomain)
-		i64[i] = int64(i % bloomDomain)
-		v := make([]float32, bloomVectorDim)
+		i8[i] = int8(i % membershipDomain)
+		i16[i] = int16(i % membershipDomain)
+		i32[i] = int32(i % membershipDomain)
+		i64[i] = int64(i % membershipDomain)
+		v := make([]float32, membershipVectorDim)
 		v[0] = float32(i)
 		vectors[i] = v
 	}
@@ -524,9 +439,9 @@ func TestBloomMatchIntTypeMatrix(t *testing.T) {
 		WithInt16Column("i16", i16).
 		WithInt32Column("i32", i32).
 		WithInt64Column("i64", i64).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 	require.NoError(t, err)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4}, 0.001)
 	require.NoError(t, err)
@@ -555,7 +470,7 @@ func TestBloomMatchJsonPathStrictTyping(t *testing.T) {
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("meta").WithDataType(entity.FieldTypeJSON)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+		WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim))
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 		WithConsistencyLevel(entity.ClStrong)))
 	t.Cleanup(func() {
@@ -570,7 +485,7 @@ func TestBloomMatchJsonPathStrictTyping(t *testing.T) {
 	vectors := make([][]float32, totalRows)
 	for i := 0; i < totalRows; i++ {
 		ids[i] = int64(i)
-		v := make([]float32, bloomVectorDim)
+		v := make([]float32, membershipVectorDim)
 		v[0] = float32(i)
 		vectors[i] = v
 		switch {
@@ -585,9 +500,9 @@ func TestBloomMatchJsonPathStrictTyping(t *testing.T) {
 	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 		WithInt64Column("id", ids).
 		WithColumns(column.NewColumnJSONBytes("meta", jsonValues)).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 	require.NoError(t, err)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0.001)
 	require.NoError(t, err)
@@ -635,7 +550,7 @@ func TestBloomMatchJsonWholeDocNestedAndDynamicPath(t *testing.T) {
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("meta").WithDataType(entity.FieldTypeJSON)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+		WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim))
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 		WithConsistencyLevel(entity.ClStrong)))
 	t.Cleanup(func() {
@@ -650,7 +565,7 @@ func TestBloomMatchJsonWholeDocNestedAndDynamicPath(t *testing.T) {
 	vectors := make([][]float32, totalRows)
 	for i := 0; i < totalRows; i++ {
 		ids[i] = int64(i)
-		v := make([]float32, bloomVectorDim)
+		v := make([]float32, membershipVectorDim)
 		v[0] = float32(i)
 		vectors[i] = v
 		switch i % 3 {
@@ -668,9 +583,9 @@ func TestBloomMatchJsonWholeDocNestedAndDynamicPath(t *testing.T) {
 	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 		WithInt64Column("id", ids).
 		WithColumns(column.NewColumnJSONBytes("meta", jsonValues)).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 	require.NoError(t, err)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0.001)
 	require.NoError(t, err)
@@ -700,7 +615,7 @@ func TestBloomMatchDynamicFieldPath(t *testing.T) {
 
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim)).
+		WithField(entity.NewField().WithName(membershipVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(membershipVectorDim)).
 		WithDynamicFieldEnabled(true)
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
 		WithConsistencyLevel(entity.ClStrong)))
@@ -717,16 +632,16 @@ func TestBloomMatchDynamicFieldPath(t *testing.T) {
 	for i := 0; i < totalRows; i++ {
 		ids[i] = int64(i)
 		dynInts[i] = int64(i % 10)
-		v := make([]float32, bloomVectorDim)
+		v := make([]float32, membershipVectorDim)
 		v[0] = float32(i)
 		vectors[i] = v
 	}
 	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 		WithInt64Column("id", ids).
 		WithInt64Column("uid", dynInts).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, vectors))
 	require.NoError(t, err)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0.001)
 	require.NoError(t, err)
@@ -746,9 +661,9 @@ func TestBloomMatchGrowingAndSealedMixed(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("bloom_growing", 6)
 
-	createBloomIntCollection(t, ctx, mc, collectionName)
-	insertBloomIntRows(t, ctx, mc, collectionName)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	createIntMembershipCollection(t, ctx, mc, collectionName, false)
+	insertIntMembershipRows(t, ctx, mc, collectionName, false)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	// A second batch NOT flushed stays in a growing segment; creator ids 500..509
 	// are disjoint from the sealed batch's 0..49.
@@ -757,27 +672,27 @@ func TestBloomMatchGrowingAndSealedMixed(t *testing.T) {
 	gcreators := make([]int64, growingN)
 	gvectors := make([][]float32, growingN)
 	for i := 0; i < growingN; i++ {
-		gids[i] = int64(bloomTotalRows + i)
+		gids[i] = int64(membershipTotalRows + i)
 		gcreators[i] = int64(500 + i%10)
-		v := make([]float32, bloomVectorDim)
-		v[0] = float32(bloomTotalRows + i)
+		v := make([]float32, membershipVectorDim)
+		v[0] = float32(membershipTotalRows + i)
 		gvectors[i] = v
 	}
 	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
 		WithInt64Column("id", gids).
-		WithInt64Column(bloomCreatorField, gcreators).
-		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, gvectors))
+		WithInt64Column(membershipCreatorField, gcreators).
+		WithFloatVectorColumn(membershipVectorField, membershipVectorDim, gvectors))
 	require.NoError(t, err)
 
 	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 500, 501, 502, 503, 504}, 0.001)
 	require.NoError(t, err)
 
 	got := queryBloomIDs(t, ctx, mc, collectionName,
-		fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 	require.NotEmpty(t, got)
 	sawSealed, sawGrowing := false, false
 	for _, id := range got {
-		if id < bloomTotalRows {
+		if id < membershipTotalRows {
 			sawSealed = true
 		} else {
 			sawGrowing = true
@@ -796,9 +711,9 @@ func TestBloomMatchFalsePositiveRateSanity(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("bloom_fpr", 6)
 
-	createBloomIntCollection(t, ctx, mc, collectionName)
-	insertBloomIntRows(t, ctx, mc, collectionName)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	createIntMembershipCollection(t, ctx, mc, collectionName, false)
+	insertIntMembershipRows(t, ctx, mc, collectionName, false)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	// Members 0..9; creators 10..49 are the disjoint (non-member) probe rows.
 	// totalRows/domain rows per value, so the non-member population is
@@ -807,16 +722,16 @@ func TestBloomMatchFalsePositiveRateSanity(t *testing.T) {
 	require.NoError(t, err)
 
 	got := queryBloomIDs(t, ctx, mc, collectionName,
-		fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 	require.NotEmpty(t, got)
 	fp := 0
 	for _, id := range got {
-		creator := id % bloomDomain
+		creator := id % membershipDomain
 		if creator >= 10 {
 			fp++
 		}
 	}
-	nonMemberRows := (bloomDomain - 10) * bloomTotalRows / bloomDomain
+	nonMemberRows := (membershipDomain - 10) * membershipTotalRows / membershipDomain
 	// At fpr=0.05 the expected false-positive count is ~5% of the non-member
 	// population; reject only if it is wildly above that (the filter is broken),
 	// keeping the bound loose enough to never be flaky.
@@ -831,15 +746,15 @@ func TestBloomMatchEmptyBlob(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("bloom_empty", 6)
 
-	createBloomIntCollection(t, ctx, mc, collectionName)
-	insertBloomIntRows(t, ctx, mc, collectionName)
-	flushAndLoadBloom(t, ctx, mc, collectionName)
+	createIntMembershipCollection(t, ctx, mc, collectionName, false)
+	insertIntMembershipRows(t, ctx, mc, collectionName, false)
+	flushLoadMembership(t, ctx, mc, collectionName)
 
 	blob, err := client.NewBloomFilterBlob([]int64{}, 0.001)
 	require.NoError(t, err)
 
 	got := queryBloomIDs(t, ctx, mc, collectionName,
-		fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+		fmt.Sprintf("bloom_match(%s, {bf})", membershipCreatorField), blob)
 	require.Empty(t, got, "empty blob must match nothing")
 }
 
