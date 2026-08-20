@@ -338,7 +338,7 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         empty_emb_list_offsets_ = std::move(empty_emb_list_state->offsets);
         if (restored_id_map.has_valid_data) {
             FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
+
                                   "empty emb-list load");
         }
     } else if (ContainsOnlyValidData(binary_set)) {
@@ -346,8 +346,7 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
             SetDim(GetDimFromConfig(config));
         }
         if (restored_id_map.has_valid_data) {
-            FinalizeRestoredIdMap(
-                index_.Node(), ErrorCode::UnexpectedError, "all-null load");
+            FinalizeRestoredIdMap(index_.Node(), "all-null load");
         }
     } else {
         auto stat = index_.Deserialize(binary_set, config);
@@ -1220,7 +1219,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         empty_emb_list_offsets_ = std::move(empty_emb_list_state.offsets);
         if (restored_id_map.has_valid_data) {
             FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
+
                                   "empty emb-list mmap load");
         }
     } else {
@@ -1232,7 +1231,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         }
         if (restored_id_map.has_valid_data) {
             FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
+
                                   "all-null mmap load");
         }
     }

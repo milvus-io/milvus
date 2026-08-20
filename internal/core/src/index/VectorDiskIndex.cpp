@@ -401,7 +401,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     if (restored_id_map.has_valid_data) {
         if (all_null_nullable || empty_emb_list_state.has_value()) {
             FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
+
                                   "disk metadata-only load");
         }
     }
