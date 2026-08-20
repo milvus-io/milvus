@@ -615,6 +615,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
+	ProxyDeleteVectors.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
 	ProxySQLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -780,5 +785,13 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		msgTypeLabelName:  DeleteLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
+	})
+	ProxySearchSparseNumNonZeros.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		collectionName:  collection,
+	})
+	ProxyFunctionlatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		collectionName:  collection,
 	})
 }
