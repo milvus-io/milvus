@@ -6877,11 +6877,16 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.RefreshWaitForIndex = ParamItem{
 		Key:     "dataCoord.externalCollection.refreshWaitForIndex",
 		Version: "3.0.0",
-		Doc: `Hold an external-collection refresh in progress until every segment it produced is indexed.
-Off, a refresh completes when its data lands, and queries meet the new segments before their indexes exist -
-correct, but brute-force-scanned. On, the job stays InProgress (progress 90-100 tracks index building) and the
-refreshed data becomes visible only once it is servable at indexed speed. Deployments that load collections on
-demand per query cluster enable this: their queries have no warm replica to hide the unindexed window behind.`,
+		Doc: `Hold an external-collection refresh job in progress until every segment it produced is indexed.
+Off, a refresh completes as soon as its data lands, so clients that query on completion meet the new segments
+before their indexes exist - correct, but brute-force-scanned. On, the refreshed segments are still applied when
+the ingest finishes, but the job keeps reporting InProgress (progress 90-100 tracks index building) and the
+schema-update broadcast waits until every produced segment is indexed - so clients that gate their queries on
+refresh completion never meet unindexed segments. (A replica that already has the collection loaded picks up
+applied segments through target updates regardless of job state.) Deployments that load collections on demand
+per query enable this: their queries have no warm replica to hide the unindexed window behind. The wait is
+bounded by dataCoord.externalCollectionJobTimeout on the gate's own clock; on expiry the job finishes with a
+warning - the data is already committed - rather than failing.`,
 		DefaultValue: "false",
 		PanicIfEmpty: false,
 		Export:       true,
