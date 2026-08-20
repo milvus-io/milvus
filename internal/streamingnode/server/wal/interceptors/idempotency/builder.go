@@ -2,7 +2,7 @@ package idempotency
 
 import (
 	"context"
-	"time"
+	"strconv"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -19,8 +19,6 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	params := paramtable.Get()
 	config := sanitizeWindowConfig(WindowConfig{
 		Enabled:      params.StreamingCfg.IdempotencyEnabled.GetAsBool(),
-		WindowTTL:    params.StreamingCfg.IdempotencyWindowTTL.GetAsDurationByParse(),
-		MinEntries:   params.StreamingCfg.IdempotencyMinEntriesPerWindow.GetAsInt(),
 		MaxBytes:     int(params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize()),
 		MaxKeyLength: params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(),
 	})
@@ -30,25 +28,21 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	return newIdempotencyInterceptorWithParam(config, param)
 }
 
-// sanitizeWindowConfig repairs invalid combinations of the runtime-tunable
-// idempotency parameters by falling back to their defaults with a warning:
-// with neither a positive TTL nor a positive max byte cap the window would grow
-// without bound per key. Kept in sync with the recovery-side
-// config.sanitizeIdempotency, which applies the same fallback.
+// sanitizeWindowConfig repairs an unusable byte cap by falling back to the
+// default with a warning. maxBytes is the window's only retention bound, so a
+// non-positive value would let it grow without limit, one entry per key.
 func sanitizeWindowConfig(config WindowConfig) WindowConfig {
-	if !config.Enabled {
+	if !config.Enabled || config.MaxBytes > 0 {
 		return config
 	}
-	if config.WindowTTL <= 0 && config.MaxBytes <= 0 {
-		fallback, err := time.ParseDuration(paramtable.Get().StreamingCfg.IdempotencyWindowTTL.DefaultValue)
-		if err != nil {
-			// The default is a compile-time literal; parsing it cannot fail.
-			panic(err)
-		}
-		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max byte cap; falling back to default TTL",
-			mlog.Duration("configuredTTL", config.WindowTTL),
-			mlog.Duration("fallbackTTL", fallback))
-		config.WindowTTL = fallback
+	fallback, err := strconv.Atoi(paramtable.Get().StreamingCfg.IdempotencyMaxBytesPerWindow.DefaultValue)
+	if err != nil {
+		// The default is a compile-time literal; parsing it cannot fail.
+		panic(err)
 	}
+	mlog.Warn(context.TODO(), "idempotency window has no positive max byte cap; falling back to the default",
+		mlog.Int("configuredMaxBytes", config.MaxBytes),
+		mlog.Int("fallbackMaxBytes", fallback))
+	config.MaxBytes = fallback
 	return config
 }

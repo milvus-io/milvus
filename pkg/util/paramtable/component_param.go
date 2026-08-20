@@ -8168,12 +8168,13 @@ type streamingConfig struct {
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyEnabled             ParamItem `refreshable:"false"`
-	IdempotencyWindowTTL           ParamItem `refreshable:"false"`
-	IdempotencyMinEntriesPerWindow ParamItem `refreshable:"false"`
-	IdempotencyMaxBytesPerWindow   ParamItem `refreshable:"false"`
-	IdempotencySnapshotInterval    ParamItem `refreshable:"false"`
-	IdempotencyMaxKeyLength        ParamItem `refreshable:"false"`
+	IdempotencyEnabled                     ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow           ParamItem `refreshable:"false"`
+	IdempotencyMinRetainedBytesPerVChannel ParamItem `refreshable:"false"`
+	IdempotencyRetentionTTL                ParamItem `refreshable:"false"`
+	IdempotencyMaxRetainedChunks           ParamItem `refreshable:"false"`
+	IdempotencyGCInterval                  ParamItem `refreshable:"false"`
+	IdempotencyMaxKeyLength                ParamItem `refreshable:"false"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -8618,45 +8619,55 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	}
 	p.IdempotencyEnabled.Init(base.mgr)
 
-	p.IdempotencyWindowTTL = ParamItem{
-		Key:          "streaming.idempotency.windowTTL",
-		Version:      "3.0.0",
-		Doc:          `The retention TTL target for completed idempotency key window entries. For entries still retained in memory, duplicate visibility does not extend past this TTL; maxBytesPerWindow is a hard cap and may evict entries before TTL.`,
-		DefaultValue: "10m",
-		FallbackKeys: []string{"idempotency.windowTTL"},
-		Export:       false,
-	}
-	p.IdempotencyWindowTTL.Init(base.mgr)
-
-	p.IdempotencyMinEntriesPerWindow = ParamItem{
-		Key:          "streaming.idempotency.minEntriesPerWindow",
-		Version:      "3.0.0",
-		Doc:          `The minimum completed idempotency key entries retained for each vchannel window after TTL eviction. It does not extend duplicate visibility past windowTTL and can be overridden by the hard maxBytesPerWindow cap.`,
-		DefaultValue: "1000",
-		FallbackKeys: []string{"idempotency.minEntriesPerWindow"},
-		Export:       false,
-	}
-	p.IdempotencyMinEntriesPerWindow.Init(base.mgr)
-
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The hard maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Oldest entries by commit timetick are evicted first, even before windowTTL; this hard cap overrides minEntriesPerWindow, since an entry-count floor cannot bound memory. 0 disables the byte cap.`,
+		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Nothing is evicted until this is reached; then the oldest entries by commit order are replaced. There is deliberately no TTL: any horizon expressed in time is invalidated by time passing, which would leave the window empty after an outage -- exactly when a resuming client needs it.`,
 		DefaultValue: "16777216",
 		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
 		Export:       false,
 	}
 	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
 
-	p.IdempotencySnapshotInterval = ParamItem{
-		Key:          "streaming.idempotency.snapshotInterval",
+	p.IdempotencyMinRetainedBytesPerVChannel = ParamItem{
+		Key:          "streaming.idempotency.minRetainedBytesPerVChannel",
 		Version:      "3.0.0",
-		Doc:          `The interval for persisting idempotency write commit checkpoints. It is scheduled independently from walRecovery.persistInterval.`,
-		DefaultValue: "10s",
-		FallbackKeys: []string{"idempotency.snapshotInterval"},
+		Doc:          `The floor of durable retention, per vchannel. Chunks holding this many of a vchannel's bytes are kept EVEN IF they are older than retentionTTL, so a long outage still leaves the most recent writes recoverable and a resuming client is still deduplicated. The boundary is the minimum across vchannels, so a hot vchannel cannot push a cold one out of retention. Should be at least maxBytesPerWindow, otherwise the store discards history a window would still have room to hold.`,
+		DefaultValue: "67108864",
+		FallbackKeys: []string{"idempotency.minRetainedBytesPerVChannel", "idempotency.retainedBytesPerVChannel"},
 		Export:       false,
 	}
-	p.IdempotencySnapshotInterval.Init(base.mgr)
+	p.IdempotencyMinRetainedBytesPerVChannel.Init(base.mgr)
+
+	p.IdempotencyRetentionTTL = ParamItem{
+		Key:          "streaming.idempotency.retentionTTL",
+		Version:      "3.0.0",
+		Doc:          `How long summary chunks are kept before they may be released. A chunk is deleted only when it is BOTH older than this AND outside the minRetainedBytesPerVChannel floor, so the floor always wins: time never removes the last window of writes.`,
+		DefaultValue: "10m",
+		FallbackKeys: []string{"idempotency.retentionTTL"},
+		Export:       false,
+	}
+	p.IdempotencyRetentionTTL.Init(base.mgr)
+
+	p.IdempotencyMaxRetainedChunks = ParamItem{
+		Key:          "streaming.idempotency.maxRetainedChunks",
+		Version:      "3.0.0",
+		Doc:          `Hard cap on how many summary chunks stay retained per pchannel. It overrides the per-vchannel byte floor: the floor bounds bytes, but recovery pays per chunk, so a workload writing little per checkpoint would otherwise keep an unbounded number of tiny chunks. When this cap binds, the deduplication window is smaller than minRetainedBytesPerVChannel asks for.`,
+		DefaultValue: "256",
+		FallbackKeys: []string{"idempotency.maxRetainedChunks"},
+		Export:       false,
+	}
+	p.IdempotencyMaxRetainedChunks.Init(base.mgr)
+
+	p.IdempotencyGCInterval = ParamItem{
+		Key:          "streaming.idempotency.gcInterval",
+		Version:      "3.0.0",
+		Doc:          `How often the summary store sweeps chunks queued for deletion. There is no periodic persist: chunks are written synchronously with the WAL consume checkpoint, so this drives gc only.`,
+		DefaultValue: "10s",
+		FallbackKeys: []string{"idempotency.gcInterval", "idempotency.persistInterval"},
+		Export:       false,
+	}
+	p.IdempotencyGCInterval.Init(base.mgr)
 
 	p.IdempotencyMaxKeyLength = ParamItem{
 		Key:          "streaming.idempotency.maxKeyLength",

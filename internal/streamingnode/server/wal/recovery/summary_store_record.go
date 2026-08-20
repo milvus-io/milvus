@@ -3,55 +3,90 @@ package recovery
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// A committed write fact derived from an already-landed pchannel WAL message is
-// streamingpb.SummaryEntry itself — there is no separate in-memory
-// model. The generated type is the one representation: it is what the chunk
-// stores, what recovery decodes, and what callers receive, so nothing is copied
-// between shapes and the two cannot drift apart.
+// SummaryRecord is one committed write fact: where and when it landed in the
+// WAL, plus what the idempotency view remembers about it.
+//
+// It is a plain Go struct, not a generated message, because it is not the stored
+// shape. A chunk stores a write split across sections -- identity and primary
+// keys in one, the client key and row offsets in another -- so that a consumer
+// can read only the part it needs. In memory there is no such consumer: whoever
+// holds a record holds all of it. Keeping one struct here and splitting only at
+// the codec means the split exists exactly where it pays for itself.
+type SummaryRecord struct {
+	SourceMessageID *commonpb.MessageID
+	SourceTimeTick  uint64
 
-// newSummaryEntryFromMessage extracts a committed write fact from an
+	// IdempotencyKey is empty for a write no view remembers. Such a record is
+	// never staged for a chunk: it materializes nothing for any consumer, and the
+	// WAL consume checkpoint -- not a chunk -- is what records how far the vchannel
+	// has advanced.
+	IdempotencyKey string
+
+	// InsertResult is what a duplicate append replays back to the client. Its two
+	// halves are stored in different sections: RowOffsets with the key, Ids with
+	// the write. They are rejoined on read.
+	InsertResult *messagespb.IdempotentInsertResult
+}
+
+// Size estimates the record's memory footprint for the byte budgets that bound
+// the staging buffer and the dedup window. The primary keys dominate it by far,
+// so the estimate is theirs plus a small fixed remainder.
+func (r *SummaryRecord) Size() int {
+	if r == nil {
+		return 0
+	}
+	size := len(r.IdempotencyKey) + 8
+	if r.SourceMessageID != nil {
+		size += proto.Size(r.SourceMessageID)
+	}
+	if r.InsertResult != nil {
+		size += proto.Size(r.InsertResult)
+	}
+	return size
+}
+
+// newSummaryRecordFromMessage extracts a committed write fact from an
 // immutable WAL message. Callers should only pass messages observed after WAL
 // append/scan has completed; inflight requests must never reach this function.
-func newSummaryEntryFromMessage(pchannel string, msg message.ImmutableMessage) (*streamingpb.SummaryEntry, bool) {
+func newSummaryRecordFromMessage(pchannel string, msg message.ImmutableMessage) (*SummaryRecord, bool) {
 	if txnMsg := message.AsImmutableTxnMessage(msg); txnMsg != nil {
-		return newSummaryEntryFromTxnMessage(pchannel, txnMsg)
+		return newSummaryRecordFromTxnMessage(pchannel, txnMsg)
 	}
 	if msg == nil || !msg.MessageType().IsDMLMessageType() || msg.IsPChannelLevel() {
 		return nil, false
 	}
-	record := &streamingpb.SummaryEntry{
-		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
-		SourceTimetick:         msg.TimeTick(),
-		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
+	record := &SummaryRecord{
+		SourceMessageID: safeMessageIDProto(msg.MessageID()),
+		SourceTimeTick:  msg.TimeTick(),
 	}
 
 	// The result is only worth storing alongside a key: without one it can never
-	// be served (a keyless entry materializes nothing for any view), and the
+	// be served (a keyless record materializes nothing for any view), and the
 	// append path rejects an insert that carries a result but no key.
 	if key := idempotencyKeyFromImmutableMessage(msg); key != "" {
-		content := &streamingpb.IdempotencyContent{Key: key}
+		record.IdempotencyKey = key
 		if result, ok := idempotentInsertResultFromImmutableInsert(msg); ok {
-			content.InsertResult = result
+			record.InsertResult = result
 		}
-		record.Idempotency = content
 	}
 	return record, true
 }
 
-func newSummaryEntryFromTxnMessage(pchannel string, msg message.ImmutableTxnMessage) (*streamingpb.SummaryEntry, bool) {
+func newSummaryRecordFromTxnMessage(pchannel string, msg message.ImmutableTxnMessage) (*SummaryRecord, bool) {
 	if msg == nil || msg.IsPChannelLevel() {
 		return nil, false
 	}
-	record := &streamingpb.SummaryEntry{
-		SourceMessageId:        safeMessageIDProto(msg.MessageID()),
-		SourceTimetick:         msg.TimeTick(),
-		LastConfirmedMessageId: safeMessageIDProto(msg.LastConfirmedMessageID()),
+	record := &SummaryRecord{
+		SourceMessageID: safeMessageIDProto(msg.MessageID()),
+		SourceTimeTick:  msg.TimeTick(),
 	}
 
 	insertResults := make([]*messagespb.IdempotentInsertResult, 0, msg.Size())
@@ -72,19 +107,18 @@ func newSummaryEntryFromTxnMessage(pchannel string, msg message.ImmutableTxnMess
 	if err != nil {
 		// Corrupt committed-write payload (e.g. mixed id types): surface it loudly
 		// instead of silently degrading to "no idempotent payload", then keep the
-		// entry without a duplicate response.
-		mlog.Warn(context.TODO(), "failed to merge idempotent insert results for summary entry",
+		// record without a duplicate response.
+		mlog.Warn(context.TODO(), "failed to merge idempotent insert results for summary record",
 			mlog.String("pchannel", pchannel),
 			mlog.String("vchannel", msg.VChannel()),
 			mlog.Err(err))
 		hadAny = false
 	}
 	if key != "" {
-		content := &streamingpb.IdempotencyContent{Key: key}
+		record.IdempotencyKey = key
 		if hadAny {
-			content.InsertResult = mergedResult
+			record.InsertResult = mergedResult
 		}
-		record.Idempotency = content
 	}
 	if !hadAny && key == "" && !hasDML {
 		return nil, false
@@ -98,16 +132,16 @@ func idempotencyKeyFromImmutableMessage(msg message.ImmutableMessage) string {
 	}
 	// A replicated message preserves the SOURCE cluster's message properties,
 	// including its idempotency key. That key must never materialize a summary
-	// entry here: the local summary's key history is independent of the source's,
-	// and a poisoned entry would drive replicated appends down the duplicate
+	// record here: the local summary's key history is independent of the source's,
+	// and a poisoned record would drive replicated appends down the duplicate
 	// path after a restart. Replicated writes are treated as keyless committed
-	// writes (checkpoint bookkeeping only), matching the interceptor-side bypass.
+	// writes, matching the interceptor-side bypass.
 	if msg.ReplicateHeader() != nil {
 		return ""
 	}
 	// Gated to the message types the summary deduplicates, mirroring
 	// getIdempotencyKey on the interceptor side: the key property alone must not
-	// materialize an entry for a type the append path never dedups.
+	// materialize a record for a type the append path never dedups.
 	switch msg.MessageType() {
 	case message.MessageTypeInsert, message.MessageTypeCommitTxn:
 		return message.IdempotencyKeyOf(msg)
@@ -121,10 +155,10 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 		return nil, false
 	}
 	// A replicated insert inherits the SOURCE cluster's header verbatim,
-	// including its IdempotentInsertResult. Its summary entry is keyless
-	// checkpoint bookkeeping only (see idempotencyKeyFromImmutableMessage), so a
-	// decoded result could never be served as a duplicate response — persisting
-	// its per-row PKs into the chunk would be pure write amplification.
+	// including its IdempotentInsertResult. Its summary record is keyless
+	// bookkeeping only (see idempotencyKeyFromImmutableMessage), so a decoded
+	// result could never be served as a duplicate response — persisting its
+	// per-row PKs into the chunk would be pure write amplification.
 	if msg.ReplicateHeader() != nil {
 		return nil, false
 	}

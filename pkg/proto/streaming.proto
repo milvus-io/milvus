@@ -694,207 +694,204 @@ enum VChannelSchemaState {
 ///
 /// Summary store
 ///
-// The summary store is a business-agnostic record of what a pchannel durably
-// wrote. It stores committed write facts and nothing about why anyone wants
-// them; applications build their own views on top, each named by a view_type.
-// The idempotency interceptor is today's only view — it turns these facts into
-// a write-dedup window — and a primary-key index is the second planned one.
+// The summary store is a record of what a pchannel durably wrote. It stores
+// committed write facts and nothing about why anyone wants them: the dedup
+// window decides what to keep and for how long, and the store neither knows nor
+// records that decision. Nothing is stored per vchannel.
 //
-// Two layers are defined here, in that order below:
+// Three artifacts, defined in that order below:
 //
-//   1. metadata, in etcd: what exists and how far each view has got.
-//   2. chunk payloads, in object storage: the facts themselves.
+//   1. meta, in etcd: a pointer to the newest manifest, plus the persist
+//      watermark.
+//   2. manifest, in object storage: the only description of the chunk set --
+//      what recovery reads, what a lazy reader indexes by, what GC deletes.
+//   3. chunk payloads, in object storage: the facts themselves.
 //
-// A third layer -- the in-memory materialization recovery hands a view once it
-// has replayed the chunks -- is deliberately NOT in this file. It is built at
-// WAL open, consumed once in the same process, and never stored or sent, so it
-// is a plain Go struct (recovery.VChannelSummarySnapshot). Only what crosses a
-// storage or process boundary earns a message here.
+// What recovery hands a consumer once it has replayed the chunks is
+// deliberately NOT in this file. It is built at WAL open, consumed once in the
+// same process, and never stored or sent, so it is a plain Go struct
+// (recovery.VChannelSummarySnapshot). Only what crosses a storage or process
+// boundary earns a message here.
 //
 // A physical WAL position is recorded only at pchannel level. Everything below
-// it is addressed by timetick, and which chunk generation to open is decided by
-// min_required_generation.
+// it is addressed by timetick.
 
 ///
 /// Summary store metadata (etcd)
 ///
-// PChannelSummaryMeta stores pchannel-level physical summary store progress.
-// It points to the latest physical chunk and summarizes the generation range
-// that is still physically available / logically in use by active view metas.
+// PChannelSummaryMeta records one thing: which WAL assignment term last owned
+// this store. It is not a checkpoint and not an inventory.
+//
+// There is no persist watermark anywhere in this design. A summary chunk is
+// written synchronously before the WAL consume checkpoint that covers it is
+// persisted, so the two are aligned by construction: everything below the WAL
+// checkpoint is already in a chunk, everything above it is still in the WAL.
+// Recording a second position would only create something that can disagree.
+//
+// The term exists to give recovery a floor when it probes for the newest
+// manifest, so a pchannel with a large assignment term but no store does not
+// pay one probe per term.
 message PChannelSummaryMeta {
     string pchannel = 1;
-    uint64 source_checkpoint_timetick = 2;
-    common.MessageID source_checkpoint_message_id = 3;
-    uint64 latest_generation = 4;
-    // Used by GC. The cleaner deletes chunk generations in [min_available_generation, min_in_use_generation)
-    // and then advances min_available_generation up to min_in_use_generation; everything below
-    // min_available_generation is already deleted. [min_in_use_generation, latest_generation] is still in
-    // use and is required to rebuild active summary views on recovery.
-    uint64 min_available_generation = 5;
-    uint64 min_in_use_generation = 6;
-    // The WAL assignment term of the owner that last persisted this meta.
-    // Split-brain fencing: writers publish this meta through catalog CAS and
-    // refuse to update a meta carrying a newer term than their own assignment.
-    int64 term = 7;
-    // Manifest mapping generation ranges to WAL assignment terms. Chunk object
-    // keys include both generation and term; recovery must only read chunks
-    // published through this manifest.
-    PChannelSummaryChunkManifest chunk_manifest = 8;
+    int64 term      = 2;
 }
 
-message PChannelSummaryChunkManifest {
-    repeated PChannelSummaryChunkTermRange ranges = 1;
+///
+/// Summary store manifest (object storage)
+///
+// The manifest is the only description of the chunk set. One live version per
+// pchannel, at {pchannel}.manifest.{term}, rewritten as "inherit the previous
+// manifest, then amend it" so that nothing a previous owner left unfinished can
+// be dropped by accident.
+message PChannelSummaryManifest {
+    // Every chunk recovery may read, one entry each. Generations are contiguous:
+    // retention only ever releases from the oldest end, never from the middle.
+    repeated PChannelSummaryChunkIndexEntry chunks = 1;
+    // Chunks released by retention and not yet deleted. An entry present means
+    // "not deleted yet"; absent means "done". This is both the work queue and the
+    // progress record, so gc needs no watermark of its own -- and no cross-check
+    // against `chunks` either: an entry is only ever moved here by the same
+    // manifest write that stopped recovery depending on it.
+    repeated PChannelSummaryChunkRef pending_gc = 2;
 }
 
-// PChannelSummaryChunkTermRange records which WAL assignment term owns a
-// contiguous physical chunk generation range. Chunks are stored under
-// generation+term scoped object keys, and recovery only reads chunks published
-// by this manifest.
-message PChannelSummaryChunkTermRange {
-    // WAL assignment term that wrote the chunks in this range.
-    int64 term = 1;
-    // Inclusive range start.
-    uint64 start_generation = 2;
-    // Inclusive latest generation published for this range. When sealed is
-    // false this is the best-known end and can advance as recovery seals the
-    // previous term.
-    uint64 end_generation = 3;
-    // True when no more chunks can be appended for this term.
-    bool sealed = 4;
-    // Operational hints for range inspection.
-    uint64 start_timetick = 5;
-    uint64 end_timetick = 6;
+// PChannelSummaryChunkIndexEntry describes one chunk. It mirrors that chunk's
+// footer index into the manifest, which is what lets a consumer locate its own
+// vchannel inside a chunk without opening the chunk, and what lets the retention
+// boundary be computed per vchannel without any read at all.
+message PChannelSummaryChunkIndexEntry {
+    uint64 generation = 1;
+    int64 term        = 2;
+    // The chunk's own span, for coarse time filtering before any read.
+    uint64 start_timetick = 3;
+    uint64 end_timetick   = 4;
+    // The chunk footer's per-vchannel index, copied verbatim.
+    repeated VChannelSummaryChunkIndex vchannels = 5;
 }
 
-// VChannelSummaryMeta stores one view's progress over one vchannel: how far it
-// has consumed, and the oldest chunk generation it still needs to rebuild what
-// it retains. The facts themselves live in the pchannel chunks.
-//
-// Nothing at vchannel level records a physical WAL position. A vchannel filters
-// by timetick, and where recovery starts reading is decided by
-// min_required_generation, which names the pchannel chunk generation to open;
-// the physical position then comes from that chunk's pchannel checkpoint.
-message VChannelSummaryMeta {
-    string pchannel = 1;
-    string vchannel = 2;
-    uint64 evicted_watermark_timetick = 3;
-    uint64 snapshot_checkpoint_timetick = 4;
-    uint64 latest_applied_generation = 5;
-    uint64 min_required_generation = 6;
-    // Summary view type, e.g. idempotency or meta-only index.
-    string view_type = 7;
-    // Metrics only.
-    uint64 entry_count = 8;
+// PChannelSummaryChunkRef is the minimum needed to address a chunk object:
+// generation and term together build its key. Nothing else is carried, because
+// gc needs nothing else.
+message PChannelSummaryChunkRef {
+    uint64 generation = 1;
+    int64 term        = 2;
 }
 
 ///
 /// Summary store chunk payloads (object storage)
 ///
 // A summary chunk lives in object storage, not in etcd, and the object frames
-// its own payloads: a fixed header, the per-vchannel payloads back to back, then
-// a footer indexing each of them by offset/length/checksum, the footer checksum,
-// its length and a trailing magic. The frame is what lets recovery locate and
-// verify one vchannel's records without decoding the whole object, so it stays
-// hand-rolled binary; the messages below are only the payloads inside it.
+// its own payloads: a fixed header, the per-vchannel sections back to back, then
+// a footer indexing each section by offset/length, the footer checksum, its
+// length and a trailing magic. The frame is what lets a reader locate one
+// section without decoding the whole object, so it stays hand-rolled binary; the
+// messages below are only the payloads inside it.
 //
-// The source span of a chunk, and of each vchannel inside it, is recorded as a
-// timetick range only.
+// A vchannel's records are stored as SEPARATE SECTIONS rather than one message,
+// split by which consumer needs them. A consumer range-reads only its own
+// sections: a primary-key index reads the insert section without paying for the
+// idempotency section, and a store written with idempotency disabled has no
+// idempotency section at all. Merging them into one message would force every
+// consumer to decode all of it and would make the keys and the primary keys
+// impossible to store independently.
+//
+// Sections of one vchannel correspond BY POSITION: record i of the idempotency
+// section describes record i of the insert section. Position is used rather than
+// an explicit reference because the sections are written together from one
+// in-memory batch, and record_count on each ref makes the correspondence
+// verifiable on read.
 
-// PChannelSummaryChunkFooter is the chunk object's index. Recovery reads it
+// PChannelSummaryChunkFooter is the chunk object's index. A reader reads it
 // first, from the object's tail.
 message PChannelSummaryChunkFooter {
-    string pchannel                                 = 1;
-    uint64 generation                               = 2;
-    // The WAL assignment term of the writer. Used to arbitrate a same-generation
-    // write conflict between two owners (split-brain): the newer term wins, the
-    // older term is fenced.
-    int64 term                                      = 3;
-    // The pchannel WAL position this chunk covers. This is the one physical
-    // position the summary store records, and recovery resumes consuming from it.
-    common.MessageID source_checkpoint_message_id   = 4;
-    uint64 source_checkpoint_timetick               = 5;
-    // The span covered by the whole object: the earliest and latest source
-    // timetick across every vchannel in it. Each chunk index below carries the
-    // same span narrowed to its own vchannel.
-    uint64 source_start_timetick                    = 6;
-    uint64 source_end_timetick                      = 7;
-    repeated VChannelSummaryChunkIndex chunks       = 8;
+    string pchannel   = 1;
+    uint64 generation = 2;
+    int64 term        = 3;
+    // The span covered by the whole object: the earliest and latest timetick
+    // across every vchannel in it. Each vchannel index below carries the same
+    // span narrowed to itself.
+    //
+    // No checkpoint is recorded here. A chunk is written synchronously before the
+    // WAL consume checkpoint that covers it is persisted, so that checkpoint is
+    // already the boundary between what a chunk holds and what the WAL holds; a
+    // second position stored here could only ever disagree with it.
+    uint64 start_timetick = 4;
+    uint64 end_timetick   = 5;
+    repeated VChannelSummaryChunkIndex chunks = 6;
 }
 
-// VChannelSummaryChunkIndex locates one vchannel's payload inside the chunk
-// object. The checksum covers exactly the stored payload bytes and is always
-// present; it is verified before that payload is decoded.
+// VChannelSummaryChunkIndex locates one vchannel's sections inside the chunk
+// object. A section absent from here was never written for this vchannel.
 message VChannelSummaryChunkIndex {
-    string vchannel            = 1;
-    uint64 offset              = 2;
-    uint64 length              = 3;
-    bytes checksum             = 4;
-    uint64 record_count        = 5;
+    string vchannel = 1;
     // This vchannel's own span inside the object.
-    uint64 source_start_timetick = 6;
-    uint64 source_end_timetick   = 7;
+    uint64 start_timetick = 2;
+    uint64 end_timetick   = 3;
+    // Optional: written only for vchannels that carry idempotency keys.
+    VChannelSummarySectionRef idempotency = 4;
+    VChannelSummarySectionRef inserts     = 5;
+    // 6 is reserved for the delete section.
 }
 
-// VChannelSummaryChunk is one vchannel's whole chunk inside the object.
+// VChannelSummarySectionRef locates one section: where it starts, how long it
+// is, and how many records it holds.
 //
-// It is the block its records belong to, so it names the vchannel once here
-// rather than on every record. Block-level information — a key range, a filter,
-// whatever lets a reader skip the entire block without decoding it — belongs
-// here too when it arrives.
-//
-// What it must not grow is a copy of what locates it. The footer index above
-// records this payload's offset, length, checksum, record count and timetick
-// range, and the payload is never decoded without that index in hand and its
-// checksum verified, so a generation or codec version here could only repeat
-// what the reader already holds and has already proven.
-message VChannelSummaryChunk {
-    string vchannel                = 1;
-    repeated SummaryEntry entries  = 2;
+// No checksum. The object store already guarantees the bytes a read returns are
+// the bytes that were written, so a checksum here would only re-verify that. The
+// failure this format does have to catch is OUR OWN mislocation -- an offset or
+// length computed wrong -- and that is caught without one, because a decode of
+// the wrong bytes fails to parse or yields a record count that disagrees with
+// the one stored here. The footer keeps its checksum, because every offset in
+// the object derives from it and a silently wrong footer would send every read
+// to the wrong place.
+message VChannelSummarySectionRef {
+    uint64 offset       = 1;
+    uint64 length       = 2;
+    uint64 record_count = 3;
 }
 
-// SummaryEntry is one committed write fact: where and when it landed in the WAL,
-// plus whatever the views need to remember about it.
+// VChannelSummaryIdempotencySection is the idempotency overlay: which client key
+// produced a write, and which rows of that client's request this vchannel took.
 //
-// It is the store's only element type. What a chunk holds durably and what a
-// snapshot hands a view at recovery are the same thing, so nothing is projected
-// between two shapes and the two cannot drift apart.
-//
-// The top level is view-neutral, and an entry may carry no view content at all:
-// such an entry is checkpoint bookkeeping — a write that happened and moved the
-// vchannel forward, that no view needs to remember. It records no destination
-// either; every entry in a chunk shares one, so the vchannel is stored once on
-// the chunk and the pchannel once on the footer.
-message SummaryEntry {
-    common.MessageID source_message_id         = 1;
-    uint64 source_timetick                     = 2;
-    common.MessageID last_confirmed_message_id = 3;
-
-    // Per-view content. A new view adds a sibling field here rather than a
-    // column on the entry, and views stay independent: an entry may carry
-    // content for several of them at once.
-    IdempotencyContent idempotency             = 4;
+// It holds no message identity and no primary keys. Identity and keys describe
+// the write itself and live in the insert section, which stays readable on its
+// own; this section only annotates them with what the idempotency feature adds.
+// That is also why it is optional: turning idempotency off stops this section
+// from being written without changing anything a write records.
+message VChannelSummaryIdempotencySection {
+    repeated VChannelSummaryIdempotencyRecord records = 1;
 }
 
-///
-/// Idempotency view
-///
-// The per-view content the idempotency interceptor stores on a summary entry.
-// A second view adds its own content message here and a sibling field on
-// SummaryEntry; the store itself never reads either.
-
-// IdempotencyContent is what the idempotency view remembers about a committed
-// write: the client key that produced it, and the result a duplicate append
-// replays back to that client.
-//
-// The rows live here rather than on the entry because they only exist for
-// idempotent writes — the proxy stamps them onto the insert header only when
-// idempotency is enabled — so hoisting them would claim every committed write
-// carries its rows, which is false. A view that later needs rows for ordinary
-// writes brings its own content message and its own way of obtaining them.
-message IdempotencyContent {
-    string key                                    = 1;
-    messages.IdempotentInsertResult insert_result = 2;
+// VChannelSummaryIdempotencyRecord is one committed write's idempotency
+// annotation. row_offsets maps the primary keys of the corresponding insert
+// record back to their positions in the client's original request, which is what
+// lets a duplicate append be answered with a result shaped like the first one.
+message VChannelSummaryIdempotencyRecord {
+    string key                  = 1;
+    repeated uint32 row_offsets = 2;
 }
+
+// VChannelSummaryInsertSection is what an insert committed: where and when it
+// landed in the WAL, and the primary keys it produced on this vchannel.
+//
+// This section is self-sufficient on purpose. It is the one a future primary-key
+// index reads, and it must not require the idempotency section to be present or
+// even to exist -- which is also what keeps the primary keys stored exactly once.
+message VChannelSummaryInsertSection {
+    repeated VChannelSummaryInsertRecord records = 1;
+}
+
+message VChannelSummaryInsertRecord {
+    common.MessageID source_message_id = 1;
+    uint64 source_timetick             = 2;
+    // The primary keys this vchannel took from the insert. No last-confirmed
+    // position is recorded: the only reader is a duplicate append, whose response
+    // is not a resumable read position.
+    schema.IDs ids                     = 3;
+}
+
+// A delete section would be added here, indexed by its own section ref, once
+// deletes are recorded.
 
 
 ///

@@ -13,11 +13,11 @@ func TestNewConfig(t *testing.T) {
 	// Mock paramtable values
 	paramtable.Init()
 	params := paramtable.Get()
-	defer params.Reset(params.StreamingCfg.IdempotencySnapshotInterval.Key)
+	defer params.Reset(params.StreamingCfg.IdempotencyGCInterval.Key)
 	cfg := newConfig()
 
 	assert.Equal(t, 10*time.Second, cfg.persistInterval)
-	assert.Equal(t, 10*time.Second, cfg.idempotencySnapshotInterval)
+	assert.Equal(t, 10*time.Second, cfg.idempotencyGCInterval)
 	assert.Equal(t, 100, cfg.maxDirtyMessages)
 	assert.Equal(t, 3*time.Second, cfg.gracefulTimeout)
 	assert.False(t, cfg.idempotencyEnabled)
@@ -26,13 +26,13 @@ func TestNewConfig(t *testing.T) {
 func TestNewConfigKeepsRecoveryAndIdempotencyIntervalsIndependent(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
-	defer params.Reset(params.StreamingCfg.IdempotencySnapshotInterval.Key)
+	defer params.Reset(params.StreamingCfg.IdempotencyGCInterval.Key)
 
-	params.Save(params.StreamingCfg.IdempotencySnapshotInterval.Key, "2s")
+	params.Save(params.StreamingCfg.IdempotencyGCInterval.Key, "2s")
 	cfg := newConfig()
 
 	assert.Equal(t, 10*time.Second, cfg.persistInterval)
-	assert.Equal(t, 2*time.Second, cfg.idempotencySnapshotInterval)
+	assert.Equal(t, 2*time.Second, cfg.idempotencyGCInterval)
 }
 
 func TestConfigValidate(t *testing.T) {
@@ -42,9 +42,9 @@ func TestConfigValidate(t *testing.T) {
 		maxDirtyMessages            int
 		gracefulTimeout             time.Duration
 		idempotencyEnabled          bool
-		idempotencySnapshotInterval time.Duration
-		idempotencyWindowTTL        time.Duration
-		idempotencyMaxBytes         int
+		idempotencyGCInterval       time.Duration
+		idempotencyRetentionTTL     time.Duration
+		idempotencyMinRetainedBytes int
 		expectError                 bool
 	}{
 		{"ValidConfig", 10 * time.Second, 100, 5 * time.Second, false, 0, 0, 0, false},
@@ -56,8 +56,8 @@ func TestConfigValidate(t *testing.T) {
 		// by validate: they are runtime-tunable operator knobs and a panic here
 		// would crash-loop every WAL open on the node.
 		{"IdempotencyEnabledValidConfig", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 10 * time.Minute, 0, false},
-		{"IdempotencyEnabledZeroSnapshotInterval", 10 * time.Second, 100, 5 * time.Second, true, 0, 10 * time.Minute, 0, false},
-		{"IdempotencyEnabledNoTTLNoMaxBytes", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 0, 0, false},
+		{"IdempotencyEnabledZeroGCInterval", 10 * time.Second, 100, 5 * time.Second, true, 0, 10 * time.Minute, 0, false},
+		{"IdempotencyEnabledNoTTLNoFloor", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 0, 0, false},
 		// Disabled idempotency tolerates fully non-positive summary config.
 		{"IdempotencyDisabledUnboundedWindow", 10 * time.Second, 100, 5 * time.Second, false, 0, 0, 0, false},
 	}
@@ -69,9 +69,9 @@ func TestConfigValidate(t *testing.T) {
 				maxDirtyMessages:            tt.maxDirtyMessages,
 				gracefulTimeout:             tt.gracefulTimeout,
 				idempotencyEnabled:          tt.idempotencyEnabled,
-				idempotencySnapshotInterval: tt.idempotencySnapshotInterval,
-				idempotencyWindowTTL:        tt.idempotencyWindowTTL,
-				idempotencyMaxBytes:         tt.idempotencyMaxBytes,
+				idempotencyGCInterval:       tt.idempotencyGCInterval,
+				idempotencyRetentionTTL:     tt.idempotencyRetentionTTL,
+				idempotencyMinRetainedBytes: tt.idempotencyMinRetainedBytes,
 			}
 			err := cfg.validate()
 			if tt.expectError {
@@ -86,40 +86,36 @@ func TestConfigValidate(t *testing.T) {
 func TestSanitizeIdempotencyFallsBack(t *testing.T) {
 	paramtable.Init()
 
-	// Both knobs invalid: fall back to the parameter defaults with a warning.
-	cfg := &config{idempotencyEnabled: true, idempotencySnapshotInterval: 0, idempotencyWindowTTL: 0, idempotencyMaxBytes: 0}
+	// Every knob invalid: fall back to the parameter defaults with a warning
+	// rather than crash-looping the WAL open over an operator typo.
+	cfg := &config{idempotencyEnabled: true}
 	cfg.sanitizeIdempotency()
-	assert.Equal(t, 10*time.Second, cfg.idempotencySnapshotInterval)
-	assert.Equal(t, 10*time.Minute, cfg.idempotencyWindowTTL)
+	assert.Equal(t, 10*time.Second, cfg.idempotencyGCInterval)
+	assert.Equal(t, 64*1024*1024, cfg.idempotencyMinRetainedBytes)
+	assert.Positive(t, cfg.idempotencyChunkTargetBytes)
+	assert.Positive(t, cfg.idempotencyManifestChunkInterval)
 
-	// An explicit max byte cap makes windowTTL: 0s a valid "byte-capped only"
-	// configuration; nothing is rewritten.
-	cfg = &config{idempotencyEnabled: true, idempotencySnapshotInterval: 5 * time.Second, idempotencyWindowTTL: 0, idempotencyMaxBytes: 100}
+	// The retention floor is what keeps the store non-empty after an outage, so
+	// a non-positive value is repaired rather than honoured.
+	cfg = &config{idempotencyEnabled: true, idempotencyMinRetainedBytes: 0}
 	cfg.sanitizeIdempotency()
-	assert.Equal(t, time.Duration(0), cfg.idempotencyWindowTTL)
-	assert.Equal(t, 5*time.Second, cfg.idempotencySnapshotInterval)
+	assert.Positive(t, cfg.idempotencyMinRetainedBytes)
+
+	// Explicit values are left alone.
+	cfg = &config{
+		idempotencyEnabled:               true,
+		idempotencyGCInterval:            5 * time.Second,
+		idempotencyMinRetainedBytes:      100,
+		idempotencyChunkTargetBytes:      200,
+		idempotencyManifestChunkInterval: 3,
+	}
+	cfg.sanitizeIdempotency()
+	assert.Equal(t, 5*time.Second, cfg.idempotencyGCInterval)
+	assert.Equal(t, 100, cfg.idempotencyMinRetainedBytes)
 
 	// Disabled idempotency is left untouched.
 	cfg = &config{idempotencyEnabled: false}
 	cfg.sanitizeIdempotency()
-	assert.Zero(t, cfg.idempotencyWindowTTL)
-	assert.Zero(t, cfg.idempotencySnapshotInterval)
-
-	// End-to-end: an operator explicitly zeroing BOTH windowTTL and
-	// maxBytesPerWindow must not panic the WAL open — the TTL falls back to
-	// its default with a warning. (windowTTL: 0s alone is now a legitimate
-	// byte-capped configuration, since maxBytesPerWindow defaults to 16MiB.)
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
-	params.Save(params.StreamingCfg.IdempotencyWindowTTL.Key, "0s")
-	params.Save(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key, "0")
-	defer func() {
-		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
-		params.Reset(params.StreamingCfg.IdempotencyWindowTTL.Key)
-		params.Reset(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key)
-	}()
-	assert.NotPanics(t, func() {
-		cfg := newConfig()
-		assert.Equal(t, 10*time.Minute, cfg.idempotencyWindowTTL)
-	})
+	assert.Zero(t, cfg.idempotencyGCInterval)
+	assert.Zero(t, cfg.idempotencyMinRetainedBytes)
 }

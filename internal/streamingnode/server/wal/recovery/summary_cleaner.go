@@ -3,246 +3,112 @@ package recovery
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-// dropSummaryStoreForDisabledIdempotency wipes the durable idempotency summary
-// store while the feature is disabled. With idempotency off, nothing is
-// recorded into the store, the consume checkpoint advances freely and the WAL
-// gets truncated past the stored SourceCheckpoint — so the persisted store is
-// stale by definition and, worse, on re-enable its SourceCheckpoint would
-// rewind recovery to a position that may no longer exist in the WAL. Dropping
-// it makes a later re-enable bootstrap cleanly from the then-current
-// checkpoint (losing summary dedup state across the disabled period, which is
-// inherent to disabling the feature).
+// dropSummaryStoreForDisabledIdempotency wipes the durable summary store while
+// the feature is disabled. With idempotency off nothing is recorded, the
+// consume checkpoint advances freely and the WAL is truncated past the stored
+// watermark -- so the store is stale by definition and, on re-enable, would
+// rewind recovery to a position that may no longer exist in the WAL. Dropping it
+// makes a later re-enable bootstrap cleanly from the then-current checkpoint,
+// losing the dedup state of the disabled period, which is inherent to disabling
+// the feature.
 //
-// Deletion order is chosen for crash safety of the recover path: vchannel
-// summary metas first (recovery treats "vchannel metas without pchannel meta"
-// as an error, so the pchannel meta must outlive them), then the pchannel
-// meta, then the chunk objects. A crash before the meta removal is retried on
-// the next disabled open; a crash after it only leaks unreferenced chunk
-// objects, because bootstrap must not prefix-delete chunks based on a stale
-// no-meta read. Best-effort: failures only log —
-// recovery with idempotency disabled must never block on summary-store IO — and
-// the next open retries.
+// Deletion order is chosen for crash safety: the manifest first, so recovery
+// immediately stops depending on the chunks; then the chunk objects; then the
+// meta. A crash anywhere only leaks objects, and the next disabled open repeats
+// the sweep.
+//
+// Best-effort throughout: recovery with idempotency disabled must never block on
+// summary-store IO.
 func (m *summaryManager) dropSummaryStoreForDisabledIdempotency(ctx context.Context, pchannel string) {
 	logger := m.Logger().With(mlog.String("op", "dropSummaryStoreForDisabledIdempotency"))
 	catalog := resource.Resource().StreamingNodeCatalog()
 	metaPB, err := catalog.GetPChannelSummaryMeta(ctx, pchannel)
 	if err != nil {
-		logger.Warn(ctx, "failed to probe pchannel summary meta; a stale idempotency summary store (if any) is kept", mlog.Err(err))
+		logger.Warn(ctx, "failed to probe pchannel summary meta; a stale summary store (if any) is kept", mlog.Err(err))
 		return
-	}
-	summaryMetas, err := catalog.ListVChannelSummaryMetas(ctx, pchannel, common.VChannelSummaryViewTypeIdempotency)
-	if err != nil {
-		logger.Warn(ctx, "failed to list vchannel summary metas; a stale idempotency summary store (if any) is kept", mlog.Err(err))
-		return
-	}
-	meta := pchannelSummaryStoreMetaFromCatalog(metaPB)
-	if meta == nil && len(summaryMetas) == 0 {
-		return
-	}
-
-	if len(summaryMetas) > 0 {
-		vchannels := make([]string, 0, len(summaryMetas))
-		for _, summaryMeta := range summaryMetas {
-			vchannels = append(vchannels, summaryMeta.GetVchannel())
-		}
-		if err := catalog.RemoveVChannelSummaryMetas(ctx, pchannel, common.VChannelSummaryViewTypeIdempotency, vchannels); err != nil {
-			logger.Warn(ctx, "failed to remove stale vchannel summary metas", mlog.Err(err))
-			return
-		}
-	}
-	if meta != nil {
-		if err := catalog.RemovePChannelSummaryMeta(ctx, pchannel); err != nil {
-			logger.Warn(ctx, "failed to remove stale pchannel summary meta", mlog.Err(err))
-			return
-		}
-	}
-	// Remove every chunk of the store, not just [MinAvailableGeneration,
-	// LatestGeneration]: a persist writes the chunk before the meta, so a crash in
-	// between leaves an orphan at LatestGeneration+1 that a generation-range walk
-	// would keep. The enabled recover path reaps such orphans itself; the drop
-	// path must too, otherwise the leftover chunk survives into a later re-enable
-	// and permanently fails the write-if-absent of that generation.
-	if err := removeAllPChannelSummaryChunks(ctx, pchannel); err != nil {
-		logger.Warn(ctx, "failed to delete stale pchannel summary chunks; unreferenced chunk objects leak", mlog.Err(err))
-		return
-	}
-	logger.Info(
-		ctx, "dropped stale idempotency summary store while idempotency is disabled",
-		mlog.String("pchannel", pchannel),
-		mlog.Int("vchannelSummaryMetas", len(summaryMetas)),
-		mlog.Bool("hasPChannelSummaryMeta", meta != nil),
-	)
-}
-
-type pchannelSummaryCleanBoundary struct {
-	canClean                 bool
-	hasActiveViewMinBoundary bool
-	minInUseGeneration       uint64
-}
-
-func (m *summaryManager) cleanPChannelSummary(ctx context.Context, logger *mlog.Logger) error {
-	if logger == nil {
-		logger = m.Logger()
-	}
-	if !m.canCleanPChannelSummary() {
-		return nil
-	}
-
-	metaPB, err := resource.Resource().StreamingNodeCatalog().GetPChannelSummaryMeta(ctx, m.pchannel)
-	if err != nil {
-		return err
 	}
 	meta := pchannelSummaryStoreMetaFromCatalog(metaPB)
 	if meta == nil {
-		return nil
-	}
-	if meta.Term > m.term {
-		// Another owner with a newer assignment term took over the store; this
-		// stale cleaner must neither delete its chunks nor rewrite its meta.
-		return pchannelSummaryStoreFencedf("pchannel summary store of %s already owned by term %d, cleaner term %d stops", m.pchannel, meta.Term, m.term)
-	}
-	if meta.MinAvailableGeneration > meta.LatestGeneration {
-		return pchannelSummaryStoreCorruptedf("pchannel summary generation range mismatch, min available %d, latest %d", meta.MinAvailableGeneration, meta.LatestGeneration)
-	}
-	if err := validatePChannelSummaryManifest(meta); err != nil {
-		return err
+		return
 	}
 
-	boundary := m.pchannelSummaryCleanBoundary(meta.LatestGeneration)
-	if !boundary.canClean {
-		return nil
+	// Prefix removal rather than a walk over the recorded generations: a chunk is
+	// written before the manifest records it, so a crash in between leaves an
+	// object no manifest names. The enabled path reaps those when retention
+	// passes them; the drop path has no later pass, so it must sweep everything.
+	// This is the one place prefix deletion is used -- GC on the normal path
+	// addresses objects exactly, because listing semantics differ across
+	// object-storage backends.
+	if err := removeAllPChannelSummaryChunks(ctx, pchannel); err != nil {
+		logger.Warn(ctx, "failed to delete stale pchannel summary chunks; unreferenced objects leak", mlog.Err(err))
+		return
 	}
-	targetMinInUse := boundary.minInUseGeneration
-	if !boundary.hasActiveViewMinBoundary {
-		targetMinInUse = meta.LatestGeneration
+	if err := catalog.RemovePChannelSummaryMeta(ctx, pchannel); err != nil {
+		logger.Warn(ctx, "failed to remove stale pchannel summary meta", mlog.Err(err))
+		return
 	}
-	targetMinAvailable := targetMinInUse
-	if targetMinAvailable > meta.LatestGeneration {
-		targetMinAvailable = meta.LatestGeneration
-	}
-	if targetMinAvailable < meta.MinAvailableGeneration {
-		targetMinAvailable = meta.MinAvailableGeneration
-	}
-	updatedMeta := *meta
-	updatedMeta.MinInUseGeneration = targetMinInUse
-	updatedMeta.MinAvailableGeneration = targetMinAvailable
-	updatedMeta.Term = m.term
-
-	if updatedMeta.MinAvailableGeneration == meta.MinAvailableGeneration &&
-		updatedMeta.MinInUseGeneration == meta.MinInUseGeneration {
-		return nil
-	}
-
-	// Persist the advanced MinInUseGeneration BEFORE deleting anything, keeping
-	// MinAvailableGeneration at its old value for now. Recovery replays chunks
-	// from the persisted MinInUseGeneration upward and hard-fails on a missing
-	// chunk, so deletion must never run ahead of that durable boundary: an
-	// interruption between a delete and the meta save — a crash, or this
-	// background task's context being canceled on WAL close — would otherwise
-	// leave the persisted MinInUseGeneration pointing into the deleted range and
-	// permanently fail every subsequent WAL open. With the advance durable
-	// first, an interruption only leaks chunks below the new boundary, and the
-	// next cycle re-deletes them idempotently (Exist check in the delete loop).
-	if updatedMeta.MinInUseGeneration != meta.MinInUseGeneration {
-		intermediateMeta := updatedMeta
-		intermediateMeta.MinAvailableGeneration = meta.MinAvailableGeneration
-		if err := retryOperationWithBackoff(ctx,
-			logger.With(
-				mlog.String("op", "advancePChannelSummaryMinInUseGeneration"),
-				mlog.Uint64("minInUseGeneration", intermediateMeta.MinInUseGeneration),
-				mlog.Bool("hasActiveViewMinBoundary", boundary.hasActiveViewMinBoundary),
-			),
-			func(ctx context.Context) error {
-				return m.repairPChannelSummaryMeta(ctx, &intermediateMeta)
-			}); err != nil {
-			return err
-		}
-	}
-
-	// Reclaim [MinAvailableGeneration, MinInUseGeneration): these chunks sit
-	// below the durably-persisted in-use boundary and are never read on recovery.
-	// [MinInUseGeneration, LatestGeneration] is still in use. Starting from the
-	// old MinAvailableGeneration also bounds each cycle's work to the newly
-	// reclaimable range instead of re-probing every generation from 0.
-	if err := m.deletePChannelSummaryChunks(ctx, logger, meta, meta.MinAvailableGeneration, updatedMeta.MinAvailableGeneration, updatedMeta.LatestGeneration); err != nil {
-		return err
-	}
-
-	if updatedMeta.MinAvailableGeneration == meta.MinAvailableGeneration {
-		return nil
-	}
-	// Only after the deletions succeeded may the low-water advance: everything
-	// below the persisted MinAvailableGeneration is promised to be gone.
-	return retryOperationWithBackoff(ctx,
-		logger.With(
-			mlog.String("op", "cleanPChannelSummaryMeta"),
-			mlog.Uint64("oldMinAvailableGeneration", meta.MinAvailableGeneration),
-			mlog.Uint64("newMinAvailableGeneration", updatedMeta.MinAvailableGeneration),
-			mlog.Uint64("minInUseGeneration", updatedMeta.MinInUseGeneration),
-			mlog.Bool("hasActiveViewMinBoundary", boundary.hasActiveViewMinBoundary),
-		),
-		func(ctx context.Context) error {
-			return m.repairPChannelSummaryMeta(ctx, &updatedMeta)
-		})
+	logger.Info(ctx, "dropped stale summary store while idempotency is disabled",
+		mlog.String("pchannel", pchannel))
 }
 
-func (m *summaryManager) canCleanPChannelSummary() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.activeViewsInitialized
-}
-
-func (m *summaryManager) pchannelSummaryCleanBoundary(latestGeneration uint64) pchannelSummaryCleanBoundary {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.activeViewsInitialized {
-		return pchannelSummaryCleanBoundary{}
-	}
-	minInUseGeneration, hasActiveViewMinBoundary := m.minRequiredGeneration(nil, latestGeneration)
-	return pchannelSummaryCleanBoundary{
-		canClean:                 true,
-		hasActiveViewMinBoundary: hasActiveViewMinBoundary,
-		minInUseGeneration:       minInUseGeneration,
-	}
-}
-
-func (m *summaryManager) deletePChannelSummaryChunks(ctx context.Context, logger *mlog.Logger, meta *pchannelSummaryStoreMeta, startGeneration uint64, endGeneration uint64, latestGeneration uint64) error {
-	if startGeneration >= endGeneration {
+// runPendingGC deletes what the manifest has queued for deletion.
+//
+// The entire input is the manifest's pending_gc list, which the persist path
+// filled in the same object write that removed those chunks from the set
+// recovery reads. Three properties follow from that, and they are the reason
+// this is the whole of GC:
+//
+//   - Clean. Every entry carries its own term, so the object key is constructed
+//     exactly. No listing, no prefix scan, and no cross-check against the chunks
+//     recovery reads: an entry only ever lands here in the same manifest write
+//     that stopped recovery depending on it, so the decision was already made.
+//   - Idempotent. Deleting an absent object succeeds. Completion is recorded in
+//     memory and becomes durable at the next manifest write, so a crash at any
+//     point replays a batch of no-ops rather than losing or double-applying
+//     work.
+//   - Efficient. One DELETE per object, no metadata round trips, no
+//     cross-storage coordination, no locks. Completion rides along on a manifest
+//     write the owner was going to do anyway.
+func (m *summaryManager) runPendingGC(ctx context.Context, logger *mlog.Logger) error {
+	pending := m.manifest.GetPendingGc()
+	if len(pending) == 0 {
 		return nil
 	}
-	chunkManager := resource.Resource().ChunkManager()
-	for generation := startGeneration; generation < endGeneration; generation++ {
-		if generation >= latestGeneration {
-			break
-		}
-		termRange, ok := pchannelSummaryManifestRangeForGeneration(meta, generation)
-		if !ok {
-			return pchannelSummaryStoreCorruptedf("pchannel summary chunk manifest misses generation %d before clean", generation)
-		}
-		chunkKey := buildPChannelSummaryChunkKey(chunkManager, m.pchannel, generation, termRange.GetTerm())
-		exists, err := chunkManager.Exist(ctx, chunkKey)
-		if err != nil {
-			return errors.Wrapf(err, "failed to check pchannel summary chunk %s before clean", chunkKey)
-		}
-		if !exists {
+	cm := resource.Resource().ChunkManager()
+	deleted := 0
+	for _, entry := range pending {
+		ref := pchannelSummaryGCRef{term: entry.GetTerm(), generation: entry.GetGeneration()}
+		if _, done := m.completedGC[ref]; done {
 			continue
 		}
-		if err := chunkManager.Remove(ctx, chunkKey); err != nil {
-			return errors.Wrapf(err, "failed to remove pchannel summary chunk %s", chunkKey)
+		chunkKey := buildPChannelSummaryChunkKey(cm, m.pchannel, ref.generation, ref.term)
+		if err := cm.Remove(ctx, chunkKey); err != nil {
+			// Leave the entry pending; the next cycle retries it. Nothing is lost by
+			// stopping here: the objects are already unreferenced.
+			logger.Warn(ctx, "failed to delete summary chunk; leaving it queued",
+				mlog.String("chunkKey", chunkKey), mlog.Err(err))
+			m.observePendingGC()
+			return err
 		}
-		logger.Debug(
-			ctx, "clean pchannel summary chunk",
-			mlog.Uint64("generation", generation),
-			mlog.String("chunkKey", chunkKey),
-		)
+		m.completedGC[ref] = struct{}{}
+		deleted++
 	}
+	if deleted > 0 {
+		logger.Info(ctx, "deleted summary chunks queued for gc", mlog.Int("objects", deleted))
+	}
+	m.observePendingGC()
 	return nil
+}
+
+// observePendingGC publishes how much deletion is outstanding. It grows without
+// bound when GC is stuck, which makes it the direct health signal.
+func (m *summaryManager) observePendingGC() {
+	if m.metrics == nil {
+		return
+	}
+	m.metrics.ObserveIdempotencyPendingGC(len(m.manifest.GetPendingGc()) - len(m.completedGC))
 }

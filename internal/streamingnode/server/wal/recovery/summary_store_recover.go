@@ -6,40 +6,23 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-type pchannelSummaryStoreMeta struct {
-	PChannel               string
-	LatestGeneration       uint64
-	MinAvailableGeneration uint64
-	MinInUseGeneration     uint64
-	SourceCheckpoint       *WALCheckpoint
-	ChunkManifest          *streamingpb.PChannelSummaryChunkManifest
-	// Term is the WAL assignment term of the owner that last persisted the
-	// meta; writers publish updates through catalog CAS and older terms are
-	// fenced before they can advance the manifest.
-	Term int64
-}
-
 type persistedPChannelSummaryChunk struct {
-	footer                 *streamingpb.PChannelSummaryChunkFooter
-	generation             uint64
-	minAvailableGeneration uint64
-}
-
-type summaryStoreRecoveryInfo struct {
-	summaryMetas []*streamingpb.VChannelSummaryMeta
-	storeMeta    *pchannelSummaryStoreMeta
+	footer     *streamingpb.PChannelSummaryChunkFooter
+	generation uint64
 }
 
 const (
 	pchannelSummaryChunkObjectExt    = ".psc"
 	pchannelSummaryChunkObjectPrefix = "chunk."
+	// probeLimit bounds a single forward probe. A term that wrote more than this
+	// many chunks past its manifest is pathological; failing loudly beats
+	// scanning object storage without end.
+	pchannelSummaryChunkProbeLimit = 1 << 16
 )
 
 // recoverSummaries recovers the idempotency summary cache before WAL replay and
@@ -66,27 +49,26 @@ func (m *summaryManager) recoverSummaries(ctx context.Context, pchannel string, 
 		m.dropSummaryStoreForDisabledIdempotency(ctx, pchannel)
 		return checkpoint, nil
 	}
-	summaryInfo, err := m.recoverSummaryInfoFromMeta(ctx, pchannel, checkpoint, vchannels)
-	if err != nil {
-		return checkpoint, wrapSummaryRecoveryError(err)
-	}
-	rewound, err := m.recoverSummaryStoreFromSnapshot(ctx, summaryInfo, checkpoint, vchannels)
+	rewound, err := m.recoverFromSummaryStore(ctx, pchannel, checkpoint, vchannels)
 	if err != nil {
 		return checkpoint, wrapSummaryRecoveryError(err)
 	}
 	return rewound, nil
 }
 
-// wrapSummaryRecoveryError decorates referenced-state corruption with the
-// operator remediation and FAILS the WAL open. Corruption reaching here always
-// concerns state the meta references (chunks inside [MinInUse, Latest] or the
-// meta's generation ranges) — orphan-chunk corruption never escalates, it is
-// self-healed inline by the recovery probe. A referenced chunk is the only
-// durable copy of the idempotency keys below the consume checkpoint once the
-// WAL has been truncated past them (the summary snapshot checkpoint is what
-// allowed that truncation), so silently resetting to an empty summary would
-// accept in-TTL client retries as fresh writes — duplicate data with no error
-// anywhere. Failing open is explicit and actionable instead.
+// wrapSummaryRecoveryError decorates corruption of state the manifest still
+// retains with the operator remediation, and FAILS the WAL open.
+//
+// A retained chunk is the only durable copy of the idempotency keys below the
+// persist watermark once the WAL has been truncated past them -- and it is the
+// summary store's own watermark that allowed that truncation. Silently starting
+// with an empty window would accept in-retention client retries as fresh
+// writes: duplicate data, no error anywhere. Failing the open is explicit and
+// actionable instead.
+//
+// Chunks above the watermark are a different case and never escalate: they were
+// never acknowledged, their data is still in the WAL, and probing simply stops
+// short of them.
 func wrapSummaryRecoveryError(err error) error {
 	if errors.Is(err, ErrPChannelSummaryStoreFenced) {
 		return errors.Wrap(err,
@@ -104,205 +86,163 @@ func wrapSummaryRecoveryError(err error) error {
 	return err
 }
 
-func (m *summaryManager) recoverSummaryInfoFromMeta(ctx context.Context, pchannel string, checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) (*summaryStoreRecoveryInfo, error) {
-	info, err := m.loadSummaryInfoFromMeta(ctx, pchannel, true, checkpoint)
+// recoverFromSummaryStore rebuilds the consumers from the durable store and
+// returns the checkpoint WAL replay must resume from.
+//
+// The sequence is fixed, and every step exists to close a specific way data
+// could otherwise be lost:
+//
+//  1. read the meta -- a pointer that may lag, never a source of truth about
+//     which chunks exist;
+//  2. find the newest manifest by probing terms downward;
+//  3. probe chunks forward within that manifest's own term, stopping at the
+//     first miss -- this recovers everything written after the last manifest;
+//  4. publish this term's manifest, inheriting the previous one and sealing the
+//     probed tail into it -- without this, the tail is invisible to the NEXT
+//     recovery and is lost silently;
+//  5. only now may this owner write chunks;
+//  6. read the retained chunks and hand each vchannel's records to its consumer.
+//
+// WAL replay is never rewound. A chunk is durable before the WAL checkpoint that
+// covers it, so the checkpoint handed in already separates what the chunks hold
+// from what replay must redo.
+func (m *summaryManager) recoverFromSummaryStore(
+	ctx context.Context,
+	pchannel string,
+	checkpoint *WALCheckpoint,
+	vchannels map[string]*vchannelRecoveryInfo,
+) (*WALCheckpoint, error) {
+	metaPB, err := m.loadPChannelSummaryMeta(ctx, pchannel)
 	if err != nil {
-		return nil, err
+		return checkpoint, err
 	}
-	m.initializeSummariesFromMeta(vchannels, info.storeMeta.SourceCheckpoint, info.summaryMetas)
+	meta := pchannelSummaryStoreMetaFromCatalog(metaPB)
+
+	floorTerm := int64(0)
+	if meta != nil {
+		if meta.Term > m.term {
+			return checkpoint, pchannelSummaryStoreFencedf(
+				"pchannel summary meta of %s owned by newer term %d, own term %d", pchannel, meta.Term, m.term,
+			)
+		}
+		floorTerm = meta.Term
+	}
+
+	previous, previousTerm, err := findNewestPChannelSummaryManifest(ctx, pchannel, m.term, floorTerm)
+	if err != nil {
+		return checkpoint, err
+	}
+
+	discovered, err := m.probeForwardFromManifest(ctx, pchannel, previous, previousTerm)
+	if err != nil {
+		return checkpoint, err
+	}
+
+	m.manifest = inheritPChannelSummaryManifest(previous, discovered)
+	if newest, ok := pchannelSummaryManifestNewest(m.manifest); ok {
+		m.nextGeneration = newest.GetGeneration() + 1
+		m.latestCoveredTT = newest.GetEndTimetick()
+	}
+
+	// A term that cannot publish its manifest must not write a chunk: a chunk
+	// written before its manifest is one recovery can never find. This is a hard
+	// failure, not a best-effort ordering.
+	if err := retryOperationWithBackoff(ctx,
+		m.Logger().With(mlog.String("op", "publishPChannelSummaryManifest")),
+		func(ctx context.Context) error {
+			return writePChannelSummaryManifest(ctx, pchannel, m.term, m.manifest)
+		}); err != nil {
+		return checkpoint, errors.Wrap(err, "failed to publish the manifest for this term; refusing to write chunks without it")
+	}
+
+	// The WAL checkpoint is the boundary: everything below it is in a chunk,
+	// everything above it is replayed. The store keeps no checkpoint of its own.
+	m.ensureActiveSummaries(vchannels, checkpoint)
+	if err := m.replayRetainedChunks(ctx, pchannel); err != nil {
+		return checkpoint, err
+	}
+	m.markActiveViewsInitialized()
+
 	m.Logger().Info(
-		ctx, "recover idempotency summary meta done",
-		mlog.Int("summaries", len(info.summaryMetas)),
-		mlog.Bool("hasPChannelSummaryMeta", info.storeMeta != nil),
+		ctx, "recovered from pchannel summary store",
+		mlog.Int("summaries", len(m.summaries())),
+		mlog.Int64("manifestTerm", previousTerm),
+		mlog.Uint64("nextGeneration", m.nextGeneration),
 	)
-	return info, nil
+	return checkpoint, nil
 }
 
-func (m *summaryManager) loadSummaryInfoFromMeta(ctx context.Context, pchannel string, allowBootstrap bool, checkpoint *WALCheckpoint) (*summaryStoreRecoveryInfo, error) {
-	// Bounded retry: transient catalog blips must not hard-fail the WAL open.
-	var summaryMetas []*streamingpb.VChannelSummaryMeta
-	if err := retry.Do(ctx, func() error {
-		var listErr error
-		summaryMetas, listErr = resource.Resource().StreamingNodeCatalog().ListVChannelSummaryMetas(ctx, pchannel, common.VChannelSummaryViewTypeIdempotency)
-		return listErr
-	}, retry.Attempts(5)); err != nil {
-		return nil, errors.Wrap(err, "failed to list idempotency summary meta")
-	}
-	var storeMetaPB *streamingpb.PChannelSummaryMeta
+func (m *summaryManager) loadPChannelSummaryMeta(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
+	var metaPB *streamingpb.PChannelSummaryMeta
+	// Bounded retry: a transient catalog blip must not hard-fail the WAL open.
 	if err := retry.Do(ctx, func() error {
 		var getErr error
-		storeMetaPB, getErr = resource.Resource().StreamingNodeCatalog().GetPChannelSummaryMeta(ctx, pchannel)
+		metaPB, getErr = resource.Resource().StreamingNodeCatalog().GetPChannelSummaryMeta(ctx, pchannel)
 		return getErr
 	}, retry.Attempts(5)); err != nil {
 		return nil, errors.Wrap(err, "failed to get pchannel summary meta")
 	}
-	storeMeta := pchannelSummaryStoreMetaFromCatalog(storeMetaPB)
-	if storeMeta == nil {
-		if !allowBootstrap || len(summaryMetas) > 0 {
-			return nil, merr.WrapErrServiceInternalMsg("pchannel summary meta missing for pchannel %s", pchannel)
-		}
-		bootstrapped, err := m.bootstrapPChannelSummaryStore(ctx, pchannel, checkpoint)
-		if err != nil {
-			return nil, err
-		}
-		storeMeta = bootstrapped
-	}
-	return &summaryStoreRecoveryInfo{
-		summaryMetas: summaryMetas,
-		storeMeta:    storeMeta,
-	}, nil
+	return metaPB, nil
 }
 
-func (m *summaryManager) recoverSummaryStoreFromSnapshot(ctx context.Context, info *summaryStoreRecoveryInfo, checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) (*WALCheckpoint, error) {
-	if info == nil || info.storeMeta == nil {
-		return checkpoint, nil
-	}
-	storeMeta := info.storeMeta
-	recoveredStoreMeta, err := m.recoverSummariesFromStore(ctx, storeMeta.PChannel, storeMeta)
-	if err != nil {
-		return checkpoint, err
-	}
-	if recoveredStoreMeta != nil && recoveredStoreMeta.LatestGeneration > storeMeta.LatestGeneration {
-		storeMeta = recoveredStoreMeta
-		if err := m.repairPChannelSummaryMeta(ctx, storeMeta); err != nil {
-			return checkpoint, err
-		}
-	}
-	info.storeMeta = storeMeta
-	m.setPChannelSummarySnapshotCheckpoint(storeMeta.SourceCheckpoint)
-	m.ensureActiveSummaries(vchannels, storeMeta.SourceCheckpoint)
-	m.markActiveViewsInitialized()
-	rewound := m.rewindCheckpointForPChannelSummaryReplay(storeMeta.SourceCheckpoint, checkpoint, vchannels)
-	m.Logger().Info(
-		ctx, "recover idempotency summary info done",
-		mlog.Int("summaries", len(m.summaries())),
-		mlog.String("storage", "pchannel-summary-store"),
-	)
-	return rewound, nil
-}
-
-func (m *summaryManager) bootstrapPChannelSummaryStore(ctx context.Context, pchannel string, sourceCheckpoint *WALCheckpoint) (*pchannelSummaryStoreMeta, error) {
-	if sourceCheckpoint == nil {
-		return nil, merr.WrapErrServiceInternalMsg("cannot bootstrap pchannel summary store without source checkpoint for pchannel %s", pchannel)
-	}
-	chunkPayload, footer, _, err := marshalPChannelSummaryChunk(pchannel, 0, m.term, sourceCheckpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, footer.Generation, m.term)
-	logger := m.Logger().With(mlog.String("op", "bootstrapPChannelSummaryStore"), mlog.Uint64("generation", footer.Generation))
-	// Do not remove chunks here based only on the earlier no-meta read: another
-	// owner may have bootstrapped and published a meta after that read. A stale
-	// opener can safely write an orphan term-suffixed generation-0 chunk and then
-	// lose the pchannel summary meta CAS, but a prefix delete would remove the new
-	// owner's referenced chunk before the stale owner is fenced.
-	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
-		return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, footer, m.term)
-	}); err != nil {
-		return nil, err
-	}
-	if err := m.persistPChannelSummaryMeta(ctx, logger, &persistedPChannelSummaryChunk{
-		footer:                 footer,
-		generation:             footer.Generation,
-		minAvailableGeneration: 0,
-	}, 0); err != nil {
-		return nil, err
-	}
-	m.Logger().Info(
-		ctx, "bootstrap pchannel summary store done",
-		mlog.String("pchannel", pchannel),
-		mlog.String("chunkKey", chunkKey),
-		mlog.Uint64("sourceTimeTick", sourceCheckpoint.TimeTick),
-	)
-	return newPChannelSummaryStoreMetaFromChunk(pchannel, footer, 0, 0), nil
-}
-
-func (m *summaryManager) recoverSummariesFromStore(ctx context.Context, pchannel string, meta *pchannelSummaryStoreMeta) (*pchannelSummaryStoreMeta, error) {
-	if meta == nil {
+// probeForwardFromManifest discovers chunks written after the manifest was last
+// written, because a chunk is made durable before the manifest naming it.
+//
+// It probes ONE term -- the manifest's own -- and stops at the first missing
+// generation. Both are sound for the same reason: a term publishes its manifest
+// before its first chunk, so a chunk beyond this manifest cannot belong to any
+// other term; and generations are claimed in order, so a hole means the writer
+// stopped there. Anything above a hole was never acknowledged and is still in
+// the WAL.
+//
+// The probe starts at generation 0 when the manifest names no chunk at all. That
+// is not a degenerate case: a term that published its manifest, wrote its first
+// chunk and then died leaves exactly that state, and skipping it would drop the
+// chunk permanently.
+func (m *summaryManager) probeForwardFromManifest(
+	ctx context.Context,
+	pchannel string,
+	manifest *streamingpb.PChannelSummaryManifest,
+	manifestTerm int64,
+) ([]*streamingpb.PChannelSummaryChunkIndexEntry, error) {
+	if manifest == nil {
 		return nil, nil
 	}
-	if meta.Term > m.term {
-		// The durable store was already taken over by a newer assignment term:
-		// this open is stale (split-brain) and must not recover from — much
-		// less later persist over — the current owner's state.
-		return nil, pchannelSummaryStoreFencedf("pchannel summary store of %s already owned by term %d, recovering term %d stops", pchannel, meta.Term, m.term)
-	}
-	if meta.MinAvailableGeneration > meta.LatestGeneration {
-		return nil, pchannelSummaryStoreCorruptedf("pchannel summary generation range mismatch, min available %d, latest %d", meta.MinAvailableGeneration, meta.LatestGeneration)
-	}
-	if meta.MinAvailableGeneration > meta.MinInUseGeneration || meta.MinInUseGeneration > meta.LatestGeneration {
-		return nil, pchannelSummaryStoreCorruptedf("pchannel summary generation range mismatch, min available %d, min in use %d, latest %d", meta.MinAvailableGeneration, meta.MinInUseGeneration, meta.LatestGeneration)
-	}
-	if err := validatePChannelSummaryManifest(meta); err != nil {
-		return nil, err
-	}
-	sealedMeta, err := m.sealPreviousPChannelSummaryTerm(ctx, pchannel, meta)
-	if err != nil {
-		return nil, err
-	}
-	if sealedMeta != nil {
-		meta = sealedMeta
-	}
-	actualMeta := meta
-	for generation := meta.MinInUseGeneration; generation <= meta.LatestGeneration; generation++ {
-		termRange, ok := pchannelSummaryManifestRangeForGeneration(meta, generation)
-		if !ok {
-			return nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk manifest misses generation %d", generation)
-		}
-		footer, err := m.recoverPChannelSummaryChunk(ctx, pchannel, generation, termRange.GetTerm())
-		if err != nil {
-			return nil, err
-		}
-		if generation == meta.LatestGeneration {
-			actualMeta = newPChannelSummaryStoreMetaFromChunk(pchannel, footer, meta.MinAvailableGeneration, meta.MinInUseGeneration)
-			actualMeta.ChunkManifest = clonePChannelSummaryChunkManifest(meta.ChunkManifest)
-			break
-		}
+	nextGeneration := uint64(0)
+	if newest, ok := pchannelSummaryManifestNewest(manifest); ok {
+		nextGeneration = newest.GetGeneration() + 1
 	}
 
-	if meta.LatestGeneration == ^uint64(0) {
-		return actualMeta, nil
-	}
-	for generation := meta.LatestGeneration + 1; ; generation++ {
-		chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, m.term)
-		exists, err := resource.Resource().ChunkManager().Exist(ctx, chunkKey)
+	discovered := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0)
+	cm := resource.Resource().ChunkManager()
+	for offset := 0; offset < pchannelSummaryChunkProbeLimit; offset++ {
+		generation := nextGeneration + uint64(offset)
+		exists, err := cm.Exist(ctx, buildPChannelSummaryChunkKey(cm, pchannel, generation, manifestTerm))
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to probe pchannel summary chunk %s", chunkKey)
+			return nil, errors.Wrapf(err, "failed to probe pchannel summary chunk at generation %d", generation)
 		}
 		if !exists {
 			break
 		}
-		footer, err := m.recoverPChannelSummaryChunk(ctx, pchannel, generation, m.term)
-		if err != nil {
-			if errors.Is(err, ErrPChannelSummaryStoreCorrupted) {
-				// A chunk above the durable LatestGeneration is an orphan from a
-				// persist that wrote the chunk but crashed before advancing the meta.
-				// The meta never referenced it, so its source data is still in the WAL
-				// and is rebuilt by replay. Drop a corrupt orphan and stop probing
-				// rather than failing recovery -- and, crucially, rather than leaving
-				// it to wedge the next persist, which would try to rewrite the same
-				// generation and hit a permanent byte-mismatch.
-				m.Logger().Warn(ctx, "dropping corrupt orphan pchannel summary chunk above latest generation",
-					mlog.String("chunkKey", chunkKey), mlog.Uint64("generation", generation), mlog.Err(err))
-				if removeErr := resource.Resource().ChunkManager().Remove(ctx, chunkKey); removeErr != nil {
-					return nil, errors.Wrapf(removeErr, "failed to remove corrupt orphan pchannel summary chunk %s", chunkKey)
-				}
-				break
-			}
-			return nil, err
-		}
-		previousManifest := actualMeta.ChunkManifest
-		actualMeta = newPChannelSummaryStoreMetaFromChunk(pchannel, footer, meta.MinAvailableGeneration, meta.MinInUseGeneration)
-		manifest, err := pchannelSummaryManifestWithChunk(previousManifest, m.term, generation, footer.SourceCheckpointTimetick)
+		_, footer, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, manifestTerm)
 		if err != nil {
 			return nil, err
 		}
-		actualMeta.ChunkManifest = manifest
-		if generation == ^uint64(0) {
-			break
+		discovered = append(discovered, chunkIndexEntryFromFooter(footer))
+	}
+	return discovered, nil
+}
+
+// replayRetainedChunks reads every chunk the manifest still retains and hands
+// the decoded records to the per-vchannel summaries. The manifest carries each
+// chunk's term, so nothing has to be looked up to address the object.
+func (m *summaryManager) replayRetainedChunks(ctx context.Context, pchannel string) error {
+	for _, entry := range m.manifest.GetChunks() {
+		if err := m.recoverPChannelSummaryChunk(ctx, pchannel, entry.GetGeneration(), entry.GetTerm()); err != nil {
+			return err
 		}
 	}
-	return actualMeta, nil
+	return nil
 }
 
 func (m *summaryManager) recoverPChannelSummaryChunk(
@@ -310,10 +250,10 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	expectedTerm int64,
-) (*streamingpb.PChannelSummaryChunkFooter, error) {
-	recordsByVChannel, footer, chunkKey, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, expectedTerm)
+) error {
+	recordsByVChannel, _, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, expectedTerm)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for vchannel, records := range recordsByVChannel {
 		if !hasIdempotencyContent(records) {
@@ -323,15 +263,10 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 		if state == nil {
 			continue
 		}
-		if err := state.applySummaryEntriesAtGeneration(records, generation); err != nil {
-			return nil, errors.Wrapf(err, "failed to apply pchannel summary chunk %s for vchannel %s", chunkKey, vchannel)
-		}
+		state.applySummaryRecordsAtGeneration(records)
+		state.capRecoveryBytes(m.evictionConfig.retainedBytes)
 	}
-	evictBeforeTT := evictBeforeTimetick(footer.SourceCheckpointTimetick, m.evictionConfig.entryTTL)
-	for _, state := range m.summaries() {
-		state.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxBytes)
-	}
-	return footer, nil
+	return nil
 }
 
 func (m *summaryManager) readPChannelSummaryChunk(
@@ -339,7 +274,7 @@ func (m *summaryManager) readPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	expectedTerm int64,
-) (map[string][]*streamingpb.SummaryEntry, *streamingpb.PChannelSummaryChunkFooter, string, error) {
+) (map[string][]*SummaryRecord, *streamingpb.PChannelSummaryChunkFooter, error) {
 	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, expectedTerm)
 	// Bounded retry on the raw read. Referenced-state corruption hard-fails the
 	// WAL open, so only a VERIFIED decode/checksum failure below may be called
@@ -351,95 +286,23 @@ func (m *summaryManager) readPChannelSummaryChunk(
 		payload, readErr = resource.Resource().ChunkManager().Read(ctx, chunkKey)
 		return readErr
 	}, retry.Attempts(5)); err != nil {
-		return nil, nil, chunkKey, errors.Wrapf(err, "failed to read pchannel summary chunk %s", chunkKey)
+		return nil, nil, errors.Wrapf(err, "failed to read pchannel summary chunk %s", chunkKey)
 	}
-	recordsByVChannel, footer, _, err := unmarshalPChannelSummaryChunk(payload)
+	recordsByVChannel, footer, err := unmarshalPChannelSummaryChunk(payload)
 	if err != nil {
-		return nil, nil, chunkKey, errors.Wrapf(err, "failed to unmarshal pchannel summary chunk %s", chunkKey)
+		return nil, nil, errors.Wrapf(err, "failed to unmarshal pchannel summary chunk %s", chunkKey)
 	}
 	if footer.Pchannel != "" && footer.Pchannel != pchannel {
-		return nil, nil, chunkKey, pchannelSummaryStoreCorruptedf("pchannel summary chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.Pchannel)
+		return nil, nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.Pchannel)
 	}
 	if footer.Generation != generation {
-		return nil, nil, chunkKey, pchannelSummaryStoreCorruptedf("pchannel summary chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
+		return nil, nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
 	}
 	if footer.Term > m.term {
-		return nil, nil, chunkKey, pchannelSummaryStoreFencedf("pchannel summary chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
+		return nil, nil, pchannelSummaryStoreFencedf("pchannel summary chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
 	}
 	if footer.Term != expectedTerm {
-		return nil, nil, chunkKey, pchannelSummaryStoreCorruptedf("pchannel summary chunk %s term mismatch, manifest %d, footer %d", chunkKey, expectedTerm, footer.Term)
+		return nil, nil, pchannelSummaryStoreCorruptedf("pchannel summary chunk %s term mismatch, manifest %d, footer %d", chunkKey, expectedTerm, footer.Term)
 	}
-	return recordsByVChannel, footer, chunkKey, nil
-}
-
-func (m *summaryManager) sealPreviousPChannelSummaryTerm(ctx context.Context, pchannel string, meta *pchannelSummaryStoreMeta) (*pchannelSummaryStoreMeta, error) {
-	lastRange := pchannelSummaryManifestLastRange(meta)
-	if lastRange == nil || lastRange.GetSealed() || lastRange.GetTerm() >= m.term {
-		return meta, nil
-	}
-	actual := &pchannelSummaryStoreMeta{
-		PChannel:               meta.PChannel,
-		LatestGeneration:       meta.LatestGeneration,
-		MinAvailableGeneration: meta.MinAvailableGeneration,
-		MinInUseGeneration:     meta.MinInUseGeneration,
-		SourceCheckpoint:       cloneWALCheckpoint(meta.SourceCheckpoint),
-		Term:                   m.term,
-		ChunkManifest:          clonePChannelSummaryChunkManifest(meta.ChunkManifest),
-	}
-	scanned := 0
-	for generation := lastRange.GetEndGeneration() + 1; ; generation++ {
-		chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), pchannel, generation, lastRange.GetTerm())
-		exists, err := resource.Resource().ChunkManager().Exist(ctx, chunkKey)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to probe previous-term pchannel summary chunk %s", chunkKey)
-		}
-		if !exists {
-			break
-		}
-		_, footer, _, err := m.readPChannelSummaryChunk(ctx, pchannel, generation, lastRange.GetTerm())
-		if err != nil {
-			return nil, err
-		}
-		manifest, err := pchannelSummaryManifestWithChunk(actual.ChunkManifest, lastRange.GetTerm(), generation, footer.SourceCheckpointTimetick)
-		if err != nil {
-			return nil, err
-		}
-		actual.ChunkManifest = manifest
-		actual.LatestGeneration = generation
-		actual.SourceCheckpoint = pchannelSummarySourceCheckpointToWALCheckpoint(&pchannelSummarySourceCheckpoint{
-			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageId),
-			TimeTick:  footer.SourceCheckpointTimetick,
-		})
-		scanned++
-		if scanned%pchannelSummaryTermSealProgressInterval == 0 {
-			if err := m.repairPChannelSummaryMeta(ctx, actual); err != nil {
-				return nil, err
-			}
-		}
-		if generation == ^uint64(0) {
-			break
-		}
-	}
-	manifest, err := markPChannelSummaryRangeSealed(actual.ChunkManifest, lastRange.GetTerm())
-	if err != nil {
-		return nil, err
-	}
-	actual.ChunkManifest = manifest
-	actual.Term = m.term
-	if err := m.repairPChannelSummaryMeta(ctx, actual); err != nil {
-		return nil, err
-	}
-	return actual, nil
-}
-
-func (m *summaryManager) repairPChannelSummaryMeta(ctx context.Context, storeMeta *pchannelSummaryStoreMeta) error {
-	return updatePChannelSummaryMetaWithCAS(ctx,
-		m.Logger().With(mlog.String("op", "repairPChannelSummaryMeta")),
-		m.pchannel,
-		func(currentPB *streamingpb.PChannelSummaryMeta, current *pchannelSummaryStoreMeta) (*streamingpb.PChannelSummaryMeta, error) {
-			if current != nil && current.Term > m.term {
-				return nil, pchannelSummaryStoreFencedf("pchannel summary meta of %s already owned by term %d, own term %d", m.pchannel, current.Term, m.term)
-			}
-			return storeMeta.intoCatalogMeta(), nil
-		})
+	return recordsByVChannel, footer, nil
 }

@@ -15,15 +15,6 @@ type StreamingNodeCataLog interface {
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
 
-	// ListVChannelSummaryMetas lists all vchannel summary metadata for a view type on current pchannel.
-	ListVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error)
-
-	// SaveVChannelSummaryMetas saves vchannel summary metadata for a view type on current pchannel.
-	SaveVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string, summaries map[string]*streamingpb.VChannelSummaryMeta) error
-
-	// RemoveVChannelSummaryMetas removes vchannel summary metadata for a view type on current pchannel.
-	RemoveVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error
-
 	// GetPChannelSummaryMeta gets pchannel-level physical summary metadata.
 	GetPChannelSummaryMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelSummaryMeta, error)
 

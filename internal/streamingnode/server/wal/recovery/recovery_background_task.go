@@ -119,14 +119,24 @@ func (rs *recoveryStorageImpl) persistRecoverySnapshotData(ctx context.Context, 
 		return err
 	}
 
+	// The summary chunk covering this checkpoint MUST be durable before the
+	// checkpoint is saved. That ordering is the entire reason the summary store
+	// needs no watermark, no clamp and no replay rewind: the consume checkpoint
+	// below is itself the boundary between what a chunk holds and what the WAL
+	// still holds. A failure here fails the whole persist, deliberately -- a
+	// checkpoint that outran its chunk would lose that window undetectably.
+	if err := rs.summaryManager.persistSummaryForCheckpoint(ctx, logger); err != nil {
+		logger.Warn(ctx, "failed to persist summary chunk for checkpoint", mlog.Err(err))
+		return err
+	}
+
 	// The catalog persists the whole snapshot as a single compound write, with
 	// the consume checkpoint always the last/commit-marker op - so a
 	// whole-snapshot retry is always safe (every part is an idempotent put).
-	effectiveCheckpoint := rs.summaryManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	recoverySnapshot := &metastore.WALRecoverySnapshot{
 		SegmentAssignments: snapshot.SegmentAssignments,
 		VChannels:          snapshot.VChannels,
-		ConsumeCheckpoint:  effectiveCheckpoint.IntoProto(),
+		ConsumeCheckpoint:  snapshot.Checkpoint.IntoProto(),
 	}
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
@@ -142,11 +152,10 @@ func (rs *recoveryStorageImpl) persistRecoverySnapshotData(ctx context.Context, 
 		}); err != nil {
 		return err
 	}
-	rs.summaryManager.markConsumeCheckpointPersisted(effectiveCheckpoint)
 
 	// sample the checkpoint for truncator to make wal truncation.
-	rs.metrics.ObServePersistedMetrics(effectiveCheckpoint.TimeTick)
-	rs.simpleTruncateCheckpoint(ctx, effectiveCheckpoint)
+	rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
+	rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
 	return
 }
 
@@ -156,8 +165,9 @@ func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, che
 		return
 	}
 	// use the smallest one to truncate the wal.
+	// No summary term in this minimum: the store never lags the consume
+	// checkpoint, so it can never require WAL that truncation would remove.
 	truncateCP := minCheckpointByMessageID(flusherCP, checkpoint)
-	truncateCP = minCheckpointByMessageID(truncateCP, rs.summaryManager.truncateClampCheckpoint())
 	if truncateCP == nil || truncateCP.MessageID == nil {
 		return
 	}

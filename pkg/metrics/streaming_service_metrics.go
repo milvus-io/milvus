@@ -524,14 +524,19 @@ var (
 		Help: "Total idempotency key entries evicted from idempotency windows",
 	}, WALVChannelLabelName)
 
-	WALIdempotencySnapshotTotal = newWALCounterVec(prometheus.CounterOpts{
-		Name: "idempotency_snapshot_total",
-		Help: "Total idempotency write commit store snapshot persist attempts",
+	WALIdempotencyPersistTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_persist_total",
+		Help: "Total summary store chunk persist attempts",
 	}, WALChannelLabelName, WALChannelTermLabelName, StatusLabelName)
 
-	WALIdempotencySnapshotCheckpointLag = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "idempotency_snapshot_checkpoint_lag_seconds",
-		Help: "Physical time lag between main recovery checkpoint and idempotency write commit checkpoint",
+	WALIdempotencyPersistWatermarkLag = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_persist_watermark_lag_seconds",
+		Help: "Physical time lag between the recovery checkpoint and the summary store persist watermark. The watermark gates WAL truncation, so sustained growth here holds truncation back",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALIdempotencyPendingGC = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_pending_gc_ranges",
+		Help: "Summary chunk ranges queued for deletion. Grows without bound when gc is stuck, so this is the direct gc health signal",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
 	WALIdempotencyReaderDedupDropTotal = newWALCounterVec(prometheus.CounterOpts{
@@ -748,8 +753,9 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALIdempotencyWindowInflight)
 	registry.MustRegister(WALIdempotencyDuplicateTotal)
 	registry.MustRegister(WALIdempotencyEvictionTotal)
-	registry.MustRegister(WALIdempotencySnapshotTotal)
-	registry.MustRegister(WALIdempotencySnapshotCheckpointLag)
+	registry.MustRegister(WALIdempotencyPersistTotal)
+	registry.MustRegister(WALIdempotencyPersistWatermarkLag)
+	registry.MustRegister(WALIdempotencyPendingGC)
 	registry.MustRegister(WALIdempotencyReaderDedupDropTotal)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)

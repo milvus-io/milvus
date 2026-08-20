@@ -70,8 +70,7 @@ func TestRecoverSummariesDropsStaleStoreWhenIdempotencyDisabled(t *testing.T) {
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}, nil)
-	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
-	catalogState.summaryMetas["v1"] = &streamingpb.VChannelSummaryMeta{Pchannel: "p1", Vchannel: "v1"}
+	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(100),
@@ -115,7 +114,7 @@ func TestRecoverSummariesDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) 
 		MessageID: rmq.NewRmqID(20),
 		TimeTick:  20,
 	}, nil)
-	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(100),
@@ -128,59 +127,6 @@ func TestRecoverSummariesDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) 
 	require.Nil(t, catalogState.storeMeta)
 	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, false)
 	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 1, false)
-}
-
-// A stale opener can observe no pchannel meta, pause, and resume after another
-// owner has bootstrapped. Bootstrap must therefore not prefix-delete chunks
-// based on the earlier no-meta read; it publishes only the current term's
-// generation-0 chunk through the pchannel meta CAS and leaves unrelated
-// term-suffixed leftovers unreferenced.
-func TestBootstrapDoesNotReapChunksLeftByIncompleteDrop(t *testing.T) {
-	ctx := context.Background()
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
-	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
-
-	catalog, catalogState := newTestPChannelSummaryCatalog(t)
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
-
-	// Leftovers of a store whose metas are already gone. Their term suffix keeps
-	// them from colliding with the new bootstrap chunk, and bootstrap must not
-	// delete them based only on catalog absence.
-	_, gen0Term1Key, _ := writeTestPChannelSummaryChunkWithTerm(ctx, t, "p1", 0, 1, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(10),
-		TimeTick:  10,
-	}, nil)
-	_, gen3Term1Key, _ := writeTestPChannelSummaryChunkWithTerm(ctx, t, "p1", 3, 1, chunkManager, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(40),
-		TimeTick:  40,
-	}, nil)
-
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 2}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(100),
-		TimeTick:  100,
-	})
-	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
-		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
-	})
-	rs.SetLogger(resource.Resource().Logger())
-
-	checkpoint, err := rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
-	require.NoError(t, err)
-	// The store is bootstrapped from the current checkpoint, not from the stale
-	// leftovers, and the stale leftovers are not referenced by the new manifest.
-	require.Equal(t, uint64(100), checkpoint.TimeTick)
-	require.NotNil(t, catalogState.storeMeta)
-	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
-	require.Equal(t, uint64(100), catalogState.storeMeta.GetSourceCheckpointTimetick())
-	require.Equal(t, int64(2), catalogState.storeMeta.GetChunkManifest().GetRanges()[0].GetTerm())
-	exists, err := chunkManager.Exist(ctx, gen0Term1Key)
-	require.NoError(t, err)
-	require.True(t, exists)
-	exists, err = chunkManager.Exist(ctx, gen3Term1Key)
-	require.NoError(t, err)
-	require.True(t, exists)
 }
 
 // Summary lifecycle (creation) belongs on vchannel events, not the per-message
@@ -238,7 +184,7 @@ func TestRecoverSummariesFailsOnReferencedChunkCorruption(t *testing.T) {
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
-	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
 
 	// Corrupt the persisted chunk header magic so recovery hits a decode failure.
 	payload, err := chunkManager.Read(ctx, key)
@@ -281,7 +227,7 @@ func TestRecoverSummariesSelfHealsCorruptOrphanChunk(t *testing.T) {
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
-	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.storeMeta = (&pchannelSummaryStoreMeta{PChannel: "p1"}).intoCatalogMeta()
 
 	// An orphan at generation 1 from a persist that crashed before the meta
 	// advanced; corrupt it.

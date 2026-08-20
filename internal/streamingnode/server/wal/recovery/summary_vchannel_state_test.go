@@ -29,127 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// The persisted-meta projection must honor the durable-retention ledger the
-// same way summaryMetaAtGeneration does: after evictPersisted clears the staging
-// summary, a later persist cycle carrying only keyless committed writes
-// (EntryCount == 0) must not project MinRequiredGeneration forward past a
-// generation the ledger still pins — that poisoned meta would survive restart
-// and make the loss of in-TTL keys irreversible once chunk GC runs.
-func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
-	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
-	state.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
-
-	// Generation 1 persists a keyed insert; the staging summary is then cleared.
-	keyed := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(600_000).IntoProto(), SourceTimetick: tsoutil.ComposeTS(600_000, 0), Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}})
-	require.NoError(t, state.applySummaryEntry(keyed, true))
-	state.markSummaryEntriesPersisted([]*streamingpb.SummaryEntry{keyed}, 1)
-	state.evictPersisted()
-	state.consumePendingSummaryEntries()
-	require.Equal(t, uint64(1), state.minRequiredGeneration)
-
-	// The next cycle carries only a keyless committed write (delete/replicated),
-	// so the staged meta reports EntryCount == 0 while the ledger still pins 1.
-	keyless := &streamingpb.SummaryEntry{
-		SourceTimetick: tsoutil.ComposeTS(660_000, 0),
-	}
-	require.NoError(t, state.applySummaryEntry(keyless, true))
-	_, update := state.consumePendingSummaryEntries()
-	require.NotNil(t, update)
-
-	meta := update.WithPersistedGeneration(2)
-	require.Equal(t, uint64(2), meta.GetLatestAppliedGeneration())
-	require.Equal(t, uint64(1), meta.GetMinRequiredGeneration(),
-		"persisted meta must keep the ledger-pinned generation, not project it forward")
-}
-
-// The durable-retention ledger must keep chunk generations recoverable for the
-// full retention policy even after evictPersisted cleared the staging memory.
-// minRequiredGeneration therefore derives from the ledger, not from the
-// materialized entries: a boundary computed from staging memory would collapse
-// to the latest generation on every persist cycle, chunk GC would trim
-// everything below it, and a restart could rebuild only ~one snapshot interval
-// of the summary instead of a TTL's worth.
-func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
-	entryAt := func(vchannel, key string, physicalMs int64) *streamingpb.SummaryEntry {
-		return (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(physicalMs).IntoProto(), SourceTimetick: tsoutil.ComposeTS(physicalMs, 0), Idempotency: &streamingpb.IdempotencyContent{Key: key}})
-	}
-
-	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
-	state.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
-
-	// Three persist cycles at generations 1..3, entries one minute apart; each
-	// cycle clears the staging memory like the summary background task does.
-	for i, gen := range []uint64{1, 2, 3} {
-		rec := entryAt("v1", fmt.Sprintf("key-%d", gen), int64(600_000+i*60_000))
-		require.NoError(t, state.applySummaryEntry(rec, true))
-		state.markSummaryEntriesPersisted([]*streamingpb.SummaryEntry{rec}, gen)
-		state.evictPersisted()
-	}
-	require.Empty(t, state.entries)
-
-	// All entries are within TTL: generation 1 stays pinned despite the empty
-	// staging summary, and the persisted meta projection must not override it.
-	state.snapshotCheckpointTimetick = tsoutil.ComposeTS(600_000+3*60_000, 0)
-	state.refreshMinRequiredGeneration()
-	require.Equal(t, uint64(1), state.minRequiredGeneration)
-	meta := state.summaryMetaAtGeneration(4)
-	require.Equal(t, uint64(1), meta.GetMinRequiredGeneration())
-	require.Equal(t, uint64(4), meta.GetLatestAppliedGeneration())
-
-	// Time passing expires generations 1 and 2 (TTL 10m, no floor here), and the
-	// boundary advances so chunk GC can reclaim them.
-	state.snapshotCheckpointTimetick = tsoutil.ComposeTS(600_000+60_000+10*60_000+30_000, 0)
-	state.refreshMinRequiredGeneration()
-	require.Equal(t, uint64(3), state.minRequiredGeneration)
-
-	// A byte cap releases generations beyond the cap even within TTL.
-	capped := newEmptyVChannelSummary("p1", "v2", testRecoveryCheckpoint(1, 1))
-	capped.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
-	var capBytes int
-	for i, gen := range []uint64{1, 2} {
-		rec := entryAt("v2", fmt.Sprintf("cap-key-%d", gen), int64(600_000+i*60_000))
-		if capBytes == 0 {
-			capBytes = proto.Size(rec)
-			capped.evictionCfg.maxBytes = capBytes
-		}
-		require.NoError(t, capped.applySummaryEntry(rec, true))
-		capped.markSummaryEntriesPersisted([]*streamingpb.SummaryEntry{rec}, gen)
-		capped.evictPersisted()
-	}
-	capped.snapshotCheckpointTimetick = tsoutil.ComposeTS(600_000+2*60_000, 0)
-	capped.refreshMinRequiredGeneration()
-	require.Equal(t, uint64(2), capped.minRequiredGeneration)
-}
-
-func TestMinRequiredGenerationHonorsByteOnlyRetention(t *testing.T) {
-	entryAt := func(key string, physicalMs int64) *streamingpb.SummaryEntry {
-		return (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(physicalMs).IntoProto(), SourceTimetick: tsoutil.ComposeTS(physicalMs, 0), Idempotency: &streamingpb.IdempotencyContent{Key: key}})
-	}
-
-	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
-
-	totalBytes := 0
-	latestBytes := 0
-	for _, gen := range []uint64{1, 2} {
-		rec := entryAt(fmt.Sprintf("byte-key-%d", gen), int64(600_000+gen*60_000))
-		size := proto.Size(rec)
-		totalBytes += size
-		latestBytes = size
-		require.NoError(t, state.applySummaryEntry(rec, true))
-		state.markSummaryEntriesPersisted([]*streamingpb.SummaryEntry{rec}, gen)
-		state.evictPersisted()
-	}
-	require.Empty(t, state.entries)
-
-	state.evictionCfg.maxBytes = totalBytes
-	state.refreshMinRequiredGeneration()
-	require.Equal(t, uint64(1), state.minRequiredGeneration)
-
-	state.evictionCfg.maxBytes = latestBytes
-	state.refreshMinRequiredGeneration()
-	require.Equal(t, uint64(2), state.minRequiredGeneration)
-}
-
 func writeTestBootstrapPChannelSummaryMeta(
 	ctx context.Context,
 	t require.TestingT,
@@ -208,24 +87,17 @@ func recoverTestSummaries(ctx context.Context, t require.TestingT, rs *recoveryS
 
 func recoverTestSummariesWithError(ctx context.Context, rs *recoveryStorageImpl, pchannel string, allowBootstrap bool) error {
 	rs.summaryManager.cfg.idempotencyEnabled = true
-	info, err := rs.summaryManager.loadSummaryInfoFromMeta(ctx, pchannel, allowBootstrap, rs.checkpoint)
+	recovered, err := rs.summaryManager.recoverFromSummaryStore(ctx, pchannel, rs.checkpoint, rs.vchannels)
 	if err != nil {
 		return err
 	}
-	rs.summaryManager.initializeSummariesFromMeta(rs.vchannels, info.storeMeta.SourceCheckpoint, info.summaryMetas)
-	rewound, err := rs.summaryManager.recoverSummaryStoreFromSnapshot(ctx, info, rs.checkpoint, rs.vchannels)
-	if err != nil {
-		return err
-	}
-	// Mirror RecoverRecoveryStorage: apply the (possibly rewound) checkpoint.
-	rs.checkpoint = rewound
+	rs.checkpoint = recovered
 	return nil
 }
 
 type testPChannelSummaryCatalogState struct {
-	summaryMetas map[string]*streamingpb.VChannelSummaryMeta
-	storeMeta    *streamingpb.PChannelSummaryMeta
-	operations   []string
+	storeMeta  *streamingpb.PChannelSummaryMeta
+	operations []string
 }
 
 type testPChannelSummaryCASCatalog struct {
@@ -258,24 +130,8 @@ func (c *testPChannelSummaryCASCatalog) CompareAndSwapPChannelSummaryMeta(ctx co
 }
 
 func newTestPChannelSummaryCatalog(t *testing.T) (*mock_metastore.MockStreamingNodeCataLog, *testPChannelSummaryCatalogState) {
-	state := &testPChannelSummaryCatalogState{
-		summaryMetas: make(map[string]*streamingpb.VChannelSummaryMeta),
-	}
+	state := &testPChannelSummaryCatalogState{}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
-		values := make([]*streamingpb.VChannelSummaryMeta, 0, len(state.summaryMetas))
-		for _, meta := range state.summaryMetas {
-			values = append(values, proto.Clone(meta).(*streamingpb.VChannelSummaryMeta))
-		}
-		return values, nil
-	}).Maybe()
-	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelSummaryMeta) error {
-		state.operations = append(state.operations, "vchannel-summary-meta")
-		for key, meta := range saved {
-			state.summaryMetas[key] = proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
-		}
-		return nil
-	}).Maybe()
 	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
 		if state.storeMeta == nil {
 			return nil, nil
@@ -287,73 +143,12 @@ func newTestPChannelSummaryCatalog(t *testing.T) (*mock_metastore.MockStreamingN
 		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
 		return nil
 	}).Maybe()
-	catalog.EXPECT().RemoveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, vchannels []string) error {
-		state.operations = append(state.operations, "remove-vchannel-summary-metas")
-		for _, vchannel := range vchannels {
-			delete(state.summaryMetas, vchannel)
-		}
-		return nil
-	}).Maybe()
 	catalog.EXPECT().RemovePChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
 		state.operations = append(state.operations, "remove-pchannel-summary-meta")
 		state.storeMeta = nil
 		return nil
 	}).Maybe()
 	return catalog, state
-}
-
-func TestPersistPChannelSummaryRetriesTransientMetaLoad(t *testing.T) {
-	ctx := context.Background()
-	state := &testPChannelSummaryCatalogState{summaryMetas: make(map[string]*streamingpb.VChannelSummaryMeta)}
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
-		return nil, nil
-	}).Maybe()
-	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelSummaryMeta) error {
-		for key, meta := range saved {
-			state.summaryMetas[key] = proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
-		}
-		return nil
-	}).Maybe()
-	catalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelSummaryMeta) error {
-		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
-		return nil
-	}).Maybe()
-	// GetPChannelSummaryMeta fails on its first call -- a transient etcd blip on the
-	// one persist-path call that was not wrapped in retry -- then succeeds.
-	getCalls := 0
-	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
-		getCalls++
-		if getCalls == 1 {
-			return nil, errors.New("transient etcd error")
-		}
-		if state.storeMeta == nil {
-			return nil, nil
-		}
-		return proto.Clone(state.storeMeta).(*streamingpb.PChannelSummaryMeta), nil
-	}).Maybe()
-
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
-
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 1})
-	rs.SetLogger(resource.Resource().Logger())
-	rs.summaryManager.SetLogger(resource.Resource().Logger())
-
-	records := map[string][]*streamingpb.SummaryEntry{
-		"v1": {
-			(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(99).IntoProto(), SourceTimetick: 99, LastConfirmedMessageId: rmq.NewRmqID(98).IntoProto(), Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}),
-		},
-	}
-	sourceCheckpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}
-
-	// A transient meta-load error must be retried internally, not propagated: a
-	// propagated error kills the summary background task and stalls idempotency
-	// durability (the summaries then grow unbounded until OOM).
-	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, getCalls, 2, "transient GetPChannelSummaryMeta error should have been retried")
-	require.NotNil(t, state.storeMeta)
 }
 
 func TestSummaryEntryFromMessageWithIdempotency(t *testing.T) {
@@ -621,7 +416,7 @@ func TestRecoveryStorageAdvancesOnlyTargetSummaryForOrdinaryMessages(t *testing.
 func TestConsumeDirtySnapshotDoesNotConsumeIdempotencySummaries(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, summary.applySummaryEntry((&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(20).IntoProto(), SourceTimetick: 20, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}), true))
+	summary.applySummaryEntry((&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(20).IntoProto(), SourceTimetick: 20, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}), true)
 	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.dirtyCounter = 1
 
@@ -630,22 +425,6 @@ func TestConsumeDirtySnapshotDoesNotConsumeIdempotencySummaries(t *testing.T) {
 	require.Nil(t, snapshot.pchannelSummarySourceCheckpoint)
 	require.True(t, summary.dirty)
 	require.Equal(t, 0, rs.dirtyCounter)
-}
-
-func TestConsumeIdempotencySnapshotDoesNotConsumeRecoveryState(t *testing.T) {
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
-	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, summary.applySummaryEntry((&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(20).IntoProto(), SourceTimetick: 20, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}}), true))
-	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
-	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(20, 20))
-	rs.dirtyCounter = 1
-
-	snapshot := rs.summaryManager.consumeIdempotencySnapshot()
-	require.NotNil(t, snapshot)
-	require.NotNil(t, snapshot.pchannelSummarySourceCheckpoint)
-	require.Equal(t, uint64(20), snapshot.pchannelSummarySourceCheckpoint.TimeTick)
-	require.False(t, summary.dirty)
-	require.Equal(t, 1, rs.dirtyCounter)
 }
 
 func TestSummaryEntryRoundTripsThroughChunk(t *testing.T) {
@@ -686,7 +465,7 @@ func TestSummaryMaterializerApplyEntries(t *testing.T) {
 		LastConfirmedMessageId: rmq.NewRmqID(111).IntoProto(),
 	}
 
-	require.NoError(t, state.applySummaryEntriesAtGeneration([]*streamingpb.SummaryEntry{keylessRecord, record, record}, 0))
+	state.applySummaryEntriesAtGeneration([]*streamingpb.SummaryEntry{keylessRecord, record, record}, 0)
 	require.False(t, state.dirty)
 	require.Empty(t, state.pendingEntries)
 
@@ -706,8 +485,8 @@ func TestSummaryConsumesPendingEntries(t *testing.T) {
 		LastConfirmedMessageId: rmq.NewRmqID(110).IntoProto(),
 	}
 
-	require.NoError(t, state.applySummaryEntry(didRecord, true))
-	require.NoError(t, state.applySummaryEntry(keylessRecord, true))
+	state.applySummaryEntry(didRecord, true)
+	state.applySummaryEntry(keylessRecord, true)
 
 	pending, metaUpdate := state.consumePendingSummaryEntries()
 	require.Len(t, pending, 2)
@@ -718,20 +497,6 @@ func TestSummaryConsumesPendingEntries(t *testing.T) {
 	require.Empty(t, state.pendingEntries)
 	require.Empty(t, state.pendingRecords)
 	pending, metaUpdate = state.consumePendingSummaryEntries()
-	require.Nil(t, pending)
-	require.Nil(t, metaUpdate)
-}
-
-func TestSummaryCheckpointOnlyDoesNotForceMetaUpdate(t *testing.T) {
-	state := newEmptyVChannelSummary("p1", "v1", &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(10),
-		TimeTick:  10,
-	})
-	state.advanceCheckpoint(message.CreateTestTimeTickSyncMessage(t, 20, 20, rmq.NewRmqID(20)).IntoImmutableMessage(rmq.NewRmqID(20)))
-
-	require.False(t, state.dirty)
-	require.Equal(t, uint64(20), state.snapshotCheckpointTimetick)
-	pending, metaUpdate := state.consumePendingSummaryEntries()
 	require.Nil(t, pending)
 	require.Nil(t, metaUpdate)
 }
@@ -748,25 +513,6 @@ func TestSummaryMaterializerApplyEntryDuplicate(t *testing.T) {
 	require.Len(t, snapshot.Entries, 1)
 	require.Equal(t, uint64(100), snapshot.Entries[0].GetSourceTimetick())
 	require.Equal(t, uint64(101), snapshot.SnapshotCheckpointTimetick)
-}
-
-func TestSummaryMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
-	state := newEmptyVChannelSummary("p1", "v1", nil)
-	state.evictionCfg = summaryEvictionConfig{entryTTL: time.Second}
-	firstTT := tsoutil.ComposeTS(100_000, 0)
-	reusedTT := tsoutil.ComposeTS(102_000, 0)
-	first := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(100).IntoProto(), SourceTimetick: firstTT, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}})
-	reused := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(101).IntoProto(), SourceTimetick: reusedTT, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}})
-
-	require.NoError(t, state.applySummaryEntriesAtGeneration([]*streamingpb.SummaryEntry{first}, 0))
-	require.NoError(t, state.applySummaryEntriesAtGeneration([]*streamingpb.SummaryEntry{reused}, 1))
-
-	snapshot := state.snapshot()
-	require.Len(t, snapshot.Entries, 1)
-	require.Equal(t, reusedTT, snapshot.Entries[0].GetSourceTimetick())
-	require.Equal(t, uint64(1), state.latestAppliedGeneration)
-	_, oldGenerationPinned := state.generationStats[0]
-	require.False(t, oldGenerationPinned)
 }
 
 func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
@@ -1764,7 +1510,7 @@ func TestPChannelSummaryPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
 
 	summary := newEmptyVChannelSummary("p1", "v1", nil)
 	record := (&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(210).IntoProto(), SourceTimetick: 210, Idempotency: &streamingpb.IdempotencyContent{Key: "key-1"}})
-	require.NoError(t, summary.applySummaryEntry(record, true))
+	summary.applySummaryEntry(record, true)
 	records, metaUpdate := summary.consumePendingSummaryEntries()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -1839,7 +1585,7 @@ func TestPChannelSummaryMetaMinInUseIncludesNonDirtySummaries(t *testing.T) {
 		(&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(210).IntoProto(), SourceTimetick: 210, Idempotency: &streamingpb.IdempotencyContent{Key: "key-old"}}),
 	}, 2))
 	newSummary := newEmptyVChannelSummary("p1", "v-new", nil)
-	require.NoError(t, newSummary.applySummaryEntry((&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(410).IntoProto(), SourceTimetick: 410, Idempotency: &streamingpb.IdempotencyContent{Key: "key-new"}}), true))
+	newSummary.applySummaryEntry((&streamingpb.SummaryEntry{SourceMessageId: rmq.NewRmqID(410).IntoProto(), SourceTimetick: 410, Idempotency: &streamingpb.IdempotencyContent{Key: "key-new"}}), true)
 	records, metaUpdate := newSummary.consumePendingSummaryEntries()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{

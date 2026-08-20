@@ -24,8 +24,9 @@ func newRecoveryStorageMetrics(channelInfo types.PChannelInfo) *recoveryMetrics 
 		isOnPersisting:         metrics.WALRecoveryIsOnPersisting.With(constLabels),
 		inMemTimeTick:          metrics.WALRecoveryInMemTimeTick.With(constLabels),
 		persistedTimeTick:      metrics.WALRecoveryPersistedTimeTick.With(constLabels),
-		idempotencySnapshot:    metrics.WALIdempotencySnapshotTotal.MustCurryWith(constLabels),
-		idempotencySnapshotLag: metrics.WALIdempotencySnapshotCheckpointLag.With(constLabels),
+		idempotencyPersist:     metrics.WALIdempotencyPersistTotal.MustCurryWith(constLabels),
+		idempotencyPersistLag:  metrics.WALIdempotencyPersistWatermarkLag.With(constLabels),
+		idempotencyPendingGC:   metrics.WALIdempotencyPendingGC.With(constLabels),
 	}
 }
 
@@ -36,8 +37,9 @@ type recoveryMetrics struct {
 	isOnPersisting         prometheus.Gauge
 	inMemTimeTick          prometheus.Gauge
 	persistedTimeTick      prometheus.Gauge
-	idempotencySnapshot    *prometheus.CounterVec
-	idempotencySnapshotLag prometheus.Gauge
+	idempotencyPersist     *prometheus.CounterVec
+	idempotencyPersistLag  prometheus.Gauge
+	idempotencyPendingGC   prometheus.Gauge
 }
 
 // ObserveStateChange sets the state of the recovery storage metrics.
@@ -66,19 +68,26 @@ func (m *recoveryMetrics) ObserveIsOnPersisting(onPersisting bool) {
 	}
 }
 
-func (m *recoveryMetrics) ObserveIdempotencySnapshot(success bool) {
+func (m *recoveryMetrics) ObserveIdempotencyPersist(success bool) {
 	status := metrics.SuccessLabel
 	if !success {
 		status = metrics.FailLabel
 	}
-	m.idempotencySnapshot.WithLabelValues(status).Inc()
+	m.idempotencyPersist.WithLabelValues(status).Inc()
 }
 
-func (m *recoveryMetrics) ObserveIdempotencySnapshotCheckpointLag(lagSeconds float64) {
+func (m *recoveryMetrics) ObserveIdempotencyPersistWatermarkLag(lagSeconds float64) {
 	if lagSeconds < 0 {
 		lagSeconds = 0
 	}
-	m.idempotencySnapshotLag.Set(lagSeconds)
+	m.idempotencyPersistLag.Set(lagSeconds)
+}
+
+func (m *recoveryMetrics) ObserveIdempotencyPendingGC(ranges int) {
+	if ranges < 0 {
+		ranges = 0
+	}
+	m.idempotencyPendingGC.Set(float64(ranges))
 }
 
 func (m *recoveryMetrics) Close() {
@@ -87,6 +96,7 @@ func (m *recoveryMetrics) Close() {
 	metrics.WALRecoveryIsOnPersisting.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryInMemTimeTick.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryPersistedTimeTick.DeletePartialMatch(m.constLabels)
-	metrics.WALIdempotencySnapshotTotal.DeletePartialMatch(m.constLabels)
-	metrics.WALIdempotencySnapshotCheckpointLag.DeletePartialMatch(m.constLabels)
+	metrics.WALIdempotencyPersistTotal.DeletePartialMatch(m.constLabels)
+	metrics.WALIdempotencyPersistWatermarkLag.DeletePartialMatch(m.constLabels)
+	metrics.WALIdempotencyPendingGC.DeletePartialMatch(m.constLabels)
 }

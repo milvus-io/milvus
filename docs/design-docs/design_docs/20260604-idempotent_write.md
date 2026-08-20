@@ -6,16 +6,10 @@
 - Design Review: 2026-06-04
 
 - **Created:** 2026-06-04
-- **Status:** Reviewed; implemented in milvus-io/milvus#50007
+- **Status:** Under review
 - **Component:** Proxy | StreamingNode | Metastore | Storage | Client
 - **Related Issues:** milvus-io/milvus#50007
 - **Released:** TBD
-
-This document records the design as reviewed and built. It is the design of record
-for idempotent write, not a proposal: the design review listed above has been held
-and the implementation follows what is written here. Where the review settled a
-trade-off, the decision and its rejected alternatives are recorded in
-[Design Decisions](#design-decisions).
 
 ## Summary
 
@@ -23,11 +17,11 @@ A client that loses the response to an `Insert` has no safe recovery: retrying m
 double-write the rows, not retrying may lose them. Idempotent write makes an insert
 retry a no-op on the server and return the original result.
 
-The mechanism is an **idempotency key** carried on the write, and a per-vchannel
-**dedup window** in the streaming node that answers a repeated key from the first
-attempt's result instead of appending again. The window is rebuilt after a restart
-from a durable **summary store**, so the guarantee survives streaming node failover
-rather than only covering in-process retries.
+The mechanism has two halves. An **idempotency key** rides on the write, and a
+per-vchannel **dedup window** in the streaming node answers a repeated key from the
+first attempt's result instead of appending again. Behind the window, a **summary
+store** durably records what the pchannel wrote, so the window can be rebuilt after a
+restart or a WAL failover rather than only covering in-process retries.
 
 The feature is off by default and is enabled per collection on top of a global
 switch. It applies to `Insert` only.
@@ -38,8 +32,8 @@ switch. It applies to `Insert` only.
 
 The write path between a client and the WAL has several points where a request can
 succeed while its response is lost: client timeout, proxy crash after append,
-streaming node failover, network partition. The client sees an error and cannot
-tell "not written" from "written, response lost".
+streaming node failover, network partition. The client sees an error and cannot tell
+"not written" from "written, response lost".
 
 Both recoveries are wrong:
 
@@ -48,9 +42,9 @@ Both recoveries are wrong:
   fresh IDs.
 - **Do not retry** — if the first attempt did not land, the rows are silently lost.
 
-Every production ingestion pipeline has to solve this above Milvus, usually by
-maintaining its own dedup table keyed by a business ID. That work is repeated by
-every user, and it cannot be done correctly for autoID collections at all.
+Every production ingestion pipeline has to solve this above Milvus, usually with its
+own dedup table keyed by a business ID. That work is repeated by every user, and it
+cannot be done correctly for autoID collections at all.
 
 ### Why the existing mechanisms do not cover it
 
@@ -64,20 +58,22 @@ every user, and it cannot be done correctly for autoID collections at all.
 ### Goals
 
 - An `Insert` retried with the same idempotency key is applied at most once.
-- A duplicate retry returns the original attempt's primary keys, so the client's
-  view of assigned IDs is stable across retries.
-- The guarantee survives streaming node restart and WAL failover, bounded by an
-  explicit retention window.
+- A duplicate retry returns the original attempt's primary keys, so the client's view
+  of assigned IDs is stable across retries.
+- The guarantee survives streaming node restart and WAL failover, including an outage
+  long enough that wall-clock TTLs would have expired.
+- No data loss in the summary store under any crash point.
 - Zero cost when the feature is off.
 
 ### Non-goals
 
-- `Delete` and `Upsert`. Both are rejected with an explicit error when an
-  idempotency key is supplied. Deleting the same rows twice is already effectively a
-  no-op; `Upsert` needs its delete leg deduped as well, which is a separate design.
+- `Delete` and `Upsert`. Both are rejected with an explicit error when an idempotency
+  key is supplied. Deleting the same rows twice is already effectively a no-op;
+  `Upsert` needs its delete leg deduped as well, which is a separate design.
 - Cross-cluster dedup. Replicated writes bypass the window entirely (see
-  [Replication](#replication-and-cdc)).
-- Unbounded retention. Duplicate visibility is a bounded window, not forever.
+  [Replication and CDC](#replication-and-cdc)).
+- Unbounded retention. Duplicate visibility is a bounded window (see
+  [Retention](#retention)).
 
 ## Public Interfaces
 
@@ -87,27 +83,31 @@ every user, and it cannot be done correctly for autoID collections at all.
 collection.insert.idempotency.enabled = "true" | "false"
 ```
 
-Set at `CreateCollection` / `AlterCollection`. An unparseable value is rejected at
-DDL time rather than silently downgrading a durability guarantee the operator
-believes is on.
+Set at `CreateCollection` / `AlterCollection`. An unparseable value is rejected at DDL
+time rather than silently downgrading a durability guarantee the operator believes is
+on.
 
-Both this property **and** the global `streaming.idempotency.enabled` must be true
-for a collection's inserts to be idempotent.
+Both this property **and** the global `streaming.idempotency.enabled` must be true for
+a collection's inserts to be idempotent.
 
 ### Configuration
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `streaming.idempotency.enabled` | `false` | Global kill switch. |
-| `streaming.idempotency.windowTTL` | `10m` | Retention target for completed entries. Duplicate visibility does not extend past this TTL. |
-| `streaming.idempotency.minEntriesPerWindow` | `1000` | Entry floor per vchannel after TTL eviction. Does **not** extend visibility past TTL. |
-| `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Hard byte cap per vchannel; overrides the floor and may evict before TTL. `0` disables. |
-| `streaming.idempotency.snapshotInterval` | `10s` | Interval for persisting summary checkpoints. Independent of `walRecovery.persistInterval`. |
+| `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Per-vchannel in-memory window cap. Nothing is evicted until this is reached; then oldest-first. |
+| `streaming.idempotency.retainedBytesPerVChannel` | `64MiB` | Durable retention budget per vchannel. Sets how far back chunks are kept, and therefore how much window can be rebuilt after a restart. |
+| `streaming.idempotency.chunkTargetBytes` | `4MiB` | Size trigger for writing a chunk. |
+| `streaming.idempotency.persistInterval` | `10s` | Time trigger for writing a chunk. |
+| `streaming.idempotency.manifestChunkInterval` | `5` | Write the manifest after this many chunks. |
 | `streaming.idempotency.maxKeyLength` | `1024` | Maximum accepted explicit key length in bytes. |
 
-The byte cap exists because an entry-count floor cannot bound memory: each retained
-entry carries the per-row primary keys of its insert, so one entry can be arbitrarily
-large.
+`retainedBytesPerVChannel` should be at least `maxBytesPerWindow`; otherwise the store
+discards history a window would still have room to hold, and a restart rebuilds less
+than the running process had.
+
+There is deliberately **no TTL and no minimum entry count**. See
+[Retention](#retention).
 
 ### Client API
 
@@ -123,13 +123,13 @@ Supplying a key to `Upsert` returns an error before the RPC is issued. The clien
 short-circuits that error rather than routing it into the schema-mismatch retry,
 because no schema refresh can fix a caller mistake.
 
-**Contract:** an explicit key must not be reused for a different payload. Reuse
-within the retention window returns the first payload's result and does not write
-the new rows.
+**Contract:** an explicit key must not be reused for a different payload. Reuse within
+the retention window returns the first payload's result and does not write the new
+rows.
 
-If no explicit key is supplied, the proxy derives one from the request
-(see [Key derivation](#key-derivation)), so an unmodified client still gets
-idempotency for a byte-identical retry.
+If no explicit key is supplied, the proxy derives one from the request (see
+[Key derivation](#key-derivation)), so an unmodified client still gets idempotency for
+a byte-identical retry.
 
 ### Wire protocol
 
@@ -137,8 +137,8 @@ idempotency for a byte-identical retry.
   one accessor serves every message type and both the mutable (interceptor) and
   immutable (recovery) sides. An empty key materializes no property at all.
 - `InsertMessageHeader.idempotent_result` carries `{row_offsets, ids}` — the primary
-  keys this write unit produced and where each row came from in the original
-  request. See [Why the result is on the wire](#why-the-result-is-on-the-wire).
+  keys this write unit produced and where each row came from in the original request.
+  See [Why the result is on the wire](#why-the-result-is-on-the-wire).
 
 ### Metrics
 
@@ -148,9 +148,10 @@ idempotency for a byte-identical retry.
 | `idempotency_window_inflight` | Keys currently being appended. |
 | `idempotency_duplicate_total` | Duplicate hits served. |
 | `idempotency_eviction_total` | Entries evicted from a window. |
-| `idempotency_snapshot_total` | Summary persist cycles. |
-| `idempotency_snapshot_checkpoint_lag_seconds` | How far the durable summary checkpoint trails the consume checkpoint. Drives the WAL truncation clamp — the primary alert. |
-| `idempotency_reader_physical_dedup_drop_total` | Scanner-side physical duplicate drops (see [Reader-side dedup](#reader-side-physical-dedup)). |
+| `idempotency_persist_total` | Chunk persist cycles, labeled by outcome. |
+| `idempotency_persist_watermark_lag_seconds` | How far the durable persist watermark trails the consume checkpoint. Gates WAL truncation — the primary alert. |
+| `idempotency_pending_gc_entries` | Ranges awaiting deletion. Grows without bound if GC is stuck; the direct GC health signal. |
+| `idempotency_reader_physical_dedup_drop_total` | Scanner-side physical duplicate drops (see [Reader-side physical dedup](#reader-side-physical-dedup)). |
 
 ### Storage layout
 
@@ -158,14 +159,17 @@ etcd, under the streaming node catalog root:
 
 ```
 streamingnode/<pchannel>/summary-store/pchannel-summary-meta
-streamingnode/<pchannel>/summary-store/vchannel-summary-meta/<view_type>/<vchannel>
 ```
 
 Object storage:
 
 ```
-<chunk-manager-root>/streamingnode/summary-store/<pchannel>/chunks/chunk.<generation>.term<term>.psc
+<root>/streamingnode/summary-store/<pchannel>/<pchannel>.manifest.<term>
+<root>/streamingnode/summary-store/<pchannel>/chunks/chunk.<generation>.term<term>.psc
 ```
+
+Nothing is stored per vchannel. How a consumer retains and evicts what it is handed is
+entirely its own business, so the store keeps no per-consumer progress.
 
 ## Design Details
 
@@ -187,24 +191,23 @@ client ── idempotency-key header ──► proxy
                                       WAL
                                        │
                                        ▼
-                        recovery storage: summary store (durable)
-                             etcd meta + object-storage chunks
+                              summary store (durable)
+                       etcd meta ── manifest ── chunk objects
                                        │
-                          restart ─────┴──► rebuild window at WAL open
+                          restart ─────┴──► rebuild windows at WAL open
 ```
 
 Two layers, deliberately separated:
 
-- **The summary store** is a business-agnostic record of what a pchannel durably
-  wrote. It stores committed write facts and nothing about why anyone wants them.
-- **A view** builds meaning on top. The idempotency window is today's only view; a
-  primary-key index is the second planned one. Every logical metadata record is
-  scoped by a `view_type` so views do not collide.
+- **The summary store** is a record of what a pchannel durably wrote. It stores
+  committed write facts and nothing about why anyone wants them.
+- **The dedup window** builds meaning on top. It decides what to keep and for how
+  long; the store neither knows nor records that decision.
 
 ### Key derivation
 
-An explicit client key is used as-is (length-checked). Otherwise the proxy derives
-one deterministically:
+An explicit client key is used as-is (length-checked). Otherwise the proxy derives one
+deterministically:
 
 ```
 key = SHA256( destination ‖ numRows ‖ canonical(client-supplied columns) )
@@ -214,17 +217,17 @@ key = SHA256( destination ‖ numRows ‖ canonical(client-supplied columns) )
 vchannel is a *collection shard* — not a partition, not a namespace. Two logically
 distinct inserts of the same rows into two partitions of one collection would
 otherwise hash to the same key, and the second would be answered as a duplicate with
-the first insert's primary keys while its rows never reached the WAL. A derived key
-is not under the caller's control, so the "do not reuse a key" contract that covers
-an explicit key does not excuse that collision. The destination covers
-`(dbName, collectionName, partitionName, namespace)`, every string length-prefixed
-so neighbouring fields cannot shift into each other. `namespace` distinguishes unset
-from empty: unset routes by primary key, empty routes by namespace.
+the first insert's primary keys while its rows never reached the WAL. A derived key is
+not under the caller's control, so the "do not reuse a key" contract that covers an
+explicit key does not excuse that collision. The destination covers
+`(dbName, collectionName, partitionName, namespace)`, every string length-prefixed so
+neighbouring fields cannot shift into each other. `namespace` distinguishes unset from
+empty: unset routes by primary key, empty routes by namespace.
 
 The destination is hashed **exactly as the client sent it**, before the proxy resolves
 an empty partition name to the default. A retry resends the same request, so the key
-stays stable; spelling one destination two ways costs a missed dedup, never a merge
-of two destinations.
+stays stable; spelling one destination two ways costs a missed dedup, never a merge of
+two destinations.
 
 The payload side covers only the client-supplied columns plus `numRows`: derivation
 runs before the proxy fills field properties, function output, dynamic and namespace
@@ -236,30 +239,28 @@ server-assigned and differs per attempt.
 ### autoID and stable shard routing
 
 Rows are routed to shards by `hash(primaryKey) % numChannels`. With autoID the proxy
-allocates the keys, so a naive retry allocates different keys, routes rows to
-different shards, and the per-shard dedup no longer lines up with the first attempt.
+allocates the keys, so a naive retry allocates different keys, routes rows to different
+shards, and the per-shard dedup no longer lines up with the first attempt.
 
 `reassignAutoIDForStableIdempotency` fixes the routing rather than the keys: it
 allocates candidate IDs in rounds and keeps only those that hash into the bucket
-matching the row's own offset (`offset % numChannels`), so row *i* always lands on
-the same shard on every attempt.
+matching the row's own offset (`offset % numChannels`), so row *i* always lands on the
+same shard on every attempt.
 
 **Accepted cost:** a candidate that hashes into an already-satisfied bucket is
 discarded, and each top-up round deliberately over-allocates (`missing * numChannels`)
 so that one round almost always suffices. ID amplification therefore grows with shard
 count and shrinks with batch size: measured at ~1.01x for 100k rows over 4 shards,
 ~1.25x for 10k over 16, and ~21x for a 100-row insert over 64 shards, where the
-over-allocation dominates — the last case is still only about 2k IDs in absolute
-terms, and the ID space is `int64`. The loop is bounded at 256 rounds so a
-pathological hash distribution fails loudly instead of burning the ID space forever;
-the common case is one round. The cost applies only to idempotency-enabled autoID
-collections.
+over-allocation dominates — the last case is still only about 2k IDs in absolute terms,
+and the ID space is `int64`. The loop is bounded at 256 rounds so a pathological hash
+distribution fails loudly instead of burning the ID space forever; the common case is
+one round. The cost applies only to idempotency-enabled autoID collections.
 
 The alternatives do not work: deriving the shard from the row offset directly breaks
 `Delete`/`Upsert`, whose index-based routing hashes the primary key against the same
-channel list, so the insert's row→shard assignment MUST equal
-`hash(assignedPK) % n`; and deterministic PRNG-generated IDs cannot guarantee global
-uniqueness.
+channel list, so the insert's row→shard assignment MUST equal `hash(assignedPK) % n`;
+and deterministic PRNG-generated IDs cannot guarantee global uniqueness.
 
 The channel list must not be permuted while doing this — `HashPK2Channels` is
 index-based, and `Delete` hashes against the same unpermuted list.
@@ -269,32 +270,47 @@ index-based, and `Delete` hashes against the same unpermuted list.
 One window per vchannel, keyed by idempotency key. `Begin(key)` returns one of:
 
 - **Owner** — first sighting. The append proceeds; on success the result is recorded.
-- **Wait** — another request owns the key and is still appending. The waiter blocks
-  on the owner's outcome, so concurrent duplicates converge on one append.
+- **Wait** — another request owns the key and is still appending. The waiter blocks on
+  the owner's outcome, so concurrent duplicates converge on one append.
 - **Duplicate** — the key has a completed entry. The stored result is returned and
   **no append happens**.
 
-Retention is three bounds, strongest first:
+### Retention
 
-1. `maxBytesPerWindow` — hard cap, may evict before TTL.
-2. `windowTTL` — an entry past TTL never answers a duplicate, even while the
-   `minEntries` floor still keeps it in memory. Without this rule the floor would
-   extend duplicate visibility forever on a quiet shard.
-3. `minEntriesPerWindow` — keeps recent entries alive on a low-traffic shard.
+Retention is **byte-bounded only**, at both layers.
 
-Eviction order is by commit timetick, derived from the *message's* timetick rather
-than local wall clock, so the live window and the clock-free recovery-side window
-retain the same key set under NTP skew.
+**Window (memory).** Nothing is evicted while the window is under
+`maxBytesPerWindow`. Once it is full, entries are replaced oldest-first. There is no
+TTL and no minimum entry count.
 
-TTL sweeps are driven by the periodic TimeTick append (rate-limited), so an idle
-vchannel releases its retained primary-key memory without waiting for its next write.
+**Store (objects).** Chunks are kept newest-first until the cumulative size reaches
+`retainedBytesPerVChannel`; older ones are released. The boundary is computed **per
+vchannel** by accumulating that vchannel's own `length` values from the manifest index,
+then taking the minimum across vchannels. Without the per-vchannel split, one hot
+vchannel would consume the whole budget and push a cold vchannel's history out of
+retention even though the cold vchannel's window is nowhere near full.
+
+Two consequences follow, and both must be stated plainly because they change what the
+feature promises:
+
+- **Duplicate visibility is measured in bytes of writes, not in time.** On a busy
+  shard the retained window may span minutes; on a quiet one it may span days. A key
+  written long ago on an idle shard still answers as a duplicate.
+- **An idle vchannel does not release its window over time.** Memory is bounded by
+  `maxBytesPerWindow`, not reclaimed by inactivity.
+
+This is deliberate. A time-based rule cannot survive the case the feature exists for:
+after an outage of any length, an upstream that resumes from its breakpoint must still
+be deduplicated. Any horizon expressed in time is, by construction, invalidated by time
+passing. A byte-bounded rule is invalidated only by new data, which is exactly the
+condition under which forgetting old keys is safe.
 
 ### Transactions
 
 One insert fans out to one message per vchannel, and a vchannel's rows are further
 split into several messages when they exceed `pulsar.maxMessageSize`. The producer
-groups all messages of one vchannel into a **transaction** whenever there is more
-than one, and stamps the idempotency key on the synthesized `CommitTxn` message only.
+groups all messages of one vchannel into a **transaction** whenever there is more than
+one, and stamps the idempotency key on the synthesized `CommitTxn` message only.
 
 The interceptor therefore never dedups a txn body — bodies are appended normally and
 their insert results are buffered per `(vchannel, txnID)`. Dedup happens once, on the
@@ -304,14 +320,14 @@ the scanner discards the uncommitted bodies. A partial write unit can never land
 Three consequences worth stating:
 
 - A duplicate commit **synthesizes a rollback** for the retried transaction, whose
-  `BeginTxn` and bodies were already appended under a new txnID. Without it the
-  session lingers until keepalive expiry, stalling checkpoint advancement and
-  accumulating WAL garbage per retry. The rollback is only synthesized for a
-  transaction positively known to be still open.
+  `BeginTxn` and bodies were already appended under a new txnID. Without it the session
+  lingers until keepalive expiry, stalling checkpoint advancement and accumulating WAL
+  garbage per retry. The rollback is only synthesized for a transaction positively
+  known to be still open.
 - If the txn buffer expired before the commit arrives, completing with a nil result
-  would permanently store an entry whose duplicates return the retry's own
-  unpersisted IDs. The commit fails with `TransactionExpired` instead — deliberately
-  an *unrecoverable* code, so the resumable producer rebuilds the whole transaction
+  would permanently store an entry whose duplicates return the retry's own unpersisted
+  IDs. The commit fails with `TransactionExpired` instead — deliberately an
+  *unrecoverable* code, so the resumable producer rebuilds the whole transaction
   (re-appending the bodies repopulates the buffer) rather than hot-retrying a commit
   that can never succeed.
 - The buffer is reclaimed only when the **owner** resolved the entry. A waiter that
@@ -326,36 +342,72 @@ Both halves are needed and neither is derivable at the streaming node:
 
 - `ids` — for autoID collections the primary keys are server-allocated and a retry
   allocates different ones, so the duplicate answer must carry the originals. They do
-  exist in the message body, but the streaming node never decodes an insert body on
-  the append path (segment assignment and size estimation all read the header), and
+  exist in the message body, but the streaming node never decodes an insert body on the
+  append path (segment assignment and size estimation all read the header), and
   decoding would materialize every column including vectors to extract an 8-byte key
   per row, on the write hot path, without even having the collection schema to locate
   the primary column.
 - `row_offsets` — the mapping back to the original request's row order exists only in
-  the proxy; it is not in the body at all. It could in principle be recomputed on
-  retry since routing is deterministic, but the size-driven message split boundaries
-  would also have to match between attempts. A `maxMessageSize` change or a schema
-  change moves them, and a recomputed mapping would then scatter primary keys to the
-  wrong rows silently.
+  the proxy; it is not in the body at all. It could in principle be recomputed on retry
+  since routing is deterministic, but the size-driven message split boundaries would
+  also have to match between attempts. A `maxMessageSize` change or a schema change
+  moves them, and a recomputed mapping would then scatter primary keys to the wrong
+  rows silently.
 
 The `ids` payload is redundant for client-supplied primary keys, since the retry
 already has them. The first version stamps it unconditionally to keep the write path
 uniform; making the stamp conditional on autoID is tracked as follow-up work.
 
-The interceptor enforces the pairing invariant: an insert carrying a result but no
-key is rejected, because it would be appended outside the window and its result could
-never be served.
+The interceptor enforces the pairing invariant: an insert carrying a result but no key
+is rejected, because it would be appended outside the window and its result could never
+be served.
 
-### The summary store
+## The summary store
 
-Three layers.
+### Three artifacts
 
-**1. Metadata (etcd).** One `PChannelSummaryMeta` per pchannel — latest generation,
-GC boundaries, owner term, chunk manifest. One `VChannelSummaryMeta` per
-`(view_type, vchannel)` — that view's checkpoint hint and the oldest generation it
-still needs.
+**1. `PChannelSummaryMeta` (etcd), one per pchannel.**
 
-**2. Chunk payloads (object storage).** One object per generation, per pchannel:
+```protobuf
+message PChannelSummaryMeta {
+    string pchannel                                = 1;
+    uint64 source_checkpoint_timetick              = 2;
+    common.MessageID source_checkpoint_message_id  = 3;
+    int64 term                                     = 4;   // owner's WAL assignment term
+    string manifest_path                           = 5;   // newest manifest written
+}
+```
+
+It is a pointer and a checkpoint, nothing more. It carries no chunk inventory and no
+GC boundaries.
+
+**2. The manifest (object storage), one live version per pchannel.**
+
+Path `{pchannel}.manifest.{term}`. Three sections, with three different jobs:
+
+```protobuf
+message PChannelSummaryManifest {
+    // What recovery must read.
+    repeated PChannelSummaryChunkTermRange ranges       = 1;
+    // Redundant copy of every retained chunk's footer index, so a consumer can
+    // locate its own vchannel inside a chunk without opening the chunk.
+    repeated PChannelSummaryChunkIndexEntry chunk_index = 2;
+    // What GC must delete. Carries the term, so GC needs no lookup and no listing.
+    repeated PChannelSummaryChunkTermRange pending_gc   = 3;
+}
+```
+
+`ranges` maps a contiguous generation range to the term that wrote it. `chunk_index`
+holds, per generation, the per-vchannel `{offset, length, checksum, record_count}` copied
+from that chunk's footer — this is what makes a lazy, ranged read of a single vchannel
+possible, and it is also the input to the per-vchannel retention computation.
+
+**A manifest is always written as the previous manifest plus amendments.** Inheritance
+is structural, not a checklist: whatever a previous owner left unfinished — an unsealed
+range, a pending GC entry — is carried forward because the new manifest is derived from
+the old one rather than assembled from scratch.
+
+**3. Chunk objects (object storage), one per generation.**
 
 ```
 ┌────────────────────────────────────────────────┐
@@ -374,274 +426,474 @@ still needs.
 └────────────────────────────────────────────────┘
 ```
 
-The format version lives **only** in the fixed binary header, checked before any
-proto in the object is trusted; a second copy could only ever agree with the first.
-The footer checksum covers the exact stored bytes and is carried in the trailer, so
-verification never re-marshals a parsed footer — proto marshaling is not guaranteed
-byte-stable across library versions, and re-deriving would flag a healthy chunk as
-corrupt the day the encoding shifts.
+The format version lives **only** in the fixed binary header, checked before any proto
+in the object is trusted; a second copy could only ever agree with the first. The footer
+checksum covers the exact stored bytes and is carried in the trailer, so verification
+never re-marshals a parsed footer — proto marshaling is not guaranteed byte-stable
+across library versions, and re-deriving would flag a healthy chunk as corrupt the day
+the encoding shifts.
 
 A physical WAL position is recorded only at pchannel level. Everything below it is
-addressed by timetick, and which generation to open comes from
-`min_required_generation`.
+addressed by timetick.
 
-**3. Materialization (memory).** At WAL open, recovery replays the chunks it still
-needs, deduplicates by key, applies retention, and hands each view a
-`VChannelSummarySnapshot` — retained entries plus the retention state that decides
-which of them may still be served. It is built once, consumed once, never stored;
-it is a plain Go struct, not a proto.
+### The three watermarks
 
-### Split-brain fencing
+Everything in this design is ordered by three monotonic points:
+
+```
+  GC progress          retention boundary            persist watermark
+       │                        │                            │
+       ▼                        ▼                            ▼
+ ──────┴────────────────────────┴────────────────────────────┴──────▶ generation
+   deleted, or          oldest generation            newest contiguously
+   queued in            recovery may read            confirmed chunk
+   pending_gc
+```
+
+| Watermark | Meaning | Where it lives | Who advances it |
+| --- | --- | --- | --- |
+| **Persist watermark** | Source checkpoint of the newest **contiguously confirmed** chunk | meta's source checkpoint; newest range in the manifest | the persist path, on chunk durability |
+| **Retention boundary** | Oldest generation still readable | the oldest entry of the manifest's `ranges` | the persist path, when the byte budget slides |
+| **GC progress** | What has been physically deleted | implicit: `pending_gc` empty means done | the GC worker |
+
+Invariants:
+
+1. `GC progress ≤ retention boundary ≤ persist watermark`
+2. All three advance monotonically.
+3. Recovery reads only `[retention boundary, newest discovered generation]`, so it
+   never touches a range GC is working on.
+
+The persist watermark advances only over a **contiguous** prefix of confirmed writes.
+Chunks may be written concurrently under load, but if generations G+1 and G+3 succeed
+while G+2 fails, the watermark stops at G+1. G+3 physically exists and is simply not
+counted; it becomes an orphan that later GC reclaims. This rule is what makes
+"probe forward, stop at the first gap" a correct recovery procedure — the writer and
+the reader agree on exactly the same boundary.
+
+## Normal operation
+
+### Write path
+
+```
+append(msg with `_ik`)
+   │
+   ├─ window.Begin(key)
+   │     ├─ Duplicate → return stored result, no WAL append          ← terminates here
+   │     ├─ Wait      → block on the owner's outcome
+   │     └─ Owner     → continue
+   │
+   ├─ append to WAL
+   ├─ window.Complete(key, result)          ← entry now serves duplicates
+   └─ hand the committed fact to the summary store (in-memory, per vchannel)
+```
+
+The summary store buffers committed facts per vchannel and turns them into chunks
+asynchronously. Nothing on the append path waits for object storage.
+
+### Persist path
+
+A chunk is written when any of these fires:
+
+| Trigger | Condition |
+| --- | --- |
+| size | buffered bytes reach `chunkTargetBytes` |
+| time | `persistInterval` elapsed with buffered data |
+| forced | the recovery WAL checkpoint is about to advance |
+
+The order within a cycle is fixed:
+
+```
+1. write chunk object          chunk.{g}.term{T}.psc
+2. confirm durability          advance persist watermark over the contiguous prefix
+3. every `manifestChunkInterval` chunks:
+      recompute the retention boundary from the byte budget
+      move released ranges + their index entries into `pending_gc`
+      write the manifest                                    ← single PUT
+4. occasionally: update the etcd meta (checkpoint, manifest path)
+```
+
+**The WAL checkpoint waits only on step 2.** It does not wait for the manifest and it
+does not wait for the meta. This is what keeps object-storage latency off the WAL
+truncation path, and it is the reason recovery must be able to discover chunks the
+manifest does not yet know about — see [Startup and recovery](#startup-and-recovery).
+
+Step 3 is a single object PUT that atomically does two things: it removes released
+ranges from `ranges` (so recovery immediately stops depending on them) and adds them to
+`pending_gc` (so GC keeps the term it needs to delete them). There is no window in which
+a range is in neither place.
+
+## Startup and recovery
+
+### Sequence
+
+```
+1. read PChannelSummaryMeta from etcd            → term T_meta, manifest path
+2. locate the newest manifest
+      probe {pchannel}.manifest.{t} for t descending from T_now
+      take the highest that exists                → manifest M, term T_M
+3. probe forward for chunks the manifest does not know about
+      for g = M.newest_generation + 1, 2, ...
+          read chunk.{g}.term{T_M}
+          stop at the first miss
+4. write manifest.{T_new}
+      = inherit M
+      + seal T_M's range at the last discovered generation
+      + open a new range for T_new
+      + carry pending_gc forward unchanged
+5. only now may this owner write its first chunk
+6. read chunks in [retention boundary, newest discovered], rebuild the per-vchannel
+   entry sets, hand each vchannel's set to its window
+7. rewind WAL consumption to the persist watermark and replay forward
+```
+
+### Why one term is enough to probe
+
+Step 3 probes a **single** term, not a range of terms, because of the ordering in step
+4/5: **a term writes its manifest before it writes any chunk.** Therefore:
+
+- a manifest exists for term T ⟹ every chunk of term T was written after it
+- no manifest for term T ⟹ term T wrote no chunks
+
+So the highest manifest that exists already covers every term that produced data, and
+anything beyond it belongs to that same term. Probing degenerates from a
+term × generation search into a single forward scan.
+
+This is the load-bearing invariant of the whole recovery procedure. **A term that
+cannot write its manifest must not write a chunk** — that has to be a hard failure in
+code, not a best-effort ordering, because a chunk written before its manifest is a
+chunk recovery can never find.
+
+### Why nothing is lost
+
+Three separate gaps could lose data, and each is closed by a different rule:
+
+| Gap | Closed by |
+| --- | --- |
+| Chunks written after the last manifest | forward probing (step 3) |
+| Writes after the last chunk | WAL replay from the persist watermark (step 7) |
+| A previous term's tail discovered by probing | folded into the new manifest (step 4) |
+
+The third deserves emphasis. If recovery probes T1's tail, finds generations 95–99, and
+writes a manifest that still records T1 as ending at 94, then the *next* recovery reads
+that manifest, probes forward only within its own term, and **95–99 are never read
+again**. The loss is silent. This is why step 4 is expressed as *inherit and amend*
+rather than *construct*: a manifest built from the previous one cannot drop what the
+previous one knew, and cannot drop what this recovery just learned.
+
+Because the WAL cannot be truncated past the persist watermark (see
+[Interaction with WAL truncation](#interaction-with-wal-truncation)), the second gap is
+always replayable. Together the three rules give: **every committed write is either in a
+chunk recovery reads, or in the WAL segment recovery replays.**
+
+### Crash matrix
+
+Every crash point resolves without operator action:
+
+| Crash point | On-disk state | Next startup |
+| --- | --- | --- |
+| Between chunk write and durability confirmation | chunk may exist beyond the watermark | probing stops at the first gap; the orphan is reclaimed by GC |
+| Concurrent chunk writes, middle one failed | G+1, G+3 exist; G+2 missing | watermark is G+1; probing stops there; G+3 is an orphan |
+| After chunks, before the manifest | chunks beyond the manifest | probing discovers them and seals them into the new manifest |
+| After the manifest, before the meta | meta points at an older manifest | manifest probing finds the newer one by term |
+| While writing the manifest | single PUT — old or new, never partial | both states are self-consistent |
+| After moving ranges into `pending_gc`, before deleting | ranges gone from `ranges`, present in `pending_gc` | recovery does not read them; GC deletes them |
+| After deleting, before recording completion | objects gone, `pending_gc` still lists them | GC re-issues deletes; each is a no-op |
+| Manifest object fails its checksum | — | **WAL open fails.** See below. |
+
+**Manifest corruption fails the WAL open.** It is the only index into the chunk
+inventory, so a corrupt manifest means recovery cannot know what it is missing.
+Silently starting with an empty window would accept in-retention client retries as fresh
+writes — duplicate data with no error anywhere. Object storage is expected to return
+what was written; a checksum failure is an infrastructure fault, and the honest response
+is to stop and say so rather than to guess.
+
+## Chunk GC
+
+### Mechanism
+
+GC is a worker owned by the manifest manager. Its entire input is the `pending_gc`
+section of the manifest it already holds.
+
+```
+for each entry {term T, generations [a, b]} in pending_gc:
+        for g in a..b:
+                DELETE chunk.{g}.term{T}.psc        ← exact key; missing is a no-op
+        mark the entry done in memory
+
+at the next manifest persist: completed entries are dropped from pending_gc
+```
+
+That is the whole design. Three properties fall out of it:
+
+**Clean.** GC never lists a prefix, never scans, and never consults `ranges`. The term
+is carried in the entry that asked for the deletion, so every key is constructed
+exactly. Prefix deletion is retained only as an operator repair tool, never on the
+normal path — listing semantics differ across object-storage backends and cannot be
+relied on.
+
+**Idempotent.** Deleting an absent object succeeds everywhere. Completion is recorded
+in memory and becomes durable at the next manifest write, so the worst case at any crash
+point is that a completed batch is replayed as a sequence of no-ops. There is no state
+that can be half-applied: a range is either in `pending_gc` or it is not, and that
+transition is a single object PUT.
+
+**Efficient.** One DELETE per object, no metadata round trips, no cross-store
+coordination, no locks. GC and the persist path write the same manifest but never race
+for it: both run inside the single owner, and completion is folded into the persist the
+owner was going to do anyway.
+
+### Why there is no separate GC watermark
+
+`pending_gc` is simultaneously the work queue and the progress record: an entry present
+means "not finished", an entry absent means "finished". A watermark alongside it would
+be a second source of truth, and the two could disagree — a watermark that has advanced
+past an entry still listed, or an entry dropped while the watermark lags. One structure
+cannot contradict itself.
+
+### Orphans
+
+Two kinds of object are never referenced by any manifest:
+
+- chunks written beyond the persist watermark (a failed concurrent write, or a crash
+  between write and confirmation)
+- chunks written by a fenced owner at a generation another term also used
+
+Both sit above the retention boundary at the time they are created, and both are swept
+into `pending_gc` when the boundary eventually passes them — the deletion is by
+generation and term, and the entry that covers that generation range covers them too.
+No separate reaping path is required.
+
+## Split-brain fencing
 
 WAL ownership can move while an old owner is still running. Every chunk and every
 metadata write carries the owner's **WAL assignment term**:
 
-- Metadata is published through catalog CAS; an owner refuses to update a meta
+- The etcd meta is published through catalog CAS; an owner refuses to update a meta
   carrying a newer term than its own assignment and stops persisting.
-- Chunk object keys include both generation and term, and the pchannel meta carries a
-  **manifest** mapping generation ranges to terms. Recovery only reads chunks
-  published through that manifest.
-- Writing a generation that already exists is arbitrated on the decoded footer: a
-  newer term wins, an older term is fenced. Same term with different bytes is not
-  automatically a conflict — the encoding is not guaranteed byte-stable — so the
-  decoded footer identity is compared instead, keeping an identical rewrite
-  idempotent while still detecting genuine corruption.
+- Chunk object keys include both generation and term, so an old owner and a new owner
+  writing the same generation produce two distinct objects rather than overwriting each
+  other. The manifest decides which one is real; the other is an orphan.
+- A new owner's manifest is written under its own term before it writes anything, so a
+  stale owner's later chunks can never be mistaken for the current sequence.
 
-### Interaction with WAL truncation
+A fenced owner may still be executing its own `pending_gc` deletions. This is safe: its
+retention boundary was computed over strictly less data than the current owner's, so it
+is strictly more conservative, and it deletes only what the current owner has also
+released. It stops on its next manifest write, which fails the CAS.
 
-**This is the coupling that most deserves review.** The durable summary source
-checkpoint clamps the consume checkpoint, which in turn gates WAL truncation. The WAL
-cannot be truncated past what the summary store has durably covered, because a
-referenced chunk is the only durable copy of the idempotency keys below the consume
-checkpoint once the WAL is gone.
+## Interaction with WAL truncation
+
+**This is the coupling that most deserves review.** The persist watermark clamps the
+consume checkpoint, which in turn gates WAL truncation. The WAL cannot be truncated past
+what the summary store has durably covered, because everything after the watermark
+exists only in the WAL and must be replayable at the next open.
 
 Consequences:
 
-- A stalled summary persist holds back WAL truncation. `idempotency_snapshot_checkpoint_lag_seconds`
-  is the metric to alert on.
-- An idle pchannel would freeze the durable source checkpoint (nothing marks a summary
-  dirty, so no chunk is written). A meta-only checkpoint advance runs on the
-  background task to keep truncation moving.
-- Corruption of *referenced* summary state **fails the WAL open** rather than
-  resetting to an empty window. Silently starting empty would accept in-TTL client
-  retries as fresh writes — duplicate data with no error anywhere. Orphan-chunk
-  corruption (above the durable latest generation, never referenced) self-heals inline.
+- A stalled persist path holds back WAL truncation.
+  `idempotency_persist_watermark_lag_seconds` is the metric to alert on.
+- An idle pchannel would freeze the watermark, since nothing marks a summary dirty and
+  no chunk is written. A checkpoint-only advance runs on the background task to keep
+  truncation moving.
+- The manifest and the meta are explicitly **not** on this path. They may lag
+  arbitrarily; recovery repairs the lag by probing. Only chunk durability gates the
+  checkpoint.
 
-### Chunk GC
-
-The cleaner deletes generations in `[min_available, min_in_use)` and then advances
-`min_available`. The advanced `min_in_use` is persisted **before** any deletion:
-recovery replays from the persisted boundary upward and hard-fails on a missing chunk,
-so an interruption between a delete and a meta save would otherwise leave the boundary
-pointing into the deleted range and permanently fail every WAL open. With the advance
-durable first, an interruption only leaks chunks below the new boundary, and the next
-cycle re-deletes them idempotently.
-
-`min_in_use` comes from a **durable-retention ledger** — one row per persisted
-generation — not from the entries materialized in memory, which are cleared on every
-persist. A boundary derived from memory would collapse to the latest generation each
-cycle, GC would trim everything below, and a restart could rebuild only about one
-snapshot interval of the window instead of a TTL's worth.
-
-### Replication and CDC
+## Replication and CDC
 
 Replicated messages **bypass the window entirely**. The replicate stream has its own
-exactly-once delivery via source-timetick checkpoints, and the idempotency key inside
-a replicated message belongs to the *source* cluster's window history. Deduplicating
-against the local window would silently drop replicated writes whenever the key
-happens to sit in this cluster's window — after a demotion, or after the source
-evicted the key by TTL and a client legally re-issued it.
+exactly-once delivery via source-timetick checkpoints, and the idempotency key inside a
+replicated message belongs to the *source* cluster's window history. Deduplicating
+against the local window would silently drop replicated writes whenever the key happens
+to sit in this cluster's window — after a demotion, or after the source released the key
+and a client legally re-issued it.
 
 The recovery observer applies the same rule: a replicated write becomes a *keyless*
-committed write (checkpoint bookkeeping only), so a foreign key can never materialize
-a local entry.
+committed write (checkpoint bookkeeping only), so a foreign key can never materialize a
+local entry.
 
-### Reader-side physical dedup
+## Reader-side physical dedup
 
-Switching between the write-ahead buffer stream and the WAL scanner stream can
-deliver the same logical message twice with *different* message IDs, which the
-existing message-ID dedup cannot catch. The reorder buffer additionally drops a
-non-TimeTick message whose timetick was already seen.
+Switching between the write-ahead buffer stream and the WAL scanner stream can deliver
+the same logical message twice with *different* message IDs, which the existing
+message-ID dedup cannot catch. The reorder buffer additionally drops a non-TimeTick
+message whose timetick was already seen.
 
 **Invariant:** the timetick interceptor assigns a unique timetick to every appended
 message, so two genuinely distinct non-TimeTick messages never share a timetick while
 both are retained. A repeated timetick can therefore only be a physical replay. If a
 future code path ever lets two genuinely distinct messages reach this buffer with the
 same timetick, the second is silently dropped — **this invariant must be preserved.**
-Drops are surfaced by a warn log and
-`idempotency_reader_physical_dedup_drop_total`.
+Drops are surfaced by a warn log and `idempotency_reader_physical_dedup_drop_total`.
 
-The rule is gated on `streaming.idempotency.enabled`, so the flag is a real kill
-switch that restores the pre-idempotency scanner behavior.
+The rule is gated on `streaming.idempotency.enabled`, so the flag is a real kill switch
+that restores the pre-idempotency scanner behavior.
 
 ## Design Decisions
 
-Trade-offs that were raised and settled. Each records what was chosen, and what was
-rejected and why, so a later reader does not reopen a closed question without new
-information.
+Trade-offs that were argued and settled, with what was rejected and why.
 
-### The key travels as a message property, not a header field
+### Retention is byte-bounded, with no TTL and no entry floor
 
-**Chosen:** the key lives in the `_ik` message property.
+**Chosen:** the window evicts oldest-first only when `maxBytesPerWindow` is reached;
+the store keeps the newest `retainedBytesPerVChannel` per vchannel.
 
-**Rejected:** a field on `InsertMessageHeader` (and a second one on
-`CommitTxnMessageHeader`). A header field would need to be added to, and read from,
-every message type that can be deduplicated, and the reader would have to decode a
-specialized header before it could even tell whether a message carries a key. A
-property is readable uniformly by one accessor across every message type and on both
-the mutable (interceptor) and immutable (recovery) sides.
+**Rejected — a TTL.** Any horizon expressed in time is invalidated by time passing.
+After an outage, everything in the restored window is older than `now − TTL` and the
+window is empty exactly when the resuming upstream needs it. Anchoring the horizon to
+the last-persisted timetick instead of wall clock does not fix it either: a single new
+write advances the anchor by the whole outage duration and wipes the window.
 
-The specialized header is itself stored as a property, so this costs nothing on the
-wire and removes a per-message-type change from every future view.
+**Rejected — an entry-count floor.** It reintroduces the problem the byte cap exists to
+solve: one entry carries the per-row primary keys of its insert, so a count says nothing
+about memory. It also forces the store to ask each consumer what it still needs.
 
-### The insert result stays on the wire
+The cost of the choice is stated in [Retention](#retention): visibility is measured in
+bytes, and idle windows are not released over time.
 
-**Chosen:** keep `InsertMessageHeader.idempotent_result`.
+### The store keeps no per-consumer state
 
-**Rejected:** drop it and derive the result at the streaming node from the assembled
-insert data. The reasoning is in
-[Why the result is on the wire](#why-the-result-is-on-the-wire): `row_offsets` does
-not exist anywhere below the proxy, and recovering `ids` would put a full insert-body
-decode — vectors included, without the schema needed to locate the primary column —
-on the WAL append hot path.
+**Chosen:** no per-vchannel metadata of any kind. The store hands entries to a consumer
+and forgets them.
 
-**Also rejected:** not storing the result in the summary store and re-deriving it on
-replay. This trades a bounded, explicit storage cost for an implicit reconstruction
-step on the recovery path, which is both slower and harder to keep correct as the
-write path evolves.
+**Rejected — per-vchannel metadata scoped by a consumer type.** Its purpose would be to
+persist each consumer's retention boundary so GC could respect it. With byte-bounded
+retention, GC derives its boundary from the manifest alone, so such metadata would have
+no reader.
 
-### The store is business-agnostic; idempotency is a view on top
+**Rejected — consumers reporting their in-use boundary to the pchannel.** This was
+considered and dropped with the entry floor. It required a completeness gate (a missing
+report must block GC, never be read as "no constraint"), and the expected-reporter set
+had to track vchannel lifecycle events or GC would stall forever on a dropped vchannel.
+All of that disappears when retention is a function of the manifest.
 
-**Chosen:** a *summary store* that records committed write facts, with per-view
-metadata scoped by `view_type`, and the dedup window built on top as one view.
+### GC state is the work queue
 
-**Rejected:** naming and shaping the storage after the idempotency window. A
-primary-key index is the second planned consumer of the same facts; a store named and
-structured for one consumer would have to be renamed and reshaped for the second. The
-naming rule is enforced in the package documentation: "summary" is the durable,
-application-neutral data, "window" belongs to the interceptor.
+**Chosen:** `pending_gc` inside the manifest is both the list of work and the record of
+progress.
 
-### Chunk payloads are protobuf, with the version in a fixed binary header
+**Rejected — a GC watermark in etcd.** GC would then need the generation→term mapping
+from somewhere, and the only sources are the manifest's `ranges` (which couples GC to
+the manifest's compaction lifetime) or a prefix listing (which is not portable across
+object-storage backends).
 
-**Chosen:** protobuf payloads inside a framed object whose 16-byte fixed header
-carries the format version.
+**Rejected — an etcd deletion queue written alongside the manifest.** The manifest is in
+object storage and the queue in etcd; there is no transaction across them. The safe
+ordering (manifest first) leaves a crash window in which the objects are unreferenced
+*and* unqueued, leaking permanently, which then needs a prefix-scan sweeper to reclaim —
+reintroducing exactly what the queue was meant to avoid.
 
-**Rejected:** JSON payloads. **Rejected:** repeating the version inside the footer or
-in the etcd metadata — the version must be readable before any proto in the object is
-trusted, and a second copy could only ever agree with the first.
+Keeping both sides in one object removes the coordination problem instead of solving it.
 
-Because this is a first version with nothing released, no compatibility path to an
-earlier chunk encoding exists or is needed.
+### A term writes its manifest before its first chunk
 
-### Retention is bounded by bytes, not only by entry count
+**Chosen:** manifest first, hard-failing if it cannot be written.
 
-**Chosen:** a hard `maxBytesPerWindow` cap that overrides both the TTL horizon and the
-`minEntries` floor.
+**Rejected — writing chunks first and reconstructing the term mapping at recovery.**
+Recovery would have to probe every term in a range against every generation, and the
+stop rule becomes unsound: a miss at one term cannot be distinguished from the end of
+the sequence, so recovery would either truncate valid data or scan unboundedly.
 
-**Rejected:** an entry-count floor alone. Each retained entry carries the per-row
-primary keys of its insert, so entry count says nothing about memory; one entry can be
-arbitrarily large.
+### The persist watermark advances only over a contiguous prefix
 
-**Also settled:** the `minEntries` floor must not extend duplicate *visibility* past
-TTL. An entry retained by the floor but past TTL is kept in memory and does not answer
-duplicates — otherwise a quiet shard would answer retries forever.
+**Chosen:** concurrent chunk writes are allowed, but the watermark stops at the first
+unconfirmed generation.
 
-### Referenced-state corruption fails the WAL open
+**Rejected — counting every successful write.** Recovery's forward probe stops at the
+first gap, so a watermark that ran past a gap would claim coverage for data recovery
+cannot reach, and the WAL would be truncated past writes that are then unrecoverable.
 
-**Chosen:** fail the WAL open, with operator remediation in the error.
+### The chunk key carries the term
 
-**Rejected:** reset to an empty window and continue. The summary snapshot checkpoint
-is what allowed the WAL to be truncated past those keys, so a referenced chunk is
-their only durable copy. Starting empty would accept in-TTL client retries as fresh
-writes — duplicate data, no error anywhere. Orphan chunks (above the durable latest
-generation, never referenced) are a different case and self-heal inline.
+**Chosen:** `chunk.{generation}.term{term}.psc`.
 
-### Split-brain is arbitrated on decoded content, not bytes
-
-**Chosen:** compare the decoded footer identity when the same generation is rewritten
-by the same term.
-
-**Rejected:** byte equality. Protobuf guarantees deterministic output within a build
-but not across library versions, so a retry spanning a binary upgrade would re-encode
-identical records differently and be misread as corruption.
+**Rejected — a term-free key.** A fenced owner and the current owner would collide at
+the same generation and overwrite each other. Conditional writes do not help: the
+current owner cannot distinguish its own retry from a fenced owner's write.
 
 ## Compatibility, Deprecation, and Migration Plan
 
-**Compatibility.** The feature is off by default and adds no cost when off: no
-summary store is written, the reader-side drop rule is disabled, and a non-idempotent
-write carries no idempotency property at all (not an empty-valued one), so its
-messages are byte-identical to before.
+**Compatibility.** The feature is off by default and adds no cost when off: no summary
+store is written, the reader-side drop rule is disabled, and a non-idempotent write
+carries no idempotency property at all (not an empty-valued one), so its messages are
+byte-identical to a build without the feature.
 
 `InsertMessageHeader.idempotent_result` is a new optional field; older readers ignore
 it. The `_ik` message property is absent unless a key exists.
 
-**Enabling.** Set the global flag, then the collection property. Idempotency starts
-from the current checkpoint; nothing historical is scanned.
+**Enabling.** Set the global flag, then the collection property. Idempotency starts from
+the current checkpoint; nothing historical is scanned.
 
-**Disabling / rollback.** Turn off `streaming.idempotency.enabled`. On the next WAL
-open the durable summary store is dropped automatically: with the feature off nothing
-is recorded, checkpoints advance freely and the WAL gets truncated past the stored
-source checkpoint, so a retained store would be stale by definition and, worse, on
-re-enable its source checkpoint would rewind recovery to a position that may no longer
-exist in the WAL. Deletion order is chosen for crash safety — vchannel metas, then the
-pchannel meta, then the chunk objects — and is best-effort, retried on the next open.
+**Disabling / rollback.** Turn off `streaming.idempotency.enabled`. On the next WAL open
+the durable summary store is dropped: with the feature off nothing is recorded,
+checkpoints advance freely and the WAL is truncated past the stored checkpoint, so a
+retained store would be stale by definition and, on re-enable, would rewind recovery to a
+position that may no longer exist in the WAL. Deletion order is chosen for crash safety —
+manifest first (so recovery stops depending on the chunks), then the chunk objects, then
+the meta — and is best-effort, retried on the next open.
 
-Re-enabling later bootstraps cleanly from the then-current checkpoint. The dedup state
-of the disabled period is lost, which is inherent to disabling the feature.
+Re-enabling later bootstraps cleanly from the then-current checkpoint. The dedup state of
+the disabled period is lost, which is inherent to disabling the feature.
 
-**No data migration.** No existing on-disk format changes.
+**No data migration.** The feature is unreleased; there is no earlier on-disk format.
 
 ## Test Coverage
 
-Delivered with the implementation:
+**Unit** — proxy key derivation and destination separation, key length validation, autoID
+reassignment stability and its interaction with delete routing, duplicate result merge
+back into original row order, DDL property validation; window owner/wait/duplicate
+decisions, byte-cap eviction, restore-from-snapshot, txn commit dedup with rollback
+synthesis, expired txn buffer classification, replicated bypass; chunk codec round-trip
+and checksum coverage, corrupt-chunk rejection, manifest inheritance, forward probing and
+its stop rule, `pending_gc` transitions, GC idempotency across each crash point.
 
-- **Proxy** — key derivation determinism and destination separation, key length
-  validation, autoID reassignment stability and its interaction with delete routing,
-  duplicate result merge back into the original row order, message size guard, DDL
-  property validation.
-- **Interceptor** — owner/wait/duplicate decisions, concurrent duplicates converging
-  on one append, TTL and byte-cap eviction, restore-from-snapshot TTL bound, txn
-  commit dedup with rollback synthesis, expired txn buffer classification, replicated
-  bypass, vchannel reclamation.
-- **Summary store** — chunk codec round-trip, checksum coverage of the exact stored
-  bytes, corrupt-chunk rejection, referenced vs orphan corruption handling, generation
-  manifest, term-based fencing (stale owner refused, newer owner overwrites, same-term
-  different-content is corruption), GC boundary ordering, drop-while-disabled,
-  concurrency and lock ordering.
-- **End-to-end** — `wal_idempotency_test.go` drives append → duplicate → restart →
-  duplicate-after-restart through a real WAL.
+**StreamingNode integration** — `wal_idempotency_test.go` opens a real WAL through the
+real opener and interceptor chain, appends, hits a duplicate, closes and reopens the WAL,
+and hits the duplicate again after recovery. This exercises the interceptor, the summary
+store, real chunk objects on local storage, and the manifest, but it is **not** an
+end-to-end test: there is no proxy, no client, and no real object store or etcd.
 
-Two gaps are known and deliberately left open: chaos-level failover during an
-in-flight idempotent append, and a long-running soak measuring window memory against
-the byte cap under skewed shard load.
+**Known gaps.**
+
+- No test spans SDK → proxy → streaming node → WAL. The proxy half (key derivation,
+  autoID stabilization, duplicate result merge) and the streaming node half have never
+  been exercised together.
+- The integration test mounts only the idempotency and timetick interceptors. The
+  production chain has seven, and the interactions with `redo` (which retries),
+  `shard`/`partialupdate` (which run after idempotency), and `replicate` are uncovered.
+- No chaos test for failover during an in-flight idempotent append.
+- No soak test measuring window memory against the byte cap under skewed shard load.
 
 ## Future Work
 
-- **Stamp `idempotent_result` only for autoID collections.** For client-supplied
-  primary keys the retry already has them, so the payload is redundant.
-- **`Upsert` support.** Requires deduping the delete leg as well.
-- **Primary-key index view.** The second consumer of the summary store; the
-  `view_type` axis exists for it.
-- **Live-process reconciliation.** See below.
+- **Stamp `idempotent_result` only for autoID collections.** For client-supplied primary
+  keys the retry already has them.
+- **`Upsert` support**, which requires deduping the delete leg as well.
+- **Lazy per-vchannel recovery.** The manifest already carries every chunk's per-vchannel
+  index, so a consumer can be restored with ranged reads of only its own bytes instead of
+  reading whole chunks. The layout is in place; the read path is not.
+- **A second consumer.** A primary-key index would want full history rather than a
+  byte-bounded tail, so it needs its own retention input; the current store is shaped for
+  a single, byte-bounded consumer.
 
 ## Known Limitations
 
-- **Ambiguous append errors.** Releasing the key on append failure assumes an error
-  means nothing was written, but some WAL implementations may land the write despite
-  returning an error (the pulsar walimpls documents exactly this). In that window a
-  same-key retry re-owns the key and appends again, producing duplicate rows — the
-  same outcome a retry without idempotency would produce. Crash recovery is
-  unaffected: the persisted window re-materializes landed keys at WAL open. Closing
-  the live-process gap requires the interceptor window to reconcile from the
-  recovery-side observer.
-- **Bounded visibility.** Duplicate visibility ends at `windowTTL`, and the hard byte
-  cap may shorten it further per vchannel under skewed load. A retry after that window
-  is a fresh write. `idempotency_eviction_total` makes cap pressure observable.
-- **Partial fan-out retries.** A retry after an attempt that reached only some shards
-  is deduplicated on the landed shards and appended fresh on the missing ones — the
-  intended outcome. The proxy cannot distinguish it from the pathological case where
-  one shard's window forgot a key its siblings still hold, so the mix is logged rather
-  than rejected: failing would break the legitimate case.
+- **Ambiguous append errors.** Releasing the key on append failure assumes an error means
+  nothing was written, but some WAL implementations may land the write despite returning
+  an error (the pulsar walimpls documents exactly this). In that window a same-key retry
+  re-owns the key and appends again, producing duplicate rows — the same outcome a retry
+  without idempotency would produce. Crash recovery is unaffected: the persisted store
+  re-materializes landed keys at WAL open. Closing the live-process gap requires the
+  window to reconcile against the recovery-side observer.
+- **Visibility is a byte budget, not a promise in time.** Two shards with different write
+  rates have very different effective dedup horizons.
+- **Idle windows are not released.** Memory is bounded by `maxBytesPerWindow` but is not
+  reclaimed by inactivity.
+- **Partial fan-out retries.** A retry after an attempt that reached only some shards is
+  deduplicated on the landed shards and appended fresh on the missing ones — the intended
+  outcome. The proxy cannot distinguish it from the pathological case where one shard's
+  window released a key its siblings still hold, so the mix is logged rather than
+  rejected: failing would break the legitimate case.
 
 ## References
 

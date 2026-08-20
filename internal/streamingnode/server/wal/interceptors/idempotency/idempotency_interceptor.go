@@ -2,7 +2,6 @@ package idempotency
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
@@ -11,10 +10,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -41,14 +38,7 @@ type idempotencyInterceptor struct {
 	// them; a duplicate short-circuit here would otherwise acknowledge data that
 	// is neither persisted nor replicated.
 	replicateRole func() replicateutil.Role
-	// lastSweepPhysicalMs rate-limits the idle-vchannel TTL sweep (physical ms
-	// of the last sweep's timetick).
-	lastSweepPhysicalMs atomic.Int64
 }
-
-// idleSweepMinIntervalMs bounds how often the TimeTick-driven window sweep may
-// run; between sweeps a TimeTick append costs one atomic load.
-const idleSweepMinIntervalMs = 1000
 
 func (impl *idempotencyInterceptor) Name() string {
 	return interceptorName
@@ -132,14 +122,6 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 		return msgID, err
 	}
 
-	if msg.MessageType() == message.MessageTypeTimeTick {
-		msgID, err := append(ctx, msg)
-		if err == nil {
-			impl.sweepWindowsOnTimeTick(ctx)
-		}
-		return msgID, err
-	}
-
 	if isTxnMessage(msg) {
 		return impl.appendTxnMessage(ctx, msg, append)
 	}
@@ -154,39 +136,6 @@ func (impl *idempotencyInterceptor) shouldLetReplicateGateHandle(msg message.Mut
 		return false
 	}
 	return true
-}
-
-// sweepWindowsOnTimeTick evicts TTL-expired entries from every window on the
-// periodic TimeTick append, so an idle vchannel releases its retained per-row
-// PK memory without waiting for its next write — Complete-driven eviction alone
-// never runs on a quiet vchannel.
-func (impl *idempotencyInterceptor) sweepWindowsOnTimeTick(ctx context.Context) {
-	if impl.config.WindowTTL <= 0 {
-		return
-	}
-	// The assigned timetick is read from the append result rather than the
-	// message: the inner timetick interceptor publishes it there, and a mutable
-	// message without the property would panic on TimeTick().
-	extra := utility.GetExtraAppendResult(ctx)
-	if extra == nil || extra.TimeTick == 0 {
-		return
-	}
-	// TimeTicks arrive several times per second per pchannel and the sweep walks
-	// every window; rate-limit it so the common no-op path costs one atomic load
-	// instead of an O(windows) pass per tick.
-	physical, _ := tsoutil.ParseHybridTs(extra.TimeTick)
-	last := impl.lastSweepPhysicalMs.Load()
-	if physical-last < idleSweepMinIntervalMs || !impl.lastSweepPhysicalMs.CompareAndSwap(last, physical) {
-		return
-	}
-	evictBefore := evictBeforeCommitTT(extra.TimeTick, impl.config.WindowTTL)
-	if evictBefore == 0 {
-		return
-	}
-	impl.windows.Range(func(vchannel string, window *Window) bool {
-		window.Evict(evictBefore, vchannel)
-		return true
-	})
 }
 
 // removeWindow drops the in-memory window, its metric series, and any buffered
@@ -533,7 +482,6 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 	}
 	if extra != nil {
 		result.CommitTimeTick = extra.TimeTick
-		result.LastConfirmedMessageID = message.MustMarshalMessageID(extra.LastConfirmedMessageID)
 	}
 	if insertResult != nil {
 		result.IdempotentResult = insertResult
@@ -541,20 +489,22 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 	return result
 }
 
-func fillDuplicateResult(ctx context.Context, entry *streamingpb.SummaryEntry) (message.MessageID, error) {
-	if entry == nil || entry.GetSourceMessageId() == nil {
+func fillDuplicateResult(ctx context.Context, entry *recovery.SummaryRecord) (message.MessageID, error) {
+	if entry == nil || entry.SourceMessageID == nil {
 		// Typed so the streamingnode->proxy status converter carries a real code
 		// instead of the untyped catch-all.
 		return nil, status.NewInner("missing duplicate idempotency entry result")
 	}
-	msgID := message.MustUnmarshalMessageID(entry.GetSourceMessageId())
-	lastConfirmed := message.MustUnmarshalMessageID(entry.GetLastConfirmedMessageId())
-	if lastConfirmed == nil {
-		lastConfirmed = msgID
-	}
+	msgID := message.MustUnmarshalMessageID(entry.SourceMessageID)
 	if extra := utility.GetExtraAppendResult(ctx); extra != nil {
-		extra.TimeTick = entry.GetSourceTimetick()
-		extra.LastConfirmedMessageID = lastConfirmed
+		extra.TimeTick = entry.SourceTimeTick
+		// The store records no last-confirmed position, so the original message's
+		// own id stands in. It is NOT a resumable read position -- the true
+		// last-confirmed is at or before it, so a reader starting here could miss
+		// messages below this response's timetick. Nothing on the idempotent
+		// append path consumes it as one; the field exists because the append
+		// result always carries it.
+		extra.LastConfirmedMessageID = msgID
 		// A duplicate response never carries a txn context; clear whatever an
 		// intervening inner append (e.g. the synthesized retried-txn rollback)
 		// left behind.
@@ -562,8 +512,8 @@ func fillDuplicateResult(ctx context.Context, entry *streamingpb.SummaryEntry) (
 		// Always overwrite Extra so a duplicate without an insert result does not
 		// leak whatever value the ExtraAppendResult already carried into this
 		// append's result.
-		if result := entry.GetIdempotency().GetInsertResult(); result != nil && result.GetIds() != nil {
-			extra.Extra = result
+		if entry.InsertResult != nil && entry.InsertResult.GetIds() != nil {
+			extra.Extra = entry.InsertResult
 		} else {
 			extra.Extra = nil
 		}

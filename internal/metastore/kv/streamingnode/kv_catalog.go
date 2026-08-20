@@ -15,9 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -171,84 +169,6 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 	return removes, kvs, nil
 }
 
-// ListVChannelSummaryMetas lists the summary metadata of the pchannel for the given view type.
-func (c *catalog) ListVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
-	if viewType == "" {
-		return nil, merr.WrapErrServiceInternalMsg("vchannel summary meta view type is empty")
-	}
-	prefix := buildVChannelSummaryMetaPrefix(pchannelName, viewType)
-	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-
-	metas := make([]*streamingpb.VChannelSummaryMeta, 0, len(values))
-	for i, value := range values {
-		meta := &streamingpb.VChannelSummaryMeta{}
-		if err := proto.Unmarshal([]byte(value), meta); err != nil {
-			return nil, errors.Wrapf(err, "unmarshal vchannel summary meta %s failed", keys[i])
-		}
-		// LoadWithPrefix returns full keys including the metaKV rootPath, so strip the
-		// prefix rootPath-tolerantly like removePrefix does; a plain strings.TrimPrefix
-		// would be a no-op and leave the whole key as the vchannel name.
-		vchannelName := typeutil.After(keys[i], prefix)
-		meta, _, err = normalizeVChannelSummaryMeta(pchannelName, viewType, vchannelName, meta)
-		if err != nil {
-			return nil, errors.Wrapf(err, "invalid vchannel summary meta %s", keys[i])
-		}
-		metas = append(metas, meta)
-	}
-	return metas, nil
-}
-
-// SaveVChannelSummaryMetas saves the summary metadata of the pchannel for the given view type.
-func (c *catalog) SaveVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string, summaries map[string]*streamingpb.VChannelSummaryMeta) error {
-	if viewType == "" {
-		return merr.WrapErrServiceInternalMsg("vchannel summary meta view type is empty")
-	}
-	kvs := make(map[string]string, len(summaries))
-	for vchannel, meta := range summaries {
-		if meta == nil {
-			continue
-		}
-		stored, vchannelName, err := normalizeVChannelSummaryMeta(pchannelName, viewType, vchannel, meta)
-		if err != nil {
-			return errors.Wrapf(err, "invalid vchannel summary meta %s at pchannel %s view %s", vchannel, pchannelName, viewType)
-		}
-		data, err := proto.Marshal(stored)
-		if err != nil {
-			return errors.Wrapf(err, "marshal vchannel summary meta %s at pchannel %s view %s failed", vchannelName, pchannelName, viewType)
-		}
-		kvs[buildVChannelSummaryMetaKey(pchannelName, viewType, vchannelName)] = string(data)
-	}
-
-	if len(kvs) == 0 {
-		return nil
-	}
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-		return c.metaKV.MultiSave(ctx, partialKvs)
-	})
-}
-
-// RemoveVChannelSummaryMetas removes the summary metadata of the pchannel for the given view type.
-func (c *catalog) RemoveVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error {
-	if viewType == "" {
-		return merr.WrapErrServiceInternalMsg("vchannel summary meta view type is empty")
-	}
-	if len(vchannels) == 0 {
-		return nil
-	}
-	removes := make([]string, 0, len(vchannels))
-	for _, vchannel := range vchannels {
-		removes = append(removes, buildVChannelSummaryMetaKey(pchannelName, viewType, vchannel))
-	}
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
-		return c.metaKV.MultiRemove(ctx, partialRemoves)
-	})
-}
-
 // GetPChannelSummaryMeta gets the pchannel-level physical summary metadata.
 func (c *catalog) GetPChannelSummaryMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelSummaryMeta, error) {
 	key := buildPChannelSummaryMetaKey(pchannelName)
@@ -326,38 +246,6 @@ func (c *catalog) CompareAndSwapPChannelSummaryMeta(ctx context.Context, pchanne
 // RemovePChannelSummaryMeta removes the pchannel-level physical summary metadata.
 func (c *catalog) RemovePChannelSummaryMeta(ctx context.Context, pchannelName string) error {
 	return c.metaKV.Remove(ctx, buildPChannelSummaryMetaKey(pchannelName))
-}
-
-func normalizeVChannelSummaryMeta(pchannelName string, viewType string, vchannelName string, meta *streamingpb.VChannelSummaryMeta) (*streamingpb.VChannelSummaryMeta, string, error) {
-	if meta == nil {
-		return nil, "", merr.WrapErrServiceInternalMsg("nil vchannel summary meta")
-	}
-	if viewType == "" {
-		return nil, "", merr.WrapErrServiceInternalMsg("vchannel summary meta view type is empty")
-	}
-	stored := proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
-	if stored.GetPchannel() == "" {
-		stored.Pchannel = pchannelName
-	} else if stored.GetPchannel() != pchannelName {
-		return nil, "", merr.WrapErrServiceInternalMsg("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
-	}
-	if stored.GetViewType() == "" {
-		stored.ViewType = viewType
-	} else if stored.GetViewType() != viewType {
-		return nil, "", merr.WrapErrServiceInternalMsg("view type mismatch: path %s, meta %s", viewType, stored.GetViewType())
-	}
-	if stored.GetVchannel() == "" {
-		if vchannelName == "" {
-			return nil, "", merr.WrapErrServiceInternalMsg("vchannel is empty")
-		}
-		stored.Vchannel = vchannelName
-	} else {
-		if vchannelName != "" && stored.GetVchannel() != vchannelName {
-			return nil, "", merr.WrapErrServiceInternalMsg("vchannel mismatch: path %s, meta %s", vchannelName, stored.GetVchannel())
-		}
-		vchannelName = stored.GetVchannel()
-	}
-	return stored, vchannelName, nil
 }
 
 func normalizePChannelSummaryMeta(pchannelName string, meta *streamingpb.PChannelSummaryMeta) (*streamingpb.PChannelSummaryMeta, error) {
@@ -459,11 +347,6 @@ func buildSummaryStorePrefix(pchannelName string) string {
 	return buildWALPrefix(pchannelName) + DirectorySummaryStore + "/"
 }
 
-// buildVChannelSummaryMetaPrefix returns the prefix for all vchannel summary metadata of a view type under a pchannel.
-func buildVChannelSummaryMetaPrefix(pchannelName string, viewType string) string {
-	return buildSummaryStorePrefix(pchannelName) + DirectoryVChannelSummaryMeta + "/" + viewType + "/"
-}
-
 // Key functions: return exact keys for individual records.
 
 // buildVChannelKey returns the key for a specific vchannel's metadata.
@@ -479,11 +362,6 @@ func buildVChannelSchemaKey(pChannelName string, vchannelName string, version ui
 // buildSegmentAssignmentKey returns the key for a specific segment assignment.
 func buildSegmentAssignmentKey(pChannelName string, segmentID int64) string {
 	return buildSegmentAssignmentPrefix(pChannelName) + strconv.FormatInt(segmentID, 10)
-}
-
-// buildVChannelSummaryMetaKey returns the key for a specific vchannel summary metadata under a view type.
-func buildVChannelSummaryMetaKey(pchannelName string, viewType string, vchannelName string) string {
-	return buildVChannelSummaryMetaPrefix(pchannelName, viewType) + vchannelName
 }
 
 // buildPChannelSummaryMetaKey returns the key for pchannel-level physical summary metadata.

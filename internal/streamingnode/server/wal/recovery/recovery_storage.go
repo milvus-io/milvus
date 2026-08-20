@@ -33,15 +33,6 @@ type RecoverySnapshot struct {
 	// them into its dedup window, but nothing here is specific to that use. Rebuilt
 	// from the pchannel summary store during recovery, never persisted to etcd.
 	SummarySnapshots map[string]*VChannelSummarySnapshot
-	// pchannelSummaryRecords are pending physical summary records grouped by vchannel.
-	// They are written to pchannelSummaryChunk before advancing the pchannel consume checkpoint.
-	pchannelSummaryRecords map[string][]*streamingpb.SummaryEntry
-	// vchannelSummaryMetaUpdates are pending logical view metadata updates.
-	// They are persisted before PChannelSummaryMeta uses their GC boundary.
-	vchannelSummaryMetaUpdates map[string]*summaryMetaUpdate
-	// pchannelSummarySourceCheckpoint is the source pchannel checkpoint covered by
-	// the latest pchannelSummaryChunk. It is persisted before the pchannel consume checkpoint.
-	pchannelSummarySourceCheckpoint *WALCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.

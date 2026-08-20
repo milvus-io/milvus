@@ -112,7 +112,7 @@ func attachTestSummaryManager(rs *recoveryStorageImpl) {
 	if rs.cfg == nil {
 		rs.cfg = &config{}
 	}
-	rs.summaryManager = newSummaryManager(rs.channel.Name, rs.channel.Term, rs.cfg, rs.metrics, rs.checkpoint, summaryEvictionConfig{})
+	rs.summaryManager = newSummaryManager(rs.channel.Name, rs.channel.Term, rs.cfg, rs.metrics, summaryEvictionConfig{})
 }
 
 func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestRecoveryMetricsObserveIdempotencySnapshot(t *testing.T) {
+func TestRecoveryMetricsObserveIdempotencyPersist(t *testing.T) {
 	paramtable.Init()
 	channel := types.PChannelInfo{Name: "metrics-idempotency-pchannel", Term: 7}
 	m := newRecoveryStorageMetrics(channel)
@@ -19,15 +19,15 @@ func TestRecoveryMetricsObserveIdempotencySnapshot(t *testing.T) {
 
 	nodeID := paramtable.GetStringNodeID()
 	term := "7"
-	successCounter := pkgmetrics.WALIdempotencySnapshotTotal.WithLabelValues(nodeID, channel.Name, term, pkgmetrics.SuccessLabel)
-	failCounter := pkgmetrics.WALIdempotencySnapshotTotal.WithLabelValues(nodeID, channel.Name, term, pkgmetrics.FailLabel)
-	lagGauge := pkgmetrics.WALIdempotencySnapshotCheckpointLag.WithLabelValues(nodeID, channel.Name, term)
+	successCounter := pkgmetrics.WALIdempotencyPersistTotal.WithLabelValues(nodeID, channel.Name, term, pkgmetrics.SuccessLabel)
+	failCounter := pkgmetrics.WALIdempotencyPersistTotal.WithLabelValues(nodeID, channel.Name, term, pkgmetrics.FailLabel)
+	lagGauge := pkgmetrics.WALIdempotencyPersistWatermarkLag.WithLabelValues(nodeID, channel.Name, term)
 	successBefore := testutil.ToFloat64(successCounter)
 	failBefore := testutil.ToFloat64(failCounter)
 
-	m.ObserveIdempotencySnapshot(true)
-	m.ObserveIdempotencySnapshot(false)
-	m.ObserveIdempotencySnapshotCheckpointLag(3.5)
+	m.ObserveIdempotencyPersist(true)
+	m.ObserveIdempotencyPersist(false)
+	m.ObserveIdempotencyPersistWatermarkLag(3.5)
 
 	require.Equal(t, successBefore+1, testutil.ToFloat64(successCounter))
 	require.Equal(t, failBefore+1, testutil.ToFloat64(failCounter))

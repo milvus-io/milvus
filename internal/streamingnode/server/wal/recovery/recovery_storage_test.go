@@ -45,7 +45,6 @@ func TestRecoveryStorage(t *testing.T) {
 
 	vchannelMetas := make(map[string]*streamingpb.VChannelMeta)
 	segmentMetas := make(map[int64]*streamingpb.SegmentAssignmentMeta)
-	summaryMetas := make(map[string]*streamingpb.VChannelSummaryMeta)
 	var pchannelSummaryMeta *streamingpb.PChannelSummaryMeta
 	cp := &streamingpb.WALCheckpoint{
 		MessageId:     rmq.NewRmqID(1).IntoProto(),
@@ -62,11 +61,6 @@ func TestRecoveryStorage(t *testing.T) {
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.VChannelMeta, error) {
 		return lo.MapToSlice(vchannelMetas, func(_ string, v *streamingpb.VChannelMeta) *streamingpb.VChannelMeta {
 			return proto.Clone(v).(*streamingpb.VChannelMeta)
-		}), nil
-	})
-	snCatalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
-		return lo.MapToSlice(summaryMetas, func(_ string, v *streamingpb.VChannelSummaryMeta) *streamingpb.VChannelSummaryMeta {
-			return proto.Clone(v).(*streamingpb.VChannelSummaryMeta)
 		}), nil
 	})
 	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(cp, nil)
@@ -100,15 +94,6 @@ func TestRecoveryStorage(t *testing.T) {
 		}
 		if snapshot.ConsumeCheckpoint != nil {
 			cp = snapshot.ConsumeCheckpoint
-		}
-		return nil
-	})
-	snCatalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, viewType string, metas map[string]*streamingpb.VChannelSummaryMeta) error {
-		if rand.Int31n(3) == 0 {
-			return errors.New("save failed")
-		}
-		for k, v := range metas {
-			summaryMetas[k] = v
 		}
 		return nil
 	})

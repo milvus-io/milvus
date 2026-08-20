@@ -5,14 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type IdempotencyKey string
@@ -27,8 +23,6 @@ const (
 
 type WindowConfig struct {
 	Enabled      bool
-	WindowTTL    time.Duration
-	MinEntries   int
 	MaxBytes     int
 	MaxKeyLength int
 	Now          func() time.Time
@@ -37,27 +31,21 @@ type WindowConfig struct {
 type Window struct {
 	mu sync.Mutex
 
-	entries  map[IdempotencyKey]*streamingpb.SummaryEntry
+	entries  map[IdempotencyKey]*recovery.SummaryRecord
 	inflight map[IdempotencyKey]*PendingEntry
 
-	commitOrder          []IdempotencyKey
-	evictedWatermarkTT   uint64
-	snapshotCheckpointTT uint64
-	// ttlEvictBoundTT is the highest TTL eviction bound this window has ever been
-	// asked to apply (commitTT of "now" minus the TTL). Entries older than it are
-	// TTL-expired even when the minEntries floor still keeps them in memory; see
-	// servableLocked.
-	ttlEvictBoundTT uint64
+	commitOrder []IdempotencyKey
 
-	minEntries int
-	// maxBytes caps the total serialized size of retained entries (each entry
-	// carries the per-row PKs of its insert), overriding both the minEntries floor
-	// and the TTL horizon: entry COUNT alone cannot bound dedup-metadata memory.
+	// maxBytes is the only retention bound. Nothing is evicted while the window
+	// is under it; once it is reached, entries are replaced oldest-first by
+	// commit order. There is deliberately no TTL: a horizon expressed in time is
+	// invalidated by time passing, so after an outage the window would be empty
+	// exactly when a resuming client needs it. A byte bound is invalidated only
+	// by new data, which is the condition under which forgetting is safe.
 	// 0 disables the cap.
-	maxBytes  int
-	bytes     int
-	windowTTL time.Duration
-	now       func() time.Time
+	maxBytes int
+	bytes    int
+	now      func() time.Time
 }
 
 type PendingEntry struct {
@@ -82,19 +70,18 @@ const (
 type BeginResult struct {
 	Decision BeginDecision
 	Pending  *PendingEntry
-	Entry    *streamingpb.SummaryEntry
+	Entry    *recovery.SummaryRecord
 	Err      error
 }
 
 type CommitResult struct {
-	CommitTimeTick         uint64
-	MessageID              *commonpb.MessageID
-	LastConfirmedMessageID *commonpb.MessageID
-	IdempotentResult       *messagespb.IdempotentInsertResult
+	CommitTimeTick   uint64
+	MessageID        *commonpb.MessageID
+	IdempotentResult *messagespb.IdempotentInsertResult
 }
 
 type PendingResult struct {
-	Entry *streamingpb.SummaryEntry
+	Entry *recovery.SummaryRecord
 	Err   error
 	// OwnerResolved reports that this result was published by the owner
 	// (Complete or Fail), which necessarily happens after the owner's Build
@@ -111,12 +98,10 @@ func NewWindow(config WindowConfig) *Window {
 		now = time.Now
 	}
 	return &Window{
-		entries:    make(map[IdempotencyKey]*streamingpb.SummaryEntry),
-		inflight:   make(map[IdempotencyKey]*PendingEntry),
-		minEntries: config.MinEntries,
-		maxBytes:   config.MaxBytes,
-		windowTTL:  config.WindowTTL,
-		now:        now,
+		entries:  make(map[IdempotencyKey]*recovery.SummaryRecord),
+		inflight: make(map[IdempotencyKey]*PendingEntry),
+		maxBytes: config.MaxBytes,
+		now:      now,
 	}
 }
 
@@ -125,28 +110,19 @@ func NewWindowFromSnapshot(config WindowConfig, snapshot *recovery.VChannelSumma
 	if snapshot == nil {
 		return window
 	}
-	window.snapshotCheckpointTT = snapshot.SnapshotCheckpointTimetick
-	window.evictedWatermarkTT = snapshot.EvictedWatermarkTimetick
-	// The recovery-side store deliberately retains past-TTL entries (minEntries
-	// floor), so a restored window may hold entries that must no longer answer
-	// duplicates. Seed the TTL visibility bound from the snapshot checkpoint
-	// timetick — the latest clock the snapshot vouches for — so those entries
-	// are unservable immediately at WAL open instead of only after the first
-	// TimeTick sweep. The bound is conservative (checkpoint TT <= now) and
-	// evictLocked only ever advances it.
-	if config.WindowTTL > 0 {
-		window.ttlEvictBoundTT = evictBeforeCommitTT(window.snapshotCheckpointTT, config.WindowTTL)
-	}
-	for _, snapshotEntry := range snapshot.Entries {
-		if snapshotEntry == nil {
+	// Everything the store handed over is immediately servable, however old it
+	// is. That is the point of restoring it: an upstream resuming from its
+	// breakpoint after an outage must be deduplicated, and age is exactly the
+	// wrong reason to refuse.
+	for _, record := range snapshot.Records {
+		if record == nil || record.IdempotencyKey == "" {
 			continue
 		}
-		key := IdempotencyKey(snapshotEntry.GetIdempotency().GetKey())
-		window.entries[key] = snapshotEntry
-		window.bytes += proto.Size(snapshotEntry)
+		key := IdempotencyKey(record.IdempotencyKey)
+		window.entries[key] = record
+		window.bytes += record.Size()
 		window.commitOrder = append(window.commitOrder, key)
 	}
-	window.refreshEvictedWatermarkLocked()
 	return window
 }
 
@@ -154,18 +130,12 @@ func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResu
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// Retention is the only thing that decides visibility: an entry still held is
+	// still servable. Eviction removes entries; it never leaves an unservable one
+	// behind.
 	if entry, ok := w.entries[key]; ok {
-		if w.servableLocked(entry) {
-			observeWindowDuplicate(vchannelOf(msg))
-			return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
-		}
-		// TTL-expired but still held by the minEntries floor: serving it would make
-		// the floor extend duplicate visibility forever on quiet shards. For entries
-		// still retained in memory, duplicate visibility ends at the TTL bound. The
-		// hard maxBytes cap below is a stricter capacity limit and may remove an
-		// entry before TTL; that is a documented retention limitation, not an
-		// extension of the TTL answer.
-		w.dropEntryLocked(key)
+		observeWindowDuplicate(vchannelOf(msg))
+		return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
 	}
 
 	if pending, ok := w.inflight[key]; ok {
@@ -192,18 +162,17 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 		return false, 0
 	}
 
-	entry := &streamingpb.SummaryEntry{SourceMessageId: result.MessageID, SourceTimetick: result.CommitTimeTick, LastConfirmedMessageId: result.LastConfirmedMessageID, Idempotency: &streamingpb.IdempotencyContent{Key: string(pending.Key), InsertResult: result.IdempotentResult}}
+	entry := &recovery.SummaryRecord{
+		SourceMessageID: result.MessageID,
+		SourceTimeTick:  result.CommitTimeTick,
+		IdempotencyKey:  string(pending.Key),
+		InsertResult:    result.IdempotentResult,
+	}
 	delete(w.inflight, pending.Key)
 	w.entries[pending.Key] = entry
-	w.bytes += proto.Size(entry)
-	w.insertCommitOrderLocked(pending.Key, entry.GetSourceTimetick())
-	evicted := 0
-	if w.windowTTL > 0 {
-		evicted = w.evictLocked(evictBeforeCommitTT(entry.GetSourceTimetick(), w.windowTTL))
-	} else if w.maxBytes > 0 {
-		evicted = w.evictLocked(0)
-	}
-	w.refreshEvictedWatermarkLocked()
+	w.bytes += entry.Size()
+	w.insertCommitOrderLocked(pending.Key, entry.SourceTimeTick)
+	evicted := w.evictLocked()
 	observeWindowEviction(vchannelOf(msg), evicted)
 	observeWindowEntries(vchannelOf(msg), len(w.entries))
 	observeWindowInflight(vchannelOf(msg), len(w.inflight))
@@ -242,36 +211,6 @@ func (p *PendingEntry) Wait(ctx context.Context, msg message.MutableMessage) Pen
 	}
 }
 
-// Evict takes the vchannel name directly (not a message) so the idle-vchannel
-// TTL sweep — which has no message for the window it is sweeping — still
-// reports its evictions and refreshes the entry gauge.
-func (w *Window) Evict(evictBeforeTT uint64, vchannel string) int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	evicted := w.evictLocked(evictBeforeTT)
-	w.refreshEvictedWatermarkLocked()
-	observeWindowEviction(vchannel, evicted)
-	observeWindowEntries(vchannel, len(w.entries))
-	return evicted
-}
-
-// evictBeforeCommitTT derives the TTL eviction bound from the just-committed
-// entry's timetick instead of the local wall clock, so the live window and the
-// clock-free recovery-side window (evictBeforeTimetick in the recovery package)
-// retain the same key set under NTP skew. The physical guard keeps a timetick
-// younger than the TTL from underflowing into an evict-everything bound.
-func evictBeforeCommitTT(commitTT uint64, ttl time.Duration) uint64 {
-	if ttl <= 0 {
-		return 0
-	}
-	physical, logical := tsoutil.ParseHybridTs(commitTT)
-	msecs := ttl.Milliseconds()
-	if physical <= msecs {
-		return 0
-	}
-	return tsoutil.ComposeTS(physical-msecs, logical)
-}
-
 // insertCommitOrderLocked keeps commitOrder sorted by commit timetick.
 // Completion order is NOT commit-timetick order: this interceptor is outermost,
 // the timetick is assigned by the inner timetick interceptor, and concurrent
@@ -283,7 +222,7 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 	i := len(w.commitOrder)
 	for i > 0 {
 		prev, ok := w.entries[w.commitOrder[i-1]]
-		if ok && prev.GetSourceTimetick() <= commitTT {
+		if ok && prev.SourceTimeTick <= commitTT {
 			break
 		}
 		if !ok {
@@ -298,69 +237,20 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 	w.commitOrder[i] = key
 }
 
-// servableLocked reports whether an entry may still answer a duplicate hit.
-// For entries still retained in memory, the minEntries floor must not extend
-// duplicate visibility beyond the TTL bound. Hard capacity caps are different:
-// maxBytes may delete entries before TTL to bound memory, at which point there
-// is no entry left to serve.
-func (w *Window) servableLocked(entry *streamingpb.SummaryEntry) bool {
-	if w.windowTTL <= 0 || w.ttlEvictBoundTT == 0 {
-		return true
-	}
-	return entry.GetSourceTimetick() >= w.ttlEvictBoundTT
-}
-
-// dropEntryLocked removes a retained-but-unservable entry together with its
-// commitOrder slot. The slot must go too: Complete re-appends the key at its new
-// commit timetick, and a leftover old slot would resolve to that new entry and
-// stall eviction of everything queued behind it.
-func (w *Window) dropEntryLocked(key IdempotencyKey) {
-	if entry, ok := w.entries[key]; ok {
-		w.bytes -= proto.Size(entry)
-	}
-	delete(w.entries, key)
-	for i, ordered := range w.commitOrder {
-		if ordered == key {
-			w.commitOrder = append(w.commitOrder[:i], w.commitOrder[i+1:]...)
-			break
-		}
-	}
-	w.refreshEvictedWatermarkLocked()
-}
-
-func (w *Window) evictLocked(evictBeforeTT uint64) int {
-	if evictBeforeTT > w.ttlEvictBoundTT {
-		w.ttlEvictBoundTT = evictBeforeTT
-	}
+// evictLocked enforces the byte cap by replacing the oldest entries. It is the
+// only retention mechanism: entries are removed for capacity, never for age.
+func (w *Window) evictLocked() int {
 	evicted := 0
-	for len(w.entries) > w.minEntries && len(w.commitOrder) > 0 {
+	for w.maxBytes > 0 && w.bytes > w.maxBytes && len(w.commitOrder) > 0 {
 		key := w.commitOrder[0]
 		w.commitOrder = w.commitOrder[1:]
 		entry, ok := w.entries[key]
 		if !ok {
 			continue
 		}
-		if entry.GetSourceTimetick() >= evictBeforeTT {
-			w.commitOrder = append([]IdempotencyKey{key}, w.commitOrder...)
-			break
-		}
-		w.bytes -= proto.Size(entry)
+		w.bytes -= entry.Size()
 		delete(w.entries, key)
 		evicted++
-	}
-
-	// The byte cap is a hard bound: it overrides the minEntries floor and may
-	// shorten the effective dedup horizon below TTL, because a floor measured in
-	// entries cannot promise anything about memory when each entry carries an
-	// unbounded per-row PK list.
-	for w.maxBytes > 0 && w.bytes > w.maxBytes && len(w.commitOrder) > 0 {
-		key := w.commitOrder[0]
-		w.commitOrder = w.commitOrder[1:]
-		if entry, ok := w.entries[key]; ok {
-			w.bytes -= proto.Size(entry)
-			delete(w.entries, key)
-			evicted++
-		}
 	}
 	return evicted
 }
@@ -375,38 +265,4 @@ func (w *Window) InflightLen() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return len(w.inflight)
-}
-
-func (w *Window) EvictedWatermarkTT() uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.evictedWatermarkTT
-}
-
-func (w *Window) SnapshotCheckpointTT() uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.snapshotCheckpointTT
-}
-
-func (w *Window) SetSnapshotCheckpointTT(tt uint64) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.snapshotCheckpointTT = tt
-	w.refreshEvictedWatermarkLocked()
-}
-
-func (w *Window) refreshEvictedWatermarkLocked() {
-	for len(w.commitOrder) > 0 {
-		key := w.commitOrder[0]
-		entry, ok := w.entries[key]
-		if !ok {
-			w.commitOrder = w.commitOrder[1:]
-			continue
-		}
-		// The watermark is inclusive: it points to the oldest retained entry, not a strict evicted lower bound.
-		w.evictedWatermarkTT = entry.GetSourceTimetick()
-		return
-	}
-	w.evictedWatermarkTT = w.snapshotCheckpointTT
 }

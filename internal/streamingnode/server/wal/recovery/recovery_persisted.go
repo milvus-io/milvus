@@ -42,7 +42,8 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		}
 		r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	}
-	r.Logger().Info(ctx, "recover checkpoint done",
+	r.Logger().Info(
+		ctx, "recover checkpoint done",
 		mlog.String("checkpoint", r.checkpoint.MessageID.String()),
 		mlog.Uint64("timetick", r.checkpoint.TimeTick),
 		mlog.Int64("magic", r.checkpoint.Magic),
@@ -158,7 +159,8 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to save recovery snapshot to catalog")
 	}
-	r.Logger().Info(ctx, "initialize checkpoint done",
+	r.Logger().Info(
+		ctx, "initialize checkpoint done",
 		mlog.Int("vchannels", len(vchannels)),
 		mlog.String("checkpoint", checkpoint.MessageId.String()),
 		mlog.Uint64("timetick", checkpoint.TimeTick),

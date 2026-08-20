@@ -94,10 +94,10 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
 	}
-	rs.summaryManager = newSummaryManager(channel.Name, channel.Term, cfg, rs.metrics, cp, summaryEvictionConfig{
-		entryTTL:   cfg.idempotencyWindowTTL,
-		maxBytes:   cfg.idempotencyMaxBytes,
-		minEntries: cfg.idempotencyMinEntries,
+	rs.summaryManager = newSummaryManager(channel.Name, channel.Term, cfg, rs.metrics, summaryEvictionConfig{
+		// The store hands over everything it retained; the consumer decides how
+		// much of that to cache.
+		retainedBytes: cfg.idempotencyMinRetainedBytes,
 	})
 	return rs
 }
@@ -267,8 +267,11 @@ func (r *recoveryStorageImpl) consumeDirtySnapshotLocked() *RecoverySnapshot {
 }
 
 func (r *recoveryStorageImpl) hasDirtyRecoveryStateUnsafe() bool {
+	// A dirty summary is dirty recovery state: the chunk covering this
+	// checkpoint has to be written before the checkpoint is persisted, so the
+	// summary having something to write is itself a reason to persist.
 	return r.dirtyCounter > 0 || r.pendingSalvageCheckpoint != nil ||
-		r.summaryManager.canPersistConsumeCheckpoint(r.checkpoint, r.getFlusherCheckpointUnsafe())
+		r.summaryManager.hasDirtySummary()
 }
 
 // observeMessage observes a message and update the recovery storage.
@@ -288,7 +291,6 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	r.summaryManager.observeMessage(msg)
 
 	r.updateCheckpoint(ctx, msg)
-	r.summaryManager.advancePChannelSummarySnapshotCheckpoint(r.checkpoint)
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
 	if !msg.IsPersisted() {

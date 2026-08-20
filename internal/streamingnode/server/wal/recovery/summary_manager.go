@@ -2,7 +2,6 @@ package recovery
 
 import (
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -10,10 +9,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
+// summaryEvictionConfig bounds what a replay may materialize before the
+// consumer takes ownership. It is not a retention policy: retention on the
+// consumer side is the window's own byte cap, and on the durable side a byte
+// budget over the manifest.
 type summaryEvictionConfig struct {
-	entryTTL   time.Duration
-	maxBytes   int
-	minEntries int
+	retainedBytes int
 }
 
 type summaryManager struct {
@@ -34,29 +35,42 @@ type summaryManager struct {
 	// acquires rs.mu, so the ordering is one-directional and deadlock-free.
 	mu                            sync.Mutex
 	summaryBackgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
-	summarySnapshotCheckpoint     trackedCheckpoint
-	persistedConsumeCheckpoint    *WALCheckpoint
 	vchannelSummaries             map[string]*vchannelSummary
 	activeViewsInitialized        bool
-	// droppedSummaryVChannels queues vchannels whose summaries were reclaimed; the
-	// background task removes their persisted summary metas batched (guarded by mu).
-	droppedSummaryVChannels           []string
-	recoveryMode                      bool
-	evictionConfig                    summaryEvictionConfig
-	pendingIdempotencyPersistSnapshot *RecoverySnapshot
+	recoveryMode                  bool
+	evictionConfig                summaryEvictionConfig
+
+	// manifest is the live description of the chunk set: what recovery reads,
+	// what a lazy reader indexes by, and what GC deletes. It is rewritten by
+	// inheriting itself and amending, never rebuilt from scratch.
+	manifest *streamingpb.PChannelSummaryManifest
+	// nextGeneration is the generation the next chunk will claim. It advances in
+	// memory: the meta is not consulted per chunk, because the meta is allowed to
+	// lag and reading it on the write path would put etcd on the persist path.
+	nextGeneration uint64
+	// latestCoveredTT is the newest source timetick a chunk has covered. The
+	// retention TTL horizon is derived from it rather than the wall clock, so
+	// retention measures time the way the write path does and simply stops
+	// advancing while the channel is idle.
+	latestCoveredTT uint64
+	// completedGC records the chunks the GC worker finished deleting. They are
+	// dropped from the manifest at the next write, so a crash before that only
+	// replays deletes that are already no-ops.
+	completedGC map[pchannelSummaryGCRef]struct{}
 }
 
-func newSummaryManager(pchannel string, term int64, cfg *config, metrics *recoveryMetrics, persistedConsumeCheckpoint *WALCheckpoint, evictionCfg summaryEvictionConfig) *summaryManager {
+func newSummaryManager(pchannel string, term int64, cfg *config, metrics *recoveryMetrics, evictionCfg summaryEvictionConfig) *summaryManager {
 	return &summaryManager{
 		pchannel:                      pchannel,
 		term:                          term,
 		cfg:                           cfg,
 		metrics:                       metrics,
 		summaryBackgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
-		persistedConsumeCheckpoint:    cloneWALCheckpoint(persistedConsumeCheckpoint),
 		vchannelSummaries:             make(map[string]*vchannelSummary),
 		recoveryMode:                  true,
 		evictionConfig:                evictionCfg,
+		manifest:                      &streamingpb.PChannelSummaryManifest{},
+		completedGC:                   make(map[pchannelSummaryGCRef]struct{}),
 	}
 }
 
@@ -86,17 +100,6 @@ func (m *summaryManager) setSummaries(summaries map[string]*vchannelSummary) {
 	m.vchannelSummaries = summaries
 }
 
-func (m *summaryManager) initializeSummariesFromMeta(
-	vchannels map[string]*vchannelRecoveryInfo,
-	checkpoint *WALCheckpoint,
-	metas []*streamingpb.VChannelSummaryMeta,
-) {
-	m.resetSummaries()
-	m.setPChannelSummarySnapshotCheckpoint(checkpoint)
-	m.ensureActiveSummaries(vchannels, checkpoint)
-	m.applyRecoveredSummaryMetas(metas)
-}
-
 func (m *summaryManager) setSummary(vchannel string, state *vchannelSummary) {
 	if vchannel == "" || state == nil {
 		return
@@ -112,20 +115,14 @@ func (m *summaryManager) getOrCreateSummary(vchannel string, checkpoint *WALChec
 		return state
 	}
 	state := newEmptyVChannelSummary(m.pchannel, vchannel, checkpoint)
-	// The view's retention policy drives the durable-retention ledger, which
-	// decides how far back chunks stay recoverable across restarts.
-	state.evictionCfg = m.evictionConfig
 	m.vchannelSummaries[vchannel] = state
 	return state
 }
 
-// removeSummary drops the in-memory summary for a reclaimed (dropped)
-// vchannel. Without this, m.vchannelSummaries grows without bound under collection
-// create/drop churn and every per-message / per-timetick scan keeps walking dead
-// summaries. The vchannel's persisted summary meta is NOT removed here (that would
-// mean catalog IO on the drop hot path); the vchannel is queued and the summary
-// background task drains the removals batched (drainDroppedSummaryMetas), so
-// dropped vchannels do not leave permanent etcd keys behind either.
+// removeSummary drops the in-memory summary for a reclaimed (dropped) vchannel.
+// Without it, m.vchannelSummaries grows without bound under collection
+// create/drop churn and every per-message scan keeps walking dead summaries.
+// Nothing is persisted per vchannel, so there is nothing else to clean up.
 func (m *summaryManager) removeSummary(vchannel string) {
 	if m == nil || vchannel == "" {
 		return
@@ -133,7 +130,6 @@ func (m *summaryManager) removeSummary(vchannel string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.vchannelSummaries, vchannel)
-	m.droppedSummaryVChannels = append(m.droppedSummaryVChannels, vchannel)
 }
 
 // ensureActiveSummaries advances every existing summary and creates a
@@ -156,7 +152,7 @@ func (m *summaryManager) ensureActiveSummaries(vchannels map[string]*vchannelRec
 
 func (m *summaryManager) advanceAllSummaryCheckpointsUnsafe(checkpoint *WALCheckpoint) {
 	for _, state := range m.summaries() {
-		state.advanceCheckpointTo(checkpoint)
+		state.advanceAppliedTo(checkpoint)
 	}
 }
 
@@ -176,15 +172,13 @@ func (m *summaryManager) observeMessage(msg message.ImmutableMessage) {
 	}
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		for _, summary := range summaries {
-			summary.advanceCheckpoint(msg)
-			// Time passing expires ledger generations by TTL; recompute the
-			// chunk-retention boundary so GC keeps advancing on idle vchannels.
-			summary.refreshMinRequiredGeneration()
+			summary.advanceApplied(msg.TimeTick())
 		}
 		if m.recoveryMode {
-			evictBeforeTT := evictBeforeTimetick(msg.TimeTick(), m.evictionConfig.entryTTL)
+			// Bound what a replay may materialize before the consumer takes over
+			// and applies its own cap. Not a retention decision.
 			for _, summary := range summaries {
-				summary.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxBytes)
+				summary.capRecoveryBytes(m.evictionConfig.retainedBytes)
 			}
 		}
 		return
@@ -206,83 +200,6 @@ func (m *summaryManager) hasDirtySummaryUnsafe() bool {
 	return false
 }
 
-func (m *summaryManager) consumePendingSummaryEntries() (map[string][]*streamingpb.SummaryEntry, map[string]*summaryMetaUpdate, *WALCheckpoint) {
-	if len(m.summaries()) == 0 || !m.hasDirtySummaryUnsafe() {
-		return nil, nil, nil
-	}
-	recordsByVChannel := make(map[string][]*streamingpb.SummaryEntry)
-	metaUpdates := make(map[string]*summaryMetaUpdate)
-	for _, summary := range m.summaries() {
-		records, metaUpdate := summary.consumePendingSummaryEntries()
-		if len(records) > 0 {
-			recordsByVChannel[summary.vchannel] = records
-		}
-		if metaUpdate != nil {
-			metaUpdates[summary.vchannel] = metaUpdate
-		}
-	}
-	return recordsByVChannel, metaUpdates, m.getPChannelSummarySnapshotCheckpointUnsafe()
-}
-
-func (m *summaryManager) applyRecoveredSummaryMetas(metas []*streamingpb.VChannelSummaryMeta) {
-	for _, meta := range metas {
-		if meta == nil || meta.GetVchannel() == "" {
-			continue
-		}
-		state, ok := m.summaries()[meta.GetVchannel()]
-		if !ok {
-			continue
-		}
-		state.latestAppliedGeneration = maxUint64(state.latestAppliedGeneration, meta.GetLatestAppliedGeneration())
-		state.minRequiredGeneration = meta.GetMinRequiredGeneration()
-	}
-}
-
-func (m *summaryManager) markSummariesPersisted(recordsByVChannel map[string][]*streamingpb.SummaryEntry, metas map[string]*streamingpb.VChannelSummaryMeta, generation uint64) {
-	if generation == 0 && len(recordsByVChannel) == 0 && len(metas) == 0 {
-		return
-	}
-	for vchannel, records := range recordsByVChannel {
-		if summary, ok := m.summaries()[vchannel]; ok {
-			summary.markSummaryEntriesPersisted(records, generation)
-		}
-	}
-	for vchannel, meta := range metas {
-		if summary, ok := m.summaries()[vchannel]; ok && meta != nil {
-			summary.latestAppliedGeneration = maxUint64(summary.latestAppliedGeneration, meta.GetLatestAppliedGeneration())
-			summary.minRequiredGeneration = meta.GetMinRequiredGeneration()
-		}
-	}
-	for _, summary := range m.summaries() {
-		summary.latestAppliedGeneration = maxUint64(summary.latestAppliedGeneration, generation)
-		summary.refreshMinRequiredGeneration()
-	}
-}
-
-// minRequiredGeneration returns the lowest min-required generation across the
-// idempotency summaries (and any supplied per-vchannel meta overrides), plus
-// whether any summary contributed a boundary. persistedGeneration is the
-// generation about to be persisted, used to project a summary's boundary forward.
-func (m *summaryManager) minRequiredGeneration(summaryMetas map[string]*streamingpb.VChannelSummaryMeta, persistedGeneration uint64) (uint64, bool) {
-	aggregator := minRequiredGenerationAggregator{}
-	overriddenSummaries := make(map[string]struct{}, len(summaryMetas))
-	for vchannel, meta := range summaryMetas {
-		if meta == nil {
-			continue
-		}
-		overriddenSummaries[vchannel] = struct{}{}
-		aggregator.Observe(meta)
-	}
-
-	for vchannel, summary := range m.summaries() {
-		if _, ok := overriddenSummaries[vchannel]; ok {
-			continue
-		}
-		aggregator.Observe(summary.summaryMetaAtGeneration(persistedGeneration))
-	}
-	return aggregator.Value(), aggregator.Initialized()
-}
-
 func (m *summaryManager) markActiveViewsInitialized() {
 	m.activeViewsInitialized = true
 }
@@ -291,12 +208,10 @@ func (m *summaryManager) setNormalMode() {
 	m.recoveryMode = false
 }
 
-// evictPersistedEntries drops every already-persisted entry from each
-// idempotency summary's in-memory staging buffer. It is keyed off persistence
-// progress (an entry's generation being assigned), not the chunk-GC / in-use
-// boundary: whether an entry is persisted and whether a chunk is still in use
-// are independent concerns.
-func (m *summaryManager) evictPersistedEntries() {
+// evictPersistedRecords releases each vchannel's staging buffer once its
+// contents are in a written chunk. Whether a chunk is still in use is a separate
+// concern and is decided by retention, not here.
+func (m *summaryManager) evictPersistedRecords() {
 	if m.recoveryMode {
 		return
 	}
@@ -305,29 +220,13 @@ func (m *summaryManager) evictPersistedEntries() {
 	}
 }
 
-type minRequiredGenerationAggregator struct {
-	minimum     uint64
-	initialized bool
-}
-
-func (a *minRequiredGenerationAggregator) Observe(meta *streamingpb.VChannelSummaryMeta) {
-	if meta == nil {
-		return
+// hasDirtySummary reports whether any vchannel has committed facts not yet
+// carried by a chunk.
+func (m *summaryManager) hasDirtySummary() bool {
+	if m == nil || !m.cfg.idempotencyEnabled {
+		return false
 	}
-	generation := meta.GetMinRequiredGeneration()
-	if !a.initialized || generation < a.minimum {
-		a.minimum = generation
-		a.initialized = true
-	}
-}
-
-func (a *minRequiredGenerationAggregator) Value() uint64 {
-	if !a.initialized {
-		return 0
-	}
-	return a.minimum
-}
-
-func (a *minRequiredGenerationAggregator) Initialized() bool {
-	return a.initialized
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hasDirtySummaryUnsafe()
 }
