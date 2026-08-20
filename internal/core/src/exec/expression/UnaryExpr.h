@@ -1048,6 +1048,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
+    bool
     IsSource() const override {
         return true;
     }
@@ -1141,7 +1146,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow(OffsetVector* input = nullptr);
+    PreCheckOverflow(int64_t batch_size, OffsetVector* input = nullptr);
 
     template <typename T>
     bool
