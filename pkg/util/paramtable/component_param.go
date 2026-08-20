@@ -5563,6 +5563,7 @@ type dataCoordConfig struct {
 	MaxFilesPerImportReq            ParamItem `refreshable:"true"`
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
+	RefreshWaitForIndex             ParamItem `refreshable:"true"`
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
@@ -6872,6 +6873,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.WaitForIndex.Init(base.mgr)
+
+	p.RefreshWaitForIndex = ParamItem{
+		Key:     "dataCoord.externalCollection.refreshWaitForIndex",
+		Version: "3.0.0",
+		Doc: `Hold an external-collection refresh in progress until every segment it produced is indexed.
+Off, a refresh completes when its data lands, and queries meet the new segments before their indexes exist -
+correct, but brute-force-scanned. On, the job stays InProgress (progress 90-100 tracks index building) and the
+refreshed data becomes visible only once it is servable at indexed speed. Deployments that load collections on
+demand per query cluster enable this: their queries have no warm replica to hide the unindexed window behind.`,
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.RefreshWaitForIndex.Init(base.mgr)
 
 	p.ImportInReplicatingCluster = ParamItem{
 		Key:          "dataCoord.import.enableInReplicatingCluster",
