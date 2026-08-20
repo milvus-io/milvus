@@ -150,6 +150,14 @@ class FMIndex {
     std::string
     Extract(uint64_t doc_id, uint64_t offset, size_t len) const;
 
+    // Build isa_sample_ if it is still empty. The scalar wrapper calls this on
+    // the single-threaded load/build path so cache cell size includes Extract
+    // storage before any query. Thread-safe; a no-op after the first call.
+    void
+    MaterializeIsaSample() const {
+        ensureIsaSample();
+    }
+
     // The longest substring of `query` that occurs in the corpus (fuzzy / partial
     // contamination: "how long a span of this benchmark item appears in training",
     // which catches paraphrased or truncated overlaps that an exact n-gram misses).
@@ -275,11 +283,10 @@ class FMIndex {
     // Data-sized heap storage retained by the index. For LoadView this excludes
     // every array viewed from the mmap blob and includes only rebuilt rank
     // directories and small derived metadata. Deserialize additionally owns
-    // owned_blob_. Lazy Extract ISA storage is included once materialized.
+    // owned_blob_. Extract ISA storage is included once materialized.
     size_t
     resident_heap_bytes() const {
-        return wm_.resident_heap_bytes() +
-               c_.capacity() * sizeof(uint64_t) +
+        return wm_.resident_heap_bytes() + c_.capacity() * sizeof(uint64_t) +
                first_.capacity() * sizeof(size_t) +
                sampled_bv_.resident_heap_bytes() +
                sample_vals_narrow_owned_.capacity() * sizeof(uint32_t) +
@@ -359,7 +366,8 @@ class FMIndex {
     suffixDocInterval(const uint8_t* pattern, size_t plen) const;
     // Rebuild the (small) in-RAM-only structures derived from the serialized
     // fields: id_to_byte_ (from byte_to_id_). Called after Build and after a
-    // load. isa_sample_ is NOT built here — see ensureIsaSample().
+    // load. isa_sample_ is NOT built here — see ensureIsaSample() /
+    // MaterializeIsaSample().
     void
     buildDerived();
     // Build isa_sample_ on first use (Extract is its only consumer). Thread-safe
@@ -432,9 +440,10 @@ class FMIndex {
     std::vector<uint8_t>
         id_to_byte_;  // dense id -> byte (inverse of byte_to_id_)
     // isa_sample_[k] = row whose SA value = k*rate. Only Extract needs it, and
-    // building it walks ALL m rows (an O(m) pass + m/rate x 8 B of heap) — so it
-    // is built LAZILY on the first Extract call (thread-safe via isa_once_),
-    // never at load time. Locate/Count/prefix/suffix never touch it.
+    // building it walks ALL m rows (an O(m) pass + m/rate x 8 B of heap). The
+    // library still builds it lazily on first Extract. The scalar wrapper calls
+    // MaterializeIsaSample at load/build so cache accounting sees that heap
+    // before any query.
     mutable std::vector<uint64_t> isa_sample_;
     mutable std::unique_ptr<std::once_flag> isa_once_ =
         std::make_unique<std::once_flag>();

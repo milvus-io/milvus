@@ -208,11 +208,11 @@ TEST(FMIndex, CountFirstGuardDeclinesHighHitPatterns) {
     // Empty literal (LIKE '%', or a caller without literal information):
     // always accelerate. Answered by an O(rows) bitmap clone.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::PrefixMatch, ""));
-    // General LIKE: rarest fragment uses the same occ bound. Absent fragment
-    // (occ 0) accelerates. High-hit fragment declines. No literal fragment
-    // (`%`, `%_%`) declines to brute force.
+    // General LIKE: occ 0 still accelerates. A hit also pays full-row Extract
+    // per candidate, so %RARE% (5 hits x ~500 B rows) declines even though
+    // InnerMatch on the same fragment accepts. No literal fragment declines.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%QQQQ%"));
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%COMMON%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%x%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%"));
@@ -271,9 +271,11 @@ TEST(FMIndex, CountFirstGuardAcceleratesLowHitAndMatchesAreExact) {
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, "QUOKKA"));
     EXPECT_TRUE(Inner(idx.get(), "QUOKKA").empty());
 
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%ZEBRA%"));
+    // Extract recheck makes Match decline here (4 x ~500 B rows). PatternMatch
+    // is still exact when the executor falls back to the scan.
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%ZEBRA%"));
     EXPECT_EQ(Match(idx.get(), "%ZEBRA%"), zebra);
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "QOP%ZEBRA"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "QOP%ZEBRA"));
     EXPECT_TRUE(Match(idx.get(), "QOP%ZEBRA").empty());
 }
 
@@ -785,8 +787,13 @@ RunRoundTrip(bool enable_mmap) {
     EXPECT_EQ(idx->Count(), 9);
     if (enable_mmap) {
         EXPECT_EQ(idx->CellByteSize().memory_bytes, idx->ByteSize());
-        EXPECT_LT(idx->CellByteSize().memory_bytes, kEstimatedMemory / 2);
         EXPECT_EQ(idx->CellByteSize().file_bytes, kEstimatedFile);
+        const auto bytes_after_load = idx->ByteSize();
+        EXPECT_GT(bytes_after_load, 0);
+        // ISA is materialized at load. A later Extract must not grow the cell.
+        (void)Match(idx.get(), "%app%");
+        EXPECT_EQ(idx->ByteSize(), bytes_after_load);
+        EXPECT_EQ(idx->CellByteSize().memory_bytes, bytes_after_load);
     } else {
         // This change targets LoadView: the copy path keeps its pre-load cache
         // accounting unchanged.
@@ -1187,8 +1194,8 @@ TEST(FMIndex, MatchGuardDeclinesUnselectiveAndStillExact) {
     auto idx = MakeRawDataIndex(data);
 
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%x%"));
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%x%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%x%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%_%"));
 
     LikePatternMatcher rare("%RARE%");
@@ -1207,4 +1214,40 @@ TEST(FMIndex, MatchGuardDeclinesUnselectiveAndStillExact) {
         }
     }
     EXPECT_EQ(Match(idx.get(), "%x%"), every_expected);
+}
+
+// Locate-only would accept a single rare hit (occ x sr < ratio x tokens). Match
+// also pays Extract of each candidate row, so the same fragment declines.
+TEST(FMIndex, MatchGuardDeclinesWhenExtractDominates) {
+    std::vector<std::string> data;
+    std::string filler(2000, 'y');
+    data.reserve(100);
+    for (int i = 0; i < 100; i++) {
+        std::string row = filler;
+        if (i == 0) {
+            row += "RARE";
+        }
+        data.push_back(std::move(row));
+    }
+    auto idx = MakeRawDataIndex(data);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, "RARE"));
+    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_EQ(Match(idx.get(), "%RARE%"), (std::vector<int64_t>{0}));
+}
+
+// Short rows, one rare hit: Extract is cheap enough that Match still accelerates.
+TEST(FMIndex, MatchGuardAcceptsRareFragmentOnShortRows) {
+    std::vector<std::string> data;
+    std::string filler(200, 'y');
+    data.reserve(5000);
+    for (int i = 0; i < 5000; i++) {
+        std::string row = filler;
+        if (i == 0) {
+            row += "RARE";
+        }
+        data.push_back(std::move(row));
+    }
+    auto idx = MakeRawDataIndex(data);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_EQ(Match(idx.get(), "%RARE%"), (std::vector<int64_t>{0}));
 }

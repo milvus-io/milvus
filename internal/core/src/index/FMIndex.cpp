@@ -250,7 +250,8 @@ FMIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     // this single-threaded build path, so the concurrent const query path never
     // races on a lazy write.
     ComputeTotalTokens();
-    ComputeByteSize();
+    fm_.MaterializeIsaSample();
+    RefreshResidentSize();
 
     LOG_INFO("FM index build done, field id: {}, total rows: {}",
              field_id_,
@@ -279,20 +280,31 @@ FMIndex::BuildWithRawDataForUT(size_t n,
 
     // total_tokens is derived from the built blob, so compute after Build.
     ComputeTotalTokens();
-    ComputeByteSize();
+    fm_.MaterializeIsaSample();
+    RefreshResidentSize();
 }
 
 void
 FMIndex::ComputeByteSize() {
     // Mmap-backed serialized arrays are accounted as file bytes by the cache,
     // not heap memory. fm_ reports only allocations it owns; the wrapper adds
-    // its row-sized null bitmap.
+    // its row-sized null bitmap. ISA storage is included because load/build
+    // call MaterializeIsaSample before this.
     const size_t bytes =
         fm_.resident_heap_bytes() + null_bitmap_.size_in_bytes();
     cached_byte_size_ =
         bytes > static_cast<size_t>(std::numeric_limits<int64_t>::max())
             ? std::numeric_limits<int64_t>::max()
             : static_cast<int64_t>(bytes);
+}
+
+void
+FMIndex::RefreshResidentSize() {
+    ComputeByteSize();
+    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+        const auto estimated_cell = CellByteSize();
+        SetCellSize({ByteSize(), estimated_cell.file_bytes});
+    }
 }
 
 TargetBitmap
@@ -337,9 +349,16 @@ FMIndex::MatchGuardAccepts(const std::string& pattern) const {
     }
     const double ratio = static_cast<double>(
         segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
-    return static_cast<double>(occ) *
-               static_cast<double>(fm_.sa_sample_rate()) <
-           ratio * static_cast<double>(TotalTokens());
+    const double tokens = static_cast<double>(TotalTokens());
+    const double sr = static_cast<double>(fm_.sa_sample_rate());
+    int64_t non_null = total_rows_ - static_cast<int64_t>(null_bitmap_.count());
+    if (non_null < 1) {
+        non_null = 1;
+    }
+    const double avg_row = tokens / static_cast<double>(non_null);
+    // Locate is occ x sr LF steps. Recheck then Extract-walks each candidate
+    // row (occ x avg_row LF steps). The anchored-op ratio only priced locate.
+    return static_cast<double>(occ) * (sr + avg_row) < ratio * tokens;
 }
 
 const TargetBitmap
@@ -779,18 +798,11 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
     }
 
     // Guard token total, derived from the loaded blob (bwt_size); needs fm_ valid
-    // (asserted above), so compute it here at the end of the load path.
+    // (asserted above), so compute it here at the end of the load path. ISA is
+    // built here so cache cell size includes Extract storage before any query.
     ComputeTotalTokens();
-
-    ComputeByteSize();
-    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
-        // Admission used the conservative pre-load estimate. Once LoadView has
-        // rebuilt its directories, replace only the memory component with the
-        // measured resident heap. Preserve file_bytes: it accounts for the
-        // staged mmap file and is independent of heap residency.
-        const auto estimated_cell = CellByteSize();
-        SetCellSize({ByteSize(), estimated_cell.file_bytes});
-    }
+    fm_.MaterializeIsaSample();
+    RefreshResidentSize();
 
     LOG_INFO("LoadEntries FM index done, field id: {}, total rows: {}",
              field_id_,

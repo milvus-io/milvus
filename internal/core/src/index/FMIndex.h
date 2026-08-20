@@ -200,7 +200,9 @@ class FMIndex : public ScalarIndex<std::string> {
     //    An empty pattern means EITHER `LIKE '%'` (answered by an O(rows)
     //    bitmap clone, always accelerate) OR a caller without literal
     //    information — both accelerate, so no flag is needed to tell them
-    //    apart.
+    //    apart. Match is not covered by that locate-only calibration: recheck
+    //    also pays one full-row Extract per candidate, so MatchGuardAccepts
+    //    adds occ x avg_row_bytes to the left-hand side.
     bool
     ShouldUseOp(proto::plan::OpType op,
                 const std::string& pattern = "") const override {
@@ -279,10 +281,16 @@ class FMIndex : public ScalarIndex<std::string> {
  private:
     // Count-first guard for general LIKE (Match). Empty pattern (caller has no
     // literal yet) stays on the allowlist. A pattern with no literal fragment
-    // (`%`, `%_%`) declines. Otherwise the rarest fragment is scored with the
-    // same occ x sa_sample_rate < ratio x tokens bound as the anchored ops.
+    // (`%`, `%_%`) declines. Otherwise the rarest fragment is scored as
+    // occ x (sa_sample_rate + avg_row_bytes) < ratio x tokens: locate plus one
+    // full-row Extract per candidate. The anchored-op ratio was not calibrated
+    // for Extract; the extra term is what keeps Match from beating the scan
+    // on locate count alone while losing on recheck.
     bool
     MatchGuardAccepts(const std::string& pattern) const;
+
+    void
+    RefreshResidentSize();
 
     // Occurrence/document count for `pattern` under `op`, answered by backward
     // search ALONE — O(|pattern|), NO suffix-array locate. The guard's input:
