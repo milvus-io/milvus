@@ -21,15 +21,16 @@ func TestRecoveryMetricsObserveIdempotencyPersist(t *testing.T) {
 	term := "7"
 	successCounter := pkgmetrics.WALIdempotencyPersistTotal.WithLabelValues(nodeID, channel.Name, term, pkgmetrics.SuccessLabel)
 	failCounter := pkgmetrics.WALIdempotencyPersistTotal.WithLabelValues(nodeID, channel.Name, term, pkgmetrics.FailLabel)
-	lagGauge := pkgmetrics.WALIdempotencyPersistWatermarkLag.WithLabelValues(nodeID, channel.Name, term)
 	successBefore := testutil.ToFloat64(successCounter)
 	failBefore := testutil.ToFloat64(failCounter)
 
+	pendingGC := pkgmetrics.WALIdempotencyPendingGC.WithLabelValues(nodeID, channel.Name, term)
+
 	m.ObserveIdempotencyPersist(true)
 	m.ObserveIdempotencyPersist(false)
-	m.ObserveIdempotencyPersistWatermarkLag(3.5)
+	m.ObserveIdempotencyPendingGC(4)
 
 	require.Equal(t, successBefore+1, testutil.ToFloat64(successCounter))
 	require.Equal(t, failBefore+1, testutil.ToFloat64(failCounter))
-	require.Equal(t, 3.5, testutil.ToFloat64(lagGauge))
+	require.Equal(t, float64(4), testutil.ToFloat64(pendingGC))
 }

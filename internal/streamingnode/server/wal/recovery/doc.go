@@ -4,47 +4,58 @@
 //
 // # The summary store
 //
-// The summary store is a business-agnostic record of what a pchannel durably
+// The summary store is a consumer-agnostic record of what a pchannel durably
 // wrote. It is deliberately NOT named after any consumer: it stores committed
-// write facts (source message id, timetick, primary keys, and whatever extra
-// payload a write carried), and applications build their own views on top.
-// Today the idempotency interceptor materializes a write-dedup window from
-// these entries; a primary-key index view is the second planned consumer, which
-// is why every logical meta is scoped by a view_type.
+// write facts (source message id, timetick, last-confirmed position, primary
+// keys, and whatever a view adds on top), and applications build their own
+// views from them. Today the idempotency interceptor materializes a write-dedup
+// window; a primary-key index is the second planned consumer.
 //
 // Layout, from the outside in:
 //
-//   - One object per generation, at pchannel level:
-//     <minio-root>/streamingnode/summary-store/<pchannel>/chunks/<generation>-<term>
-//   - Inside that object: a footer indexing N per-vchannel chunks, each entry
-//     giving that chunk's offset, length, checksum, record count and source
-//     timetick range. The chunk itself holds summary entrys, nothing
-//     else.
-//   - In etcd: one PChannelSummaryMeta per pchannel (generations, manifest,
-//     owner term) plus one VChannelSummaryMeta per (view_type, vchannel)
-//     recording that view's checkpoint hint and the oldest generation it still
-//     needs.
+//   - In etcd, one PChannelSummaryMeta per pchannel, carrying the owner's WAL
+//     assignment term and nothing else. It is not a checkpoint and not an
+//     inventory: it only gives recovery a floor when it probes for the newest
+//     manifest.
+//   - In object storage, one manifest per term:
+//     <root>/streamingnode/summary-store/<pchannel>/<pchannel>.manifest.<term>
+//     It lists every chunk recovery may read and every chunk queued for
+//     deletion. It is the only index into the chunk set.
+//   - In object storage, one chunk object per generation:
+//     <root>/streamingnode/summary-store/<pchannel>/chunks/chunk.<gen>.term<term>.psc
+//
+// Inside a chunk, a vchannel's records are stored as SEPARATE SECTIONS rather
+// than one message — the idempotency annotation (key, row offsets) in one, the
+// write itself (identity and primary keys) in another — each located by its own
+// {offset, length, record_count} ref in the footer. A consumer range-reads only
+// the section it needs, which is what lets a future primary-key index reuse the
+// stored primary keys instead of writing its own copy. Sections of one vchannel
+// correspond by position; they are built in one pass over one sorted slice, so
+// they cannot disagree.
 //
 // A physical WAL position is recorded only at pchannel level. Everything below
-// it is addressed by timetick, and which chunk generation to open is decided by
-// min_required_generation.
+// it is addressed by timetick.
 //
-// For everything that crosses a storage or process boundary, the generated
-// protobuf types ARE the model — there is no parallel set of Go structs
-// mirroring them. A record read out of a chunk is the same
-// *streamingpb.SummaryEntry the chunk stored, so nothing is copied between
-// shapes and the two cannot drift. Add fields to the proto, not to a wrapper.
+// There is no persist watermark. A chunk is written synchronously from the WAL
+// checkpoint's dirty persist, BEFORE that checkpoint is saved, so the consume
+// checkpoint is itself the boundary between what a chunk holds and what the WAL
+// still holds. Nothing records a second position, nothing clamps the
+// checkpoint, and recovery never rewinds.
 //
-// The converse also holds: what never crosses such a boundary does NOT get a
-// message in streaming.proto. VChannelSummarySnapshot — what recovery hands a
-// view at WAL open — is built, consumed once in-process, and dropped; it is a
-// plain Go struct, and a proto there would advertise a wire contract that does
-// not exist. It still carries *streamingpb.SummaryEntry values, unconverted.
+// # Model boundaries
 //
-// Naming convention in this package: "summary" is the durable, application-
-// neutral data; "window" belongs to the idempotency interceptor, which is the
-// application that turns summary entries into a dedup window with a TTL and a
-// byte cap. A type or file here should never be named after the window.
+// For everything that crosses a storage boundary, the generated protobuf types
+// ARE the model. What never crosses one does NOT get a message in
+// streaming.proto: SummaryRecord and VChannelSummarySnapshot are plain Go
+// structs, built and consumed in-process, and a proto there would advertise a
+// wire contract that does not exist. SummaryRecord is also why the section split
+// lives only in the codec — in memory there is no partial consumer, so whoever
+// holds a record holds all of it.
+//
+// Naming convention in this package: "summary" is the durable, consumer-neutral
+// data; "window" belongs to the idempotency interceptor, which is the consumer
+// that turns summary records into a dedup window with a byte cap. A type or file
+// here should never be named after the window.
 //
 // # File groups
 //
@@ -54,14 +65,15 @@
 //   - segment_recovery_info.go / vchannel_recovery_info.go — per-segment / per-vchannel state
 //   - config.go / metrics.go / checkpoint_util.go — config, metrics, checkpoint helpers (shared)
 //
-// Summary store — the in-memory + durable write summary (summary_* files):
+// Summary store — the in-memory staging plus the durable store (summary_* files):
 //   - summary_manager.go — summaryManager, the entry point owned by recoveryStorageImpl
-//   - summary_background_task.go — periodic snapshot/clean task
-//   - summary_vchannel_state.go — per-vchannel summary state machine
-//   - summary_store_recover.go / summary_store_persist.go — pchannel chunk store recover / persist paths
-//   - summary_store_record.go — the summary entry data model
-//   - summary_store_codec.go — chunk serialization + checksums
-//   - summary_store_errors.go — summary-store corruption / fencing sentinels
-//   - summary_store_manifest.go — generation-to-term manifest
-//   - summary_checkpoint.go / summary_cleaner.go — consume-checkpoint clamping & chunk GC
+//   - summary_background_task.go — the gc loop, and the persist called from the checkpoint
+//   - summary_vchannel_state.go — per-vchannel staging buffer
+//   - summary_store_record.go — SummaryRecord, the in-memory write fact
+//   - summary_store_recover.go / summary_store_persist.go — recover / persist paths
+//   - summary_store_codec.go — chunk framing and the section split
+//   - summary_store_manifest.go — the manifest, retention, and the gc queue
+//   - summary_store_meta.go — the etcd meta and its CAS
+//   - summary_store_errors.go — corruption / fencing sentinels
+//   - summary_cleaner.go — chunk gc, and the drop path when idempotency is off
 package recovery

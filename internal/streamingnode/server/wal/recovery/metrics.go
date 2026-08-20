@@ -25,7 +25,6 @@ func newRecoveryStorageMetrics(channelInfo types.PChannelInfo) *recoveryMetrics 
 		inMemTimeTick:          metrics.WALRecoveryInMemTimeTick.With(constLabels),
 		persistedTimeTick:      metrics.WALRecoveryPersistedTimeTick.With(constLabels),
 		idempotencyPersist:     metrics.WALIdempotencyPersistTotal.MustCurryWith(constLabels),
-		idempotencyPersistLag:  metrics.WALIdempotencyPersistWatermarkLag.With(constLabels),
 		idempotencyPendingGC:   metrics.WALIdempotencyPendingGC.With(constLabels),
 	}
 }
@@ -38,7 +37,6 @@ type recoveryMetrics struct {
 	inMemTimeTick          prometheus.Gauge
 	persistedTimeTick      prometheus.Gauge
 	idempotencyPersist     *prometheus.CounterVec
-	idempotencyPersistLag  prometheus.Gauge
 	idempotencyPendingGC   prometheus.Gauge
 }
 
@@ -76,18 +74,11 @@ func (m *recoveryMetrics) ObserveIdempotencyPersist(success bool) {
 	m.idempotencyPersist.WithLabelValues(status).Inc()
 }
 
-func (m *recoveryMetrics) ObserveIdempotencyPersistWatermarkLag(lagSeconds float64) {
-	if lagSeconds < 0 {
-		lagSeconds = 0
+func (m *recoveryMetrics) ObserveIdempotencyPendingGC(chunks int) {
+	if chunks < 0 {
+		chunks = 0
 	}
-	m.idempotencyPersistLag.Set(lagSeconds)
-}
-
-func (m *recoveryMetrics) ObserveIdempotencyPendingGC(ranges int) {
-	if ranges < 0 {
-		ranges = 0
-	}
-	m.idempotencyPendingGC.Set(float64(ranges))
+	m.idempotencyPendingGC.Set(float64(chunks))
 }
 
 func (m *recoveryMetrics) Close() {
@@ -97,6 +88,5 @@ func (m *recoveryMetrics) Close() {
 	metrics.WALRecoveryInMemTimeTick.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryPersistedTimeTick.DeletePartialMatch(m.constLabels)
 	metrics.WALIdempotencyPersistTotal.DeletePartialMatch(m.constLabels)
-	metrics.WALIdempotencyPersistWatermarkLag.DeletePartialMatch(m.constLabels)
 	metrics.WALIdempotencyPendingGC.DeletePartialMatch(m.constLabels)
 }

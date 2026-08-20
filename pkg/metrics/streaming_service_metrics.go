@@ -529,14 +529,9 @@ var (
 		Help: "Total summary store chunk persist attempts",
 	}, WALChannelLabelName, WALChannelTermLabelName, StatusLabelName)
 
-	WALIdempotencyPersistWatermarkLag = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "idempotency_persist_watermark_lag_seconds",
-		Help: "Physical time lag between the recovery checkpoint and the summary store persist watermark. The watermark gates WAL truncation, so sustained growth here holds truncation back",
-	}, WALChannelLabelName, WALChannelTermLabelName)
-
 	WALIdempotencyPendingGC = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "idempotency_pending_gc_ranges",
-		Help: "Summary chunk ranges queued for deletion. Grows without bound when gc is stuck, so this is the direct gc health signal",
+		Name: "idempotency_pending_gc_chunks",
+		Help: "Summary chunks queued for deletion. Grows without bound when gc is stuck, so this is the direct gc health signal",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
 	WALIdempotencyReaderDedupDropTotal = newWALCounterVec(prometheus.CounterOpts{
@@ -754,7 +749,6 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALIdempotencyDuplicateTotal)
 	registry.MustRegister(WALIdempotencyEvictionTotal)
 	registry.MustRegister(WALIdempotencyPersistTotal)
-	registry.MustRegister(WALIdempotencyPersistWatermarkLag)
 	registry.MustRegister(WALIdempotencyPendingGC)
 	registry.MustRegister(WALIdempotencyReaderDedupDropTotal)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
