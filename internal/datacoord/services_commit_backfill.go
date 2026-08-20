@@ -74,6 +74,22 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
+	// Schema-version fence: a result computed against a schema that is no
+	// longer live (e.g. the function was dropped/changed while the Spark job
+	// was in flight) must not be committed against the current segments.
+	if err := checkBackfillSchemaVersion(result, coll); err != nil {
+		log.Warn(ctx, "CommitBackfillResult rejected by schema version fence",
+			mlog.Err(err),
+			mlog.Int32("resultSchemaVersion", result.SchemaVersion),
+			mlog.Int32("collectionSchemaVersion", coll.GetSchema().GetVersion()))
+		return &datapb.CommitBackfillResultResponse{
+			Status:          merr.Status(err),
+			TotalSegments:   total,
+			FailedSegments:  int32(len(result.Segments)),
+			SegmentStatuses: allSegmentsFailed(result, err.Error()),
+		}, nil
+	}
+
 	// Split items across multiple broadcast messages so a single
 	// BatchUpdateManifestMessageBody never exceeds the broker's message size
 	// limit (Pulsar defaults to 5MiB). Each batch acquires its own broadcaster
@@ -362,6 +378,48 @@ func inferKind(entry *BackfillSegment) string {
 		return "v2"
 	}
 	return "v3"
+}
+
+// checkBackfillSchemaVersion enforces the schema-version fence on a backfill
+// result. A result computed against a schema that is no longer live (e.g. the
+// function was dropped/changed while the Spark job was in flight) must not be
+// committed against the current segments. Results that carry no version (0 —
+// produced before Spark stamped the schema version it read) are exempt from
+// the fence for backward compatibility.
+func checkBackfillSchemaVersion(result *BackfillResult, coll *milvuspb.DescribeCollectionResponse) error {
+	if result.SchemaVersion == 0 {
+		return nil
+	}
+	currentVersion := int32(0)
+	if coll.GetSchema() != nil {
+		currentVersion = coll.GetSchema().GetVersion()
+	}
+	if result.SchemaVersion != currentVersion {
+		return merr.WrapErrCollectionSchemaMisMatch(
+			result.CollectionID,
+			"backfill result schema version "+strconv.FormatInt(int64(result.SchemaVersion), 10)+
+				" does not match collection's current schema version "+strconv.FormatInt(int64(currentVersion), 10)+
+				"; re-run the backfill against the current schema")
+	}
+	return nil
+}
+
+// allSegmentsFailed builds a per-segment failure status for every segment in
+// the result. Used when a collection-level rejection (e.g. the schema-version
+// fence) fails the whole result before any broadcast, so callers still see
+// which segments were rejected and why.
+func allSegmentsFailed(result *BackfillResult, reason string) []*datapb.CommitBackfillResultSegmentStatus {
+	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0, len(result.Segments))
+	for segIDStr, entry := range result.Segments {
+		segID, perr := strconv.ParseInt(segIDStr, 10, 64)
+		if perr != nil {
+			segID = 0
+		}
+		statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: inferKind(&entry), Reason: reason,
+		})
+	}
+	return sortStatuses(statuses)
 }
 
 func countStatuses(statuses []*datapb.CommitBackfillResultSegmentStatus) (committed, failed int32) {
