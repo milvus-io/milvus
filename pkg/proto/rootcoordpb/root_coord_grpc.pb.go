@@ -53,6 +53,11 @@ const (
 	RootCoord_HasPartition_FullMethodName                  = "/milvus.proto.rootcoord.RootCoord/HasPartition"
 	RootCoord_ShowPartitions_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/ShowPartitions"
 	RootCoord_ShowPartitionsInternal_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/ShowPartitionsInternal"
+	RootCoord_CreateNamespace_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreateNamespace"
+	RootCoord_DescribeNamespace_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/DescribeNamespace"
+	RootCoord_ListNamespaces_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/ListNamespaces"
+	RootCoord_DropNamespace_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DropNamespace"
+	RootCoord_HasNamespace_FullMethodName                  = "/milvus.proto.rootcoord.RootCoord/HasNamespace"
 	RootCoord_ShowSegments_FullMethodName                  = "/milvus.proto.rootcoord.RootCoord/ShowSegments"
 	RootCoord_GetPChannelInfo_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetPChannelInfo"
 	RootCoord_AllocTimestamp_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/AllocTimestamp"
@@ -204,6 +209,11 @@ type RootCoordClient interface {
 	// @return StringListResponse
 	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
 	ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
+	CreateNamespace(ctx context.Context, in *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption) (*CreateNamespaceResponse, error)
+	DescribeNamespace(ctx context.Context, in *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error)
+	ListNamespaces(ctx context.Context, in *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error)
+	DropNamespace(ctx context.Context, in *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error)
+	HasNamespace(ctx context.Context, in *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error)
 	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error)
 	GetPChannelInfo(ctx context.Context, in *GetPChannelInfoRequest, opts ...grpc.CallOption) (*GetPChannelInfoResponse, error)
 	AllocTimestamp(ctx context.Context, in *AllocTimestampRequest, opts ...grpc.CallOption) (*AllocTimestampResponse, error)
@@ -529,6 +539,51 @@ func (c *rootCoordClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowP
 func (c *rootCoordClient) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	out := new(milvuspb.ShowPartitionsResponse)
 	err := c.cc.Invoke(ctx, RootCoord_ShowPartitionsInternal_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CreateNamespace(ctx context.Context, in *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption) (*CreateNamespaceResponse, error) {
+	out := new(CreateNamespaceResponse)
+	err := c.cc.Invoke(ctx, RootCoord_CreateNamespace_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DescribeNamespace(ctx context.Context, in *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error) {
+	out := new(milvuspb.DescribeNamespaceResponse)
+	err := c.cc.Invoke(ctx, RootCoord_DescribeNamespace_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListNamespaces(ctx context.Context, in *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error) {
+	out := new(milvuspb.ListNamespacesResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListNamespaces_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DropNamespace(ctx context.Context, in *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error) {
+	out := new(milvuspb.DropNamespaceResponse)
+	err := c.cc.Invoke(ctx, RootCoord_DropNamespace_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) HasNamespace(ctx context.Context, in *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error) {
+	out := new(milvuspb.HasNamespaceResponse)
+	err := c.cc.Invoke(ctx, RootCoord_HasNamespace_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1044,6 +1099,11 @@ type RootCoordServer interface {
 	// @return StringListResponse
 	ShowPartitions(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 	ShowPartitionsInternal(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
+	CreateNamespace(context.Context, *milvuspb.CreateNamespaceRequest) (*CreateNamespaceResponse, error)
+	DescribeNamespace(context.Context, *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error)
+	ListNamespaces(context.Context, *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error)
+	DropNamespace(context.Context, *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error)
+	HasNamespace(context.Context, *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error)
 	ShowSegments(context.Context, *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 	GetPChannelInfo(context.Context, *GetPChannelInfoRequest) (*GetPChannelInfoResponse, error)
 	AllocTimestamp(context.Context, *AllocTimestampRequest) (*AllocTimestampResponse, error)
@@ -1190,6 +1250,21 @@ func (UnimplementedRootCoordServer) ShowPartitions(context.Context, *milvuspb.Sh
 }
 func (UnimplementedRootCoordServer) ShowPartitionsInternal(context.Context, *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowPartitionsInternal not implemented")
+}
+func (UnimplementedRootCoordServer) CreateNamespace(context.Context, *milvuspb.CreateNamespaceRequest) (*CreateNamespaceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateNamespace not implemented")
+}
+func (UnimplementedRootCoordServer) DescribeNamespace(context.Context, *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeNamespace not implemented")
+}
+func (UnimplementedRootCoordServer) ListNamespaces(context.Context, *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListNamespaces not implemented")
+}
+func (UnimplementedRootCoordServer) DropNamespace(context.Context, *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropNamespace not implemented")
+}
+func (UnimplementedRootCoordServer) HasNamespace(context.Context, *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HasNamespace not implemented")
 }
 func (UnimplementedRootCoordServer) ShowSegments(context.Context, *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowSegments not implemented")
@@ -1874,6 +1949,96 @@ func _RootCoord_ShowPartitionsInternal_Handler(srv interface{}, ctx context.Cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).ShowPartitionsInternal(ctx, req.(*milvuspb.ShowPartitionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CreateNamespace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreateNamespaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CreateNamespace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CreateNamespace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CreateNamespace(ctx, req.(*milvuspb.CreateNamespaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DescribeNamespace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DescribeNamespaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DescribeNamespace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DescribeNamespace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DescribeNamespace(ctx, req.(*milvuspb.DescribeNamespaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListNamespaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListNamespacesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListNamespaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListNamespaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListNamespaces(ctx, req.(*milvuspb.ListNamespacesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DropNamespace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DropNamespaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DropNamespace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DropNamespace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DropNamespace(ctx, req.(*milvuspb.DropNamespaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_HasNamespace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.HasNamespaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).HasNamespace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_HasNamespace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).HasNamespace(ctx, req.(*milvuspb.HasNamespaceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2814,6 +2979,26 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ShowPartitionsInternal",
 			Handler:    _RootCoord_ShowPartitionsInternal_Handler,
+		},
+		{
+			MethodName: "CreateNamespace",
+			Handler:    _RootCoord_CreateNamespace_Handler,
+		},
+		{
+			MethodName: "DescribeNamespace",
+			Handler:    _RootCoord_DescribeNamespace_Handler,
+		},
+		{
+			MethodName: "ListNamespaces",
+			Handler:    _RootCoord_ListNamespaces_Handler,
+		},
+		{
+			MethodName: "DropNamespace",
+			Handler:    _RootCoord_DropNamespace_Handler,
+		},
+		{
+			MethodName: "HasNamespace",
+			Handler:    _RootCoord_HasNamespace_Handler,
 		},
 		{
 			MethodName: "ShowSegments",

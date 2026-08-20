@@ -111,6 +111,8 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"CollectionLoaded":          ErrCollectionLoaded,
 		"ResourceGroupNotFound":     ErrResourceGroupNotFound,
 		"IndexDuplicate":            ErrIndexDuplicate,
+		"NamespaceNotFound":         ErrNamespaceNotFound,
+		"NamespaceAlreadyExists":    ErrNamespaceAlreadyExists,
 		"PrivilegeNotPermitted":     ErrPrivilegeNotPermitted,
 		"PrivilegeGroupInvalidName": ErrPrivilegeGroupInvalidName,
 		"NeedAuthenticate":          ErrNeedAuthenticate,
@@ -148,6 +150,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 	// errors.go fails here until the expected set is updated deliberately.
 	wantInputCodes := []int32{
 		102, 104, 105, 107, 108, 109, // Collection: num limit / loaded / illegal schema / vector clustering key / replicate mode / schema mismatch
+		203, 204, // Namespace: not found / already exists
 		300, 301, 302, 303, // ResourceGroup
 		702,      // IndexDuplicate
 		801, 802, // Database: num limit / invalid name

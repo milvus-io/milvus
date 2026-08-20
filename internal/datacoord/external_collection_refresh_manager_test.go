@@ -652,6 +652,55 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
 }
 
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsNotifiesUpdatedSegments(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainBuildIndexOverflowChForTest()
+	defer drainBuildIndexOverflowChForTest()
+
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+		TaskId:          1001,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
+		KeptSegments:    []int64{1},
+		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+	}, 1)
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 100,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    5,
+	}})
+	mt := &meta{
+		catalog:     catalog,
+		segments:    segments,
+		collections: newTestCollections(100),
+	}
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.NoError(t, err)
+
+	assertBuildIndexEvents(t, 10)
+	assertNoBuildIndexEvent(t)
+}
+
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFinishedTask(t *testing.T) {
 	ctx := context.Background()
 	catalog := &stubCatalog{}

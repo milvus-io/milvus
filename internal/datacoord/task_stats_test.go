@@ -638,6 +638,36 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 	s.mt.segments = origSegments
 }
 
+func (s *statsTaskSuite) TestSetSortJobInfoEnqueuesTargetSegment() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+
+	s.mt.segments.SetSegment(s.targetID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.targetID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+		},
+	})
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:          s.taskID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.targetID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+
+	err := st.SetJobInfo(context.Background(), &workerpb.StatsResult{
+		TaskID: s.taskID,
+		State:  indexpb.JobState_JobStateFinished,
+	})
+
+	s.NoError(err)
+	assertBuildIndexEvents(s.T(), s.targetID)
+}
+
 func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
 	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
