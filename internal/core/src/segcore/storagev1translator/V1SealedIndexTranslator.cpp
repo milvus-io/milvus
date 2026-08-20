@@ -41,7 +41,6 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
           load_index_info->field_id,
           load_index_info->index_build_id,
           load_index_info->index_version,
-          load_index_info->support_eviction,
       }),
       binary_set_(binary_set),
       key_(fmt::format("seg_{}_si_{}",
