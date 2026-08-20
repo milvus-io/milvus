@@ -28,8 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -454,4 +456,140 @@ func TestCatalog_Update_AddPartitionStatsAndVersionEncodingMatchesLegacy(t *test
 
 	assert.Equal(t, legacySaves, compositeSaves)
 	assert.Equal(t, "100", compositeSaves[buildCurrentPartitionStatsVersionPath(1, 2, "ch-1")])
+}
+
+// TestCatalog_Update_IndexAndManifestAreOneWrite proves a finished index
+// record and the segment manifest pointer that publishes its artifact reach
+// the store in a single guarded transaction.
+func TestCatalog_Update_IndexAndManifestAreOneWrite(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var saved map[string]string
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, kvs map[string]string, _ []string, _ ...predicates.Predicate) error {
+			saved = kvs
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	seg := &datapb.SegmentInfo{
+		ID: 1, CollectionID: 2, PartitionID: 3,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: `{"base_path":"a","ver":4}`,
+	}
+	segIdx := &model.SegmentIndex{
+		CollectionID: 2, PartitionID: 3, SegmentID: 1,
+		IndexID: 10, BuildID: 11,
+		IndexState:    commonpb.IndexState_Finished,
+		IndexFileKeys: []string{"0"},
+	}
+	err := c.Update(context.TODO(),
+		metastore.AlterSegment(seg),
+		metastore.UpdateSegmentIndex(segIdx))
+	assert.NoError(t, err)
+
+	// Both records in the same MultiSaveAndRemove call: one etcd txn.
+	indexKey := BuildSegmentIndexKey(2, 3, 1, 11)
+	assert.Contains(t, saved, indexKey)
+	assert.Contains(t, saved, buildSegmentPath(2, 3, 1))
+
+	persisted := &indexpb.SegmentIndex{}
+	assert.NoError(t, proto.Unmarshal([]byte(saved[indexKey]), persisted))
+	assert.Equal(t, commonpb.IndexState_Finished, persisted.GetState())
+	assert.Equal(t, []string{"0"}, persisted.GetIndexFileKeys())
+}
+
+// A bundle carrying a segment index must never take the chunked fallback:
+// exposing the index record without the manifest pointer (or the reverse)
+// leaves the index either unreadable or pointing at collected files.
+func TestCatalog_Update_IndexAndManifestRejectNonAtomicFallback(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Maybe()
+	// No write expectation: the catalog must refuse before touching the store.
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(),
+		metastore.AlterSegment(&datapb.SegmentInfo{
+			ID: 1, CollectionID: 2, PartitionID: 3,
+			State: commonpb.SegmentState_Flushed,
+		}),
+		metastore.UpdateSegmentIndex(&model.SegmentIndex{
+			CollectionID: 2, PartitionID: 3, SegmentID: 1, IndexID: 10, BuildID: 11,
+		}))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestCatalog_Update_SegmentIndexRejectsNilAndUnsupportedType(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(), metastore.UpdateSegmentIndex(nil))
+	assert.Error(t, err)
+
+	err = c.Update(context.TODO(), metastore.DropSegmentIndex(nil))
+	assert.Error(t, err)
+
+	// ActionAdd has no segment index encoding: a record is either upserted
+	// whole (ActionUpdate) or removed (ActionDelete).
+	err = c.Update(context.TODO(), metastore.UpdateAction{
+		Type:  metastore.ActionAdd,
+		Entry: metastore.SegmentIndexEntry{SegmentIndex: &model.SegmentIndex{BuildID: 1}},
+	})
+	assert.Error(t, err)
+}
+
+// The GC counterpart of TestCatalog_Update_IndexAndManifestAreOneWrite: the
+// revision that retracts an index artifact and the removal of the record
+// claiming it must land in the same etcd txn, so no reader can see a
+// SegmentIndex whose artifact the visible manifest no longer carries.
+func TestCatalog_Update_IndexRemovalAndManifestAreOneWrite(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var saved map[string]string
+	var removed []string
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, kvs map[string]string, removals []string, _ ...predicates.Predicate) error {
+			saved = kvs
+			removed = removals
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(),
+		metastore.AlterSegment(&datapb.SegmentInfo{
+			ID: 1, CollectionID: 2, PartitionID: 3,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: `{"base_path":"a","ver":5}`,
+		}),
+		metastore.DropSegmentIndex(&model.SegmentIndex{
+			CollectionID: 2, PartitionID: 3, SegmentID: 1, IndexID: 10, BuildID: 11,
+		}))
+	assert.NoError(t, err)
+
+	indexKey := BuildSegmentIndexKey(2, 3, 1, 11)
+	assert.Contains(t, saved, buildSegmentPath(2, 3, 1))
+	assert.NotContains(t, saved, indexKey)
+	assert.Contains(t, removed, indexKey)
+}
+
+// A removal bundle must refuse the chunked fallback for the same reason an
+// upsert bundle does.
+func TestCatalog_Update_IndexRemovalRejectsNonAtomicFallback(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Maybe()
+	// No write expectation: the catalog must refuse before touching the store.
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(),
+		metastore.AlterSegment(&datapb.SegmentInfo{
+			ID: 1, CollectionID: 2, PartitionID: 3,
+			State: commonpb.SegmentState_Flushed,
+		}),
+		metastore.DropSegmentIndex(&model.SegmentIndex{
+			CollectionID: 2, PartitionID: 3, SegmentID: 1, IndexID: 10, BuildID: 11,
+		}))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }

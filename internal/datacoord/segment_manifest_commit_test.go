@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -627,4 +628,313 @@ func TestShouldPublishPreparedManifestSkipsUnhealthySegment(t *testing.T) {
 		&workerpb.StatsResult{Manifest: packed.MarshalManifestPath(base+"231", 8)}))
 	require.True(t, st.shouldPublishPreparedManifest(context.Background(), 232,
 		&workerpb.StatsResult{Manifest: packed.MarshalManifestPath(base+"232", 8)}))
+}
+
+// TestCommitSegmentManifestPublishesIndexTaskAtomically proves the index task
+// record and the manifest pointer that publishes its artifact land in one
+// catalog transaction, and that in-memory index metadata is installed only
+// after that write.
+func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(10)
+		segmentID    = int64(210)
+		indexID      = int64(101)
+		buildID      = int64(102)
+	)
+	basePath := "/tmp/milvus/insert_log/1/10/210"
+	oldManifest := packed.MarshalManifestPath(basePath, 3)
+	newManifest := packed.MarshalManifestPath(basePath, 4)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+		CollectionID:          collectionID,
+		PartitionID:           partitionID,
+		SegmentID:             segmentID,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		IndexVersion:          4,
+		IndexState:            commonpb.IndexState_InProgress,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			// The transaction opens at the segment's currently published
+			// revision, not at whatever revision the build was issued against.
+			require.Equal(t, basePath, base)
+			require.EqualValues(t, 3, version)
+			require.Len(t, updates.Indexes, 1)
+			require.EqualValues(t, indexID, updates.Indexes[0].IndexID)
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	taskInfo := &workerpb.IndexTaskInfo{
+		BuildID:               buildID,
+		State:                 commonpb.IndexState_Finished,
+		IndexFileKeys:         []string{"0", "1"},
+		SerializedSize:        2000,
+		MemSize:               3000,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{
+				IndexID: indexID,
+				BuildID: buildID,
+			}}},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{
+				Type:         SegmentIndexUpsert,
+				BuildID:      buildID,
+				FinishedTask: taskInfo,
+			},
+		},
+	}))
+
+	require.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+	published, ok := meta.indexMeta.GetIndexJob(buildID)
+	require.True(t, ok)
+	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
+	require.Equal(t, []string{"0", "1"}, published.IndexFileKeys)
+	require.EqualValues(t, 2000, published.IndexSerializedSize)
+}
+
+// A worker result for a task that was deleted mid-flight must not advance the
+// pointer: publishing it would strand a manifest index entry with no
+// SegmentIndex record to drive its GC.
+func TestCommitSegmentManifestDiscardsResultForDeletedIndexTask(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/211"
+	oldManifest := packed.MarshalManifestPath(basePath, 3)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             211,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).
+		Return(packed.MarshalManifestPath(basePath, 4), nil).Build()
+	defer commit.UnPatch()
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     211,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{IndexID: 1, BuildID: 999}}},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{
+				Type:    SegmentIndexUpsert,
+				BuildID: 999,
+				FinishedTask: &workerpb.IndexTaskInfo{
+					BuildID: 999,
+					State:   commonpb.IndexState_Finished,
+				},
+			},
+		},
+	}))
+	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), 211).GetManifestPath())
+}
+
+// The batch path publishes through UpdateSegmentsInfo, which writes segment
+// records only. It cannot stage the SegmentIndex action alongside them the way
+// the single-segment commit does, so accepting a SegmentIndex mutation there
+// would advance the manifest pointer while silently dropping the index record
+// change. Reject it up front instead.
+func TestCommitSegmentManifestsRejectsSegmentIndexMutation(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	commit := commitUpdates(213, "/tmp/milvus/insert_log/1/10/213")
+	commit.CatalogMutation.SegmentIndex = &SegmentIndexMutation{
+		Type:    SegmentIndexUpsert,
+		BuildID: 1,
+		FinishedTask: &workerpb.IndexTaskInfo{
+			BuildID: 1,
+			State:   commonpb.IndexState_Finished,
+		},
+	}
+	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{commit})
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+// The GC counterpart of the index-task commit: the revision that retracts an
+// index artifact and the removal of the SegmentIndex record claiming it must
+// become visible together, so a reader can never load an index whose artifact
+// the published manifest no longer carries.
+func TestCommitSegmentManifestRemovesSegmentIndexWithRetraction(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(10)
+		segmentID    = int64(214)
+		indexID      = int64(700)
+		buildID      = int64(701)
+	)
+	basePath := "/tmp/milvus/insert_log/1/10/214"
+	oldManifest := packed.MarshalManifestPath(basePath, 3)
+	newManifest := packed.MarshalManifestPath(basePath, 4)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		SegmentID:     segmentID,
+		IndexID:       indexID,
+		BuildID:       buildID,
+		IndexVersion:  1,
+		IndexState:    commonpb.IndexState_Finished,
+		IndexFileKeys: []string{"0"},
+	}))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, basePath, base)
+			require.EqualValues(t, 3, version)
+			require.Len(t, updates.DropIndexes, 1)
+			require.EqualValues(t, indexID, updates.DropIndexes[0].IndexID)
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				DropIndexes: []packed.DropIndexEntry{{IndexID: indexID, ExpectedBuildID: buildID}},
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{
+				Type:    SegmentIndexRemove,
+				BuildID: buildID,
+			},
+		},
+	}))
+
+	require.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+	_, ok := meta.indexMeta.GetIndexJob(buildID)
+	require.False(t, ok)
+	require.Empty(t, meta.indexMeta.GetSegmentIndexes(collectionID, segmentID))
+}
+
+// A removal whose record is already gone is not an error: the record's absence
+// is the mutation's intended end state, and the manifest may still carry the
+// entry an earlier interrupted attempt failed to retract. Publish anyway.
+func TestCommitSegmentManifestRemovesMissingSegmentIndexStillPublishes(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/215"
+	oldManifest := packed.MarshalManifestPath(basePath, 3)
+	newManifest := packed.MarshalManifestPath(basePath, 4)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             215,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	defer commit.UnPatch()
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     215,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				DropIndexes: []packed.DropIndexEntry{{IndexID: 800, ExpectedBuildID: 801}},
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: 801},
+		},
+	}))
+	require.Equal(t, newManifest, meta.GetSegment(context.Background(), 215).GetManifestPath())
+}
+
+// The mutation is the framework's only SegmentIndex contract, so its shape is
+// validated before any manifest I/O rather than producing a half-applied
+// commit.
+func TestCommitSegmentManifestRejectsMalformedSegmentIndexMutation(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/216"
+	newMeta := func(t *testing.T) *meta {
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		require.NoError(t, m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             216,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 3),
+		})))
+		return m
+	}
+
+	cases := []struct {
+		name     string
+		mutation *SegmentIndexMutation
+	}{
+		{"no build ID", &SegmentIndexMutation{Type: SegmentIndexUpsert, FinishedTask: &workerpb.IndexTaskInfo{}}},
+		{"unknown type", &SegmentIndexMutation{BuildID: 1}},
+		{"upsert without task", &SegmentIndexMutation{Type: SegmentIndexUpsert, BuildID: 1}},
+		{"upsert with mismatched task", &SegmentIndexMutation{
+			Type: SegmentIndexUpsert, BuildID: 1,
+			FinishedTask: &workerpb.IndexTaskInfo{BuildID: 2},
+		}},
+		{"removal with task", &SegmentIndexMutation{
+			Type: SegmentIndexRemove, BuildID: 1,
+			FinishedTask: &workerpb.IndexTaskInfo{BuildID: 1},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMeta(t)
+			commit := mockey.Mock(packed.CommitManifestUpdates).
+				Return(packed.MarshalManifestPath(basePath, 4), nil).Build()
+			defer commit.UnPatch()
+
+			err := m.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+				SegmentID:       216,
+				StorageConfig:   &indexpb.StorageConfig{},
+				Mutation:        ManifestMutation{Type: ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{}},
+				CatalogMutation: SegmentCatalogMutation{SegmentIndex: tc.mutation},
+			})
+			require.Error(t, err)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			// The pointer must not have advanced.
+			require.Equal(t, packed.MarshalManifestPath(basePath, 3),
+				m.GetSegment(context.Background(), 216).GetManifestPath())
+		})
+	}
 }

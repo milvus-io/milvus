@@ -62,6 +62,26 @@ func Commit(ctx context.Context, txn kv.TxnKV, b *Builder) error {
 	return commitFallback(ctx, txn, limit, b)
 }
 
+// CommitWithoutFallback applies b in one guarded txn, or returns an error
+// without writing anything when the backend's op limit cannot hold the whole
+// bundle. Use it for a composite metadata change whose records must never
+// become visible independently - the ordered chunked fallback that Commit
+// uses would expose the earlier records on a mid-flush crash.
+func CommitWithoutFallback(ctx context.Context, txn kv.TxnKV, b *Builder) error {
+	if len(b.ops) == 0 {
+		return nil
+	}
+	limit := txn.MaxTxnOps()
+	if limit <= 0 {
+		return merr.WrapErrParameterInvalidMsg("composite txn limit must be positive")
+	}
+	if len(b.ops) > limit {
+		return merr.WrapErrServiceInternalMsg(
+			"atomic composite update needs %d ops but the transaction limit is %d", len(b.ops), limit)
+	}
+	return commitAtomic(ctx, txn, b)
+}
+
 // commitAtomic applies every op in a single guarded txn.
 // commitAtomic folds every op into one guarded etcd txn. Note: puts and
 // exact removals are collected into a map/slice, so a Save and a Remove of the

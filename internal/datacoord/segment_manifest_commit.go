@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -84,6 +85,40 @@ type SegmentCatalogMutation struct {
 	// metadata contract while the manifest mutation is Noop.  They must not
 	// perform manifest I/O or include UpdateManifest.
 	Operators []UpdateOperator
+	// SegmentIndex, when set, changes one SegmentIndex record in the same
+	// catalog transaction that publishes the manifest revision the change
+	// refers to, so an index can never be visible in one store while absent
+	// from the other. It carries the caller's intent, not a prepared record:
+	// the record is re-read and projected under indexMeta's per-buildID lock,
+	// so the persisted value cannot be built from a stale read.
+	SegmentIndex *SegmentIndexMutation
+}
+
+// SegmentIndexMutationType selects which change a SegmentIndexMutation makes
+// to the targeted record.
+type SegmentIndexMutationType int
+
+const (
+	// SegmentIndexUpsert persists the record projected from a worker result,
+	// publishing an artifact the manifest revision adds.
+	SegmentIndexUpsert SegmentIndexMutationType = iota + 1
+	// SegmentIndexRemove deletes the record, retiring an artifact the manifest
+	// revision retracts.
+	SegmentIndexRemove
+)
+
+// SegmentIndexMutation is the SegmentIndex half of a manifest commit: exactly
+// one index record, identified by BuildID, changed atomically with the
+// manifest pointer. It is deliberately generic - the framework only stages the
+// resulting catalog action and runs the resulting in-memory install; all
+// SegmentIndex semantics live in indexMeta.stageSegmentIndexMutation.
+type SegmentIndexMutation struct {
+	Type    SegmentIndexMutationType
+	BuildID int64
+	// FinishedTask is the raw worker result an upsert projects the persisted
+	// record from. Required for SegmentIndexUpsert, rejected for
+	// SegmentIndexRemove.
+	FinishedTask *workerpb.IndexTaskInfo
 }
 
 // SegmentManifestCommit describes one segment-scoped StorageV3 commit.
@@ -254,14 +289,48 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	} else {
 		action = metastore.AlterSegment(updated.SegmentInfo)
 	}
+	actions := []metastore.UpdateAction{action}
 
-	if err := m.catalog.Update(ctx, action); err != nil {
+	// The index record and the manifest pointer whose revision publishes or
+	// retracts its artifact are staged into one catalog transaction, so an
+	// index can never be visible against a revision that does not carry it,
+	// nor claimed by a record after the revision dropped it.
+	var stagedIndex *stagedSegmentIndexMutation
+	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
+		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
+		if staged != nil {
+			defer staged.unlock()
+		}
+		if err != nil {
+			if errors.Is(err, errSegmentIndexRecordGone) {
+				// The task can be dropped while its worker result is in flight.
+				// Abandon the commit: the prepared revision stays unreferenced and
+				// is invisible, whereas publishing it would strand an index entry
+				// that no SegmentIndex record can ever drive GC for.
+				mlog.Warn(ctx, "index task no longer exists, discarding prepared manifest",
+					mlog.Int64("buildID", indexMutation.BuildID),
+					mlog.Int64("segmentID", commit.SegmentID),
+					mlog.String("manifestPath", manifestPath))
+				return nil
+			}
+			return err
+		}
+		stagedIndex = staged
+		if staged.action != nil {
+			actions = append(actions, *staged.action)
+		}
+	}
+
+	if err := m.catalog.Update(ctx, actions...); err != nil {
 		return merr.Wrap(err, "publish segment manifest")
 	}
 	metricMutation.commit()
 	// Memory is installed only after the catalog write has succeeded while the
 	// same segMu critical section still excludes competing full-record writers.
 	m.segments.SetSegment(commit.SegmentID, updated)
+	if stagedIndex != nil {
+		stagedIndex.install()
+	}
 	return nil
 }
 
@@ -489,8 +558,9 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 // locks are all held before UpdateSegmentsInfo takes segMu). No caller may hold segMu.
 //
 // commits must target existing StorageV3 segments; NewSegment is rejected because the
-// single AlterSegments batch cannot create a segment, and duplicate segment IDs are
-// rejected. A segment dropped/unhealthy when its revision is generated — or between
+// single AlterSegments batch cannot create a segment, SegmentIndex is rejected
+// because the batch's one catalog transaction carries segment records only, and
+// duplicate segment IDs are rejected. A segment dropped/unhealthy when its revision is generated — or between
 // generation and publication — is skipped as a benign terminal outcome (logged),
 // matching how single-segment callers treat ErrSegmentNotFound; it does not fail the
 // batch. Any other failure (manifest I/O error, a stale pointer — Noop CAS conflict or
@@ -510,6 +580,15 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 		}
 		if commit.CatalogMutation.NewSegment != nil {
 			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot create a new segment, segmentID=%d", commit.SegmentID)
+		}
+		if commit.CatalogMutation.SegmentIndex != nil {
+			// The batch publishes through UpdateSegmentsInfo, which writes only
+			// segment records; it cannot stage the SegmentIndex action into the
+			// same catalog transaction the way CommitSegmentManifest does.
+			// Accepting the field here would advance the manifest pointer while
+			// silently dropping the index record change, stranding the artifact
+			// or leaving a record claiming a retracted one.
+			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot mutate a segment index, segmentID=%d", commit.SegmentID)
 		}
 		if _, dup := idSet[commit.SegmentID]; dup {
 			return merr.WrapErrServiceInternalMsg("duplicate segment ID %d in batch manifest commit", commit.SegmentID)

@@ -340,6 +340,7 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 			_ context.Context,
 			_ storage.ChunkManager,
 			_ *indexpb.StorageConfig,
+			_ *indexpb.StorageConfig,
 			_ storage.CrossBucketCopier,
 			_ string,
 			_ string,
@@ -764,6 +765,7 @@ func TestCopySegmentTaskExecute_FailureWaitsForAllWorkers(t *testing.T) {
 		func(
 			_ context.Context,
 			_ storage.ChunkManager,
+			_ *indexpb.StorageConfig,
 			_ *indexpb.StorageConfig,
 			_ storage.CrossBucketCopier,
 			_ string,
