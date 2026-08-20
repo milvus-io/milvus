@@ -46,10 +46,10 @@ func TestCheckPhase0VersionContract(t *testing.T) {
 		}
 	}
 
-	t.Run("accepts every registered role at minimum version", func(t *testing.T) {
+	t.Run("accepts every registered role at the dev version", func(t *testing.T) {
 		sessions := make(map[string]map[string]*sessionutil.Session)
 		for _, role := range Phase0VersionContractRoles {
-			sessions[role] = map[string]*sessionutil.Session{"node": newSession(1, "3.0.1")}
+			sessions[role] = map[string]*sessionutil.Session{"node": newSession(1, "3.0.1-dev")}
 		}
 		require.NoError(t, CheckPhase0VersionContract(context.Background(), &versionContractProvider{sessions: sessions}))
 	})
@@ -63,9 +63,9 @@ func TestCheckPhase0VersionContract(t *testing.T) {
 		require.ErrorContains(t, err, "querynode node 7 reports 3.0.0")
 	})
 
-	t.Run("rejects target prerelease and missing versions", func(t *testing.T) {
+	t.Run("rejects versions at or below the minimum and missing versions", func(t *testing.T) {
 		for name, session := range map[string]*sessionutil.Session{
-			"release candidate": newSession(8, "3.0.1-rc.1"),
+			"old default build": newSession(8, "3.0.0-beta"),
 			"missing": {
 				SessionRaw: sessionutil.SessionRaw{ServerID: 9},
 			},
@@ -81,8 +81,8 @@ func TestCheckPhase0VersionContract(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts later releases and build metadata", func(t *testing.T) {
-		for _, version := range []string{"3.0.1+build.1", "3.0.2", "3.1.0"} {
+	t.Run("accepts development, pre-release, released and later versions", func(t *testing.T) {
+		for _, version := range []string{"3.0.1-dev", "3.0.1-rc.1", "3.0.1", "3.0.1+build.1", "3.0.2", "3.1.0"} {
 			err := CheckPhase0VersionContract(context.Background(), &versionContractProvider{
 				sessions: map[string]map[string]*sessionutil.Session{
 					"querynode": {"node": newSession(10, version)},

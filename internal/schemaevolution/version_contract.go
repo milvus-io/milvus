@@ -25,11 +25,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Phase0MinimumNodeVersion is the minimum released version that advertises
-// the schema-install gate and schema/barrier receiver fence. It is deliberately
-// independent of pkg/common.Version while the repository is being developed
-// against a pre-release version.
-var Phase0MinimumNodeVersion = semver.MustParse("3.0.1")
+// Phase0MinimumNodeVersion is the lowest version that advertises the
+// schema-install gate and schema/barrier receiver fence. Nodes must report a
+// version strictly greater than this constant: the released 3.0.0 predates the
+// Phase 0 protocol, while pre-release development builds of this branch (for
+// example 3.0.1-dev) already contain it. It is deliberately independent of
+// pkg/common.Version while the repository is being developed against a
+// pre-release version.
+var Phase0MinimumNodeVersion = semver.MustParse("3.0.0")
 
 // Phase0VersionContractRoles contains every service role whose session may
 // participate in schema DDL or receive schema-dependent state. MixCoord is the
@@ -76,7 +79,7 @@ func CheckPhase0VersionContract(ctx context.Context, provider SessionProvider) e
 		for key, sess := range sessions {
 			if sess == nil {
 				return merr.WrapErrServiceNotReadyMsg(
-					"schema install requires all nodes to be at least %s; %s session %s is empty",
+					"schema install requires all nodes to be strictly newer than %s; %s session %s is empty",
 					Phase0MinimumNodeVersion,
 					role,
 					key)
@@ -86,7 +89,7 @@ func CheckPhase0VersionContract(ctx context.Context, provider SessionProvider) e
 				parsed, parseErr := semver.Parse(sess.SessionRaw.Version)
 				if parseErr != nil {
 					return merr.WrapErrServiceNotReadyMsg(
-						"schema install requires all nodes to be at least %s; %s node %d reports malformed version %q",
+						"schema install requires all nodes to be strictly newer than %s; %s node %d reports malformed version %q",
 						Phase0MinimumNodeVersion,
 						role,
 						sess.ServerID,
@@ -94,12 +97,12 @@ func CheckPhase0VersionContract(ctx context.Context, provider SessionProvider) e
 				}
 				version = parsed
 			}
-			// A release candidate/pre-release build of the target release is not
-			// the released 3.0.1 protocol contract. Require the plain release or
-			// a later release; build metadata does not affect compatibility.
-			if version.Pre != nil || version.LT(Phase0MinimumNodeVersion) {
+			// Every node must be strictly newer than the released 3.0.0 that
+			// predates the Phase 0 protocol. Development builds (3.0.1-dev) and
+			// later releases qualify; build metadata does not affect comparison.
+			if !version.GT(Phase0MinimumNodeVersion) {
 				return merr.WrapErrServiceNotReadyMsg(
-					"schema install requires all nodes to be at least %s; %s node %d reports %s",
+					"schema install requires all nodes to be strictly newer than %s; %s node %d reports %s",
 					Phase0MinimumNodeVersion,
 					role,
 					sess.ServerID,
