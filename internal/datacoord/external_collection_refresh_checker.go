@@ -115,6 +115,11 @@ type indexGateState struct {
 	// until an apply landed, or the job timeout would lose its terminal-bound
 	// role over a never-applying job).
 	enteredAt time.Time
+	// segmentIDs is the one-time snapshot of the segments the refresh
+	// produced, taken from the result store at gate entry. The results are
+	// immutable once committed, so held ticks reuse this instead of
+	// re-reading the store (object-storage I/O per task) every tick.
+	segmentIDs []int64
 	// lastApplyErr remembers the most recent pre-gate apply failure. The
 	// gate retries every tick because the failure may be transient, but a
 	// permanent one (a validation error in the task results) then rides the
@@ -323,34 +328,51 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	// meta.segments: judging them before the apply reads every new segment
 	// as unindexed forever (the inspector drops unknown ids), which is a
 	// held job that can never advance. Only then is the debt computed, from
-	// the tasks' externalized results; stragglers go to the index-build
+	// the tasks' externalized results (snapshotted once at gate entry);
+	// stragglers go to the index-build
 	// acceleration channel and the job holds InProgress with progress
 	// tracking the indexed fraction (90-100) until a later pass finds the
 	// debt cleared - or the gate's own budget expired - and lets the
 	// Finished transition run, whose own apply replay is a no-op by then.
 	if state == indexpb.JobState_JobStateFinished && Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool() {
-		if c.applyJobInfo != nil {
-			if err := c.applyJobInfo(c.ctx, job); err != nil {
-				// Possibly transient (a catalog write): retry next tick. The
-				// job's own timeout stays the terminal bound, because the
-				// gate's wait clock below only starts once an apply landed -
-				// and the recorded error rides along so a permanent failure
-				// that exhausts the timeout reports its actual cause.
-				mlog.Warn(c.ctx, "failed to apply refresh segments ahead of the index gate; retrying next tick",
-					mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
-				c.recordGateApplyErr(job.GetJobId(), err)
-				return
+		gs, ok := c.loadIndexGate(job.GetJobId())
+		if !ok || gs.enteredAt.IsZero() {
+			// Entry pass: land the apply, then snapshot the produced segment
+			// ids from the result store ONCE. The results are immutable once
+			// committed, so held ticks below reuse the snapshot - replaying
+			// the apply and re-reading the results (object-storage I/O per
+			// task) on every tick of a potentially hours-long hold is waste.
+			if c.applyJobInfo != nil {
+				if err := c.applyJobInfo(c.ctx, job); err != nil {
+					// Possibly transient (a catalog write): retry next tick.
+					// The job's own timeout stays the terminal bound, because
+					// the gate's wait clock below only starts once an apply
+					// landed - and the recorded error rides along so a
+					// permanent failure that exhausts the timeout reports its
+					// actual cause.
+					mlog.Warn(c.ctx, "failed to apply refresh segments ahead of the index gate; retrying next tick",
+						mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+					c.recordGateApplyErr(job.GetJobId(), err)
+					return
+				}
 			}
+			gs.segmentIDs = c.refreshedSegmentIDs(job)
 		}
-		if total, unindexed := c.refreshSegmentIndexDebt(job); len(unindexed) > 0 {
+		var unindexed []int64
+		if len(gs.segmentIDs) > 0 && c.unindexedSegments != nil {
+			unindexed = c.unindexedSegments(job.GetCollectionId(), gs.segmentIDs)
+		}
+		if len(unindexed) > 0 {
+			total := len(gs.segmentIDs)
 			c.indexGateMu.Lock()
-			gs := c.indexGates[job.GetJobId()]
-			if gs.enteredAt.IsZero() {
-				gs.enteredAt = time.Now()
+			cur := c.indexGates[job.GetJobId()]
+			if cur.enteredAt.IsZero() {
+				cur.enteredAt = time.Now()
 			}
-			gs.lastApplyErr = "" // the apply landed
-			c.indexGates[job.GetJobId()] = gs
-			entered := gs.enteredAt
+			cur.segmentIDs = gs.segmentIDs
+			cur.lastApplyErr = "" // the apply landed
+			c.indexGates[job.GetJobId()] = cur
+			entered := cur.enteredAt
 			c.indexGateMu.Unlock()
 			// The gate enforces its own budget (the job-timeout param on the
 			// gate's clock) and expires into FINISHED, not Failed: the
@@ -690,21 +712,22 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 	}
 }
 
-// refreshSegmentIndexDebt reports how many segments the job's tasks produced
-// and which of them still lack a finished index. A nil unindexedSegments -
-// no index meta wired - reports no debt, which keeps the gate inert.
-func (c *externalCollectionRefreshChecker) refreshSegmentIndexDebt(job *datapb.ExternalCollectionRefreshJob) (int, []int64) {
+// refreshedSegmentIDs snapshots the ids of the segments the job's tasks
+// produced. Read from the RESULT store, not the task headers: a runtime task
+// externalizes its results and writes the header's UpdatedSegments back as
+// nil, so reading the headers sees an empty set and the gate silently never
+// holds. A read failure reports no segments - the gate fails open rather than
+// holding the job on a guess.
+func (c *externalCollectionRefreshChecker) refreshedSegmentIDs(job *datapb.ExternalCollectionRefreshJob) []int64 {
 	if c.unindexedSegments == nil {
-		return 0, nil
+		// No index meta wired - the gate is inert, skip the read.
+		return nil
 	}
-	// The RESULT store, not the task headers: a runtime task externalizes its
-	// results and writes the header's UpdatedSegments back as nil, so reading
-	// the headers sees an empty set and the gate silently never holds.
 	tasks, err := c.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())
 	if err != nil {
 		mlog.Warn(c.ctx, "failed to read task results for the index gate; not holding the job on a guess",
 			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
-		return 0, nil
+		return nil
 	}
 	segIDs := make([]int64, 0)
 	for _, task := range tasks {
@@ -712,8 +735,5 @@ func (c *externalCollectionRefreshChecker) refreshSegmentIndexDebt(job *datapb.E
 			segIDs = append(segIDs, seg.GetID())
 		}
 	}
-	if len(segIDs) == 0 {
-		return 0, nil
-	}
-	return len(segIDs), c.unindexedSegments(job.GetCollectionId(), segIDs)
+	return segIDs
 }

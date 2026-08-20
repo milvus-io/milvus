@@ -1251,7 +1251,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 	// GetCommittedTaskResultsByJobID) has them. A gate that reads the
 	// headers instead sees an empty set and silently never holds, which is
 	// exactly the bug this fixture exists to catch.
-	stage := func(t *testing.T) (*externalCollectionRefreshMeta, *datapb.ExternalCollectionRefreshJob) {
+	stage := func(t *testing.T) (*externalCollectionRefreshMeta, *datapb.ExternalCollectionRefreshJob, *atomic.Int64) {
 		t.Helper()
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
@@ -1269,8 +1269,10 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		}
 		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+		resultReads := &atomic.Int64{} // atomic: the race subtest reads results from concurrent goroutines
 		mockey.Mock((*externalCollectionRefreshMeta).GetCommittedTaskResultsByJobID).To(
 			func(_ *externalCollectionRefreshMeta, jobID int64) ([]*datapb.ExternalCollectionRefreshTask, error) {
+				resultReads.Add(1)
 				return []*datapb.ExternalCollectionRefreshTask{
 					{
 						TaskId: 1001, JobId: jobID, CollectionId: 100,
@@ -1283,7 +1285,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return meta, meta.GetJob(1)
+		return meta, meta.GetJob(1), resultReads
 	}
 
 	// gateClockRunning reports whether job 1's index-gate wait clock started.
@@ -1298,7 +1300,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "false")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			unindexedAsked := false
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
 				func(int64, []int64) []int64 { unindexedAsked = true; return []int64{555} })
@@ -1317,7 +1319,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			applied := 0
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
@@ -1351,7 +1353,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			// The ingest consumed far more than the whole job timeout.
 			staleStart := time.Now().Add(-1000 * time.Hour).UnixMilli()
 			job.StartTime = staleStart
@@ -1378,7 +1380,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
 				func(int64, []int64) []int64 { return []int64{556} })
 
@@ -1413,7 +1415,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			// The ingest consumed far more than the whole job timeout.
 			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
 			debt := []int64{556}
@@ -1449,7 +1451,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			debtAsked := false
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
@@ -1480,7 +1482,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
@@ -1498,13 +1500,44 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		})
 	})
 
+	t.Run("held ticks reuse the entry snapshot instead of re-applying and re-reading", func(t *testing.T) {
+		// The task results are immutable once committed, so the gate lands
+		// the apply and reads the result store exactly once, at entry. A
+		// hold can last hours (large index builds) on a 10s tick - replaying
+		// the apply and the object-storage result loads every tick is waste.
+		mockey.PatchConvey("snapshot", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job, resultReads := stage(t)
+			applied := 0
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					applied++
+					return nil
+				}, nil, nil, nil,
+				func(int64, []int64) []int64 { return []int64{556} })
+
+			checker.aggregateJobState(job) // entry: apply once, read results once
+			require.True(t, gateClockRunning(checker))
+			entryReads := resultReads.Load()
+
+			checker.aggregateJobState(meta.GetJob(1)) // held ticks
+			checker.aggregateJobState(meta.GetJob(1))
+
+			assert.Equal(t, 1, applied, "the apply lands once at gate entry, not per held tick")
+			assert.Equal(t, entryReads, resultReads.Load(), "held ticks must reuse the segment snapshot, not re-read the result store")
+		})
+	})
+
 	t.Run("gate finishes once the debt clears", func(t *testing.T) {
 		mockey.PatchConvey("cleared", t, func() {
 			pt := paramtable.Get()
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
 				func(int64, []int64) []int64 { return nil })
 
@@ -1526,7 +1559,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			meta, job := stage(t)
+			meta, job, _ := stage(t)
 			job.StartTime = time.Now().UnixMilli() // keep the ingest clock fresh so the timeout path only reads
 			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
 				func(int64, []int64) []int64 { return []int64{556} })
