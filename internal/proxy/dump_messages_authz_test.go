@@ -68,11 +68,78 @@ func TestAuthorizeWALRead(t *testing.T) {
 				},
 			}, nil
 		}
-		_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
+		_, err := initMetaCache(context.Background(), client)
+		require.NoError(t, err)
 
 		t.Run("admin role is allowed", func(t *testing.T) {
 			_, err := authorizeWALRead(GetContext(context.Background(), "dbadmin:pwd"))
 			assert.NoError(t, err)
+		})
+
+		t.Run("custom superuser with Global PrivilegeGroupAdmin is allowed", func(t *testing.T) {
+			superClient := &MockMixCoordClientInterface{}
+			superClient.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+				return &internalpb.ListPolicyResponse{
+					Status: merr.Success(),
+					PolicyInfos: []string{
+						// Cluster-level PrivilegeGroupAdmin grant at db="*",
+						// the way rootcoord normalizes cluster-level grants.
+						funcutil.PolicyForPrivilege("role_super", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String(), util.AnyWord),
+					},
+					UserRoles: []string{
+						funcutil.EncodeUserRoleCache("super", "role_super"),
+					},
+				}, nil
+			}
+			_, err := initMetaCache(context.Background(), superClient)
+			require.NoError(t, err)
+
+			_, err = authorizeWALRead(GetContext(context.Background(), "super:pwd"))
+			assert.NoError(t, err)
+		})
+
+		t.Run("custom superuser with Global PrivilegeAll is allowed", func(t *testing.T) {
+			superClient := &MockMixCoordClientInterface{}
+			superClient.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+				return &internalpb.ListPolicyResponse{
+					Status: merr.Success(),
+					PolicyInfos: []string{
+						funcutil.PolicyForPrivilege("role_all", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAll.String(), util.AnyWord),
+					},
+					UserRoles: []string{
+						funcutil.EncodeUserRoleCache("alluser", "role_all"),
+					},
+				}, nil
+			}
+			_, err := initMetaCache(context.Background(), superClient)
+			require.NoError(t, err)
+
+			_, err = authorizeWALRead(GetContext(context.Background(), "alluser:pwd"))
+			assert.NoError(t, err)
+		})
+
+		t.Run("role with only replicate-config grant is denied", func(t *testing.T) {
+			// Guardrail: replication rights (PrivilegeUpdateReplicateConfiguration)
+			// must NOT imply raw WAL dump rights. A role holding only that narrow
+			// grant can create a replicate stream but is denied DumpMessages.
+			replClient := &MockMixCoordClientInterface{}
+			replClient.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+				return &internalpb.ListPolicyResponse{
+					Status: merr.Success(),
+					PolicyInfos: []string{
+						funcutil.PolicyForPrivilege("role_repl", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(), util.AnyWord),
+					},
+					UserRoles: []string{
+						funcutil.EncodeUserRoleCache("repluser", "role_repl"),
+					},
+				}, nil
+			}
+			_, err := initMetaCache(context.Background(), replClient)
+			require.NoError(t, err)
+
+			_, err = authorizeWALRead(GetContext(context.Background(), "repluser:pwd"))
+			require.Error(t, err)
+			assert.Equal(t, codes.PermissionDenied, status.Code(err))
 		})
 
 		t.Run("non-admin role is denied", func(t *testing.T) {
@@ -102,7 +169,8 @@ func TestAuthorizeWALRead(t *testing.T) {
 					},
 				}, nil
 			}
-			_, err := initMetaCache(context.Background(), rootClient); require.NoError(t, err)
+			_, err := initMetaCache(context.Background(), rootClient)
+			require.NoError(t, err)
 
 			_, err := authorizeWALRead(GetContext(context.Background(), "root:pwd"))
 			assert.NoError(t, err)
@@ -127,7 +195,8 @@ func TestDumpMessages_UnauthorizedUserDenied(t *testing.T) {
 			},
 		}, nil
 	}
-	_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
+	_, err := initMetaCache(context.Background(), client)
+	require.NoError(t, err)
 
 	// The DumpMessages stream is authorized at the gRPC interceptor layer
 	// (GrpcAuthStreamInterceptor + PrivilegeStreamInterceptor), so exercise that
@@ -153,7 +222,8 @@ func TestDumpMessages_UnauthenticatedUserDenied(t *testing.T) {
 	defer privilege.CleanPrivilegeCache()
 
 	client := &MockMixCoordClientInterface{}
-	_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
+	_, err := initMetaCache(context.Background(), client)
+	require.NoError(t, err)
 
 	// The DumpMessages stream is authenticated at the gRPC interceptor layer
 	// (GrpcAuthStreamInterceptor) before authorization runs, so exercise that
@@ -199,7 +269,8 @@ func TestStreamPrivilegeInterceptor_CreateReplicateStream(t *testing.T) {
 			},
 		}, nil
 	}
-	_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
+	_, err := initMetaCache(context.Background(), client)
+	require.NoError(t, err)
 
 	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
 
@@ -283,6 +354,49 @@ func TestStreamPrivilegeInterceptor_FailClosed(t *testing.T) {
 	})
 }
 
+// TestStreamHealthWatch_FullChain verifies the exemption semantics in the real
+// chain: the health service is exempt from RBAC (so an authenticated probe
+// passes) but NOT from authentication (an unauthenticated probe is rejected
+// before the exemption is reached), matching the unary health.Check behavior.
+func TestStreamHealthWatch_FullChain(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+
+	chain := grpc_middleware.ChainStreamServer(
+		GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() })),
+		PrivilegeStreamInterceptor(StreamPrivilegeInterceptor),
+	)
+
+	t.Run("unauthenticated health watch is rejected", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: context.Background()}
+		err := chain(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: grpc_health_v1.Health_Watch_FullMethodName,
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("authenticated health watch passes the RBAC exemption", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "root:pwd")}
+		err := chain(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: grpc_health_v1.Health_Watch_FullMethodName,
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, handlerCalled)
+	})
+}
+
 // TestGrpcAuthStreamInterceptorChain verifies the external stream interceptor
 // chain (authentication -> authorization) propagates the context end-to-end:
 // auth runs first, authorization sees the resolved user, and the handler
@@ -291,7 +405,8 @@ func TestStreamPrivilegeInterceptor_FailClosed(t *testing.T) {
 func TestGrpcAuthStreamInterceptorChain(t *testing.T) {
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
-	_, err := initMetaCache(context.Background(), &MockMixCoordClientInterface{}); require.NoError(t, err)
+	_, err := initMetaCache(context.Background(), &MockMixCoordClientInterface{})
+	require.NoError(t, err)
 
 	chain := grpc_middleware.ChainStreamServer(
 		GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() })),
@@ -329,7 +444,8 @@ func TestGrpcAuthStreamInterceptorChain_Authorized(t *testing.T) {
 			},
 		}, nil
 	}
-	cache, err := initMetaCache(context.Background(), client); require.NoError(t, err)
+	cache, err := initMetaCache(context.Background(), client)
+	require.NoError(t, err)
 
 	chain := grpc_middleware.ChainStreamServer(
 		GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return cache })),

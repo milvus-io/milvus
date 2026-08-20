@@ -261,35 +261,75 @@ func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOr
 	return metaCache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
 }
 
-// authorizeWALRead gates DumpMessages, which exposes raw WAL contents for
-// CDC/data salvage. Reading raw WAL is a cluster-scoped operation, so only
-// root or a user holding the built-in admin role is allowed.
-func authorizeWALRead(ctx context.Context) (context.Context, error) {
+// enforceClusterPrivilege authorizes a cluster-scoped operation via casbin
+// against a Global object at db="*" (util.AnyWord), mirroring the unary
+// PrivilegeInterceptor's handling of cluster-level grants. It is shared by all
+// stream authorizers so the enforcement contract (root exemption, GetRole +
+// RolePublic, casbin enforce with result cache, apikey masking) stays in sync
+// with the unary path. Streaming interceptors have no `req` object, so the
+// required privilege is passed explicitly.
+func enforceClusterPrivilege(ctx context.Context, objectPrivilege string) (context.Context, error) {
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return ctx, nil
 	}
 	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
 	if err != nil {
+		mlog.Warn(ctx, "GetAuthInfoFromContext fail for stream", mlog.Err(err))
 		return ctx, err
 	}
 	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
 		return ctx, nil
 	}
-	roles, err := GetRole(username)
+	roleNames, err := GetRole(username)
 	if err != nil {
+		mlog.Warn(ctx, "GetRole fail for stream", mlog.String("username", username), mlog.Err(err))
 		return ctx, err
 	}
-	for _, role := range roles {
-		if role == util.RoleAdmin {
+	roleNames = append(roleNames, util.RolePublic)
+	ctx = SetRBACRolesToContext(ctx, roleNames)
+
+	objectType := commonpb.ObjectType_Global.String()
+	// Cluster-level privileges are authorized globally (db = util.AnyWord),
+	// mirroring the unary interceptor's handling of cluster-level grants.
+	dbName := util.AnyWord
+	object := funcutil.PolicyForResource(dbName, objectType, util.AnyWord)
+	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
+		mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),
+		mlog.FieldDbName(dbName))
+
+	e := privilege.GetEnforcer()
+	for _, roleName := range roleNames {
+		isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+		if !cached {
+			isPermit, err = e.Enforce(roleName, object, objectPrivilege)
+			if err != nil {
+				log.Warn(ctx, "fail to execute permit func for stream", mlog.Err(err))
+				return ctx, err
+			}
+			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+		}
+		if isPermit {
 			return ctx, nil
 		}
 	}
-	mlog.Info(ctx, "dump WAL permission deny", mlog.String("username", username))
+
+	log.Info(ctx, "permission deny for stream", mlog.Strings("roles", roleNames))
 	if password == util.PasswordHolder {
 		username = "apikey user"
 	}
 	return ctx, status.Error(codes.PermissionDenied,
-		fmt.Sprintf("dump WAL requires admin or root, deny to %s", username))
+		fmt.Sprintf("%s: permission deny to %s", objectPrivilege, username))
+}
+
+// authorizeWALRead gates DumpMessages, which exposes raw WAL contents for
+// CDC/data salvage. Reading raw WAL is the widest data-exposure surface on the
+// port (unfiltered, cluster-wide), so it requires the cluster-admin grant:
+// root, the built-in admin role, or a custom role holding Global
+// PrivilegeGroupAdmin / PrivilegeAll. A role granted only the narrow
+// PrivilegeUpdateReplicateConfiguration (replication config) is still denied,
+// so CreateReplicateStream rights do not imply WAL dump rights.
+func authorizeWALRead(ctx context.Context) (context.Context, error) {
+	return enforceClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String())
 }
 
 // StreamPrivilegeFunc is the streaming counterpart of PrivilegeFunc. It
@@ -303,10 +343,11 @@ func authorizeWALRead(ctx context.Context) (context.Context, error) {
 type StreamPrivilegeFunc func(ctx context.Context, fullMethod string) (context.Context, error)
 
 // streamHealthServicePrefix is the full-method-name prefix of the gRPC health
-// service. Health probing (grpc.health.v1.Health/Watch) is an infrastructure
-// concern; it is exempt from RBAC authorization (the stream is still
-// authenticated, matching the unary health.Check behavior), otherwise health
-// checks would fail once authorization is enabled.
+// service. Health probing (grpc.health.v1.Health/Watch) is exempt from RBAC
+// authorization, but the stream is STILL authenticated by
+// GrpcAuthStreamInterceptor (matching the unary health.Check path) — so when
+// authorization is enabled, health probes must carry valid credentials, and the
+// exemption only skips the casbin check.
 const streamHealthServicePrefix = "/grpc.health.v1.Health/"
 
 // streamMethodAuthorizers is the static authorization table for streaming RPCs
@@ -317,8 +358,10 @@ const streamHealthServicePrefix = "/grpc.health.v1.Health/"
 //     PrivilegeUpdateReplicateConfiguration privilege (Global scope), so that a
 //     dedicated role can be granted replication rights.
 //   - DumpMessages streams raw WAL messages out for data salvage. It exposes
-//     raw, unfiltered cluster data, so it is restricted to root or the built-in
-//     admin role via authorizeWALRead.
+//     raw, unfiltered cluster data, so it requires the cluster-admin grant
+//     (Global PrivilegeGroupAdmin / PrivilegeAll / built-in admin / root) via
+//     authorizeWALRead — intentionally stricter than CreateReplicateStream, so
+//     replication rights do not imply raw WAL export rights.
 //
 // Any streaming method NOT present in this table is denied by default
 // (fail-closed) in StreamPrivilegeInterceptor, which prevents a newly-added
@@ -372,59 +415,7 @@ func StreamPrivilegeInterceptor(ctx context.Context, fullMethod string) (context
 // authorizeCreateReplicateStream authorizes CreateReplicateStream, which writes
 // replicated messages into the WAL data plane. It is a cluster-scoped operation
 // and is authorized via casbin against PrivilegeUpdateReplicateConfiguration
-// (Global scope). Like the unary PrivilegeInterceptor, cluster-level privileges
-// are authorized against util.AnyWord ("*") db scope, independent of the
-// connection namespace.
+// (Global scope), mirroring the unary interceptor's cluster-level handling.
 func authorizeCreateReplicateStream(ctx context.Context) (context.Context, error) {
-	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		return ctx, nil
-	}
-	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
-	if err != nil {
-		mlog.Warn(ctx, "GetAuthInfoFromContext fail for stream", mlog.Err(err))
-		return ctx, err
-	}
-	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
-		return ctx, nil
-	}
-	roleNames, err := GetRole(username)
-	if err != nil {
-		mlog.Warn(ctx, "GetRole fail for stream", mlog.String("username", username), mlog.Err(err))
-		return ctx, err
-	}
-	roleNames = append(roleNames, util.RolePublic)
-	ctx = SetRBACRolesToContext(ctx, roleNames)
-
-	objectType := commonpb.ObjectType_Global.String()
-	objectPrivilege := commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()
-	// Cluster-level privileges are authorized globally (db = util.AnyWord),
-	// mirroring the unary interceptor's handling of cluster-level grants.
-	dbName := util.AnyWord
-	object := funcutil.PolicyForResource(dbName, objectType, util.AnyWord)
-	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
-		mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),
-		mlog.FieldDbName(dbName))
-
-	e := privilege.GetEnforcer()
-	for _, roleName := range roleNames {
-		isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
-		if !cached {
-			isPermit, err = e.Enforce(roleName, object, objectPrivilege)
-			if err != nil {
-				log.Warn(ctx, "fail to execute permit func for stream", mlog.Err(err))
-				return ctx, err
-			}
-			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
-		}
-		if isPermit {
-			return ctx, nil
-		}
-	}
-
-	log.Info(ctx, "permission deny for stream", mlog.Strings("roles", roleNames))
-	if password == util.PasswordHolder {
-		username = "apikey user"
-	}
-	return ctx, status.Error(codes.PermissionDenied,
-		fmt.Sprintf("%s: permission deny to %s", objectPrivilege, username))
+	return enforceClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String())
 }
