@@ -31,7 +31,7 @@ class MilvusConan(ConanFile):
         "milvus-common/1.0.0-b589c5a@milvus/dev#d431af735c8acb829feb7a94f05daf42",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
-        "librdkafka/1.9.1#ec1a00d5414f618555799be9566adfb7",
+        "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "crc32c/1.1.2",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
