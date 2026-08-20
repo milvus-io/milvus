@@ -1865,6 +1865,10 @@ func (coord *MixCoordMock) ClientHeartbeat(ctx context.Context, req *milvuspb.Cl
 	return &milvuspb.ClientHeartbeatResponse{}, nil
 }
 
+func (coord *MixCoordMock) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return &rootcoordpb.ListClientCommandsResponse{}, nil
+}
+
 func (coord *MixCoordMock) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return &milvuspb.DeleteClientCommandResponse{}, nil
 }

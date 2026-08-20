@@ -43,8 +43,13 @@ import (
 type TelemetryConfig struct {
 	// Enabled controls whether telemetry collection is active
 	Enabled bool
-	// HeartbeatInterval is how often to send heartbeats to server (default: 30 seconds)
-	// Snapshot period aligns with heartbeat interval
+	// HeartbeatInterval is how often to send heartbeats to server (default: 10 seconds).
+	//
+	// It is also the metrics window: each heartbeat carries the operations since the last
+	// one. The coordinator answers a telemetry query from the window before the newest, so
+	// what a caller reads is between one and two intervals old -- ten to twenty seconds at
+	// the default. Raising it cuts the coordinator's heartbeat load, which scales with the
+	// number of connected clients rather than with traffic, at the cost of that staleness.
 	HeartbeatInterval time.Duration
 	// SamplingRate is the sampling rate for all operations (0.0-1.0, default: 1.0 = 100%)
 	// Can be dynamically adjusted
@@ -65,7 +70,7 @@ type TelemetryConfig struct {
 func DefaultTelemetryConfig() *TelemetryConfig {
 	return &TelemetryConfig{
 		Enabled:           true,
-		HeartbeatInterval: 30 * time.Second,
+		HeartbeatInterval: 10 * time.Second,
 		SamplingRate:      1.0, // 100% sampling by default
 		ErrorMaxCount:     100,
 	}
@@ -513,8 +518,10 @@ type ClientTelemetryManager struct {
 	// interval elapsed. Zero until the first snapshot.
 	lastSnapshotEnd atomic.Int64
 
-	// Deterministic sampling counter
-	samplingCounter uint64
+	// samplingAccum carries the fractional sampling rate between calls, in samplingScale
+	// units: each operation adds the rate and the one that pushes it past a whole unit is
+	// the one sampled. See shouldSample.
+	samplingAccum uint64
 }
 
 // CommandHandler handles a specific command type from the server
@@ -787,7 +794,10 @@ func (m *ClientTelemetryManager) getHeartbeatInterval() time.Duration {
 	interval := m.config.HeartbeatInterval
 	m.configMu.RUnlock()
 	if interval <= 0 {
-		return 30 * time.Second
+		// Matches DefaultTelemetryConfig: a config built field by field can leave this
+		// zero, and falling back to a different number than the documented default would
+		// make the interval depend on how the config was constructed.
+		return DefaultTelemetryConfig().HeartbeatInterval
 	}
 	return interval
 }
@@ -815,8 +825,27 @@ func (m *ClientTelemetryManager) snapshotEnabledCollections() (map[string]bool, 
 	return snapshot, false
 }
 
-const samplingDenominator = 10000
+// samplingScale is the fixed-point unit for accumulating a fractional sampling rate. A
+// rate becomes an integer step of samplingScale units, so the smallest rate that still
+// samples is 1e-9 -- far below anything an operator would set, which is the point: a
+// configured rate must never round down to "off".
+const samplingScale = 1_000_000_000
 
+// shouldSample decides whether this operation is recorded, spreading the sampled ones
+// evenly rather than in runs.
+//
+// Each call adds the rate to a shared accumulator and samples on the call that carries it
+// across a whole unit: at 0.25 that is every fourth operation, at 0.1 every tenth. What
+// matters is that the ratio holds over any stretch of calls, not only over a long one --
+// metrics are reported per heartbeat window, and a window is tens or hundreds of
+// operations. A scheme that sampled a contiguous run and then dropped one would give the
+// right long-run ratio while making every individual window either complete or empty.
+//
+// The accumulator is shared, so concurrent callers reorder which of them observes a
+// crossing, but each crossing is observed exactly once: atomic.AddUint64 hands every caller
+// a distinct interval, and the step is smaller than one unit, so no interval spans two
+// crossings. The count of sampled operations is therefore exact, not statistical, which is
+// also why this needs no random source.
 func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 	if samplingRate >= 1.0 {
 		return true
@@ -825,13 +854,17 @@ func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 		return false
 	}
 
-	threshold := uint64(samplingRate * float64(samplingDenominator))
-	if threshold == 0 {
-		return false
+	step := uint64(samplingRate * float64(samplingScale))
+	if step == 0 {
+		// A rate too small to represent still means "sample rarely", never "sample never":
+		// silently disabling telemetry for a positive rate is the one outcome nobody could
+		// have intended.
+		step = 1
 	}
 
-	counter := atomic.AddUint64(&m.samplingCounter, 1)
-	return counter%samplingDenominator < threshold
+	after := atomic.AddUint64(&m.samplingAccum, step)
+	before := after - step
+	return after/samplingScale != before/samplingScale
 }
 
 // toProtoOperationMetrics converts collected metrics into their proto form, dropping
@@ -1341,6 +1374,31 @@ type ConfigPayload struct {
 	TTLSeconds        int64    `json:"ttl_seconds,omitempty"`
 }
 
+// ConfigApplyResult is what a push_config reply carries back, so the sender can tell a
+// config that took effect from one that was quietly dropped.
+//
+// encoding/json ignores fields it does not know, which made every payload look accepted:
+// a misspelled key, a key belonging to a newer client, or ttl_seconds -- which lives in
+// ConfigPayload and is sent by the web UI but has never been read by anything -- all
+// produced the same bare Success. Naming both halves is the only way the caller can see
+// the difference.
+type ConfigApplyResult struct {
+	// Applied lists the payload keys that changed this client's configuration.
+	Applied []string `json:"applied"`
+	// Ignored lists the payload keys this client does not act on. It is not an error:
+	// failing the whole command would stop a newer server from configuring an older
+	// client at all, so the keys are reported and the rest is still applied.
+	Ignored []string `json:"ignored,omitempty"`
+}
+
+// configPayloadKeys are the payload keys handlePushConfig acts on. Anything else in a
+// payload is reported as ignored.
+var configPayloadKeys = map[string]struct{}{
+	"enabled":               {},
+	"heartbeat_interval_ms": {},
+	"sampling_rate":         {},
+}
+
 // CollectionMetricsPayload represents the payload for collection_metrics command
 type CollectionMetricsPayload struct {
 	Enabled      bool     `json:"enabled"`
@@ -1351,6 +1409,10 @@ type CollectionMetricsPayload struct {
 // handlePushConfig handles dynamic configuration updates
 func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandReply {
 	var payload ConfigPayload
+	// raw is decoded alongside the typed payload purely to see which keys were sent:
+	// unmarshalling into ConfigPayload cannot distinguish "key absent" from "key unknown",
+	// and both halves are needed to answer honestly.
+	raw := map[string]json.RawMessage{}
 	if len(cmd.Payload) > 0 {
 		if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
 			return &CommandReply{
@@ -1359,25 +1421,51 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 				ErrorMessage: "failed to parse config payload: " + err.Error(),
 			}
 		}
+		if err := json.Unmarshal(cmd.Payload, &raw); err != nil {
+			return &CommandReply{
+				CommandId:    cmd.CommandId,
+				Success:      false,
+				ErrorMessage: "failed to parse config payload: " + err.Error(),
+			}
+		}
 	}
+
+	ignored := make([]string, 0, len(raw))
+	for key := range raw {
+		if _, known := configPayloadKeys[key]; !known {
+			ignored = append(ignored, key)
+		}
+	}
+	sort.Strings(ignored)
+
+	// Validate before touching anything: a payload is applied whole or not at all. Writing
+	// the fields as they were read would let a rejected value leave earlier ones applied,
+	// so a command carrying both enabled and a bad interval would switch telemetry off and
+	// still report failure -- the caller would have no way to know what state it left.
+	if payload.HeartbeatInterval != nil && *payload.HeartbeatInterval <= 0 {
+		return &CommandReply{
+			CommandId:    cmd.CommandId,
+			Success:      false,
+			ErrorMessage: "heartbeat_interval_ms must be positive",
+		}
+	}
+
+	applied := make([]string, 0, len(configPayloadKeys))
 
 	// Apply configuration changes with write lock
 	m.configMu.Lock()
 	if payload.Enabled != nil {
 		m.config.Enabled = *payload.Enabled
+		applied = append(applied, "enabled")
 	}
 	if payload.HeartbeatInterval != nil {
-		if *payload.HeartbeatInterval <= 0 {
-			m.configMu.Unlock()
-			return &CommandReply{
-				CommandId:    cmd.CommandId,
-				Success:      false,
-				ErrorMessage: "heartbeat_interval_ms must be positive",
-			}
-		}
 		m.config.HeartbeatInterval = time.Duration(*payload.HeartbeatInterval) * time.Millisecond
+		applied = append(applied, "heartbeat_interval_ms")
 	}
 	if payload.SamplingRate != nil {
+		// Out-of-range rates are clamped rather than rejected, which is why this is not
+		// part of the validation above: 1.5 means "everything" and -0.5 means "nothing",
+		// and neither is ambiguous enough to refuse.
 		samplingRate := *payload.SamplingRate
 		if samplingRate < 0.0 {
 			samplingRate = 0.0
@@ -1385,13 +1473,20 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 			samplingRate = 1.0
 		}
 		m.config.SamplingRate = samplingRate
+		applied = append(applied, "sampling_rate")
 	}
 	m.configMu.Unlock()
 
-	return &CommandReply{
+	reply := &CommandReply{
 		CommandId: cmd.CommandId,
 		Success:   true,
 	}
+	// A reply that cannot be encoded would be worse than one without the detail, so the
+	// command still succeeds -- the configuration was applied either way.
+	if encoded, err := json.Marshal(ConfigApplyResult{Applied: applied, Ignored: ignored}); err == nil {
+		reply.Payload = encoded
+	}
+	return reply
 }
 
 // GetConfigResponse represents the response for get_config command
