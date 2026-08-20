@@ -1500,6 +1500,33 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		})
 	})
 
+	t.Run("held progress is monotonic and stays below done", func(t *testing.T) {
+		// The task-average ingest progress can legitimately sit above the
+		// indexed fraction when the hold begins (e.g. 96 with nothing
+		// indexed yet, raw held = 90). Pollers must never see progress move
+		// backwards, nor see 100 - their signal for done - while the job is
+		// still held.
+		mockey.PatchConvey("monotonic", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, _, _ := stage(t)
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
+				func(int64, []int64) []int64 { return []int64{555, 556} }) // nothing indexed: raw held = 90
+
+			require.NoError(t, meta.UpdateJobProgress(1, 96)) // late-ingest progress
+			checker.aggregateJobState(meta.GetJob(1))
+			assert.Equal(t, int64(96), meta.GetJob(1).GetProgress(),
+				"holding must not walk progress back from 96 to 90")
+
+			require.NoError(t, meta.UpdateJobProgress(1, 100)) // all tasks at 100, one not yet marked done
+			checker.aggregateJobState(meta.GetJob(1))
+			assert.Equal(t, int64(99), meta.GetJob(1).GetProgress(),
+				"a held job must never show 100; pollers treat 100 as done")
+		})
+	})
+
 	t.Run("held ticks reuse the entry snapshot instead of re-applying and re-reading", func(t *testing.T) {
 		// The task results are immutable once committed, so the gate lands
 		// the apply and reads the result store exactly once, at entry. A

@@ -399,6 +399,17 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 				if total > 0 {
 					held = 90 + int64(10*(total-len(unindexed))/total)
 				}
+				// Keep progress monotonic for pollers: the task-average
+				// ingest progress can legitimately sit above the indexed
+				// fraction when the hold begins, and must never show 100
+				// while held - pollers treat 100 as done - so a carried-over
+				// 100 pins to 99 until the gate opens.
+				if cur := job.GetProgress(); cur > held {
+					held = cur
+				}
+				if held > 99 {
+					held = 99
+				}
 				if held != job.GetProgress() {
 					if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
 						mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
