@@ -25,7 +25,18 @@ done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 PROTO_DIR=$ROOT_DIR/pkg/proto
-API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
+if [[ -n "${MILVUS_PROTO_DIR:-}" ]]; then
+  API_PROTO_DIR=${MILVUS_PROTO_DIR}
+else
+  API_GO_DIR=$(go list -m -f '{{if .Replace}}{{.Replace.Dir}}{{else}}{{.Dir}}{{end}}' \
+    github.com/milvus-io/milvus-proto/go-api/v3 2>/dev/null || true)
+  LOCAL_API_PROTO_DIR=$(dirname "${API_GO_DIR}")/proto
+  if [[ -n "${API_GO_DIR}" && -f "${LOCAL_API_PROTO_DIR}/schema.proto" ]]; then
+    API_PROTO_DIR=${LOCAL_API_PROTO_DIR}
+  else
+    API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
+  fi
+fi
 CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
 

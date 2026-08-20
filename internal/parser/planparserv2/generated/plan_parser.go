@@ -85,7 +85,7 @@ func planParserInit() {
 		0, 251, 9, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 2, 0, 2, 0, 19, 1,
 		0, 32, 33, 1, 0, 8, 13, 1, 0, 71, 72, 1, 0, 20, 21, 1, 0, 22, 24, 2, 0,
 		32, 33, 47, 48, 2, 0, 51, 51, 54, 54, 2, 0, 52, 52, 55, 55, 2, 0, 53, 53,
-		56, 56, 1, 0, 59, 65, 3, 0, 71, 71, 75, 75, 77, 77, 2, 0, 71, 71, 75, 75,
+		56, 56, 1, 0, 59, 65, 3, 0, 71, 71, 75, 75, 77, 78, 2, 0, 71, 71, 75, 75,
 		1, 0, 34, 36, 1, 0, 38, 39, 1, 0, 8, 9, 3, 0, 71, 71, 75, 76, 78, 78, 1,
 		0, 10, 11, 1, 0, 8, 11, 1, 0, 12, 13, 315, 0, 187, 1, 0, 0, 0, 2, 252,
 		1, 0, 0, 0, 4, 5, 6, 0, -1, 0, 5, 9, 5, 71, 0, 0, 6, 7, 7, 0, 0, 0, 7,
@@ -1261,6 +1261,10 @@ func (s *ArrayLengthContext) JSONIdentifier() antlr.TerminalNode {
 
 func (s *ArrayLengthContext) StructFieldIdentifier() antlr.TerminalNode {
 	return s.GetToken(PlanParserStructFieldIdentifier, 0)
+}
+
+func (s *ArrayLengthContext) StructSubFieldIdentifier() antlr.TerminalNode {
+	return s.GetToken(PlanParserStructSubFieldIdentifier, 0)
 }
 
 func (s *ArrayLengthContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
@@ -4957,7 +4961,7 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 			p.SetState(165)
 			_la = p.GetTokenStream().LA(1)
 
-			if !((int64((_la-71)) & ^0x3f) == 0 && ((int64(1)<<(_la-71))&81) != 0) {
+			if !((int64((_la-71)) & ^0x3f) == 0 && ((int64(1)<<(_la-71))&209) != 0) {
 				p.GetErrorHandler().RecoverInline(p)
 			} else {
 				p.GetErrorHandler().ReportMatch(p)
