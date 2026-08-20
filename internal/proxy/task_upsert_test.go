@@ -794,7 +794,7 @@ func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
 			pchans = append(pchans, funcutil.ToPhysicalChannel(vchannel))
 		}
 		return channelmgr.ChannelInfo{VChans: vchans, PChans: pchans}, nil
-	}, nil)
+	})
 	proxy := task.node.(*Proxy)
 	if proxy.tsoAllocator == nil {
 		proxy.tsoAllocator = &timestampAllocator{
@@ -1529,7 +1529,7 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 						VChans: []string{partialUpdateCASTestVChannels[0]},
 						PChans: []string{funcutil.ToPhysicalChannel(partialUpdateCASTestVChannels[0])},
 					}, nil
-				}, nil),
+				}),
 				schema: &schemapb.CollectionSchema{},
 			}
 			if partitionKey {

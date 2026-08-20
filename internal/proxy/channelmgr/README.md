@@ -1,10 +1,9 @@
 # ChannelMgr Package
 
 The `channelmgr` package resolves the DML channels (virtual and physical) of
-collections and lazily caches the mapping on the proxy. It decouples channel
-resolution from the collection metadata cache: the resolver is injected at
-construction, so callers decide where channel metadata comes from (production
-reads `metacache`; tests inject a fake).
+collections. It decouples channel resolution from the collection metadata
+cache: the resolver is injected at construction, so callers decide where
+channel metadata comes from (production reads `metacache`; tests inject a fake).
 
 ## Overview
 
@@ -12,19 +11,18 @@ In Milvus, a collection is partitioned into shards represented by virtual
 channels (`vChan`), which are mapped 1:1 to physical channels (`pChan`, the
 actual message-stream topic/WAL). DML write tasks (insert/delete/upsert) and
 read paths (search/query) need the channel list of a collection before they can
-dispatch work. This package owns that lookup and its cache.
+dispatch work. This package owns that lookup.
 
 ## Responsibilities
 
 1. **Channel resolution**: resolve `(vchans, pchans)` for a collection id via an
-   injected `GetChannelsFunc`.
-2. **Lazy caching**: cache the resolved `ChannelInfo` per collection id with
-   double-checked locking; repeated lookups hit the cache.
-3. **Invalidation**: `RemoveStream` drops the cached entry for a collection
-   (called when the collection is dropped) and updates pchan metrics.
-4. **Repack**: the `RepackFunc` type and `DefaultInsertRepackFunc` bundle DML
-   messages into `MsgPack`s by hash key for streaming insertion.
-5. **Message packing helpers**: `GenInsertMsgsByPartition` splits an insert
+   injected `GetChannelsFunc`, validating the vchan/pchan alignment on every
+   resolver result.
+2. **No channel cache of its own**: the package deliberately keeps no per-
+   collection cache. The injected resolver owns caching (e.g. it reads the meta
+   cache), so this package never serves stale channel metadata and never needs
+   its own invalidation path.
+3. **Message packing helpers**: `GenInsertMsgsByPartition` splits an insert
    payload into per-segment messages honoring the WAL-specific single-row limit.
 
 ## Architecture
@@ -35,9 +33,8 @@ dispatch work. This package owns that lookup and its cache.
 │                                                          │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │             channelsMgrImpl                      │   │
-│  │  • infos map[collID]streamInfos  (lazy cache)   │   │
 │  │  • getChannelsFunc  (injected resolver)         │   │
-│  │  • repackFunc       (message bundling)          │   │
+│  │  • vchan/pchan alignment check on resolve       │   │
 │  └───────────────────────┬──────────────────────────┘   │
 │                          │ GetChannels / GetVChannels   │
 │                          ▼                              │
@@ -51,17 +48,15 @@ dispatch work. This package owns that lookup and its cache.
 type ChannelsMgr interface {
     GetChannels(collectionID typeutil.UniqueID) ([]string, error)
     GetVChannels(collectionID typeutil.UniqueID) ([]string, error)
-    RemoveStream(collectionID typeutil.UniqueID)
 }
 
 type GetChannelsFunc func(collectionID typeutil.UniqueID) (ChannelInfo, error)
-type RepackFunc func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 ```
 
 ### Construction
 
-`NewChannelsMgr(getChannelsFunc, repackFunc)` builds a manager. The resolver is
-injected so this package has **no dependency on `metacache`**:
+`NewChannelsMgr(getChannelsFunc)` builds a manager. The resolver is injected so
+this package has **no dependency on `metacache`**:
 
 ```go
 mgr := channelmgr.NewChannelsMgr(
@@ -72,7 +67,6 @@ mgr := channelmgr.NewChannelsMgr(
         }
         return channelmgr.ChannelInfo{VChans: info.VChannels, PChans: info.PChannels}, nil
     },
-    channelmgr.DefaultInsertRepackFunc,
 )
 ```
 
@@ -83,18 +77,11 @@ mgr := channelmgr.NewChannelsMgr(
   message is packed.
 - **Search/query/flush/import** call `GetVChannels(collID)` to fan work out
   across the virtual channels.
-- **DropCollection** calls `RemoveStream(collID)` through the proxy's
-  `InvalidateCollectionMetaCache` handler.
-
-## Metrics
-
-- `ProxyMsgStreamObjectsForPChan`: incremented on cache fill, decremented on
-  `RemoveStream`, labeled by node id and pchan.
 
 ## Testing
 
 The package is self-contained and testable without a coordinator: tests inject
-a fake `GetChannelsFunc` and assert cache hit/refill behavior.
+a fake `GetChannelsFunc` and assert delegation and alignment-check behavior.
 
 **Mocks** (via mockery): `mock_channels_manager.go` mocks the `ChannelsMgr`
 interface.
@@ -104,6 +91,7 @@ interface.
 - **Proxy** (`internal/proxy/`): owns the `ChannelsMgr` instance; builds the
   resolver from `metacache` in `Proxy.Init`.
 - **MetaCache** (`internal/proxy/metacache/`): the production channel data
-  source; `CollectionInfo` carries `VChannels`/`PChannels`.
+  source; `CollectionInfo` carries `VChannels`/`PChannels`. Its own cache and
+  invalidation machinery is what keeps channel lookups fast and fresh.
 - **TaskScheduler** (`internal/proxy/task_scheduler.go`): consumes the pchans
   resolved by tasks for DML timestamp statistics.

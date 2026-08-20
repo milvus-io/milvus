@@ -26,12 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func Test_removeDuplicate(t *testing.T) {
-	s1 := []string{"11", "11"}
-	filtered1 := removeDuplicate(s1)
-	assert.ElementsMatch(t, filtered1, []string{"11"})
-}
-
 func Test_newChannels(t *testing.T) {
 	t.Run("length mismatch", func(t *testing.T) {
 		_, err := newChannels([]string{"111", "222"}, []string{"111"})
@@ -46,95 +40,40 @@ func Test_newChannels(t *testing.T) {
 	})
 }
 
-func Test_channelsMgrImpl_getAllChannels(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		m := &channelsMgrImpl{
-			infos: map[typeutil.UniqueID]streamInfos{
-				100: {channelInfo: ChannelInfo{VChans: []string{"111", "222"}, PChans: []string{"111"}}},
-			},
-		}
-		got, err := m.getAllChannels(100)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111", "222"}, got.VChans)
-		assert.ElementsMatch(t, []string{"111"}, got.PChans)
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		m := &channelsMgrImpl{
-			infos: map[typeutil.UniqueID]streamInfos{},
-		}
-		_, err := m.getAllChannels(100)
-		assert.Error(t, err)
-	})
-}
-
-func Test_channelsMgrImpl_ensureChannels(t *testing.T) {
-	t.Run("hit cache", func(t *testing.T) {
-		m := &channelsMgrImpl{
-			infos: map[typeutil.UniqueID]streamInfos{
-				100: {channelInfo: ChannelInfo{VChans: []string{"111"}, PChans: []string{"p111"}}},
-			},
-			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
-				return ChannelInfo{}, errors.New("should not be called")
-			},
-		}
-		got, err := m.ensureChannels(100)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111"}, got.VChans)
-		assert.ElementsMatch(t, []string{"p111"}, got.PChans)
-	})
-
-	t.Run("load and cache", func(t *testing.T) {
+func Test_channelsMgrImpl_GetChannels(t *testing.T) {
+	t.Run("delegates to resolver", func(t *testing.T) {
 		called := atomic.Int32{}
 		m := &channelsMgrImpl{
-			infos: make(map[typeutil.UniqueID]streamInfos),
 			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
 				called.Add(1)
+				assert.Equal(t, typeutil.UniqueID(100), collectionID)
 				return ChannelInfo{VChans: []string{"111", "222"}, PChans: []string{"p111", "p222"}}, nil
-			},
-		}
-		got, err := m.ensureChannels(100)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111", "222"}, got.VChans)
-		assert.ElementsMatch(t, []string{"p111", "p222"}, got.PChans)
-		assert.Equal(t, int32(1), called.Load())
-
-		// ensure the cached value is returned without extra fetches.
-		got, err = m.ensureChannels(100)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111", "222"}, got.VChans)
-		assert.Equal(t, int32(1), called.Load())
-	})
-
-	t.Run("propagate error", func(t *testing.T) {
-		expErr := errors.New("mock")
-		m := &channelsMgrImpl{
-			infos: make(map[typeutil.UniqueID]streamInfos),
-			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
-				return ChannelInfo{}, expErr
-			},
-		}
-		_, err := m.ensureChannels(1)
-		assert.ErrorIs(t, err, expErr)
-	})
-}
-
-func Test_channelsMgrImpl_GetChannels(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		m := &channelsMgrImpl{
-			infos: map[typeutil.UniqueID]streamInfos{
-				100: {channelInfo: ChannelInfo{VChans: []string{"111", "222"}, PChans: []string{"111"}}},
 			},
 		}
 		got, err := m.GetChannels(100)
 		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111"}, got)
+		assert.ElementsMatch(t, []string{"p111", "p222"}, got)
+		// no internal cache: every call hits the resolver.
+		_, err = m.GetChannels(100)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), called.Load())
 	})
 
-	t.Run("error case", func(t *testing.T) {
+	t.Run("propagate resolver error", func(t *testing.T) {
+		expErr := errors.New("mock")
 		m := &channelsMgrImpl{
 			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
-				return ChannelInfo{}, errors.New("mock")
+				return ChannelInfo{}, expErr
+			},
+		}
+		_, err := m.GetChannels(100)
+		assert.ErrorIs(t, err, expErr)
+	})
+
+	t.Run("reject misaligned resolver result", func(t *testing.T) {
+		m := &channelsMgrImpl{
+			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
+				return ChannelInfo{VChans: []string{"111", "222"}, PChans: []string{"p111"}}, nil
 			},
 		}
 		_, err := m.GetChannels(100)
@@ -143,10 +82,10 @@ func Test_channelsMgrImpl_GetChannels(t *testing.T) {
 }
 
 func Test_channelsMgrImpl_GetVChannels(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
+	t.Run("delegates to resolver", func(t *testing.T) {
 		m := &channelsMgrImpl{
-			infos: map[typeutil.UniqueID]streamInfos{
-				100: {channelInfo: ChannelInfo{VChans: []string{"111", "222"}, PChans: []string{"111"}}},
+			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
+				return ChannelInfo{VChans: []string{"111", "222"}, PChans: []string{"p111", "p222"}}, nil
 			},
 		}
 		got, err := m.GetVChannels(100)
@@ -154,22 +93,23 @@ func Test_channelsMgrImpl_GetVChannels(t *testing.T) {
 		assert.ElementsMatch(t, []string{"111", "222"}, got)
 	})
 
-	t.Run("error case", func(t *testing.T) {
+	t.Run("propagate resolver error", func(t *testing.T) {
+		expErr := errors.New("mock")
 		m := &channelsMgrImpl{
 			getChannelsFunc: func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
-				return ChannelInfo{}, errors.New("mock")
+				return ChannelInfo{}, expErr
 			},
 		}
 		_, err := m.GetVChannels(100)
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, expErr)
 	})
 }
 
-func Test_channelsMgrImpl_RemoveStream(t *testing.T) {
-	m := &channelsMgrImpl{
-		infos: map[typeutil.UniqueID]streamInfos{
-			100: {},
-		},
-	}
-	m.RemoveStream(100)
+func TestNewChannelsMgr(t *testing.T) {
+	m := NewChannelsMgr(func(collectionID typeutil.UniqueID) (ChannelInfo, error) {
+		return ChannelInfo{VChans: []string{"v"}, PChans: []string{"p"}}, nil
+	})
+	got, err := m.GetVChannels(100)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"v"}, got)
 }

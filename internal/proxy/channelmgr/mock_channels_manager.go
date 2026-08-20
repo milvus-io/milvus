@@ -133,39 +133,6 @@ func (_c *MockChannelsMgr_GetVChannels_Call) RunAndReturn(run func(int64) ([]str
 	return _c
 }
 
-// RemoveStream provides a mock function with given fields: collectionID
-func (_m *MockChannelsMgr) RemoveStream(collectionID int64) {
-	_m.Called(collectionID)
-}
-
-// MockChannelsMgr_RemoveStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveStream'
-type MockChannelsMgr_RemoveStream_Call struct {
-	*mock.Call
-}
-
-// RemoveStream is a helper method to define mock.On call
-//   - collectionID int64
-func (_e *MockChannelsMgr_Expecter) RemoveStream(collectionID interface{}) *MockChannelsMgr_RemoveStream_Call {
-	return &MockChannelsMgr_RemoveStream_Call{Call: _e.mock.On("RemoveStream", collectionID)}
-}
-
-func (_c *MockChannelsMgr_RemoveStream_Call) Run(run func(collectionID int64)) *MockChannelsMgr_RemoveStream_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockChannelsMgr_RemoveStream_Call) Return() *MockChannelsMgr_RemoveStream_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockChannelsMgr_RemoveStream_Call) RunAndReturn(run func(int64)) *MockChannelsMgr_RemoveStream_Call {
-	_c.Run(run)
-	return _c
-}
-
 // NewMockChannelsMgr creates a new instance of MockChannelsMgr. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockChannelsMgr(t interface {

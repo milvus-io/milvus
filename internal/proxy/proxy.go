@@ -278,7 +278,6 @@ func (node *Proxy) Init() error {
 			}
 			return channelmgr.ChannelInfo{VChans: collInfo.VChannels, PChans: collInfo.PChannels}, nil
 		},
-		channelmgr.DefaultInsertRepackFunc,
 	)
 	node.chMgr = chMgr
 	mlog.Debug(node.ctx, "create channels manager done", mlog.String("role", typeutil.ProxyRole))

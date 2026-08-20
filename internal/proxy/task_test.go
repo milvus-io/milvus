@@ -85,7 +85,6 @@ func newTestChannelsMgr(ctx context.Context, mixCoord types.MixCoordClient) chan
 			}
 			return channelmgr.ChannelInfo{VChans: resp.GetVirtualChannelNames(), PChans: resp.GetPhysicalChannelNames()}, nil
 		},
-		channelmgr.DefaultInsertRepackFunc,
 	)
 }
 

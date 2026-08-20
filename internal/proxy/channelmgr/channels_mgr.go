@@ -18,25 +18,18 @@ package channelmgr
 
 import (
 	"context"
-	"strconv"
-	"sync"
 
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// ChannelsMgr manages the pchans, vchans and related message stream of collections.
+// ChannelsMgr resolves the DML channels of collections.
 type ChannelsMgr interface {
 	// GetChannels returns the physical channels of a collection.
 	GetChannels(collectionID typeutil.UniqueID) ([]string, error)
 	// GetVChannels returns the virtual channels of a collection.
 	GetVChannels(collectionID typeutil.UniqueID) ([]string, error)
-	// RemoveStream removes the corresponding stream of the specified collection. Idempotent.
-	RemoveStream(collectionID typeutil.UniqueID)
 }
 
 // ChannelInfo holds the virtual and physical channels of a collection.
@@ -45,29 +38,12 @@ type ChannelInfo struct {
 	PChans []string
 }
 
-// GetChannelsFunc resolves the channels of a collection. Implementations may
-// cache lazily; the returned info must keep vchan/pchan aligned.
+// GetChannelsFunc resolves the channels of a collection. The returned info
+// must keep vchan/pchan aligned.
 type GetChannelsFunc func(collectionID typeutil.UniqueID) (ChannelInfo, error)
 
-// RepackFunc repacks messages into a message pack.
-type RepackFunc func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
-
-type streamInfos struct {
-	channelInfo ChannelInfo
-}
-
-func removeDuplicate(ss []string) []string {
-	m := make(map[string]struct{})
-	filtered := make([]string, 0, len(ss))
-	for _, s := range ss {
-		if _, ok := m[s]; !ok {
-			filtered = append(filtered, s)
-			m[s] = struct{}{}
-		}
-	}
-	return filtered
-}
-
+// newChannels validates the alignment between virtual and physical channels
+// and returns them as a ChannelInfo.
 func newChannels(vchans []string, pchans []string) (ChannelInfo, error) {
 	if len(vchans) != len(pchans) {
 		mlog.Error(context.TODO(), "physical channels mismatch virtual channels", mlog.Int("len(VirtualChannelNames)", len(vchans)), mlog.Int("len(PhysicalChannelNames)", len(pchans)))
@@ -79,48 +55,27 @@ func newChannels(vchans []string, pchans []string) (ChannelInfo, error) {
 }
 
 type channelsMgrImpl struct {
-	infos map[typeutil.UniqueID]streamInfos // collection id -> stream infos
-	mu    sync.RWMutex
-
 	getChannelsFunc GetChannelsFunc
-	repackFunc      RepackFunc
 }
 
-func (mgr *channelsMgrImpl) getAllChannels(collectionID typeutil.UniqueID) (ChannelInfo, error) {
-	mgr.mu.RLock()
-	defer mgr.mu.RUnlock()
-
-	infos, ok := mgr.infos[collectionID]
-	if ok {
-		return infos.channelInfo, nil
-	}
-
-	return ChannelInfo{}, merr.WrapErrParameterInvalidMsg("collection not found in channels manager: %d", collectionID)
-}
-
-func (mgr *channelsMgrImpl) ensureChannels(collectionID typeutil.UniqueID) (ChannelInfo, error) {
-	if infos, err := mgr.getAllChannels(collectionID); err == nil {
-		return infos, nil
-	}
-
+// resolve validates and returns the channels of a collection, delegating the
+// actual lookup to the injected resolver. The resolver owns any caching (e.g.
+// it may read the meta cache), so this package keeps no channel cache of its
+// own and therefore never serves stale channel metadata.
+func (mgr *channelsMgrImpl) resolve(collectionID typeutil.UniqueID) (ChannelInfo, error) {
 	channelInfos, err := mgr.getChannelsFunc(collectionID)
 	if err != nil {
 		return ChannelInfo{}, err
 	}
-
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	if infos, ok := mgr.infos[collectionID]; ok {
-		return infos.channelInfo, nil
-	}
-	mgr.infos[collectionID] = streamInfos{channelInfo: channelInfos}
-	incPChansMetrics(channelInfos.PChans)
-	return channelInfos, nil
+	// Re-validate the alignment for every resolver result, since the resolver
+	// is injected and may not run the len(vchans)==len(pchans) guard itself
+	// (e.g. when it reads the meta cache, which copies the two lists verbatim).
+	return newChannels(channelInfos.VChans, channelInfos.PChans)
 }
 
 // GetChannels returns the physical channels.
 func (mgr *channelsMgrImpl) GetChannels(collectionID typeutil.UniqueID) ([]string, error) {
-	channelInfos, err := mgr.ensureChannels(collectionID)
+	channelInfos, err := mgr.resolve(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -129,46 +84,19 @@ func (mgr *channelsMgrImpl) GetChannels(collectionID typeutil.UniqueID) ([]strin
 
 // GetVChannels returns the virtual channels.
 func (mgr *channelsMgrImpl) GetVChannels(collectionID typeutil.UniqueID) ([]string, error) {
-	channelInfos, err := mgr.ensureChannels(collectionID)
+	channelInfos, err := mgr.resolve(collectionID)
 	if err != nil {
 		return nil, err
 	}
 	return channelInfos.VChans, nil
 }
 
-func incPChansMetrics(pchans []string) {
-	for _, pc := range pchans {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), pc).Inc()
-	}
-}
-
-func decPChanMetrics(pchans []string) {
-	for _, pc := range pchans {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), pc).Dec()
-	}
-}
-
-// RemoveStream removes the corresponding stream of the specified collection. Idempotent.
-// If stream already exists, remove it, otherwise do nothing.
-func (mgr *channelsMgrImpl) RemoveStream(collectionID typeutil.UniqueID) {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	if info, ok := mgr.infos[collectionID]; ok {
-		decPChanMetrics(info.channelInfo.PChans)
-		delete(mgr.infos, collectionID)
-	}
-	mlog.Info(context.TODO(), "dml stream removed", mlog.Int64("collection_id", collectionID))
-}
-
 // NewChannelsMgr constructs a channels manager backed by the given resolver.
-// getChannelsFunc resolves collection channels; repackFunc repacks messages.
+// getChannelsFunc resolves collection channels.
 func NewChannelsMgr(
 	getChannelsFunc GetChannelsFunc,
-	repackFunc RepackFunc,
 ) ChannelsMgr {
 	return &channelsMgrImpl{
-		infos:           make(map[typeutil.UniqueID]streamInfos),
 		getChannelsFunc: getChannelsFunc,
-		repackFunc:      repackFunc,
 	}
 }

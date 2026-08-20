@@ -95,26 +95,6 @@ func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
 	}
 }
 
-func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
-	paramtable.Init()
-
-	chMgr := channelmgr.NewMockChannelsMgr(t)
-	chMgr.EXPECT().RemoveStream(mock.Anything).Return()
-
-	node := &Proxy{chMgr: chMgr}
-	_ = node.initRateCollector()
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-
-	ctx := context.Background()
-	req := &proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
-	}
-
-	status, err := node.InvalidateCollectionMetaCache(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-}
-
 // TestProxy_InvalidateCollectionMetaCache_AliasScanGating locks in the
 // holder-scan fallback fingerprint: ONLY Create/AlterAlias broadcasts WITHOUT
 // target ids (an old rootcoord) may scan. DropAlias legitimately carries no id
