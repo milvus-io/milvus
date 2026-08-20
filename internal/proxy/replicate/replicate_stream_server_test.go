@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -23,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // createContextWithClusterID creates a context with cluster ID in metadata (simulating incoming context)
@@ -207,6 +209,20 @@ func TestReplicateStreamServer_recvLoop_RecvError(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestReplicateStreamServerRejectsNilReplicateMessage(t *testing.T) {
+	ctx := createContextWithClusterID("test-cluster")
+	mockStreamServer := newMockReplicateStreamServer(ctx)
+
+	server, err := CreateReplicateServer(mockStreamServer)
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() {
+		err = server.handleReplicateMessage(&milvuspb.ReplicateRequest_ReplicateMessage{})
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterMissing)
 }
 
 // mockReplicateStreamServer implements the milvuspb.MilvusService_CreateReplicateStreamServer interface

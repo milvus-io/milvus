@@ -35,7 +35,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
-const milvusServiceName protoreflect.Name = "MilvusService"
+const (
+	milvusServiceName          protoreflect.Name = "MilvusService"
+	clientTelemetryServiceName protoreflect.Name = "ClientTelemetryService"
+)
 
 var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	// AllocTimestamp only allocates a logical timestamp and does not access user data.
@@ -48,30 +51,34 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"ComputePhraseMatchSlop": "stateless text-analysis helper",
 	// Connect is the handshake that establishes client connection metadata before RBAC context exists.
 	"Connect": "client handshake",
-	// CreateReplicateStream is the CDC data-replication stream entrypoint.
-	"CreateReplicateStream": "CDC replication stream",
+	// CreateReplicateStream is authorized by the proxy stream chain (streamMethodAuthorizers, #52608): casbin replicate config.
+	"CreateReplicateStream": "stream-authenticated CDC replication stream",
+	// ClientHeartbeat is authenticated telemetry heartbeat/command polling that trusts client_id targeting.
+	"ClientHeartbeat": "authenticated telemetry heartbeat and command polling",
+	// DeleteClientCommand is root-only in the proxy handler until proto carries a telemetry privilege.
+	"DeleteClientCommand": "root-only telemetry command deletion",
 	// DescribePrewarmTask only polls the state of an asynchronous prewarm job.
 	"DescribePrewarmTask": "async prewarm status polling",
 	// DescribeSegmentIndexData is an unimplemented feder endpoint that returns service-unavailable.
 	"DescribeSegmentIndexData": "unimplemented feder endpoint",
-	// Dummy is a legacy test/debug shim that dispatches to already-typed request handlers.
-	"Dummy": "legacy debug shim",
-	// TODO(milvus-io/milvus#52238): DumpMessages needs CDC/salvage WAL authorization.
-	"DumpMessages": "temporary CDC/salvage authorization gap",
+	// Dummy is a legacy test/debug shim; query-mode dispatch is explicitly rejected.
+	"Dummy": "legacy debug shim with query-mode disabled",
+	// DumpMessages is authorized by the proxy stream chain (streamMethodAuthorizers, #52608): cluster-admin grant.
+	"DumpMessages": "stream-authenticated CDC/salvage dump",
 	// GetCompactionState only polls the state of a previously-started compaction job.
 	"GetCompactionState": "async compaction status polling",
 	// GetCompactionStateWithPlans only polls detailed state for a previously-started compaction job.
 	"GetCompactionStateWithPlans": "async compaction plan status polling",
 	// GetComponentStates reports component liveness and does not access user objects.
 	"GetComponentStates": "component liveness diagnostics",
+	// GetClientTelemetry is root-only in the proxy handler until proto carries a telemetry privilege.
+	"GetClientTelemetry": "root-only telemetry diagnostics",
 	// GetFlushAllState only polls global flush completion by timestamp.
 	"GetFlushAllState": "async global flush status polling",
 	// GetImportState is a v1 compatibility wrapper for import progress polling.
 	"GetImportState": "legacy import status polling",
 	// GetMetrics is a diagnostics endpoint for system metrics.
 	"GetMetrics": "system metrics diagnostics",
-	// TODO(milvus-proto#652): remove once GetPartitionStatistics has a collection privilege annotation.
-	"GetPartitionStatistics": "temporary proto gap for collection statistics",
 	// GetPersistentSegmentInfo is a legacy segment diagnostics endpoint.
 	"GetPersistentSegmentInfo": "legacy segment diagnostics",
 	// GetQuerySegmentInfo is a legacy query-segment diagnostics endpoint.
@@ -100,18 +107,15 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"RegisterLink": "client link registration",
 	// ReplicateMessage is the CDC message-replication endpoint.
 	"ReplicateMessage": "CDC message replication",
-	// TODO(milvus-io/milvus#52237): RunAnalyzer collection-scoped path needs RBAC coverage.
-	"RunAnalyzer": "temporary collection-scoped analyzer authorization gap",
+	// PushClientCommand is root-only in the proxy handler until proto carries a telemetry privilege.
+	"PushClientCommand": "root-only telemetry command creation",
+	// RunAnalyzer collection mode performs an explicit Search privilege check until proto carries an annotation.
+	"RunAnalyzer": "manual collection Search privilege check",
 	// ShowCollections is result-filtered by rootcoord using the caller roles.
 	"ShowCollections": "result-filtered by caller grants",
 }
 
 func TestRBACAnnotationCoverage(t *testing.T) {
-	service := milvuspb.File_milvus_proto.Services().ByName(milvusServiceName)
-	if service == nil {
-		t.Fatal("MilvusService descriptor not found")
-	}
-
 	requireAllowlistComments(t)
 
 	seenMethods := make(map[protoreflect.Name]struct{})
@@ -119,31 +123,35 @@ func TestRBACAnnotationCoverage(t *testing.T) {
 	var unallowlistedStreams []string
 	var stale []string
 	var undocumented []string
-	methods := service.Methods()
-	for i := 0; i < methods.Len(); i++ {
-		method := methods.Get(i)
-		methodName := method.Name()
-		seenMethods[methodName] = struct{}{}
 
-		reason, allowlisted := rbacAnnotationAllowlist[methodName]
-		if allowlisted && (strings.TrimSpace(reason) == "" || strings.Contains(reason, "\n")) {
-			undocumented = append(undocumented, string(methodName))
-		}
+	for _, service := range rbacCoveredServices() {
+		methods := service.Methods()
+		for i := 0; i < methods.Len(); i++ {
+			method := methods.Get(i)
+			methodName := method.Name()
+			seenMethods[methodName] = struct{}{}
 
-		hasAnnotation := hasPrivilegeExtObj(method.Input())
-		switch {
-		case isStreamMethod(method) && !allowlisted:
-			unallowlistedStreams = append(unallowlistedStreams, fmt.Sprintf("%s (%s)", methodName, method.Input().FullName()))
-		case hasAnnotation && allowlisted && !isStreamMethod(method):
-			stale = append(stale, fmt.Sprintf("%s now has privilege_ext_obj; remove it from rbacAnnotationAllowlist", methodName))
-		case !hasAnnotation && !allowlisted:
-			missing = append(missing, fmt.Sprintf("%s (%s)", methodName, method.Input().FullName()))
+			reason, allowlisted := rbacAnnotationAllowlist[methodName]
+			if allowlisted && (strings.TrimSpace(reason) == "" || strings.Contains(reason, "\n")) {
+				undocumented = append(undocumented, string(methodName))
+			}
+
+			hasAnnotation := hasPrivilegeExtObj(method.Input())
+			methodLabel := fmt.Sprintf("%s.%s (%s)", service.Name(), methodName, method.Input().FullName())
+			switch {
+			case isStreamMethod(method) && !allowlisted:
+				unallowlistedStreams = append(unallowlistedStreams, methodLabel)
+			case hasAnnotation && allowlisted && !isStreamMethod(method):
+				stale = append(stale, fmt.Sprintf("%s.%s now has privilege_ext_obj; remove it from rbacAnnotationAllowlist", service.Name(), methodName))
+			case !hasAnnotation && !allowlisted:
+				missing = append(missing, methodLabel)
+			}
 		}
 	}
 
 	for methodName := range rbacAnnotationAllowlist {
 		if _, ok := seenMethods[methodName]; !ok {
-			stale = append(stale, fmt.Sprintf("%s is not a MilvusService RPC; remove it from rbacAnnotationAllowlist", methodName))
+			stale = append(stale, fmt.Sprintf("%s is not an RBAC-covered RPC; remove it from rbacAnnotationAllowlist", methodName))
 		}
 	}
 
@@ -152,10 +160,92 @@ func TestRBACAnnotationCoverage(t *testing.T) {
 	sort.Strings(stale)
 	sort.Strings(missing)
 
-	requireNoRBACAnnotationCoverageErrors(t, "allowlist entries without one-line justification", undocumented)
-	requireNoRBACAnnotationCoverageErrors(t, "MilvusService stream RPCs without explicit allowlist entry; the proxy RBAC interceptor is unary-only", unallowlistedStreams)
-	requireNoRBACAnnotationCoverageErrors(t, "stale allowlist entries", stale)
-	requireNoRBACAnnotationCoverageErrors(t, "MilvusService RPC request types missing privilege_ext_obj annotation and allowlist entry", missing)
+	reportRBACAnnotationCoverageErrors(t,
+		coverageErrorBucket{title: "allowlist entries without one-line justification", entries: undocumented},
+		coverageErrorBucket{title: "externally registered stream RPCs without explicit allowlist entry", entries: unallowlistedStreams},
+		coverageErrorBucket{title: "stale allowlist entries", entries: stale},
+		coverageErrorBucket{title: "externally registered RPC request types missing privilege_ext_obj annotation and allowlist entry", entries: missing},
+	)
+}
+
+type coverageErrorBucket struct {
+	title   string
+	entries []string
+}
+
+func rbacCoveredServices() []protoreflect.ServiceDescriptor {
+	serviceNames := map[protoreflect.Name]struct{}{
+		milvusServiceName:          {},
+		clientTelemetryServiceName: {},
+	}
+
+	services := milvuspb.File_milvus_proto.Services()
+	covered := make([]protoreflect.ServiceDescriptor, 0, len(serviceNames))
+	for i := 0; i < services.Len(); i++ {
+		service := services.Get(i)
+		if _, ok := serviceNames[service.Name()]; ok {
+			covered = append(covered, service)
+		}
+	}
+	sort.Slice(covered, func(i, j int) bool {
+		return covered[i].Name() < covered[j].Name()
+	})
+	return covered
+}
+
+func nameExists(names []protoreflect.Name, target protoreflect.Name) bool {
+	for _, name := range names {
+		if name == target {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRBACAnnotationCoverageIncludesClientTelemetryService(t *testing.T) {
+	var names []protoreflect.Name
+	for _, service := range rbacCoveredServices() {
+		names = append(names, service.Name())
+	}
+
+	if !nameExists(names, milvusServiceName) {
+		t.Fatalf("%s is missing from RBAC coverage services: %v", milvusServiceName, names)
+	}
+	if !nameExists(names, clientTelemetryServiceName) {
+		t.Fatalf("%s is missing from RBAC coverage services: %v", clientTelemetryServiceName, names)
+	}
+}
+
+func TestFormatRBACAnnotationCoverageErrorsIncludesAllBuckets(t *testing.T) {
+	reports := formatRBACAnnotationCoverageErrors(
+		coverageErrorBucket{title: "stale allowlist entries", entries: []string{"OldRPC"}},
+		coverageErrorBucket{title: "missing annotations", entries: []string{"NewRPC"}},
+	)
+
+	if got, want := len(reports), 2; got != want {
+		t.Fatalf("expected %d coverage reports, got %d: %v", want, got, reports)
+	}
+	if !strings.Contains(reports[0], "OldRPC") || !strings.Contains(reports[1], "NewRPC") {
+		t.Fatalf("expected reports for both buckets, got %v", reports)
+	}
+}
+
+func reportRBACAnnotationCoverageErrors(t *testing.T, buckets ...coverageErrorBucket) {
+	t.Helper()
+	for _, report := range formatRBACAnnotationCoverageErrors(buckets...) {
+		t.Error(report)
+	}
+}
+
+func formatRBACAnnotationCoverageErrors(buckets ...coverageErrorBucket) []string {
+	reports := make([]string, 0, len(buckets))
+	for _, bucket := range buckets {
+		if len(bucket.entries) == 0 {
+			continue
+		}
+		reports = append(reports, fmt.Sprintf("%s:\n%s", bucket.title, strings.Join(bucket.entries, "\n")))
+	}
+	return reports
 }
 
 func hasPrivilegeExtObj(message protoreflect.MessageDescriptor) bool {
@@ -171,7 +261,7 @@ func requireNoRBACAnnotationCoverageErrors(t *testing.T, title string, entries [
 	if len(entries) == 0 {
 		return
 	}
-	t.Fatalf("%s:\n%s", title, strings.Join(entries, "\n"))
+	t.Errorf("%s:\n%s", title, strings.Join(entries, "\n"))
 }
 
 func requireAllowlistComments(t *testing.T) {

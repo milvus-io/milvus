@@ -25,11 +25,13 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -96,6 +98,11 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 
 		// Store username in context for potential use by handlers
 		c.Set("username", username)
+		authCtx := metadata.NewIncomingContext(c.Request.Context(), metadata.Pairs(
+			util.HeaderAuthorize,
+			crypto.Base64Encode(username+util.CredentialSeparator+password),
+		))
+		c.Request = c.Request.WithContext(authCtx)
 		c.Next()
 	}
 }
