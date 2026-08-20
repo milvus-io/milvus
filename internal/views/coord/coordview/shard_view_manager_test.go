@@ -1011,7 +1011,9 @@ func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
 
 	assert.True(t, retainedBeforePersist)
 	require.Len(t, event.afterPersist, 1)
-	event.afterPersist[0]()
+	for _, callback := range event.afterPersist {
+		callback()
+	}
 
 	manager.mu.Lock()
 	_, retainedAfterPersist := manager.views[sm.Version()]

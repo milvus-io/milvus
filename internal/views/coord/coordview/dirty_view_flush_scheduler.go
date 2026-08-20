@@ -18,10 +18,13 @@ import (
 // dirtyViewEvent is one immutable shard-scoped set of external effects emitted
 // by ShardViewManager after an in-memory state transition.
 type dirtyViewEvent struct {
-	shardID      qviews.ShardID
-	persists     []*viewpb.QueryViewOfShard
-	syncs        []syncer.SyncView
-	afterPersist []func()
+	shardID  qviews.ShardID
+	persists []*viewpb.QueryViewOfShard
+	syncs    []syncer.SyncView
+	// afterPersist callbacks are keyed by the view they finalize so that a
+	// pending event split at claim time keeps each removal finalizer attached
+	// to the persist that carries its Dropped state to the catalog.
+	afterPersist map[qviews.QueryViewKey]func()
 }
 
 type dirtyViewEventSubmitter interface {
@@ -37,7 +40,7 @@ func (e dirtyViewEvent) empty() bool {
 type pendingDirtyViewEvent struct {
 	persists     map[qviews.QueryViewKey]*viewpb.QueryViewOfShard
 	syncs        map[dirtyViewSyncKey]syncer.SyncView
-	afterPersist []func()
+	afterPersist map[qviews.QueryViewKey]func()
 }
 
 type dirtyViewSyncKey struct {
@@ -47,8 +50,9 @@ type dirtyViewSyncKey struct {
 
 func newPendingDirtyViewEvent() *pendingDirtyViewEvent {
 	return &pendingDirtyViewEvent{
-		persists: make(map[qviews.QueryViewKey]*viewpb.QueryViewOfShard),
-		syncs:    make(map[dirtyViewSyncKey]syncer.SyncView),
+		persists:     make(map[qviews.QueryViewKey]*viewpb.QueryViewOfShard),
+		syncs:        make(map[dirtyViewSyncKey]syncer.SyncView),
+		afterPersist: make(map[qviews.QueryViewKey]func()),
 	}
 }
 
@@ -63,7 +67,9 @@ func (e *pendingDirtyViewEvent) merge(event dirtyViewEvent) {
 		}
 		e.syncs[key] = view
 	}
-	e.afterPersist = append(e.afterPersist, event.afterPersist...)
+	for key, callback := range event.afterPersist {
+		e.afterPersist[key] = callback
+	}
 }
 
 func (e *pendingDirtyViewEvent) operationCount() int {
@@ -240,14 +246,36 @@ func (s *DirtyViewFlushScheduler) claim() map[qviews.ShardID]*pendingDirtyViewEv
 	for shardID := range s.ready {
 		event := s.pending[shardID]
 		ops := event.operationCount()
-		if len(claimed) > 0 && usedOps+ops > s.maxTxnOps {
-			continue
+		if usedOps+ops <= s.maxTxnOps {
+			// The whole event fits in the remaining transaction budget: claim it
+			// whole and keep the lane atomic.
+			claimed[shardID] = event
+			s.removeReadyLocked(shardID)
+			delete(s.pending, shardID)
+			s.inflight[shardID] = struct{}{}
+			usedOps += ops
+		} else {
+			// The event alone exceeds the remaining budget (this also covers the
+			// first shard: no exemption). Split at claim time instead of
+			// chunking at flush time, so every flush round persists one shard's
+			// views in a single transaction capped at maxTxnOps and the catalog
+			// never sees an oversized txn (ReliableWriteMetaKv would otherwise
+			// retry a deterministic ErrTooManyOps forever). The unclaimed rest
+			// stays pending for the next round. Splitting is version-ascending
+			// (regressions/removals first, promotions last), so any committed
+			// prefix across rounds is recovery-safe: recovery can never observe
+			// two active views for one shard.
+			limit := s.maxTxnOps - usedOps
+			if limit <= 0 {
+				break
+			}
+			part, rest := splitPendingEvent(event, limit)
+			claimed[shardID] = part
+			s.removeReadyLocked(shardID)
+			s.pending[shardID] = rest
+			s.inflight[shardID] = struct{}{}
+			usedOps += part.operationCount()
 		}
-		claimed[shardID] = event
-		s.removeReadyLocked(shardID)
-		delete(s.pending, shardID)
-		s.inflight[shardID] = struct{}{}
-		usedOps += ops
 		if usedOps >= s.maxTxnOps {
 			break
 		}
@@ -255,6 +283,46 @@ func (s *DirtyViewFlushScheduler) claim() map[qviews.ShardID]*pendingDirtyViewEv
 	s.scheduleReadyTasksLocked()
 	s.signalLocked()
 	return claimed
+}
+
+// splitPendingEvent splits one shard's pending event so that the first part
+// carries at most limit persist operations and the remainder stays behind for
+// a later round. Syncs and removal finalizers follow the view they belong to.
+func splitPendingEvent(event *pendingDirtyViewEvent, limit int) (part, rest *pendingDirtyViewEvent) {
+	keys := make([]qviews.QueryViewKey, 0, len(event.persists))
+	for key := range event.persists {
+		keys = append(keys, key)
+	}
+	// Version-ascending order: older views first.
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[j].QueryViewVersion.GT(keys[i].QueryViewVersion)
+	})
+	part = newPendingDirtyViewEvent()
+	rest = newPendingDirtyViewEvent()
+	partKeys := make(map[qviews.QueryViewKey]struct{}, limit)
+	for i, key := range keys {
+		if i < limit {
+			part.persists[key] = event.persists[key]
+			partKeys[key] = struct{}{}
+		} else {
+			rest.persists[key] = event.persists[key]
+		}
+	}
+	for syncKey, view := range event.syncs {
+		if _, ok := partKeys[syncKey.view]; ok {
+			part.syncs[syncKey] = view
+		} else {
+			rest.syncs[syncKey] = view
+		}
+	}
+	for key, callback := range event.afterPersist {
+		if _, ok := partKeys[key]; ok {
+			part.afterPersist[key] = callback
+		} else {
+			rest.afterPersist[key] = callback
+		}
+	}
+	return part, rest
 }
 
 func (s *DirtyViewFlushScheduler) complete(
@@ -350,7 +418,9 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 			nodeKey := view.View.WorkNode().Key()
 			viewsByNode[nodeKey] = append(viewsByNode[nodeKey], view)
 		}
-		afterPersist = append(afterPersist, event.afterPersist...)
+		for _, callback := range event.afterPersist {
+			afterPersist = append(afterPersist, callback)
+		}
 	}
 	if len(persists) > 0 {
 		if err := s.catalog.SaveQueryViews(ctx, persists); err != nil {

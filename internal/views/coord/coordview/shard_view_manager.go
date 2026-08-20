@@ -421,8 +421,9 @@ func (m *ShardViewManager) downOlderUpView(newUp *CoordQueryViewStateMachine) {
 // to DirtyViewFlushScheduler.
 func (m *ShardViewManager) consumeDirtyEventLocked() dirtyViewEvent {
 	event := dirtyViewEvent{
-		shardID:  m.shardID,
-		persists: m.pendingPersists,
+		shardID:      m.shardID,
+		persists:     m.pendingPersists,
+		afterPersist: make(map[qviews.QueryViewKey]func()),
 	}
 	for _, entry := range m.pendingSyncs {
 		version := entry.sm.Version()
@@ -440,9 +441,9 @@ func (m *ShardViewManager) consumeDirtyEventLocked() dirtyViewEvent {
 	}
 	for _, sm := range m.pendingRemovals {
 		target := sm
-		event.afterPersist = append(event.afterPersist, func() {
+		event.afterPersist[queryViewKeyFromProto(target.View())] = func() {
 			m.finalizeRemoval(target)
-		})
+		}
 	}
 	m.pendingPersists = nil
 	m.pendingSyncs = nil

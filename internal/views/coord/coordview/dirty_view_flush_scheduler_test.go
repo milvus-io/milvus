@@ -368,12 +368,13 @@ func TestDirtyViewFlushSchedulerRunsAfterPersistCallbacksAfterCatalogSave(t *tes
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, newMockSyncer(), 128)
 
 	called := make(chan struct{})
+	view := buildTestViewWithVersion(1, 1, 1, 1)
 	scheduler.Submit(dirtyViewEvent{
-		shardID: testShardID,
-		persists: []*viewpb.QueryViewOfShard{
-			buildTestViewWithVersion(1, 1, 1, 1),
+		shardID:  testShardID,
+		persists: []*viewpb.QueryViewOfShard{view},
+		afterPersist: map[qviews.QueryViewKey]func(){
+			queryViewKeyFromProto(view): func() { close(called) },
 		},
-		afterPersist: []func(){func() { close(called) }},
 	})
 
 	select {
@@ -394,6 +395,69 @@ func TestDirtyViewFlushSchedulerRunsAfterPersistCallbacksAfterCatalogSave(t *tes
 		t.Fatal("afterPersist callback did not run after catalog save")
 	}
 	require.NoError(t, scheduler.Flush(context.Background()))
+}
+
+func TestDirtyViewFlushSchedulerSplitsOversizedSingleShardAtClaim(t *testing.T) {
+	catalog := newMockCatalog()
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, newMockSyncer(), 2)
+	t.Cleanup(scheduler.Close)
+
+	// A single shard accumulates more persists than maxTxnOps while earlier
+	// flushes are in flight; the first shard is not exempt, so its event is
+	// split at claim time and every flush round persists at most maxTxnOps
+	// views in one transaction.
+	views := []*viewpb.QueryViewOfShard{
+		buildTestViewWithVersion(1, 1, 1, 1),
+		buildTestViewWithVersion(1, 1, 1, 2),
+		buildTestViewWithVersion(1, 1, 1, 3),
+		buildTestViewWithVersion(1, 1, 1, 4),
+		buildTestViewWithVersion(1, 1, 1, 5),
+	}
+	scheduler.Submit(dirtyViewEvent{shardID: testShardID, persists: views})
+
+	require.NoError(t, scheduler.Flush(context.Background()))
+
+	catalog.mu.Lock()
+	batches := catalog.saveCalls
+	catalog.mu.Unlock()
+	require.Len(t, batches, 3) // 2 + 2 + 1
+	total := 0
+	for i, b := range batches {
+		require.LessOrEqual(t, len(b), 2, "batch %d exceeds maxTxnOps", i)
+		total += len(b)
+	}
+	require.Equal(t, len(views), total)
+}
+
+func TestSplitPendingEventAssignsSyncsAndFinalizersByView(t *testing.T) {
+	oldView := buildTestViewWithVersion(1, 1, 1, 1)
+	newView := buildTestViewWithVersion(1, 1, 1, 2)
+	oldKey := queryViewKeyFromProto(oldView)
+	newKey := queryViewKeyFromProto(newView)
+
+	event := newPendingDirtyViewEvent()
+	event.persists[oldKey] = oldView
+	event.persists[newKey] = newView
+	// Syncs and removal finalizers must follow their view into the split part.
+	event.syncs[dirtyViewSyncKey{view: oldKey, node: "n1"}] = syncer.SyncView{}
+	event.syncs[dirtyViewSyncKey{view: newKey, node: "n1"}] = syncer.SyncView{}
+	event.afterPersist[oldKey] = func() {}
+	event.afterPersist[newKey] = func() {}
+
+	part, rest := splitPendingEvent(event, 1)
+
+	// Version-ascending order: the older view (state regression/removal)
+	// goes first, so any committed prefix is recovery-safe.
+	require.Contains(t, part.persists, oldKey)
+	require.NotContains(t, part.persists, newKey)
+	require.Contains(t, rest.persists, newKey)
+	require.NotContains(t, rest.persists, oldKey)
+	require.Contains(t, part.syncs, dirtyViewSyncKey{view: oldKey, node: "n1"})
+	require.Contains(t, rest.syncs, dirtyViewSyncKey{view: newKey, node: "n1"})
+	require.NotContains(t, part.syncs, dirtyViewSyncKey{view: newKey, node: "n1"})
+	require.Contains(t, part.afterPersist, oldKey)
+	require.Contains(t, rest.afterPersist, newKey)
+	require.NotContains(t, part.afterPersist, newKey)
 }
 
 func TestShardViewManagerSubmitsOneShardScopedDirtyEvent(t *testing.T) {
