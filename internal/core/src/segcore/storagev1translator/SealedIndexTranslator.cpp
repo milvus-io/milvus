@@ -85,8 +85,11 @@ SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-SealedIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
+SealedIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().IndexLoadResource(
             index_load_info_.field_type,

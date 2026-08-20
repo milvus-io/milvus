@@ -83,8 +83,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
         EXPECT_EQ(translator->cell_id_of(i), i);
     }
 
-    // Test estimated_byte_size_of_cell
-    auto [usage, peak_usage] = translator->estimated_byte_size_of_cell(0);
+    // Test estimated_loading_usage
+    auto [usage, peak_usage] = translator->estimated_loading_usage({0});
     if (use_mmap) {
         EXPECT_GT(usage.file_bytes, 0);
     } else {
@@ -542,7 +542,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestZeroRows) {
     EXPECT_EQ(translator->num_cells(), 0);
 }
 
-// Test estimated_byte_size_of_cell for different cell indices
+// Test estimated_loading_usage for different cell indices
 TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     bool use_mmap = GetParam();
     int64_t row_count = 5000000;  // Ensure multiple cells
@@ -563,8 +563,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     size_t num_cells = translator->num_cells();
     if (num_cells > 1) {
         for (size_t i = 0; i < num_cells; ++i) {
-            auto [usage, peak_usage] =
-                translator->estimated_byte_size_of_cell(i);
+            auto [usage, peak_usage] = translator->estimated_loading_usage({i});
             if (use_mmap) {
                 EXPECT_GT(usage.file_bytes, 0);
             } else {

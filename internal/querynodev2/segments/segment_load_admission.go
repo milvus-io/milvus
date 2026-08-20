@@ -35,14 +35,18 @@ type segmentLoadAdmissionWaiter struct {
 // segmentLoadAdmission limits the estimated peak memory of sealed segments
 // loading concurrently. It is independent from caching layer reservations.
 type segmentLoadAdmission struct {
-	mu       sync.Mutex
-	capacity uint64
-	used     uint64
-	waiters  []*segmentLoadAdmissionWaiter
+	mu          sync.Mutex
+	getCapacity func() uint64
+	used        uint64
+	waiters     []*segmentLoadAdmissionWaiter
 }
 
 func newSegmentLoadAdmission(capacity uint64) *segmentLoadAdmission {
-	return &segmentLoadAdmission{capacity: capacity}
+	return newSegmentLoadAdmissionWithCapacity(func() uint64 { return capacity })
+}
+
+func newSegmentLoadAdmissionWithCapacity(getCapacity func() uint64) *segmentLoadAdmission {
+	return &segmentLoadAdmission{getCapacity: getCapacity}
 }
 
 func newSegmentLoadAdmissionFromConfig() *segmentLoadAdmission {
@@ -51,8 +55,10 @@ func newSegmentLoadAdmissionFromConfig() *segmentLoadAdmission {
 		return nil
 	}
 
-	capacity := uint64(float64(hardware.GetMemoryCount()) * params.TieredMaxLoadingMemoryRatio.GetAsFloat())
-	return newSegmentLoadAdmission(capacity)
+	memoryCount := hardware.GetMemoryCount()
+	return newSegmentLoadAdmissionWithCapacity(func() uint64 {
+		return uint64(float64(memoryCount) * params.TieredMaxLoadingMemoryRatio.GetAsFloat())
+	})
 }
 
 func (a *segmentLoadAdmission) acquire(
@@ -123,9 +129,10 @@ func (a *segmentLoadAdmission) enqueueLocked(waiter *segmentLoadAdmissionWaiter)
 }
 
 func (a *segmentLoadAdmission) grantWaitersLocked() {
+	capacity := a.getCapacity()
 	for len(a.waiters) > 0 {
 		waiter := a.waiters[0]
-		if !a.canGrantLocked(waiter.weight) {
+		if !a.canGrantLocked(waiter.weight, capacity) {
 			return
 		}
 
@@ -136,14 +143,14 @@ func (a *segmentLoadAdmission) grantWaitersLocked() {
 	}
 }
 
-func (a *segmentLoadAdmission) canGrantLocked(weight uint64) bool {
-	if a.used == 0 && weight > a.capacity {
+func (a *segmentLoadAdmission) canGrantLocked(weight, capacity uint64) bool {
+	if a.used == 0 && weight > capacity {
 		return true
 	}
-	if a.used > a.capacity {
+	if a.used > capacity {
 		return false
 	}
-	return weight <= a.capacity-a.used
+	return weight <= capacity-a.used
 }
 
 func (a *segmentLoadAdmission) removeWaiterLocked(waiter *segmentLoadAdmissionWaiter) {

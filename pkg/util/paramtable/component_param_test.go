@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -962,8 +963,13 @@ func TestQueryNodeMaxLoadingMemoryRatio(t *testing.T) {
 	Init()
 	params := Get()
 	item := &params.QueryNodeCfg.TieredMaxLoadingMemoryRatio
+	defer params.Reset(item.Key)
 
 	assert.Equal(t, "queryNode.segcore.tieredStorage.maxLoadingMemoryRatio", item.Key)
+	assert.False(t, item.Forbidden)
+	field, ok := reflect.TypeOf(&params.QueryNodeCfg).Elem().FieldByName("TieredMaxLoadingMemoryRatio")
+	assert.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 	assert.InDelta(t, 1.0, item.GetAsFloat(), 0.0001)
 
 	params.Save(item.Key, "0.25")

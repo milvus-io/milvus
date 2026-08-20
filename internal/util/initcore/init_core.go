@@ -436,6 +436,7 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	maxLoadingMemoryRatio := C.double(params.QueryNodeCfg.TieredMaxLoadingMemoryRatio.GetAsFloat())
 
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
@@ -444,7 +445,8 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 		scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
-		vectorIndexCacheWarmupPolicy)
+		vectorIndexCacheWarmupPolicy,
+		maxLoadingMemoryRatio)
 
 	return nil
 }
@@ -666,6 +668,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredMaxLoadingMemoryRatio.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 

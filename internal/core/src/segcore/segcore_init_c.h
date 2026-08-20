@@ -142,7 +142,8 @@ UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
                           const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
-                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy);
+                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                          const double max_loading_memory_ratio);
 
 #ifdef __cplusplus
 }

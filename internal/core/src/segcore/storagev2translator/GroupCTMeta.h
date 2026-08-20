@@ -15,6 +15,14 @@
 // limitations under the License.
 #pragma once
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <numeric>
+#include <utility>
+#include <vector>
+
 #include "cachinglayer/Translator.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -25,6 +33,47 @@ namespace milvus::segcore::storagev2translator {
 constexpr size_t kRowGroupsPerCell = 4;
 static_assert(kRowGroupsPerCell > 0,
               "kRowGroupsPerCell must be greater than 0");
+
+inline std::pair<milvus::cachinglayer::ResourceUsage,
+                 milvus::cachinglayer::ResourceUsage>
+EstimateGroupChunkLoadingUsage(
+    const std::vector<int64_t>& cell_sizes,
+    const std::vector<milvus::cachinglayer::cid_t>& cids,
+    bool use_mmap,
+    size_t queue_capacity) {
+    if (cids.empty()) {
+        return {};
+    }
+
+    std::vector<int64_t> requested_sizes;
+    requested_sizes.reserve(cids.size());
+    for (const auto cid : cids) {
+        assert(cid < cell_sizes.size());
+        requested_sizes.push_back(cell_sizes[cid]);
+    }
+
+    const auto loaded_size =
+        std::accumulate(requested_sizes.begin(), requested_sizes.end(), 0LL);
+    // All requested cells remain loaded. Use the bounded result channel as the
+    // pipeline's temporary-loading concurrency limit, and choose the largest
+    // cells for a conservative peak estimate.
+    const auto concurrent_cells =
+        std::min(requested_sizes.size(), std::max<size_t>(queue_capacity, 1));
+    std::partial_sort(requested_sizes.begin(),
+                      requested_sizes.begin() + concurrent_cells,
+                      requested_sizes.end(),
+                      std::greater<int64_t>());
+    const auto temporary_size =
+        std::accumulate(requested_sizes.begin(),
+                        requested_sizes.begin() + concurrent_cells,
+                        0LL);
+
+    if (use_mmap) {
+        return {{0, loaded_size},
+                {2 * temporary_size, loaded_size + temporary_size}};
+    }
+    return {{loaded_size, 0}, {loaded_size + temporary_size, 0}};
+}
 
 struct GroupCTMeta : public milvus::cachinglayer::Meta {
     // num_rows_until_chunk_[i] = total rows(prefix sum) in cells [0, i-1]

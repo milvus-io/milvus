@@ -284,14 +284,14 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
 }
 
 extern "C" void
-UpdateTieredStorageConfig(
-    const int64_t loading_timeout_ms,
-    const int64_t warmup_loading_timeout_ms,
-    const bool storage_usage_tracking_enabled,
-    const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
-    const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
-    const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
-    const CacheWarmupPolicy vectorIndexCacheWarmupPolicy) {
+UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
+                          const int64_t warmup_loading_timeout_ms,
+                          const bool storage_usage_tracking_enabled,
+                          const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                          const double max_loading_memory_ratio) {
     milvus::cachinglayer::Manager::UpdateConfig(
         std::chrono::milliseconds(loading_timeout_ms),
         std::chrono::milliseconds(warmup_loading_timeout_ms),
@@ -299,7 +299,8 @@ UpdateTieredStorageConfig(
         {scalarFieldCacheWarmupPolicy,
          vectorFieldCacheWarmupPolicy,
          scalarIndexCacheWarmupPolicy,
-         vectorIndexCacheWarmupPolicy});
+         vectorIndexCacheWarmupPolicy},
+        max_loading_memory_ratio);
 }
 
 }  // namespace milvus::segcore

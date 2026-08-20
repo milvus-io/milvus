@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -177,6 +178,48 @@ func TestSegmentLoadAdmissionRunReleasesAfterError(t *testing.T) {
 	releaseNext()
 }
 
+func TestSegmentLoadAdmissionDynamicCapacityDecrease(t *testing.T) {
+	var capacity atomic.Uint64
+	capacity.Store(20)
+	admission := newSegmentLoadAdmissionWithCapacity(capacity.Load)
+
+	releaseFirst, err := admission.acquire(context.Background(), 10, commonpb.LoadPriority_LOW)
+	require.NoError(t, err)
+	capacity.Store(10)
+
+	second := acquireAdmissionAsync(context.Background(), admission, 10, commonpb.LoadPriority_LOW)
+	requireAdmissionWaiters(t, admission, 1)
+	assert.Never(t, func() bool { return len(second) > 0 }, 20*time.Millisecond, time.Millisecond)
+
+	releaseFirst()
+	result := <-second
+	require.NoError(t, result.err)
+	result.release()
+}
+
+func TestSegmentLoadAdmissionDynamicCapacityIncrease(t *testing.T) {
+	var capacity atomic.Uint64
+	capacity.Store(10)
+	admission := newSegmentLoadAdmissionWithCapacity(capacity.Load)
+
+	releaseFirst, err := admission.acquire(context.Background(), 10, commonpb.LoadPriority_LOW)
+	require.NoError(t, err)
+	second := acquireAdmissionAsync(context.Background(), admission, 10, commonpb.LoadPriority_LOW)
+	requireAdmissionWaiters(t, admission, 1)
+
+	capacity.Store(20)
+	third := acquireAdmissionAsync(context.Background(), admission, 1, commonpb.LoadPriority_LOW)
+	secondResult := <-second
+	require.NoError(t, secondResult.err)
+	requireAdmissionWaiters(t, admission, 1)
+
+	secondResult.release()
+	thirdResult := <-third
+	require.NoError(t, thirdResult.err)
+	thirdResult.release()
+	releaseFirst()
+}
+
 func TestSegmentLoadAdmissionFromConfig(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
@@ -191,5 +234,8 @@ func TestSegmentLoadAdmissionFromConfig(t *testing.T) {
 
 	admission := newSegmentLoadAdmissionFromConfig()
 	require.NotNil(t, admission)
-	assert.Equal(t, uint64(float64(hardware.GetMemoryCount())*0.25), admission.capacity)
+	assert.Equal(t, uint64(float64(hardware.GetMemoryCount())*0.25), admission.getCapacity())
+
+	params.Save(params.QueryNodeCfg.TieredMaxLoadingMemoryRatio.Key, "0.5")
+	assert.Equal(t, uint64(float64(hardware.GetMemoryCount())*0.5), admission.getCapacity())
 }

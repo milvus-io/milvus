@@ -46,7 +46,6 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -234,19 +233,13 @@ GroupChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-GroupChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    assert(cid < meta_.chunk_memory_size_.size());
-    auto cell_sz = meta_.chunk_memory_size_[cid];
-
-    if (use_mmap_) {
-        // why double the disk size for loading?
-        // during file writing, the temporary size could be larger than the final size
-        // so we need to reserve more space for the disk size.
-        return {{0, cell_sz}, {2 * cell_sz, 2 * cell_sz}};
-    } else {
-        return {{cell_sz, 0}, {2 * cell_sz, 0}};
-    }
+GroupChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    return EstimateGroupChunkLoadingUsage(
+        meta_.chunk_memory_size_,
+        cids,
+        use_mmap_,
+        GetCellReaderChannelCapacity(load_priority_));
 }
 
 const std::string&
@@ -334,10 +327,8 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // Submit cell-batch loading tasks
-    auto& pool = milvus::ThreadPools::GetThreadPool(
-        milvus::PriorityForLoad(load_priority_));
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
-        static_cast<size_t>(pool.GetMaxThreadNum() * 1.5));
+        GetCellReaderChannelCapacity(load_priority_));
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
