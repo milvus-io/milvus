@@ -662,11 +662,11 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(err)
-		// taskcommon.GetTaskType classifies an unrecognized task type as
-		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
-		// an internal protocol violation, not user input.
-		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
+		// Task types are coordinator-assigned, so an unrecognized type is a
+		// worker capability mismatch rather than invalid user input.
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
 		s.Contains(status.GetReason(), "unrecognized task type")
+		s.ErrorIs(merr.CheckRPCCall(status, nil), merr.ErrServiceUnimplemented)
 	})
 }
 
@@ -780,10 +780,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.NoError(err)
-		// taskcommon.GetTaskType classifies an unrecognized task type as
-		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
-		// an internal protocol violation, not user input.
-		s.Equal(merr.Code(merr.ErrServiceInternal), resp.GetStatus().GetCode())
+		// Task types are coordinator-assigned, so an unrecognized type is a
+		// worker capability mismatch rather than invalid user input.
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), resp.GetStatus().GetCode())
 	})
 }
 
@@ -869,10 +868,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 		}
 		status, err := s.node.DropTask(s.ctx, req)
 		s.NoError(err)
-		// taskcommon.GetTaskType classifies an unrecognized task type as
-		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
-		// an internal protocol violation, not user input.
-		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
+		// Task types are coordinator-assigned, so an unrecognized type is a
+		// worker capability mismatch rather than invalid user input.
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
 	})
 }
 
