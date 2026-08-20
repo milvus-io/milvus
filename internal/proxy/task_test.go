@@ -5128,7 +5128,6 @@ func TestDefaultPartition(t *testing.T) {
 	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
 
-
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
