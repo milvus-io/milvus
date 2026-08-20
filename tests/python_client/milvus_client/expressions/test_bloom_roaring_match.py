@@ -184,9 +184,7 @@ class TestBloomMatch(_MembershipBase):
         blob = build_bloom_filter([0, 1, 2, 3, 4], fpr=0.001)
         for field in ["i8", "i16", "i32", "i64"]:
             exact = self._query_ids(client, collection_name, f"{field} in [0,1,2,3,4]")
-            got = self._query_ids(
-                client, collection_name, f"bloom_match({field}, {{bf}})", filter_params={"bf": blob}
-            )
+            got = self._query_ids(client, collection_name, f"bloom_match({field}, {{bf}})", filter_params={"bf": blob})
             assert set(exact) <= set(got), f"bloom_match dropped true members on {field}"
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -219,8 +217,11 @@ class TestBloomMatch(_MembershipBase):
 
         blob = build_bloom_filter(list(range(10)), fpr=0.001)
         res = self.query(
-            client, collection_name, filter='bloom_match(meta["uid"], {bf})',
-            output_fields=[pk_field], filter_params={"bf": blob},
+            client,
+            collection_name,
+            filter='bloom_match(meta["uid"], {bf})',
+            output_fields=[pk_field],
+            filter_params={"bf": blob},
         )[0]
         ids = [r[pk_field] for r in res]
         assert ids, "bloom_match(json) returned no rows"
@@ -244,8 +245,10 @@ class TestBloomMatch(_MembershipBase):
         str_blob = build_bloom_filter(["0", "1", "2"], fpr=0.001)
         with pytest.raises(MilvusException) as e:
             client.query(
-                collection_name, filter=f"bloom_match({creator_field}, {{bf}})",
-                output_fields=[pk_field], filter_params={"bf": str_blob},
+                collection_name,
+                filter=f"bloom_match({creator_field}, {{bf}})",
+                output_fields=[pk_field],
+                filter_params={"bf": str_blob},
             )
         assert "value domain" in str(e.value), str(e.value)
 
@@ -257,7 +260,8 @@ class TestBloomMatch(_MembershipBase):
         blob = build_bloom_filter([0, 1, 2], fpr=0.001)
         with pytest.raises(MilvusException) as e:
             client.delete(
-                collection_name, filter=f"bloom_match({creator_field}, {{bf}})",
+                collection_name,
+                filter=f"bloom_match({creator_field}, {{bf}})",
                 filter_params={"bf": blob},
             )
         assert "cannot be used in delete" in str(e.value), str(e.value)
@@ -350,9 +354,7 @@ class TestBloomMatch(_MembershipBase):
         for i in nested:
             assert i % 3 == 0, f"bloom_match(nested) matched a non-int row {i}"
 
-        whole = self._query_ids(
-            client, collection_name, "bloom_match(meta, {bf})", filter_params={"bf": blob}
-        )
+        whole = self._query_ids(client, collection_name, "bloom_match(meta, {bf})", filter_params={"bf": blob})
         assert whole, "bloom_match(whole doc) returned no rows"
         for i in whole:
             assert i % 3 == 2, f"bloom_match(whole doc) matched a non-bare-scalar row {i}"
@@ -489,7 +491,9 @@ class TestRoaringMatch(_MembershipBase):
         victims = [0, 1, 2]
         blob = build_roaring_bitmap(victims)
         res = self.delete(
-            client, collection_name, filter=f"roaring_match({creator_field}, {{rb}})",
+            client,
+            collection_name,
+            filter=f"roaring_match({creator_field}, {{rb}})",
             filter_params={"rb": blob},
         )[0]
         assert res["delete_count"] == len(victims) * nb // domain
@@ -501,7 +505,9 @@ class TestRoaringMatch(_MembershipBase):
 
         empty = build_roaring_bitmap([])
         res = self.delete(
-            client, collection_name, filter=f"roaring_match({creator_field}, {{rb}})",
+            client,
+            collection_name,
+            filter=f"roaring_match({creator_field}, {{rb}})",
             filter_params={"rb": empty},
         )[0]
         assert res["delete_count"] == 0
@@ -588,13 +594,16 @@ class TestRoaringMatch(_MembershipBase):
 
         with pytest.raises(MilvusException):
             client.query(
-                collection_name, filter=f"roaring_match({creator_field}, [1,2,3])",
+                collection_name,
+                filter=f"roaring_match({creator_field}, [1,2,3])",
                 output_fields=[pk_field],
             )
         with pytest.raises(MilvusException):
             client.query(
-                collection_name, filter=f"roaring_match({creator_field}, {{rb}})",
-                output_fields=[pk_field], filter_params={"rb": b"not-an-mrb1-blob"},
+                collection_name,
+                filter=f"roaring_match({creator_field}, {{rb}})",
+                output_fields=[pk_field],
+                filter_params={"rb": b"not-an-mrb1-blob"},
             )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -636,7 +645,9 @@ class TestRoaringMatch(_MembershipBase):
         keep = [0, 1, 2]
         blob = build_roaring_bitmap(keep)
         res = self.delete(
-            client, collection_name, filter=f"not roaring_match({creator_field}, {{rb}})",
+            client,
+            collection_name,
+            filter=f"not roaring_match({creator_field}, {{rb}})",
             filter_params={"rb": blob},
         )[0]
         assert res["delete_count"] == (domain - len(keep)) * nb // domain
@@ -687,35 +698,45 @@ class TestMembershipStructArrayRejected(_MembershipBase):
 
         with pytest.raises(MilvusException) as e:
             client.query(
-                collection_name, filter="bloom_match(structA[int_val], {bf})",
-                output_fields=[pk_field], filter_params={"bf": bloom_blob},
+                collection_name,
+                filter="bloom_match(structA[int_val], {bf})",
+                output_fields=[pk_field],
+                filter_params={"bf": bloom_blob},
             )
         assert "only supports" in str(e.value), str(e.value)
 
         with pytest.raises(MilvusException) as e:
             client.query(
-                collection_name, filter="roaring_match(structA[int_val], {rb})",
-                output_fields=[pk_field], filter_params={"rb": roaring_blob},
+                collection_name,
+                filter="roaring_match(structA[int_val], {rb})",
+                output_fields=[pk_field],
+                filter_params={"rb": roaring_blob},
             )
         assert "only supports" in str(e.value), str(e.value)
 
         with pytest.raises(MilvusException) as e:
             client.query(
-                collection_name, filter="bloom_match(structA[str_val], {bf})",
-                output_fields=[pk_field], filter_params={"bf": str_blob},
+                collection_name,
+                filter="bloom_match(structA[str_val], {bf})",
+                output_fields=[pk_field],
+                filter_params={"bf": str_blob},
             )
         assert "only supports" in str(e.value), str(e.value)
 
         with pytest.raises(MilvusException) as e:
             client.query(
-                collection_name, filter="bloom_match(structA[float_val], {bf})",
-                output_fields=[pk_field], filter_params={"bf": bloom_blob},
+                collection_name,
+                filter="bloom_match(structA[float_val], {bf})",
+                output_fields=[pk_field],
+                filter_params={"bf": bloom_blob},
             )
         assert "only supports" in str(e.value), str(e.value)
 
         with pytest.raises(MilvusException) as e:
             client.query(
-                collection_name, filter="roaring_match(structA[str_val], {rb})",
-                output_fields=[pk_field], filter_params={"rb": roaring_blob},
+                collection_name,
+                filter="roaring_match(structA[str_val], {rb})",
+                output_fields=[pk_field],
+                filter_params={"rb": roaring_blob},
             )
         assert "only supports" in str(e.value), str(e.value)
