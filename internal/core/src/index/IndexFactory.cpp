@@ -449,7 +449,8 @@ IndexFactory::IndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    int64_t dim) {
+    int64_t dim,
+    std::optional<bool> field_nullable) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
@@ -460,12 +461,14 @@ IndexFactory::IndexLoadResource(
                                     num_rows,
                                     dim);
     } else {
-        return ScalarIndexLoadResource(field_type,
-                                       index_version,
-                                       index_size_in_bytes,
-                                       index_params,
-                                       mmap_enable,
-                                       num_rows);
+        return ScalarIndexLoadResourceImpl(field_type,
+                                           index_version,
+                                           index_size_in_bytes,
+                                           index_params,
+                                           mmap_enable,
+                                           num_rows,
+                                           std::nullopt,
+                                           field_nullable);
     }
 }
 
