@@ -807,8 +807,11 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 			}
 		}
 		if !holds {
-			err := merr.WrapErrReplicaNotFound(req.GetCollectionID(),
-				fmt.Sprintf("no replica of the collection lives in resource group %q", resourceGroup))
+			// merr.Wrapf rather than WrapErrReplicaNotFound: the latter stamps
+			// its argument as a replica id, and the only id in hand here is
+			// the collection's.
+			err := merr.Wrapf(merr.ErrReplicaNotFound,
+				"collection %d has no replica in resource group %q", req.GetCollectionID(), resourceGroup)
 			mlog.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
 			return &querypb.GetShardLeadersResponse{Status: merr.Status(err)}, nil
 		}
