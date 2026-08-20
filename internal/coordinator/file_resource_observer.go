@@ -196,6 +196,13 @@ func (m *FileResourceObserver) Sync() error {
 	var syncErr error
 	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
+	// Version 0 means no file resource has ever been added successfully. Avoid
+	// sending an empty initial state to nodes before file resources are in use.
+	// Do not check len(resources) here: after the last resource is removed, the
+	// non-zero version and empty list still need to be synced to clear nodes.
+	if targetVersion == 0 {
+		return nil
+	}
 
 	// sync file resource to query node if file resource mode was Sync
 	if m.qnMode == fileresource.SyncMode {
