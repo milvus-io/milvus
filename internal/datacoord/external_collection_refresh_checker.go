@@ -55,6 +55,33 @@ type externalCollectionRefreshChecker struct {
 	ctx         context.Context
 	refreshMeta *externalCollectionRefreshMeta
 	closeChan   chan struct{}
+	// The manager-side hooks. Embedded so the checker keeps addressing them
+	// as c.onJobFinished etc.
+	refreshCheckerHooks
+
+	// indexGates is the per-job bookkeeping of the index gate. The wait gets
+	// its own clock (enteredAt): the ingest spent most of the job timeout
+	// already, and failing a COMPLETED ingest because index building started
+	// near the deadline would throw the work away. Guarded by indexGateMu:
+	// processJob runs both on the periodic checker tick and on the eager
+	// per-task path (processJobByID), which are different goroutines. Lost
+	// on restart, which merely restarts the wait clock.
+	//
+	// An entry is released only AFTER the job's terminal transition has
+	// PERSISTED (releaseIndexGate at every persist site, with GC as the
+	// backstop) - never when the debt merely clears. Releasing early opens a
+	// window where a transiently failed finish write leaves the job
+	// InProgress with no gate clock, and the next timeout check falls back
+	// to the ingest clock and fails a completed, fully indexed refresh.
+	indexGateMu sync.Mutex
+	indexGates  map[int64]indexGateState
+}
+
+// refreshCheckerHooks bundles the manager-side callbacks the checker fires.
+// A struct with named fields rather than a positional parameter list: several
+// callbacks share a signature, so a call site transposing two of them would
+// still compile.
+type refreshCheckerHooks struct {
 	// onJobFinished is the manager-side callback that pushes the refreshed
 	// schema (ExternalSource/ExternalSpec) into RootCoord via the WAL
 	// broadcast. The manager holds a notifiedJobs dedup map so this callback
@@ -76,10 +103,6 @@ type externalCollectionRefreshChecker struct {
 	// GC so the manager can release any per-job bookkeeping (notifiedJobs
 	// dedup entry). Keeps the dedup map bounded across DataCoord lifetime.
 	onJobGC func(jobID int64)
-	// unindexedSegments answers which of the given segments still lack a
-	// finished index, from datacoord's index meta. Injected so the gate below
-	// is testable without a full meta; nil disables the gate outright.
-	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64
 	// onInitJobPending is fired for jobs still in Init state with no tasks
 	// yet. This is the retry hook for the two-phase submission scheme: the
 	// WAL ack callback persists the Job record in Init state and kicks off
@@ -88,23 +111,10 @@ type externalCollectionRefreshChecker struct {
 	// MUST be non-blocking — the manager's implementation dedups concurrent
 	// invocations and runs the actual work in a background goroutine.
 	onInitJobPending func(jobID int64)
-
-	// indexGates is the per-job bookkeeping of the index gate. The wait gets
-	// its own clock (enteredAt): the ingest spent most of the job timeout
-	// already, and failing a COMPLETED ingest because index building started
-	// near the deadline would throw the work away. Guarded by indexGateMu:
-	// processJob runs both on the periodic checker tick and on the eager
-	// per-task path (processJobByID), which are different goroutines. Lost
-	// on restart, which merely restarts the wait clock.
-	//
-	// An entry is released only AFTER the job's terminal transition has
-	// PERSISTED (releaseIndexGate at every persist site, with GC as the
-	// backstop) - never when the debt merely clears. Releasing early opens a
-	// window where a transiently failed finish write leaves the job
-	// InProgress with no gate clock, and the next timeout check falls back
-	// to the ingest clock and fails a completed, fully indexed refresh.
-	indexGateMu sync.Mutex
-	indexGates  map[int64]indexGateState
+	// unindexedSegments answers which of the given segments still lack a
+	// finished index, from datacoord's index meta. Injected so the index
+	// gate is testable without a full meta; nil disables the gate outright.
+	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64
 }
 
 // indexGateState is the index gate's per-job bookkeeping. Stored by value in
@@ -132,24 +142,14 @@ func newRefreshChecker(
 	ctx context.Context,
 	refreshMeta *externalCollectionRefreshMeta,
 	closeChan chan struct{},
-	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob),
-	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error,
-	onJobFailed func(jobID int64),
-	onJobGC func(jobID int64),
-	onInitJobPending func(jobID int64),
-	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64,
+	hooks refreshCheckerHooks,
 ) *externalCollectionRefreshChecker {
 	return &externalCollectionRefreshChecker{
-		ctx:               ctx,
-		refreshMeta:       refreshMeta,
-		closeChan:         closeChan,
-		onJobFinished:     onJobFinished,
-		applyJobInfo:      applyJobInfo,
-		onJobFailed:       onJobFailed,
-		onJobGC:           onJobGC,
-		onInitJobPending:  onInitJobPending,
-		unindexedSegments: unindexedSegments,
-		indexGates:        make(map[int64]indexGateState),
+		ctx:                 ctx,
+		refreshMeta:         refreshMeta,
+		closeChan:           closeChan,
+		refreshCheckerHooks: hooks,
+		indexGates:          make(map[int64]indexGateState),
 	}
 }
 
