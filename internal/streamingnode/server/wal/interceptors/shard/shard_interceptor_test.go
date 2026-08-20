@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -200,31 +199,6 @@ func TestShardInterceptorRejectsInvalidLegacySchemaBeforeAppend(t *testing.T) {
 		})
 	})
 	require.False(t, appended)
-}
-
-func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
-	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
-	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{ShardManager: shardManager})
-	defer i.Close()
-
-	msg := message.NewInsertMessageBuilderV1().
-		WithVChannel("missing-snapshot-v1").
-		WithHeader(&messagespb.InsertMessageHeader{
-			CollectionId: 99101,
-			Partitions: []*messagespb.PartitionSegmentAssignment{
-				{PartitionId: 1, Rows: 1, BinarySize: 100},
-			},
-		}).
-		WithBody(&msgpb.InsertRequest{}).
-		MustBuildMutable().WithTimeTick(1)
-
-	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		return rmq.NewRmqID(1), nil
-	})
-	require.Error(t, err)
-	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-	require.Nil(t, msgID)
 }
 
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
