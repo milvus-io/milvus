@@ -883,15 +883,23 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_UUID:
 			var data [][16]byte
 			if srcField.GetScalars().GetBytesData() != nil {
-				for _, b := range srcField.GetScalars().GetBytesData().GetData() { // uuid BytesData strict
+				for _, b := range srcField.GetScalars().GetBytesData().GetData() {
 					u, err := typeutil.BytesToUUID(b)
 					if err != nil {
 						return nil, err
 					}
 					data = append(data, u)
 				}
+			} else if srcField.GetScalars().GetStringData() != nil {
+				for _, s := range srcField.GetScalars().GetStringData().GetData() {
+					u, err := typeutil.ParseUUID(s)
+					if err != nil {
+						return nil, err
+					}
+					data = append(data, u)
+				}
 			} else {
-				return nil, merr.WrapErrParameterInvalidMsg("invalid UUID field data: expected BytesData with 16-byte values")
+				return nil, merr.WrapErrParameterInvalidMsg("invalid UUID field data: expected BytesData with 16-byte values or StringData with UUID strings")
 			}
 			fieldData = &UUIDFieldData{
 				Data:      data,
