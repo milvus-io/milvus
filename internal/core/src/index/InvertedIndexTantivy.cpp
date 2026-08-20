@@ -974,4 +974,5 @@ template class InvertedIndexTantivy<uint64_t>;
 template class InvertedIndexTantivy<float>;
 template class InvertedIndexTantivy<double>;
 template class InvertedIndexTantivy<std::string>;
+template class InvertedIndexTantivy<milvus::UUID>;
 }  // namespace milvus::index
