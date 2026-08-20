@@ -1063,6 +1063,7 @@ message ImportRequestSegment {
   int64 segmentID = 1;
   int64 partitionID = 2;
   string vchannel = 3;
+  SegmentLevel level = 4;
 }
 
 message ImportRequest {

@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -389,9 +388,8 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 		log.Info(c.ctx, "import job stats done", mlog.String("state", state.String()), mlog.Duration("jobTimeCost/stats", statsDuration))
 	}
 
-	// Skip stats stage if not enable stats or is l0 import.
-	if !enableSortCompaction() ||
-		importutilv2.IsL0Import(job.GetOptions()) {
+	// Skip stats stage if not enable stats or the job produces no data segments.
+	if !enableSortCompaction() || jobSkipsDataStages(job) {
 		updateJobState(internalpb.ImportJobState_IndexBuilding, "")
 		return
 	}
@@ -412,6 +410,11 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 			targetSegment := c.meta.GetHealthySegment(c.ctx, sortSegmentIDs[i])
 			if originSegment == nil {
 				// import zero num rows segment
+				doneCnt++
+				continue
+			}
+			if originSegment.GetLevel() == datapb.SegmentLevel_L0 {
+				// L0 segments hold delete records; there is nothing to sort.
 				doneCnt++
 				continue
 			}
@@ -464,9 +467,11 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		targetSegmentIDs = originSegmentIDs
 	}
 
-	healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
+	healthySegments := c.meta.GetSegments(targetSegmentIDs, func(seg *SegmentInfo) bool {
+		return isSegmentHealthy(seg) && seg.GetLevel() != datapb.SegmentLevel_L0
+	})
 	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
-	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
+	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !jobSkipsDataStages(job) {
 		for _, segmentID := range unindexed {
 			select {
 			case getBuildIndexChSingleton() <- segmentID: // accelerate index building:
