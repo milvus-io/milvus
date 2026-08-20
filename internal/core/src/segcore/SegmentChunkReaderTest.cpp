@@ -63,7 +63,7 @@ TEST(SegmentChunkReader, StringVariantMismatchIsSystemError) {
 // batch_size the condition stayed true for every remaining row, so the loops ran
 // to the end of the segment and left the cursor on the last row instead of on
 // batch_size. Compare MoveCursorForMultipleChunk (same class) and
-// MoveCursorForDataSingleChunk (exec/expression/Expr.h), which both stop.
+// MoveCursorForData (exec/expression/Expr.h), which both stop.
 TEST(SegmentChunkReader, MoveCursorForSingleChunkStopsAtBatchBoundary) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);

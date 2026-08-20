@@ -203,10 +203,11 @@ PhyBloomFilterExpr::ExecVisitorImpl(EvalCtx& context) {
             field_id_.get());
     }
 
-    auto real_batch_size = GetNextRealBatchSize(input, false);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, false);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     const auto& bitmap_input = context.get_bitmap_input();
     AssertInfo(bitmap_input.empty() ||
@@ -283,10 +284,11 @@ PhyBloomFilterExpr::ExecVisitorImplForIndex(EvalCtx& context) {
     // per row, so the same execute_sub_batch as the raw-data path works here.
     auto* input = context.get_offset_input();
 
-    auto real_batch_size = GetNextRealBatchSize(input, false);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, false);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
@@ -381,10 +383,11 @@ PhyBloomFilterExpr::ExecVisitorImplJson(EvalCtx& context) {
                   field_id_.get());
     }
 
-    auto real_batch_size = GetNextRealBatchSize(input, false);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, false);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     const auto& bitmap_input = context.get_bitmap_input();
     AssertInfo(bitmap_input.empty() ||
