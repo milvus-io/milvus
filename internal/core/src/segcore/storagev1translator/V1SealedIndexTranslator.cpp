@@ -59,7 +59,7 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
               load_index_info->warmup_policy,
               /* is_vector */ IsVectorDataType(load_index_info->field_type),
               /* is_index */ true),
-          load_index_info->support_eviction,
+          /* support_eviction */ false,
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
 }
