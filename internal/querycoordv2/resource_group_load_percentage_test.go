@@ -1,0 +1,423 @@
+package querycoordv2
+
+import (
+	"context"
+	"testing"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+)
+
+// rgLoadPercentageFixture wires up the same trio of read-only stores
+// GetLoadPercentageByResourceGroup composes over -- ReplicaManager,
+// TargetManager, and DistributionManager -- without touching etcd or any
+// other real backend, mirroring the in-memory-only style already used by
+// TargetManagerSuite and ServiceSuite in this package family.
+type rgLoadPercentageFixture struct {
+	meta      *meta.Meta
+	targetMgr *meta.TargetManager
+	dist      *meta.DistributionManager
+	broker    *meta.MockBroker
+}
+
+func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.On("SaveReplica", mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	m := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(catalog),
+		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
+	}
+	broker := meta.NewMockBroker(t)
+	nodeMgr := session.NewNodeManager()
+
+	return &rgLoadPercentageFixture{
+		meta:      m,
+		targetMgr: meta.NewTargetManager(broker, m),
+		dist:      meta.NewDistributionManager(nodeMgr),
+		broker:    broker,
+	}
+}
+
+// server builds a *Server wired to this fixture's stores, ready to call
+// GetLoadPercentageByResourceGroup on.
+func (f *rgLoadPercentageFixture) server() *Server {
+	return &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist}
+}
+
+// freeFn calls utils.LoadPercentageByResourceGroup with nothing but the three
+// stores CollectionObserver already holds -- no *Server anywhere. The tests
+// that use it therefore double as a compile-time statement of the point of
+// the split: this figure is reachable from the observer's dependency set.
+func (f *rgLoadPercentageFixture) freeFn(ctx context.Context, collectionID int64, rgName string) (int32, error) {
+	return utils.LoadPercentageByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, collectionID, rgName)
+}
+
+// putTarget registers collectionID as loaded with a single partition, and
+// gives it a next target containing one channel and the given segments, all
+// on that channel. This is what GetSealedSegmentsByCollection and
+// GetDmChannelsByCollection (both read with meta.NextTarget) will report.
+func (f *rgLoadPercentageFixture) putTarget(t *testing.T, collectionID, partitionID int64, channelName string, segmentIDs ...int64) {
+	ctx := context.Background()
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID},
+	}))
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: collectionID, PartitionID: partitionID},
+	}))
+
+	segmentInfos := make([]*datapb.SegmentInfo, 0, len(segmentIDs))
+	for _, segID := range segmentIDs {
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segID,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channelName,
+		})
+	}
+	vChannel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
+
+	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return([]*datapb.VchannelInfo{vChannel}, segmentInfos, nil).Once()
+	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+}
+
+// putReplica registers a replica of collectionID in rgName, homed on nodeID
+// (i.e. nodeID is one of the replica's own nodes). nodeID also serves as the
+// replica's ID, which is fine here since every replica in a single test uses
+// a distinct node; ReplicaManager indexes replicas by ID, so reusing the
+// zero value across more than one replica in the same test would make the
+// second Put silently clobber the first.
+func (f *rgLoadPercentageFixture) putReplica(t *testing.T, collectionID, nodeID int64, rgName string) {
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:            nodeID,
+		CollectionID:  collectionID,
+		ResourceGroup: rgName,
+		Nodes:         []int64{nodeID},
+	})
+	require.NoError(t, f.meta.Put(context.Background(), replica))
+}
+
+// putDelegator records nodeID as the delegator for channelName, holding
+// segmentIDs. Passing no segmentIDs still marks the channel itself as
+// watched by nodeID, without any segment held yet.
+func (f *rgLoadPercentageFixture) putDelegator(collectionID, nodeID int64, channelName string, segmentIDs ...int64) {
+	segments := make(map[int64]*querypb.SegmentDist, len(segmentIDs))
+	for _, segID := range segmentIDs {
+		segments[segID] = &querypb.SegmentDist{NodeID: nodeID, Version: 1}
+	}
+	channel := &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+		View: &meta.LeaderView{
+			ID:           nodeID,
+			CollectionID: collectionID,
+			Channel:      channelName,
+			Segments:     segments,
+		},
+	}
+	f.dist.ChannelDistManager.Update(nodeID, channel)
+}
+
+// TestGetLoadPercentageByResourceGroup_NoReplicaOnRG asserts that a
+// collection with no replica in the requested resource group reports -1,
+// even though the collection is fully loaded elsewhere. Deleting the
+// "if len(replicas) == 0 { return -1, nil }" guard in
+// GetLoadPercentageByResourceGroup would make this test fall through to the
+// percentage computation with an empty replica set instead.
+func TestGetLoadPercentageByResourceGroup_NoReplicaOnRG(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2)
+	f.putReplica(t, 100, 10, "rg-other")
+	f.putDelegator(100, 10, "100-dmc0", 1, 2)
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 100, "rg-target")
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, -1, percentage)
+}
+
+// TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer is the crux of
+// this rework: two resource groups on the same collection, one whose replica
+// carries every current target and one whose replica carries none, must be
+// reported at their own real progress -- 100 and 0 -- not the collection-wide
+// average (50) the old, CalculateLoadPercentage-based implementation would
+// have given to both. Deleting the per-replica restriction inside
+// calculateReplicaLoadPercentage (i.e. checking "replica.Contains(delegator.Node)"
+// instead of aggregating over every replica) collapses both results back to
+// the same number.
+func TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 200, 2000, "200-dmc0", 1, 2)
+
+	// rg-full's replica carries the channel and both segments.
+	f.putReplica(t, 200, 20, "rg-full")
+	f.putDelegator(200, 20, "200-dmc0", 1, 2)
+
+	// rg-empty's replica exists but its node carries nothing at all.
+	f.putReplica(t, 200, 21, "rg-empty")
+
+	full, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 200, "rg-full")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 100, full)
+
+	empty, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 200, "rg-empty")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, empty)
+
+	assert.NotEqual(t, full, empty)
+}
+
+// TestGetLoadPercentageByResourceGroup_ZeroVsAbsent asserts the two outcomes
+// the doc comment calls out as needing to stay distinguishable: a resource
+// group that holds a replica but no segments yet (0) versus a resource group
+// that is not on the collection at all (-1). Deleting the
+// "if len(replicas) == 0 { return -1, nil }" guard would turn the second
+// case into a panic (Exist/percentage computation on an unrelated resource
+// group query) instead of a clean -1; deleting the
+// "if targetNum == 0 { return 0 }" guard is exercised by a separate test
+// below, since this test's target is non-empty.
+func TestGetLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 300, 3000, "300-dmc0", 1, 2)
+	f.putReplica(t, 300, 30, "rg-present")
+	// No putDelegator call: rg-present's replica has not picked up
+	// anything from the target yet.
+
+	present, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 300, "rg-present")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, present)
+
+	absent, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 300, "rg-absent")
+	assert.NoError(t, err)
+	assert.EqualValues(t, -1, absent)
+
+	assert.NotEqual(t, present, absent)
+}
+
+// TestGetLoadPercentageByResourceGroup_ChannelWatchedNoSegments asserts that
+// channel targets are counted alongside segment targets, matching what
+// CollectionObserver treats as the load target. The replica's node watches
+// the one channel target but holds none of the one segment target, so the
+// expected figure is 50 (1 of 2 targets). Deleting either the channel-loop's
+// "loadedCount++" or the "channelTargets" term inside "targetNum := ..."
+// changes this to 0 or 100 respectively.
+func TestGetLoadPercentageByResourceGroup_ChannelWatchedNoSegments(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 400, 4000, "400-dmc0", 1)
+	f.putReplica(t, 400, 40, "rg-target")
+	f.putDelegator(400, 40, "400-dmc0") // watching the channel, no segments
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 400, "rg-target")
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 50, percentage)
+}
+
+// TestGetLoadPercentageByResourceGroup_NoTargetYet asserts that a replica in
+// the requested resource group, on a collection whose next target has not
+// been computed yet (targetNum == 0), reports 0 without panicking. Deleting
+// the "if targetNum == 0 { return 0 }" guard in calculateReplicaLoadPercentage
+// turns this into an integer-divide-by-zero panic.
+func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 500},
+	}))
+	f.putReplica(t, 500, 50, "rg-target")
+
+	assert.NotPanics(t, func() {
+		percentage, err := f.server().GetLoadPercentageByResourceGroup(ctx, 500, "rg-target")
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, percentage)
+	})
+}
+
+// TestGetLoadPercentageByResourceGroup_MultipleReplicasSameRG asserts that
+// when a resource group holds more than one replica of the collection (Spawn
+// allows replicaNumInRG[rg] > 1), the reported figure is the minimum across
+// those replicas, not the first one found or their average. Deleting the
+// "if p := ...; p < percentage" comparison (replacing it with, say, always
+// taking the last replica's figure) would report 100 here instead of 0,
+// because the fully-loaded replica is inserted before the empty one.
+func TestGetLoadPercentageByResourceGroup_MultipleReplicasSameRG(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 600, 6000, "600-dmc0", 1, 2)
+
+	f.putReplica(t, 600, 60, "rg-shared")
+	f.putDelegator(600, 60, "600-dmc0", 1, 2) // this replica: fully loaded
+
+	f.putReplica(t, 600, 61, "rg-shared")
+	// this replica: nothing loaded
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 600, "rg-shared")
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, percentage)
+}
+
+// TestGetLoadPercentageByResourceGroup_FailedLoad asserts that when the
+// collection has a replica in the requested resource group but the
+// collection itself is not currently registered as loaded, a recorded
+// GlobalFailedLoadCache error is surfaced to the caller instead of a bare
+// -1. Deleting the
+// "if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
+// return -1, err }" block makes this test observe a nil error where it
+// expects the seeded failure.
+func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	// Collection 700 is never registered via putTarget/PutCollectionWithoutSave,
+	// so meta.Exist(700) is false even though a replica record exists.
+	f.putReplica(t, 700, 70, "rg-target")
+
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	loadErr := errors.New("mocked load failure")
+	meta.GlobalFailedLoadCache.Put(700, loadErr)
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 700, "rg-target")
+
+	assert.EqualValues(t, -1, percentage)
+	assert.ErrorIs(t, err, loadErr)
+}
+
+// TestGetLoadPercentageByResourceGroup_NilMeta asserts that a Server whose
+// meta has not been initialized yet answers -1 rather than panicking.
+// Deleting the "if s.meta == nil { return -1, nil }" guard turns this test
+// into a nil-pointer-dereference panic on the following
+// s.meta.GetByCollection call.
+func TestGetLoadPercentageByResourceGroup_NilMeta(t *testing.T) {
+	s := &Server{}
+
+	assert.NotPanics(t, func() {
+		percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1, "rg-target")
+		assert.NoError(t, err)
+		assert.EqualValues(t, -1, percentage)
+	})
+}
+
+// TestLoadPercentageByResourceGroup_EmptyRGCoversEveryResourceGroup asserts
+// that an empty rgName is the absence of a filter, not a filter that matches
+// nothing: it selects every replica of the collection regardless of which
+// resource group each one lives in, and reports the laggard among them.
+//
+// The setup deliberately makes the three plausible wrong answers all
+// distinguishable from the right one (50):
+//   - dropping the `rgName == ""` disjunct from the replica selection makes
+//     the replica set empty and the answer -1;
+//   - keeping only the first selected replica reports 100;
+//   - averaging across the selected replicas instead of taking the minimum
+//     reports 75.
+func TestLoadPercentageByResourceGroup_EmptyRGCoversEveryResourceGroup(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 800, 8000, "800-dmc0", 1) // 2 targets: 1 channel + 1 segment
+
+	// rg-full's replica carries the channel and the segment: 100.
+	f.putReplica(t, 800, 80, "rg-full")
+	f.putDelegator(800, 80, "800-dmc0", 1)
+
+	// rg-half's replica watches the channel but holds no segment: 50.
+	f.putReplica(t, 800, 81, "rg-half")
+	f.putDelegator(800, 81, "800-dmc0")
+
+	full, err := f.freeFn(ctx, 800, "rg-full")
+	require.NoError(t, err)
+	require.EqualValues(t, 100, full)
+
+	half, err := f.freeFn(ctx, 800, "rg-half")
+	require.NoError(t, err)
+	require.EqualValues(t, 50, half)
+
+	all, err := f.freeFn(ctx, 800, "")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 50, all, "empty resource group must span every replica and report the laggard")
+	assert.EqualValues(t, half, all, "empty resource group must agree with the furthest-behind resource group")
+}
+
+// TestLoadPercentageByResourceGroup_EmptyRGMatchesCollectionWideFigure is the
+// equivalence assertion the resource-group concept has to earn: on the shape
+// every upstream caller has -- one replica of the collection, so replicaNum is
+// 1 -- an empty rgName must reproduce the collection-wide percentage
+// CollectionObserver.observePartitionLoadStatus computes, which is
+// loadedCount * 100 / (targetNum * replicaNum).
+//
+// Here targetNum is 4 (one channel plus three segments), the single replica
+// carries the channel and one of the three segments so loadedCount is 2, and
+// replicaNum is 1: 2 * 100 / (4 * 1) == 50. The empty-rgName answer is
+// asserted against that hand-evaluated collection-wide formula, and against
+// the answer for the one resource group that actually holds the replica --
+// "no filter" and "the only filter" cannot disagree.
+//
+// Any change that makes an empty rgName mean something other than "the whole
+// collection" -- returning -1, returning 0, or restricting to some default
+// resource group -- breaks this.
+func TestLoadPercentageByResourceGroup_EmptyRGMatchesCollectionWideFigure(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 900, 9000, "900-dmc0", 1, 2, 3) // 4 targets: 1 channel + 3 segments
+
+	f.putReplica(t, 900, 90, "rg-only")
+	f.putDelegator(900, 90, "900-dmc0", 1) // channel + segment 1 loaded: 2 of 4
+
+	const loadedCount, targetNum, replicaNum = 2, 4, 1
+	expected := int32(loadedCount * 100 / (targetNum * replicaNum))
+
+	all, err := f.freeFn(ctx, 900, "")
+	assert.NoError(t, err)
+	assert.EqualValues(t, expected, all, "empty resource group must reproduce the collection-wide load percentage")
+
+	only, err := f.freeFn(ctx, 900, "rg-only")
+	assert.NoError(t, err)
+	assert.EqualValues(t, all, only, "with a single resource group, filtering by it must equal not filtering at all")
+}
+
+// TestLoadPercentageByResourceGroup_EmptyRGStillReportsNoReplica asserts that
+// widening an empty rgName to "every replica" did not also swallow the
+// no-replica outcome: a collection that has a load target but no replica at
+// all must still report -1, not 0. Moving the `rgName == ""` handling ahead of
+// the `len(replicas) == 0` guard -- for instance by short-circuiting an empty
+// rgName straight into the percentage computation -- turns this into 0, which
+// callers read as "loading, but no progress" rather than "nothing here".
+func TestLoadPercentageByResourceGroup_EmptyRGStillReportsNoReplica(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 1000, 10000, "1000-dmc0", 1, 2)
+	// No putReplica call: the collection is registered and has targets, but
+	// no replica of it exists anywhere.
+
+	percentage, err := f.freeFn(ctx, 1000, "")
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, -1, percentage, "no replica anywhere must stay distinguishable from a replica at zero progress")
+}
+
+// TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion asserts the
+// figure is read NextTargetFirst: promoting the next target to current clears
+// the next target until the observer re-pulls it ~10s later, and a plain
+// NextTarget read in that window reports 0 - a fully loaded, serving resource
+// group flapping 100/0 on every promotion. Changing NextTargetFirst back to
+// NextTarget in replicaLoadPercentage fails this at 0.
+func TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 900, 9000, "900-dmc0")
+	f.putReplica(t, 900, 90, "rg-promoted")
+	f.putDelegator(900, 90, "900-dmc0")
+
+	require.True(t, f.targetMgr.UpdateCollectionCurrentTarget(context.Background(), 900),
+		"promotion moves next to current and clears next")
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 900, "rg-promoted")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 100, percentage,
+		"a promoted target must keep reporting the loaded figure, not flap to 0")
+}

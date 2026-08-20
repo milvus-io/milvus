@@ -1,0 +1,452 @@
+package querycoordv2
+
+import (
+	"context"
+	"testing"
+
+	"github.com/blang/semver/v4"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+)
+
+// shardLeaderReadinessFixture wires up the four read-only stores
+// GetShardLeaderReadinessByResourceGroup composes over -- CollectionManager
+// and ReplicaManager (as meta.Meta), TargetManager, DistributionManager and
+// NodeManager -- with no etcd and no query node behind them, mirroring the
+// in-memory style of rgLoadPercentageFixture in this package.
+type shardLeaderReadinessFixture struct {
+	meta      *meta.Meta
+	targetMgr *meta.TargetManager
+	dist      *meta.DistributionManager
+	nodeMgr   *session.NodeManager
+	broker    *meta.MockBroker
+}
+
+func newShardLeaderReadinessFixture(t *testing.T) *shardLeaderReadinessFixture {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.On("SaveReplica", mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	m := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(catalog),
+		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
+	}
+	broker := meta.NewMockBroker(t)
+	nodeMgr := session.NewNodeManager()
+
+	return &shardLeaderReadinessFixture{
+		meta:      m,
+		targetMgr: meta.NewTargetManager(broker, m),
+		dist:      meta.NewDistributionManager(nodeMgr),
+		nodeMgr:   nodeMgr,
+		broker:    broker,
+	}
+}
+
+// server builds a *Server wired to this fixture's stores, ready to call
+// GetShardLeaderReadinessByResourceGroup on.
+func (f *shardLeaderReadinessFixture) server() *Server {
+	return &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist, nodeMgr: f.nodeMgr}
+}
+
+// putLoadedCollection registers collectionID as fully loaded -- collection
+// status Loaded and its single partition at 100% -- and promotes the given
+// channels into the CURRENT target. Both halves matter: the current target is
+// what readiness is measured against, and the fully-loaded registration is
+// exactly the state under which the native, collection-wide gate
+// (checkLoadStatus) reports the collection ready.
+func (f *shardLeaderReadinessFixture) putLoadedCollection(t *testing.T, collectionID, partitionID int64, channelNames ...string) {
+	ctx := context.Background()
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: collectionID,
+			Status:       querypb.LoadStatus_Loaded,
+		},
+		LoadPercentage: 100,
+	}))
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			Status:       querypb.LoadStatus_Loaded,
+		},
+		LoadPercentage: 100,
+	}))
+
+	vChannels := make([]*datapb.VchannelInfo, 0, len(channelNames))
+	for _, name := range channelNames {
+		vChannels = append(vChannels, &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name})
+	}
+	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vChannels, nil, nil).Once()
+	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+	require.True(t, f.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID),
+		"the fixture must leave the collection with a current target, which is what readiness reads")
+}
+
+// putReplica registers a replica of collectionID in rgName holding nodeIDs.
+// The replica ID is the first node id, so distinct replicas in one test need
+// distinct nodes; ReplicaManager indexes by ID and a repeated ID would
+// silently clobber the earlier replica.
+func (f *shardLeaderReadinessFixture) putReplica(t *testing.T, collectionID int64, rgName string, nodeIDs ...int64) {
+	require.NotEmpty(t, nodeIDs)
+	require.NoError(t, f.meta.Put(context.Background(), meta.NewReplica(&querypb.Replica{
+		ID:            nodeIDs[0],
+		CollectionID:  collectionID,
+		ResourceGroup: rgName,
+		Nodes:         nodeIDs,
+	})))
+}
+
+// registerNode makes nodeID one the coordinator knows about. A leader on an
+// unregistered node is not usable, which the native shard-leader builder
+// enforces by dropping any leader whose NodeManager entry is missing.
+func (f *shardLeaderReadinessFixture) registerNode(nodeID int64) {
+	f.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  nodeID,
+		Address: "localhost:0",
+		Version: semver.MustParse("2.6.0"),
+	}))
+}
+
+// putLeader records nodeID as the delegator for channelName and registers the
+// node. serviceable drives the leader view's Serviceable flag, i.e. whether
+// the delegator reports itself able to answer a query.
+func (f *shardLeaderReadinessFixture) putLeader(collectionID, nodeID int64, channelName string, serviceable bool) {
+	f.registerNode(nodeID)
+	f.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+		Node:         nodeID,
+		View: &meta.LeaderView{
+			ID:           nodeID,
+			CollectionID: collectionID,
+			Channel:      channelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: serviceable},
+		},
+	})
+}
+
+func (f *shardLeaderReadinessFixture) readiness(t *testing.T, collectionID int64, rgName string) utils.ShardLeaderReadiness {
+	t.Helper()
+	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), collectionID, rgName)
+	require.NoError(t, err)
+	return got
+}
+
+// TestShardLeaderReadinessByRG_LeaderInOneRGDoesNotMakeAnotherReady is the
+// defect this method exists to close, stated directly: collection 100 is
+// loaded into rg-a and rg-b, only rg-a's replica has a serviceable leader on
+// the one shard, and rg-b must be reported not ready.
+//
+// The assertion pair matters more than either half alone. Any implementation
+// that answers per collection -- including the obvious one, calling
+// GetShardLeaders and looking at whether the shard has any leader at all --
+// gives rg-a and rg-b the same answer, and admitting a query to rg-b is
+// exactly the bug: rg-b has no leader to serve it.
+func TestShardLeaderReadinessByRG_LeaderInOneRGDoesNotMakeAnotherReady(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putReplica(t, 100, "rg-b", 11)
+	f.putLeader(100, 10, "100-dmc0", true)
+	f.registerNode(11) // rg-b's node is up; it just holds no leader
+
+	rgA := f.readiness(t, 100, "rg-a")
+	rgB := f.readiness(t, 100, "rg-b")
+
+	assert.True(t, rgA.Ready, "rg-a holds the serviceable leader of the only shard and must be ready")
+	assert.Empty(t, rgA.UnreadyShards)
+
+	assert.False(t, rgB.Ready,
+		"rg-b holds no leader of the shard: a leader serving rg-a must not make rg-b look ready")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, rgB.Reason)
+	assert.Equal(t, []string{"100-dmc0"}, rgB.UnreadyShards,
+		"the shard rg-b cannot serve must be named, not merely counted")
+	assert.Equal(t, 1, rgB.TotalShards)
+}
+
+// TestShardLeaderReadinessByRG_DoesNotInheritCollectionWideGate pins the
+// second, independent route to the same admission bug. checkLoadStatus, the
+// gate on the native GetShardLeaders path, is collection-wide: it reads
+// CalculateLoadPercentage(collectionID) and then short-circuits to ready
+// whenever the collection's own status is LoadStatus_Loaded. Under
+// per-resource-group loading that passes as soon as ANY resource group
+// finishes.
+//
+// This test puts the collection in exactly that state and asserts both sides
+// of the contrast in one place: the native collection-wide path reports the
+// shard served, while the per-resource-group answer for the resource group
+// that has no leader is still not ready. If this method ever grows a
+// checkLoadStatus call, or otherwise consults the collection's aggregate
+// status, rg-b flips to ready here.
+func TestShardLeaderReadinessByRG_DoesNotInheritCollectionWideGate(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 200, 2000, "200-dmc0")
+	f.putReplica(t, 200, "rg-a", 20)
+	f.putReplica(t, 200, "rg-b", 21)
+	f.putLeader(200, 20, "200-dmc0", true)
+	f.registerNode(21)
+
+	// The collection-wide view: fully loaded, shard served, no error.
+	require.EqualValues(t, 100, f.meta.CalculateLoadPercentage(ctx, 200),
+		"the fixture must reproduce the state in which the collection-wide gate passes")
+	shards, err := utils.GetShardLeaders(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 200, false)
+	require.NoError(t, err, "the native collection-wide path must admit this state")
+	require.Len(t, shards, 1)
+	require.Equal(t, []int64{20}, shards[0].GetNodeIds(),
+		"the native path reports the leader without recording which resource group it serves")
+
+	rgB := f.readiness(t, 200, "rg-b")
+
+	assert.False(t, rgB.Ready,
+		"the collection-wide gate passing must not make a resource group without a leader ready")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, rgB.Reason)
+}
+
+// TestShardLeaderReadinessByRG_NoReplicaInRG asserts that a resource group
+// that holds no replica of the collection is reported as such, rather than as
+// a resource group whose shards happen to be lagging. The two are different
+// situations for the caller: nothing is loading in this resource group, so
+// waiting will never help.
+func TestShardLeaderReadinessByRG_NoReplicaInRG(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 300, 3000, "300-dmc0")
+	f.putReplica(t, 300, "rg-a", 30)
+	f.putLeader(300, 30, "300-dmc0", true)
+
+	got := f.readiness(t, 300, "rg-absent")
+
+	assert.False(t, got.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonNoReplicaInResourceGroup, got.Reason,
+		"a resource group with no replica must be distinguishable from one whose shards are lagging")
+	assert.Zero(t, got.TotalShards)
+	assert.Empty(t, got.UnreadyShards)
+}
+
+// TestShardLeaderReadinessByRG_UnserviceableLeaderIsNotReady asserts that the
+// leader has to be serviceable, not merely present. A delegator that has been
+// assigned the shard but reports itself unable to answer -- still catching up
+// with streaming data, say -- cannot admit a query, and the native path drops
+// it for the same reason.
+func TestShardLeaderReadinessByRG_UnserviceableLeaderIsNotReady(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 400, 4000, "400-dmc0")
+	f.putReplica(t, 400, "rg-a", 40)
+	f.putLeader(400, 40, "400-dmc0", false)
+
+	got := f.readiness(t, 400, "rg-a")
+
+	assert.False(t, got.Ready,
+		"a leader that reports itself unserviceable must not count as serving the shard")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, got.Reason)
+	assert.Equal(t, []string{"400-dmc0"}, got.UnreadyShards)
+}
+
+// TestShardLeaderReadinessByRG_LeaderOnUnknownNodeIsNotReady asserts that a
+// serviceable leader sitting on a node the coordinator no longer knows about
+// does not count. This is the third condition the native shard-leader builder
+// applies per leader, and dropping it would make a resource group look ready
+// across a query node the session manager has already evicted.
+func TestShardLeaderReadinessByRG_LeaderOnUnknownNodeIsNotReady(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 500, 5000, "500-dmc0")
+	f.putReplica(t, 500, "rg-a", 50)
+	f.putLeader(500, 50, "500-dmc0", true)
+	f.nodeMgr.Remove(50)
+
+	got := f.readiness(t, 500, "rg-a")
+
+	assert.False(t, got.Ready,
+		"a leader on a node the coordinator has evicted must not count as serving the shard")
+	assert.Equal(t, []string{"500-dmc0"}, got.UnreadyShards)
+}
+
+// TestShardLeaderReadinessByRG_PartiallyServedCollection asserts that every
+// shard has to be served, that the ones that are not are named individually,
+// and that the names come back sorted so one state always prints one line --
+// the channel set arrives as a map, whose iteration order is random.
+func TestShardLeaderReadinessByRG_PartiallyServedCollection(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 600, 6000, "600-dmc0", "600-dmc1", "600-dmc2")
+	f.putReplica(t, 600, "rg-a", 60, 61)
+	f.putLeader(600, 60, "600-dmc1", true)
+	f.registerNode(61)
+
+	got := f.readiness(t, 600, "rg-a")
+
+	assert.False(t, got.Ready, "one shard out of three being served is not a servable resource group")
+	assert.Equal(t, 3, got.TotalShards)
+	assert.Equal(t, []string{"600-dmc0", "600-dmc2"}, got.UnreadyShards,
+		"the unserved shards must be named, sorted, and must not include the one that is served")
+}
+
+// TestShardLeaderReadinessByRG_UnreadyShardsAreStable asserts that one state
+// always produces one answer. The shards come out of a map, whose iteration
+// order Go deliberately varies between calls, so an implementation that
+// forwards that order straight to the caller makes the same unchanged state
+// print a different log line each second and turns any comparison of two
+// answers into noise. Repeating the call pins that down: with four unserved
+// shards, an unsorted implementation has to hit the one right order every
+// time to survive.
+func TestShardLeaderReadinessByRG_UnreadyShardsAreStable(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1200, 12000, "1200-dmc0", "1200-dmc1", "1200-dmc2", "1200-dmc3")
+	f.putReplica(t, 1200, "rg-a", 120)
+	f.registerNode(120)
+
+	want := []string{"1200-dmc0", "1200-dmc1", "1200-dmc2", "1200-dmc3"}
+	for i := 0; i < 30; i++ {
+		got := f.readiness(t, 1200, "rg-a")
+		require.Equal(t, want, got.UnreadyShards,
+			"the unserved shards must come back in a stable order on every call, attempt %d", i)
+	}
+}
+
+// TestShardLeaderReadinessByRG_LeadersAcrossReplicasInSameRG asserts that when
+// a resource group holds more than one replica of the collection, leaders from
+// any of them count: the question is whether the resource group can serve the
+// shard, not whether one particular replica can. Here neither replica serves
+// both shards on its own, but between them every shard is covered.
+func TestShardLeaderReadinessByRG_LeadersAcrossReplicasInSameRG(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 700, 7000, "700-dmc0", "700-dmc1")
+	f.putReplica(t, 700, "rg-shared", 70)
+	f.putReplica(t, 700, "rg-shared", 71)
+	f.putLeader(700, 70, "700-dmc0", true)
+	f.putLeader(700, 71, "700-dmc1", true)
+
+	got := f.readiness(t, 700, "rg-shared")
+
+	assert.True(t, got.Ready,
+		"shards served by different replicas of the same resource group must together make it ready")
+	assert.Empty(t, got.UnreadyShards)
+	assert.Equal(t, 2, got.TotalShards)
+}
+
+// TestShardLeaderReadinessByRG_EmptyRGSpansEveryReplica asserts that an empty
+// resource group name is the absence of a filter rather than a filter that
+// matches nothing, matching LoadPercentageByResourceGroup. The one replica
+// that serves the shard lives in rg-a, so rg-b is not ready while "" is.
+func TestShardLeaderReadinessByRG_EmptyRGSpansEveryReplica(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 800, 8000, "800-dmc0")
+	f.putReplica(t, 800, "rg-a", 80)
+	f.putReplica(t, 800, "rg-b", 81)
+	f.putLeader(800, 80, "800-dmc0", true)
+	f.registerNode(81)
+
+	all := f.readiness(t, 800, "")
+
+	assert.True(t, all.Ready,
+		"an empty resource group must span every replica of the collection, not match none of them")
+	assert.False(t, f.readiness(t, 800, "rg-b").Ready,
+		"the unfiltered answer must not be what a specific resource group gets")
+}
+
+// TestShardLeaderReadinessByRG_NoChannelTarget asserts that a collection with
+// a replica in the resource group but no shard in the current target -- what a
+// collection under recovery looks like -- is reported with its own reason
+// rather than as ready-by-vacuous-truth. Every shard of an empty shard set is
+// trivially served, so an implementation that skips this guard reports Ready.
+func TestShardLeaderReadinessByRG_NoChannelTarget(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 900, Status: querypb.LoadStatus_Loaded},
+		LoadPercentage:     100,
+	}))
+	f.putReplica(t, 900, "rg-a", 90)
+
+	got := f.readiness(t, 900, "rg-a")
+
+	assert.False(t, got.Ready, "a collection with no shard in the current target must not be called ready")
+	assert.Equal(t, utils.ShardLeadersReasonNoChannelTarget, got.Reason)
+	assert.Zero(t, got.TotalShards)
+}
+
+// TestShardLeaderReadinessByRG_FailedLoadIsSurfaced asserts that when a
+// replica record exists but the collection is not registered as loaded, a
+// recorded load failure reaches the caller as an error instead of leaving it
+// to wait out its timeout on a load that is never coming back. This matches
+// what LoadPercentageByResourceGroup does with the same cache.
+func TestShardLeaderReadinessByRG_FailedLoadIsSurfaced(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	// Collection 1000 is never registered as loaded, so meta.Exist is false
+	// even though a replica record exists.
+	f.putReplica(t, 1000, "rg-a", 100)
+
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	loadErr := errors.New("mocked load failure")
+	meta.GlobalFailedLoadCache.Put(1000, loadErr)
+
+	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1000, "rg-a")
+
+	assert.ErrorIs(t, err, loadErr, "a recorded load failure must reach the caller unwrapped")
+	assert.False(t, got.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
+}
+
+// TestShardLeaderReadinessByRG_UninitializedServer asserts that a Server whose
+// stores have not been wired up yet answers not-ready rather than panicking,
+// the same way GetLoadPercentageByResourceGroup answers -1.
+func TestShardLeaderReadinessByRG_UninitializedServer(t *testing.T) {
+	s := &Server{}
+
+	assert.NotPanics(t, func() {
+		got, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 1, "rg-a")
+		assert.NoError(t, err)
+		assert.False(t, got.Ready)
+		assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason)
+	})
+}
+
+// TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged is the
+// zero-behavior-change proof on the querycoord side: asking the
+// per-resource-group question is a pure read, so the native, collection-wide
+// shard-leader answer is byte-for-byte the same before and after, for every
+// resource group asked about including ones that do not exist.
+func TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1100, 11000, "1100-dmc0", "1100-dmc1")
+	f.putReplica(t, 1100, "rg-a", 110)
+	f.putReplica(t, 1100, "rg-b", 111)
+	f.putLeader(1100, 110, "1100-dmc0", true)
+	f.putLeader(1100, 111, "1100-dmc1", true)
+
+	// The native answer is built by walking a map of channels, so its order is
+	// not stable across calls. Compare it keyed by channel, or this test would
+	// fail on shuffling rather than on a behavior change.
+	nativeShards := func() map[string]*querypb.ShardLeadersList {
+		lists, err := utils.GetShardLeaders(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 1100, false)
+		require.NoError(t, err)
+		byChannel := make(map[string]*querypb.ShardLeadersList, len(lists))
+		for _, list := range lists {
+			byChannel[list.GetChannelName()] = list
+		}
+		return byChannel
+	}
+
+	before := nativeShards()
+	require.Len(t, before, 2)
+
+	for _, rg := range []string{"", "rg-a", "rg-b", "rg-does-not-exist"} {
+		_, err := f.server().GetShardLeaderReadinessByResourceGroup(ctx, 1100, rg)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, before, nativeShards(),
+		"the per-resource-group readiness read must not disturb the native shard-leader answer")
+	assert.EqualValues(t, 100, f.meta.CalculateLoadPercentage(ctx, 1100),
+		"the per-resource-group readiness read must not disturb the collection's load registration")
+}
