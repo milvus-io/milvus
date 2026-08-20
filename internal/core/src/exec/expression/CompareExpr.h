@@ -121,11 +121,13 @@ struct CompareElementFunc {
                         res[i] = left[offset] == right[offset];
                     } else if constexpr (op == proto::plan::OpType::NotEqual) {
                         res[i] = left[offset] != right[offset];
-                    } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterThan) {
                         res[i] = left[offset] > right[offset];
                     } else if constexpr (op == proto::plan::OpType::LessThan) {
                         res[i] = left[offset] < right[offset];
-                    } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterEqual) {
                         res[i] = left[offset] >= right[offset];
                     } else if constexpr (op == proto::plan::OpType::LessEqual) {
                         res[i] = left[offset] <= right[offset];
@@ -140,57 +142,72 @@ struct CompareElementFunc {
                 return;
             }
 
-        if (!bitmap_input.empty()) {
-            for (int i = 0; i < size; ++i) {
-                if (!bitmap_input[start_cursor + i]) {
-                    continue;
+            if (!bitmap_input.empty()) {
+                for (int i = 0; i < size; ++i) {
+                    if (!bitmap_input[start_cursor + i]) {
+                        continue;
+                    }
+                    if constexpr (op == proto::plan::OpType::Equal) {
+                        res[i] = left[i] == right[i];
+                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                        res[i] = left[i] != right[i];
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterThan) {
+                        res[i] = left[i] > right[i];
+                    } else if constexpr (op == proto::plan::OpType::LessThan) {
+                        res[i] = left[i] < right[i];
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterEqual) {
+                        res[i] = left[i] >= right[i];
+                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                        res[i] = left[i] <= right[i];
+                    } else {
+                        ThrowInfo(
+                            UnexpectedError,
+                            fmt::format(
+                                "unsupported op_type:{} for CompareElementFunc",
+                                op));
+                    }
                 }
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = left[i] == right[i];
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = left[i] != right[i];
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = left[i] > right[i];
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = left[i] < right[i];
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = left[i] >= right[i];
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = left[i] <= right[i];
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported op_type:{} for CompareElementFunc",
-                            op));
-                }
+                return;
             }
-            return;
-        }
 
-        if constexpr (op == proto::plan::OpType::Equal) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::EQ>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::NotEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::NE>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GT>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::LessThan) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LT>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GE>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
-                left, right, size);
-        } else {
-            ThrowInfo(UnexpectedError,
-                      fmt::format(
-                          "unsupported op_type:{} for CompareElementFunc", op));
-        }
+            if constexpr (op == proto::plan::OpType::Equal) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::EQ>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::NE>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::GT>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::LessThan) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::LT>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::GE>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::LE>(
+                    left, right, size);
+            } else {
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported op_type:{} for CompareElementFunc",
+                                op));
+            }
         }  // else: homogeneous branch
     }
 };

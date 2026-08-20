@@ -94,8 +94,8 @@ estimate_pk_index_bytes(DataType data_type,
             if (is_sorted_by_pk) {
                 base = 0;  // sorted uuid: no index built (fixed 16B)
             } else {
-                base = num_rows *
-                       static_cast<int64_t>(sizeof(UUID) + 16);  // 16B + overhead
+                base = num_rows * static_cast<int64_t>(sizeof(UUID) +
+                                                       16);  // 16B + overhead
             }
             break;
         default:

@@ -262,9 +262,8 @@ struct GeneratedData {
                                 AssertInfo(bytes.size() == 16,
                                            "UUID bytes must be 16B, got {}",
                                            bytes.size());
-                                std::memcpy(ret_data[r].data.data(),
-                                            bytes.data(),
-                                            16);
+                                std::memcpy(
+                                    ret_data[r].data.data(), bytes.data(), 16);
                             }
                             break;
                         }

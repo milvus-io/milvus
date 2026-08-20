@@ -504,7 +504,8 @@ class ChunkedColumn : public ChunkedColumnBase {
             case DataType::UUID: {
                 // UUID is fixed-width 16B FixedSizeBinary, no offsets.
                 // IsFixedWidth true, GetDataTypeSize 16.
-                auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+                auto [cids, offsets_in_chunk] =
+                    ToChunkIdAndOffset(offsets, count);
                 auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
                 auto typed_dst = static_cast<UUID*>(dst);
                 for (int64_t i = 0; i < count; i++) {

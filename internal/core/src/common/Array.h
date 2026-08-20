@@ -352,8 +352,8 @@ class Array {
         if constexpr (std::is_same_v<T, milvus::UUID>) {
             switch (element_type_) {
                 case DataType::UUID:
-                    return *reinterpret_cast<const UUID*>(
-                        data_.get() + index * sizeof(UUID));
+                    return *reinterpret_cast<const UUID*>(data_.get() +
+                                                          index * sizeof(UUID));
                 default:
                     ThrowInfo(Unsupported,
                               "unsupported element type for array");
@@ -443,8 +443,7 @@ class Array {
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<UUID>(j);
                     data_array.mutable_bytes_data()->add_data(
-                        reinterpret_cast<const char*>(element.data.data()),
-                        16);
+                        reinterpret_cast<const char*>(element.data.data()), 16);
                 }
                 break;
             }
@@ -682,8 +681,8 @@ class ArrayView {
         if constexpr (std::is_same_v<T, milvus::UUID>) {
             switch (element_type_) {
                 case DataType::UUID:
-                    return *reinterpret_cast<const UUID*>(
-                        data_ + index * sizeof(UUID));
+                    return *reinterpret_cast<const UUID*>(data_ +
+                                                          index * sizeof(UUID));
                 default:
                     ThrowInfo(Unsupported,
                               "unsupported element type for array");
@@ -768,8 +767,7 @@ class ArrayView {
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<UUID>(j);
                     data_array.mutable_bytes_data()->add_data(
-                        reinterpret_cast<const char*>(element.data.data()),
-                        16);
+                        reinterpret_cast<const char*>(element.data.data()), 16);
                 }
                 break;
             }

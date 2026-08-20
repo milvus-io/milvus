@@ -260,7 +260,8 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
             break;
         }
         case DataType::UUID: {
-            auto bytes_data = data_array.mutable_scalars()->mutable_bytes_data();
+            auto bytes_data =
+                data_array.mutable_scalars()->mutable_bytes_data();
             const UUID* src = static_cast<const UUID*>(column_raw_data);
             for (int64_t i = 0; i < column_data_size; ++i) {
                 bytes_data->mutable_data()->at(i).assign(

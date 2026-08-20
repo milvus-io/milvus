@@ -209,16 +209,14 @@ ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data) {
         }
         case DataType::UUID: {
             auto& bytes_data = data.scalars().bytes_data().data();
-            AssertInfo(
-                static_cast<size_t>(bytes_data.size()) == pks.size(),
-                "UUID bytes_data size {} mismatch pks size {}",
-                bytes_data.size(),
-                pks.size());
+            AssertInfo(static_cast<size_t>(bytes_data.size()) == pks.size(),
+                       "UUID bytes_data size {} mismatch pks size {}",
+                       bytes_data.size(),
+                       pks.size());
             for (size_t i = 0; i < pks.size(); i++) {
                 auto& b = bytes_data.Get(static_cast<int>(i));
-                AssertInfo(b.size() == 16,
-                           "UUID expected 16 bytes, got {}",
-                           b.size());
+                AssertInfo(
+                    b.size() == 16, "UUID expected 16 bytes, got {}", b.size());
                 UUID uuid{};
                 std::memcpy(uuid.data.data(), b.data(), 16);
                 pks[i] = uuid;
@@ -288,16 +286,14 @@ ParsePksFromIDs(std::vector<PkType>& pks,
         }
         case DataType::UUID: {
             auto& uuid_data = data.uuid_id().data();
-            AssertInfo(
-                static_cast<size_t>(uuid_data.size()) == pks.size(),
-                "UUID IdArray size {} mismatch pks size {}",
-                uuid_data.size(),
-                pks.size());
+            AssertInfo(static_cast<size_t>(uuid_data.size()) == pks.size(),
+                       "UUID IdArray size {} mismatch pks size {}",
+                       uuid_data.size(),
+                       pks.size());
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto& b = uuid_data.Get(static_cast<int>(i));
-                AssertInfo(b.size() == 16,
-                           "UUID expected 16 bytes, got {}",
-                           b.size());
+                AssertInfo(
+                    b.size() == 16, "UUID expected 16 bytes, got {}", b.size());
                 UUID uuid{};
                 std::memcpy(uuid.data.data(), b.data(), 16);
                 pks[i] = uuid;

@@ -202,8 +202,13 @@ SkipIndexStatsBuilder::Build(
                 }
                 total_rows += array->length();
             }
-            metricsInfo<milvus::UUID> info{
-                total_rows, null_count, min, max, false, false, std::move(unique_values)};
+            metricsInfo<milvus::UUID> info{total_rows,
+                                           null_count,
+                                           min,
+                                           max,
+                                           false,
+                                           false,
+                                           std::move(unique_values)};
             return LoadMetrics<milvus::UUID>(info);
         }
         default:
@@ -302,8 +307,13 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
             if (count - null_count == 0) {
                 return std::make_unique<NoneFieldChunkMetrics>();
             }
-            metricsInfo<milvus::UUID> info{
-                count, null_count, min, max, false, false, std::move(unique_values)};
+            metricsInfo<milvus::UUID> info{count,
+                                           null_count,
+                                           min,
+                                           max,
+                                           false,
+                                           false,
+                                           std::move(unique_values)};
             return LoadMetrics<milvus::UUID>(info);
         }
         default:

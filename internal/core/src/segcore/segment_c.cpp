@@ -1902,7 +1902,8 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
             }
             case milvus::DataType::UUID: {
                 auto pk_vec = insert_record.get_data<milvus::UUID>(field_id);
-                size_t total_size = result->num_primary_keys * sizeof(milvus::UUID);
+                size_t total_size =
+                    result->num_primary_keys * sizeof(milvus::UUID);
                 result->uuid_primary_keys =
                     static_cast<uint8_t*>(malloc(total_size));
                 if (!result->uuid_primary_keys) {
@@ -1912,10 +1913,12 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                 }
                 result->uuid_primary_keys_size = total_size;
                 for (size_t i = 0; i < result->num_primary_keys; i++) {
-                    const auto& uuid = (*pk_vec)[start_offset + static_cast<int64_t>(i)];
-                    std::memcpy(result->uuid_primary_keys + i * sizeof(milvus::UUID),
-                                uuid.data.data(),
-                                sizeof(milvus::UUID));
+                    const auto& uuid =
+                        (*pk_vec)[start_offset + static_cast<int64_t>(i)];
+                    std::memcpy(
+                        result->uuid_primary_keys + i * sizeof(milvus::UUID),
+                        uuid.data.data(),
+                        sizeof(milvus::UUID));
                 }
                 break;
             }

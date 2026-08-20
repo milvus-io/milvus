@@ -1166,9 +1166,8 @@ struct hash<milvus::UUID> {
     operator()(const milvus::UUID& uuid) const noexcept {
         // Avalanching hash over raw 16B FixedSizeBinary via SpookyHashV2.
         // No string conversion; hashes uuid.data.data() directly.
-        return static_cast<size_t>(
-            folly::hash::SpookyHashV2::Hash64(
-                uuid.data.data(), uuid.data.size(), 0));
+        return static_cast<size_t>(folly::hash::SpookyHashV2::Hash64(
+            uuid.data.data(), uuid.data.size(), 0));
     }
 };
 }  // namespace std
@@ -1185,8 +1184,7 @@ struct hasher<milvus::UUID> {
         // hasher<std::string> (Hash64 with seed 0) and enables F14
         // fast-path (skips CRC) via IsAvalanching=true.
         return static_cast<size_t>(
-            hash::SpookyHashV2::Hash64(
-                uuid.data.data(), uuid.data.size(), 0));
+            hash::SpookyHashV2::Hash64(uuid.data.data(), uuid.data.size(), 0));
     }
 };
 }  // namespace folly

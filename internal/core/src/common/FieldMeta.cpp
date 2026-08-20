@@ -305,7 +305,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
 
     if (IsUuidDataType(data_type)) {
         AssertInfo(!type_map.count(MAX_LENGTH),
-                   "max_length must not be set for UUID (fixed 16B, IsFixedWidth true, IsStringDataType false)");
+                   "max_length must not be set for UUID (fixed 16B, "
+                   "IsFixedWidth true, IsStringDataType false)");
         return FieldMeta{name,
                          field_id,
                          data_type,

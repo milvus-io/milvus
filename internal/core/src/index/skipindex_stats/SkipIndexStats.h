@@ -533,10 +533,10 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         return j;
     }
 
-  private:
-     T min_;
-     T max_;
-     BloomFilterPtr bloom_filter_{nullptr};
+ private:
+    T min_;
+    T max_;
+    BloomFilterPtr bloom_filter_{nullptr};
 };
 
 class StringFieldChunkMetrics : public FieldChunkMetrics {
@@ -753,10 +753,8 @@ NewFieldMetrics(const nlohmann::json& data) {
             T min{};
             T max{};
             if constexpr (std::is_same_v<T, milvus::UUID>) {
-                min = milvus::UUID::FromString(
-                    data["min"].get<std::string>());
-                max = milvus::UUID::FromString(
-                    data["max"].get<std::string>());
+                min = milvus::UUID::FromString(data["min"].get<std::string>());
+                max = milvus::UUID::FromString(data["max"].get<std::string>());
             } else {
                 min = data["min"].get<T>();
                 max = data["max"].get<T>();

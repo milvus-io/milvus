@@ -347,13 +347,13 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             auto fsb_array =
                 std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(array);
             AssertInfo(fsb_array->byte_width() ==
-                            static_cast<int32_t>(sizeof(milvus::UUID)),
-                        "unexpected UUID byte width {}",
-                        fsb_array->byte_width());
+                           static_cast<int32_t>(sizeof(milvus::UUID)),
+                       "unexpected UUID byte width {}",
+                       fsb_array->byte_width());
             for (size_t index = 0; index < element_count; ++index) {
                 milvus::fastmem::FastMemcpy(values[index].data.data(),
-                                             fsb_array->GetValue(index),
-                                             sizeof(milvus::UUID));
+                                            fsb_array->GetValue(index),
+                                            sizeof(milvus::UUID));
             }
             if (nullable_) {
                 return FillFieldData(values.data(),
