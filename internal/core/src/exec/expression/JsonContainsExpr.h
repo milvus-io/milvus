@@ -491,6 +491,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
     void
     DetermineExecPath() override {
         if (CanUseJsonStatsAtInit()) {

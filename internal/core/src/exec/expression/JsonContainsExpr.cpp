@@ -368,9 +368,14 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
 
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    auto real_batch_size = GetNextRealBatchSize(input, ElementLevel);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
     }
     AssertInfo(expr_->column_.element_level_ == ElementLevel,
                "ARRAY contains element-level mismatch: plan={}, executor={}",
@@ -993,9 +998,14 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContainsAll]nested path must be null");
-    auto real_batch_size = GetNextRealBatchSize(input, ElementLevel);
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
     }
     AssertInfo(expr_->column_.element_level_ == ElementLevel,
                "ARRAY contains-all element-level mismatch: plan={}, "
