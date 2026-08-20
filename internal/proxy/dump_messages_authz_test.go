@@ -68,7 +68,7 @@ func TestAuthorizeWALRead(t *testing.T) {
 				},
 			}, nil
 		}
-		require.NoError(t, InitMetaCache(context.Background(), client))
+		_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
 
 		t.Run("admin role is allowed", func(t *testing.T) {
 			_, err := authorizeWALRead(GetContext(context.Background(), "dbadmin:pwd"))
@@ -102,7 +102,7 @@ func TestAuthorizeWALRead(t *testing.T) {
 					},
 				}, nil
 			}
-			require.NoError(t, InitMetaCache(context.Background(), rootClient))
+			_, err := initMetaCache(context.Background(), rootClient); require.NoError(t, err)
 
 			_, err := authorizeWALRead(GetContext(context.Background(), "root:pwd"))
 			assert.NoError(t, err)
@@ -127,7 +127,7 @@ func TestDumpMessages_UnauthorizedUserDenied(t *testing.T) {
 			},
 		}, nil
 	}
-	require.NoError(t, InitMetaCache(context.Background(), client))
+	_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
 
 	// The DumpMessages stream is authorized at the gRPC interceptor layer
 	// (GrpcAuthStreamInterceptor + PrivilegeStreamInterceptor), so exercise that
@@ -153,14 +153,14 @@ func TestDumpMessages_UnauthenticatedUserDenied(t *testing.T) {
 	defer privilege.CleanPrivilegeCache()
 
 	client := &MockMixCoordClientInterface{}
-	require.NoError(t, InitMetaCache(context.Background(), client))
+	_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
 
 	// The DumpMessages stream is authenticated at the gRPC interceptor layer
 	// (GrpcAuthStreamInterceptor) before authorization runs, so exercise that
 	// path directly: a request without valid credentials must be rejected
 	// before the privilege interceptor or the handler runs.
 	handlerCalled := false
-	authInterceptor := GrpcAuthStreamInterceptor(AuthenticationInterceptor)
+	authInterceptor := GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() }))
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:wrongPass")}
 	err := authInterceptor(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
@@ -199,7 +199,7 @@ func TestStreamPrivilegeInterceptor_CreateReplicateStream(t *testing.T) {
 			},
 		}, nil
 	}
-	require.NoError(t, InitMetaCache(context.Background(), client))
+	_, err := initMetaCache(context.Background(), client); require.NoError(t, err)
 
 	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
 
@@ -291,10 +291,10 @@ func TestStreamPrivilegeInterceptor_FailClosed(t *testing.T) {
 func TestGrpcAuthStreamInterceptorChain(t *testing.T) {
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
-	require.NoError(t, InitMetaCache(context.Background(), &MockMixCoordClientInterface{}))
+	_, err := initMetaCache(context.Background(), &MockMixCoordClientInterface{}); require.NoError(t, err)
 
 	chain := grpc_middleware.ChainStreamServer(
-		GrpcAuthStreamInterceptor(AuthenticationInterceptor),
+		GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return InitEmptyMetaCacheForTest() })),
 		PrivilegeStreamInterceptor(StreamPrivilegeInterceptor),
 	)
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "root:pwd")}
@@ -329,15 +329,15 @@ func TestGrpcAuthStreamInterceptorChain_Authorized(t *testing.T) {
 			},
 		}, nil
 	}
-	require.NoError(t, InitMetaCache(context.Background(), client))
+	cache, err := initMetaCache(context.Background(), client); require.NoError(t, err)
 
 	chain := grpc_middleware.ChainStreamServer(
-		GrpcAuthStreamInterceptor(AuthenticationInterceptor),
+		GrpcAuthStreamInterceptor(AuthenticationInterceptorWithMetaCache(func() Cache { return cache })),
 		PrivilegeStreamInterceptor(StreamPrivilegeInterceptor),
 	)
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:mockPass")}
 	var handlerCtx context.Context
-	err := chain(nil, stream, &grpc.StreamServerInfo{
+	err = chain(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
 	}, func(srv interface{}, ss grpc.ServerStream) error {
 		handlerCtx = ss.Context()

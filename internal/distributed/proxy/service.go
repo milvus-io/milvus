@@ -328,7 +328,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		// client port. The order mirrors the unary chain: first authenticate
 		// (resolve the user into ctx), then enforce authorization on that user.
 		streamServerOption = grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptor),
+			proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
 			proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
 		))
 	} else {
