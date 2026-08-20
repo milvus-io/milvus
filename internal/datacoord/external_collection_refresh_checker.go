@@ -293,8 +293,8 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	// the tasks' externalized results; stragglers go to the index-build
 	// acceleration channel and the job holds InProgress with progress
 	// tracking the indexed fraction (90-100) until a later pass finds the
-	// debt cleared and lets the Finished transition run - whose own apply
-	// replay is a no-op by then.
+	// debt cleared - or the gate's own budget expired - and lets the
+	// Finished transition run, whose own apply replay is a no-op by then.
 	if state == indexpb.JobState_JobStateFinished && Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool() {
 		if c.applyJobInfo != nil {
 			if err := c.applyJobInfo(c.ctx, job); err != nil {
@@ -308,27 +308,45 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		}
 		if total, unindexed := c.refreshSegmentIndexDebt(job); len(unindexed) > 0 {
 			c.indexGateMu.Lock()
-			if _, ok := c.indexGateEntered[job.GetJobId()]; !ok {
-				c.indexGateEntered[job.GetJobId()] = time.Now()
+			entered, ok := c.indexGateEntered[job.GetJobId()]
+			if !ok {
+				entered = time.Now()
+				c.indexGateEntered[job.GetJobId()] = entered
 			}
 			c.indexGateMu.Unlock()
-			for _, segID := range unindexed {
-				select {
-				case getBuildIndexChSingleton() <- segID:
-				default:
+			// The gate enforces its own budget (the job-timeout param on the
+			// gate's clock) and expires into FINISHED, not Failed: the
+			// segments were applied at gate entry and are the collection's
+			// committed contents already, so failing would misreport
+			// committed work and skip the schema broadcast for data that is
+			// actually being served. The index backlog keeps building in the
+			// background; only the wait for it ends.
+			if waited := time.Since(entered); waited > Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second) {
+				mlog.Warn(c.ctx, "index gate expired; finishing the refresh with segments still unindexed",
+					mlog.FieldJobID(job.GetJobId()),
+					mlog.FieldCollectionID(job.GetCollectionId()),
+					mlog.Duration("waited", waited),
+					mlog.Int64s("unindexedSegments", unindexed))
+				// Fall through to the Finished transition below.
+			} else {
+				for _, segID := range unindexed {
+					select {
+					case getBuildIndexChSingleton() <- segID:
+					default:
+					}
 				}
-			}
-			held := int64(90)
-			if total > 0 {
-				held = 90 + int64(10*(total-len(unindexed))/total)
-			}
-			if held != job.GetProgress() {
-				if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
-					mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
-						mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+				held := int64(90)
+				if total > 0 {
+					held = 90 + int64(10*(total-len(unindexed))/total)
 				}
+				if held != job.GetProgress() {
+					if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
+						mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
+							mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+					}
+				}
+				return
 			}
-			return
 		}
 		// Debt cleared: fall through to the Finished transition WITHOUT
 		// releasing the gate clock. The release happens only after the
@@ -505,21 +523,24 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 		return
 	}
 
+	// A job whose index gate is waiting is exempt from the ingest timeout:
+	// its ingest COMPLETED and its segments are applied, so failing it here
+	// would only throw committed work away. The gate enforces its own budget
+	// (same param, the gate's clock) inside aggregateJobState and always
+	// terminates the job - the debt clears, the read fails open, or the gate
+	// expires into Finished.
+	c.indexGateMu.Lock()
+	_, gated := c.indexGateEntered[job.GetJobId()]
+	c.indexGateMu.Unlock()
+	if gated {
+		return
+	}
+
 	// Get timeout configuration
 	timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
 
-	// Calculate job age. A job whose ingest finished and whose index gate is
-	// waiting gets its own clock from the moment the gate opened: the ingest
-	// spent most of the budget already, and failing a COMPLETED ingest
-	// because index building started near the deadline would throw all of it
-	// away.
+	// Calculate job age
 	startTime := time.UnixMilli(job.GetStartTime())
-	c.indexGateMu.Lock()
-	entered, enteredOK := c.indexGateEntered[job.GetJobId()]
-	c.indexGateMu.Unlock()
-	if enteredOK {
-		startTime = entered
-	}
 	age := time.Since(startTime)
 
 	if age > timeout {
