@@ -1361,6 +1361,48 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		})
 	})
 
+	t.Run("the gate clock survives a transiently failed finish write", func(t *testing.T) {
+		// The clock is released only after the terminal state PERSISTS. If it
+		// were released the moment the debt clears, a transiently failed
+		// finish write would leave the job InProgress with no gate clock, and
+		// the next timeout check would fall back to the exhausted ingest
+		// clock - failing a completed, fully indexed refresh one write short
+		// of finishing.
+		mockey.PatchConvey("finish write fails", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job := stage(t)
+			// The ingest consumed far more than the whole job timeout.
+			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
+			debt := []int64{556}
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
+				func(int64, []int64) []int64 { return debt })
+
+			checker.aggregateJobState(job) // hold: the gate clock starts
+			require.Contains(t, checker.indexGateEntered, int64(1))
+
+			debt = nil // all indexes finished
+			mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).
+				Return(errors.New("etcd unavailable")).Build()
+			checker.aggregateJobState(meta.GetJob(1)) // debt clear, but the finish write fails
+			assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState())
+			assert.Contains(t, checker.indexGateEntered, int64(1),
+				"the gate clock must survive a failed finish write; releasing it early hands the timeout check the exhausted ingest clock")
+
+			mockSave.UnPatch()
+			checker.tryTimeoutJob(job) // between finish retries, still judged on the gate clock
+			assert.NotEqual(t, indexpb.JobState_JobStateFailed, meta.GetJob(1).GetState(),
+				"a completed, fully indexed refresh must not be failed while its finish write retries")
+
+			checker.aggregateJobState(meta.GetJob(1)) // retry lands
+			assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
+			assert.NotContains(t, checker.indexGateEntered, int64(1),
+				"the gate clock is released once the terminal state persisted")
+		})
+	})
+
 	t.Run("a transient apply failure retries instead of holding or failing", func(t *testing.T) {
 		mockey.PatchConvey("apply fails", t, func() {
 			pt := paramtable.Get()
