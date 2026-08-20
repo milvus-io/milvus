@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -92,8 +93,11 @@ type externalCollectionRefreshChecker struct {
 	// gate began waiting, per job. The wait gets its own clock: the ingest
 	// spent most of the job timeout already, and failing a COMPLETED ingest
 	// because index building started near the deadline would throw the work
-	// away. Checker-goroutine-only, never locked; lost on restart, which
-	// merely restarts the wait clock.
+	// away. Guarded by indexGateMu: processJob runs both on the periodic
+	// checker tick and on the eager per-task path (processJobByID), which are
+	// different goroutines. Lost on restart, which merely restarts the wait
+	// clock.
+	indexGateMu      sync.Mutex
 	indexGateEntered map[int64]time.Time
 }
 
@@ -283,9 +287,11 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			}
 		}
 		if total, unindexed := c.refreshSegmentIndexDebt(job); len(unindexed) > 0 {
+			c.indexGateMu.Lock()
 			if _, ok := c.indexGateEntered[job.GetJobId()]; !ok {
 				c.indexGateEntered[job.GetJobId()] = time.Now()
 			}
+			c.indexGateMu.Unlock()
 			for _, segID := range unindexed {
 				select {
 				case getBuildIndexChSingleton() <- segID:
@@ -304,7 +310,9 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			}
 			return
 		}
+		c.indexGateMu.Lock()
 		delete(c.indexGateEntered, job.GetJobId())
+		c.indexGateMu.Unlock()
 	}
 
 	// Update job if state or progress changed
@@ -471,7 +479,10 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 	// because index building started near the deadline would throw all of it
 	// away.
 	startTime := time.UnixMilli(job.GetStartTime())
-	if entered, ok := c.indexGateEntered[job.GetJobId()]; ok {
+	c.indexGateMu.Lock()
+	entered, enteredOK := c.indexGateEntered[job.GetJobId()]
+	c.indexGateMu.Unlock()
+	if enteredOK {
 		startTime = entered
 	}
 	age := time.Since(startTime)
@@ -566,6 +577,12 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			return
 		}
 		mlog.Info(c.ctx, "external collection job removed", mlog.FieldJobID(job.GetJobId()))
+		// Release the index-gate clock too: a job that failed (rather than
+		// passed the gate) never reaches the delete in aggregateJobState, and
+		// without this the entry would outlive the job.
+		c.indexGateMu.Lock()
+		delete(c.indexGateEntered, job.GetJobId())
+		c.indexGateMu.Unlock()
 		// Release per-job bookkeeping in the manager (notifiedJobs dedup map)
 		// so it stays bounded across DataCoord lifetime.
 		if c.onJobGC != nil {

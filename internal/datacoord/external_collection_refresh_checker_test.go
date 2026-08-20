@@ -1400,4 +1400,46 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
 		})
 	})
+
+	t.Run("gate bookkeeping survives the eager and periodic paths racing", func(t *testing.T) {
+		// processJob runs on two goroutines in production: the periodic
+		// checker tick and the eager per-task path (processJobByID). The
+		// former reads the gate clock in tryTimeoutJob while the latter may
+		// be writing it in aggregateJobState. Run both concurrently under
+		// -race to pin the locking; without indexGateMu this is a runtime
+		// "concurrent map read and map write" fatal.
+		mockey.PatchConvey("racing", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job := stage(t)
+			job.StartTime = time.Now().UnixMilli() // keep the ingest clock fresh so the timeout path only reads
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil,
+				func(int64, []int64) []int64 { return []int64{556} })
+
+			var wg sync.WaitGroup
+			for range 2 {
+				wg.Add(2)
+				go func() { // eager path: enters/refreshes the gate clock
+					defer wg.Done()
+					for range 50 {
+						checker.aggregateJobState(job)
+					}
+				}()
+				go func() { // periodic path: reads the gate clock
+					defer wg.Done()
+					for range 50 {
+						checker.tryTimeoutJob(job)
+					}
+				}()
+			}
+			wg.Wait()
+
+			checker.indexGateMu.Lock()
+			_, entered := checker.indexGateEntered[int64(1)]
+			checker.indexGateMu.Unlock()
+			assert.True(t, entered, "the gate wait must have started its clock")
+		})
+	})
 }
