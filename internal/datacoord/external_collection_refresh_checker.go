@@ -75,6 +75,10 @@ type externalCollectionRefreshChecker struct {
 	// GC so the manager can release any per-job bookkeeping (notifiedJobs
 	// dedup entry). Keeps the dedup map bounded across DataCoord lifetime.
 	onJobGC func(jobID int64)
+	// unindexedSegments answers which of the given segments still lack a
+	// finished index, from datacoord's index meta. Injected so the gate below
+	// is testable without a full meta; nil disables the gate outright.
+	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64
 	// onInitJobPending is fired for jobs still in Init state with no tasks
 	// yet. This is the retry hook for the two-phase submission scheme: the
 	// WAL ack callback persists the Job record in Init state and kicks off
@@ -83,6 +87,14 @@ type externalCollectionRefreshChecker struct {
 	// MUST be non-blocking — the manager's implementation dedups concurrent
 	// invocations and runs the actual work in a background goroutine.
 	onInitJobPending func(jobID int64)
+
+	// indexGateEntered records when a job's ingest finished and the index
+	// gate began waiting, per job. The wait gets its own clock: the ingest
+	// spent most of the job timeout already, and failing a COMPLETED ingest
+	// because index building started near the deadline would throw the work
+	// away. Checker-goroutine-only, never locked; lost on restart, which
+	// merely restarts the wait clock.
+	indexGateEntered map[int64]time.Time
 }
 
 func newRefreshChecker(
@@ -94,16 +106,19 @@ func newRefreshChecker(
 	onJobFailed func(jobID int64),
 	onJobGC func(jobID int64),
 	onInitJobPending func(jobID int64),
+	unindexedSegments func(collectionID int64, segmentIDs []int64) []int64,
 ) *externalCollectionRefreshChecker {
 	return &externalCollectionRefreshChecker{
-		ctx:              ctx,
-		refreshMeta:      refreshMeta,
-		closeChan:        closeChan,
-		onJobFinished:    onJobFinished,
-		applyJobInfo:     applyJobInfo,
-		onJobFailed:      onJobFailed,
-		onJobGC:          onJobGC,
-		onInitJobPending: onInitJobPending,
+		ctx:               ctx,
+		refreshMeta:       refreshMeta,
+		closeChan:         closeChan,
+		onJobFinished:     onJobFinished,
+		applyJobInfo:      applyJobInfo,
+		onJobFailed:       onJobFailed,
+		onJobGC:           onJobGC,
+		onInitJobPending:  onInitJobPending,
+		unindexedSegments: unindexedSegments,
+		indexGateEntered:  make(map[int64]time.Time),
 	}
 }
 
@@ -237,6 +252,59 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	if state == indexpb.JobState_JobStateNone {
 		// No tasks yet
 		return
+	}
+
+	// The index gate, ahead of the Finished transition. With
+	// refreshWaitForIndex on, a refresh whose ingest finished but whose new
+	// segments are not yet indexed is not done: marking it Finished would
+	// broadcast the schema update and expose those segments to queries that
+	// can only brute-force them.
+	//
+	// The segments are APPLIED to the collection meta first - the same
+	// idempotent apply the Finished transition replays - because the index
+	// machinery can only see, judge and build segments that exist in
+	// meta.segments: judging them before the apply reads every new segment
+	// as unindexed forever (the inspector drops unknown ids), which is a
+	// held job that can never advance. Only then is the debt computed, from
+	// the tasks' externalized results; stragglers go to the index-build
+	// acceleration channel and the job holds InProgress with progress
+	// tracking the indexed fraction (90-100) until a later pass finds the
+	// debt cleared and lets the Finished transition run - whose own apply
+	// replay is a no-op by then.
+	if state == indexpb.JobState_JobStateFinished && Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool() {
+		if c.applyJobInfo != nil {
+			if err := c.applyJobInfo(c.ctx, job); err != nil {
+				// Possibly transient (a catalog write): retry next tick. The
+				// job's own timeout stays the terminal bound, because the
+				// gate's wait clock below only starts once an apply landed.
+				mlog.Warn(c.ctx, "failed to apply refresh segments ahead of the index gate; retrying next tick",
+					mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+				return
+			}
+		}
+		if total, unindexed := c.refreshSegmentIndexDebt(job); len(unindexed) > 0 {
+			if _, ok := c.indexGateEntered[job.GetJobId()]; !ok {
+				c.indexGateEntered[job.GetJobId()] = time.Now()
+			}
+			for _, segID := range unindexed {
+				select {
+				case getBuildIndexChSingleton() <- segID:
+				default:
+				}
+			}
+			held := int64(90)
+			if total > 0 {
+				held = 90 + int64(10*(total-len(unindexed))/total)
+			}
+			if held != job.GetProgress() {
+				if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
+					mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
+						mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+				}
+			}
+			return
+		}
+		delete(c.indexGateEntered, job.GetJobId())
 	}
 
 	// Update job if state or progress changed
@@ -397,8 +465,15 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 	// Get timeout configuration
 	timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
 
-	// Calculate job age
+	// Calculate job age. A job whose ingest finished and whose index gate is
+	// waiting gets its own clock from the moment the gate opened: the ingest
+	// spent most of the budget already, and failing a COMPLETED ingest
+	// because index building started near the deadline would throw all of it
+	// away.
 	startTime := time.UnixMilli(job.GetStartTime())
+	if entered, ok := c.indexGateEntered[job.GetJobId()]; ok {
+		startTime = entered
+	}
 	age := time.Since(startTime)
 
 	if age > timeout {
@@ -497,4 +572,32 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			c.onJobGC(job.GetJobId())
 		}
 	}
+}
+
+// refreshSegmentIndexDebt reports how many segments the job's tasks produced
+// and which of them still lack a finished index. A nil unindexedSegments -
+// no index meta wired - reports no debt, which keeps the gate inert.
+func (c *externalCollectionRefreshChecker) refreshSegmentIndexDebt(job *datapb.ExternalCollectionRefreshJob) (int, []int64) {
+	if c.unindexedSegments == nil {
+		return 0, nil
+	}
+	// The RESULT store, not the task headers: a runtime task externalizes its
+	// results and writes the header's UpdatedSegments back as nil, so reading
+	// the headers sees an empty set and the gate silently never holds.
+	tasks, err := c.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to read task results for the index gate; not holding the job on a guess",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return 0, nil
+	}
+	segIDs := make([]int64, 0)
+	for _, task := range tasks {
+		for _, seg := range task.GetUpdatedSegments() {
+			segIDs = append(segIDs, seg.GetID())
+		}
+	}
+	if len(segIDs) == 0 {
+		return 0, nil
+	}
+	return len(segIDs), c.unindexedSegments(job.GetCollectionId(), segIDs)
 }
