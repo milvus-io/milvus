@@ -2,6 +2,7 @@ package coordview
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -500,4 +501,112 @@ func TestShardViewManagerDoesNotReuseQueryVersionBeforeDroppedPersist(t *testing
 	manager.mu.Unlock()
 	assert.False(t, oldViewRetained)
 	assert.True(t, newViewCreated)
+}
+
+// failingFlushCatalog returns a fixed error from SaveQueryViews, simulating a
+// non-shutdown flush failure (e.g. a TiKV undetermined write).
+type failingFlushCatalog struct {
+	queryview.QueryViewCatalog
+	err error
+}
+
+func (c *failingFlushCatalog) SaveQueryViews(context.Context, []*viewpb.QueryViewOfShard) error {
+	return c.err
+}
+
+// ctxErrorFlushCatalog returns the context error from SaveQueryViews,
+// simulating the flush observing the task's cancellation signal.
+type ctxErrorFlushCatalog struct {
+	queryview.QueryViewCatalog
+}
+
+func (c *ctxErrorFlushCatalog) SaveQueryViews(ctx context.Context, _ []*viewpb.QueryViewOfShard) error {
+	return ctx.Err()
+}
+
+// failingFlushSyncer returns a fixed error from SyncViews.
+type failingFlushSyncer struct {
+	syncer.ReliableSyncer
+	err error
+}
+
+func (s *failingFlushSyncer) SyncViews(context.Context, syncer.SyncGroup) error {
+	return s.err
+}
+
+func TestDirtyViewFlushTaskPanicsOnUnrecoverableFlushError(t *testing.T) {
+	catalog := &failingFlushCatalog{
+		QueryViewCatalog: newMockCatalog(),
+		err:              errors.New("simulated non-shutdown flush failure"),
+	}
+	nodeScheduler := &capturedDirtyViewTaskScheduler{}
+	scheduler := newDirtyViewFlushScheduler(catalog, newMockSyncer(), 128, nodeScheduler)
+	t.Cleanup(scheduler.Close)
+
+	scheduler.Submit(dirtyPersistEvent(testShardID, 1))
+	tasks := nodeScheduler.snapshot()
+	require.Len(t, tasks, 1)
+	task := tasks[0].(*dirtyViewFlushTask)
+
+	defer func() {
+		r := recover()
+		require.NotNil(t, r, "Execute must panic on an unrecoverable flush error")
+		msg, ok := r.(string)
+		require.True(t, ok, "panic value must be a string, got %v", r)
+		assert.Contains(t, msg, "unrecoverable flush failure")
+		assert.Contains(t, msg, "simulated non-shutdown flush failure")
+		assert.Contains(t, msg, testShardID.String())
+	}()
+	_ = task.Execute(context.Background())
+	t.Fatal("Execute must panic on an unrecoverable flush error")
+}
+
+func TestDirtyViewFlushTaskDoesNotPanicOnCanceledContext(t *testing.T) {
+	catalog := &ctxErrorFlushCatalog{QueryViewCatalog: newMockCatalog()}
+	nodeScheduler := &capturedDirtyViewTaskScheduler{}
+	scheduler := newDirtyViewFlushScheduler(catalog, newMockSyncer(), 128, nodeScheduler)
+	t.Cleanup(scheduler.Close)
+
+	scheduler.Submit(dirtyPersistEvent(testShardID, 1))
+	tasks := nodeScheduler.snapshot()
+	require.Len(t, tasks, 1)
+	task := tasks[0].(*dirtyViewFlushTask)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := task.Execute(ctx)
+	require.ErrorIs(t, err, context.Canceled, "Execute must return the cancellation error")
+}
+
+func TestDirtyViewFlushTaskPanicsOnSyncerClosedError(t *testing.T) {
+	view := buildTestViewWithVersion(1, 1, 1, 1)
+	event := dirtyViewEvent{
+		shardID: testShardID,
+		syncs: []syncer.SyncView{{
+			View: qviews.NewFullQueryViewAtStreamingNode(view.Meta, view.StreamingNode, view.QueryNode),
+		}},
+	}
+	s := &failingFlushSyncer{
+		ReliableSyncer: newMockSyncer(),
+		err:            syncer.ErrSyncerClosed,
+	}
+	nodeScheduler := &capturedDirtyViewTaskScheduler{}
+	scheduler := newDirtyViewFlushScheduler(newMockCatalog(), s, 128, nodeScheduler)
+	t.Cleanup(scheduler.Close)
+
+	scheduler.Submit(event)
+	tasks := nodeScheduler.snapshot()
+	require.Len(t, tasks, 1)
+	task := tasks[0].(*dirtyViewFlushTask)
+
+	defer func() {
+		r := recover()
+		require.NotNil(t, r, "Execute must panic on ErrSyncerClosed: it is not a cancellation signal")
+		msg, ok := r.(string)
+		require.True(t, ok, "panic value must be a string, got %v", r)
+		assert.Contains(t, msg, "unrecoverable flush failure")
+		assert.Contains(t, msg, syncer.ErrSyncerClosed.Error())
+	}()
+	_ = task.Execute(context.Background())
+	t.Fatal("Execute must panic on ErrSyncerClosed")
 }

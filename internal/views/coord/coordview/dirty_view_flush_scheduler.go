@@ -2,6 +2,9 @@ package coordview
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
@@ -92,7 +95,6 @@ type DirtyViewFlushScheduler struct {
 	batchDepth  int
 	queuedTasks int
 	tasks       map[*dirtyViewFlushTask]nodescheduler.TaskHandle
-	err         error
 	closed      bool
 	notify      chan struct{}
 }
@@ -181,7 +183,7 @@ func (s *DirtyViewFlushScheduler) Submit(event dirtyViewEvent) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.err != nil {
+	if s.closed {
 		return
 	}
 	pending := s.pending[event.shardID]
@@ -208,7 +210,7 @@ func (s *DirtyViewFlushScheduler) Submit(event dirtyViewEvent) {
 }
 
 func (s *DirtyViewFlushScheduler) scheduleReadyTasksLocked() {
-	if s.closed || s.err != nil || s.batchDepth > 0 {
+	if s.closed || s.batchDepth > 0 {
 		return
 	}
 	if len(s.ready) == 0 {
@@ -230,7 +232,7 @@ func (s *DirtyViewFlushScheduler) claim() map[qviews.ShardID]*pendingDirtyViewEv
 		s.queuedTasks--
 	}
 	claimed := make(map[qviews.ShardID]*pendingDirtyViewEvent)
-	if s.closed || s.err != nil {
+	if s.closed {
 		return claimed
 	}
 	usedOps := 0
@@ -267,9 +269,9 @@ func (s *DirtyViewFlushScheduler) complete(
 			s.markReadyLocked(shardID)
 		}
 	}
-	if err != nil && !s.closed {
-		s.err = err
-	}
+	// A failed batch must not reschedule more work: on shutdown the scheduler is
+	// closing anyway, and on a real failure Execute panics (unrecoverable path)
+	// right after this returns, so there is nothing left to schedule.
 	if err == nil {
 		s.scheduleReadyTasksLocked()
 	}
@@ -277,11 +279,56 @@ func (s *DirtyViewFlushScheduler) complete(
 	s.mu.Unlock()
 }
 
+// Execute flushes one claimed batch and enforces the scheduler's failure
+// contract.
+//
+// A flush failure is deliberately unrecoverable: the batch's external effects
+// (persist, syncs and afterPersist callbacks) have been destructively consumed,
+// and the in-memory shard state may have advanced past the catalog. Replaying
+// the batch is unsafe (afterPersist callbacks are not idempotent, and an
+// undetermined write may or may not have committed), while silently dropping it
+// would leave the coordinator's views diverged from the catalog with no signal
+// to the operator. The only safe recovery is a coordinator restart, which
+// rebuilds every shard from the catalog via RecoverShardViewRegistry — so any
+// non-shutdown failure panics to fail fast and loudly instead of continuing
+// with a poisoned scheduler.
+//
+// Shutdown is the single exception: a flush task may only stop gracefully
+// through its own context being canceled (the coordinator is stopping and the
+// error is expected). Everything else — an invariant violation, a failure of a
+// conditional write, or ErrSyncerClosed (which means the syncer closed while a
+// flush task was still executing, i.e. a shutdown-ordering violation) — panics.
+// Undetermined write results from the catalog's predicate-free Set persist are
+// retried inside ReliableWriteMetaKv and do not escape here.
 func (t *dirtyViewFlushTask) Execute(ctx context.Context) error {
 	claimed := t.scheduler.claim()
 	err := t.scheduler.flushBatch(ctx, claimed)
 	t.scheduler.complete(t, claimed, err)
+	if err != nil && !isShutdownError(ctx, err) {
+		panic(fmt.Sprintf(
+			"dirty view flush scheduler: unrecoverable flush failure (shards %s): %v",
+			claimedShardList(claimed), err,
+		))
+	}
 	return err
+}
+
+// isShutdownError reports whether err is the cancellation signal of the task
+// context, the only expected failure while the coordinator is stopping. Any
+// other error is an unrecoverable flush failure.
+func isShutdownError(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// claimedShardList returns the sorted shard IDs of a claimed batch for error
+// reporting.
+func claimedShardList(claimed map[qviews.ShardID]*pendingDirtyViewEvent) []string {
+	ids := make([]string, 0, len(claimed))
+	for shardID := range claimed {
+		ids = append(ids, shardID.String())
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (s *DirtyViewFlushScheduler) flushBatch(
@@ -328,12 +375,11 @@ func (s *DirtyViewFlushScheduler) Flush(ctx context.Context) error {
 	}
 	for {
 		s.mu.Lock()
-		err := s.err
 		idle := len(s.pending) == 0 && len(s.inflight) == 0 && len(s.tasks) == 0 && s.queuedTasks == 0
 		notify := s.notify
 		s.mu.Unlock()
-		if err != nil || idle {
-			return err
+		if idle {
+			return nil
 		}
 		select {
 		case <-notify:

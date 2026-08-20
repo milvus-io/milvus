@@ -127,7 +127,11 @@ func TestReliableWriteMetaKv(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
-func TestReliableWriteMetaKvDoesNotRetryUndeterminedWriteResult(t *testing.T) {
+// TestReliableWriteMetaKvRetriesUndeterminedForPureSet verifies that an
+// undetermined write result from an unconditional (predicate-free) Set
+// operation is retried: re-running the identical key→value operation converges
+// whether or not the first attempt committed.
+func TestReliableWriteMetaKvRetriesUndeterminedForPureSet(t *testing.T) {
 	metaKV := mock_kv.NewMockMetaKv(t)
 	calls := atomic.NewInt32(0)
 	metaKV.EXPECT().Save(mock.Anything, "k", "v").RunAndReturn(
@@ -140,6 +144,48 @@ func TestReliableWriteMetaKvDoesNotRetryUndeterminedWriteResult(t *testing.T) {
 
 	rkv := NewReliableWriteMetaKv(metaKV)
 	err := rkv.Save(context.Background(), "k", "v")
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+// TestReliableWriteMetaKvRetriesUndeterminedForMultiSaveAndRemoveWithoutPreds
+// covers the qviews flush persist path: MultiSaveAndRemove without predicates
+// is a deterministic Set operation, so undetermined results are retried.
+func TestReliableWriteMetaKvRetriesUndeterminedForMultiSaveAndRemoveWithoutPreds(t *testing.T) {
+	metaKV := mock_kv.NewMockMetaKv(t)
+	calls := atomic.NewInt32(0)
+	metaKV.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+			if calls.Inc() == 1 {
+				return errors.Wrap(tikverr.ErrResultUndetermined, "commit failed")
+			}
+			return nil
+		}).Maybe()
+
+	rkv := NewReliableWriteMetaKv(metaKV)
+	err := rkv.MultiSaveAndRemove(context.Background(), map[string]string{"k": "v"}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+// TestReliableWriteMetaKvDoesNotRetryUndeterminedWriteResult verifies that a
+// conditional operation (CAS) surfaces an undetermined write result instead of
+// retrying: the first attempt may already have consumed the guarded condition,
+// so the outcome ambiguity cannot be resolved by re-running it.
+func TestReliableWriteMetaKvDoesNotRetryUndeterminedWriteResult(t *testing.T) {
+	metaKV := mock_kv.NewMockMetaKv(t)
+	calls := atomic.NewInt32(0)
+	metaKV.EXPECT().CompareVersionAndSwap(mock.Anything, "k", int64(1), "v").RunAndReturn(
+		func(ctx context.Context, key string, version int64, target string) (bool, error) {
+			if calls.Inc() == 1 {
+				return false, errors.Wrap(tikverr.ErrResultUndetermined, "commit failed")
+			}
+			return true, nil
+		}).Maybe()
+
+	rkv := NewReliableWriteMetaKv(metaKV)
+	swapped, err := rkv.CompareVersionAndSwap(context.Background(), "k", 1, "v")
 	assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+	assert.False(t, swapped)
 	assert.Equal(t, int32(1), calls.Load())
 }

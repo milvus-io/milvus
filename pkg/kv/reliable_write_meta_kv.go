@@ -35,37 +35,37 @@ type ReliableWriteMetaKv struct {
 func (kv *ReliableWriteMetaKv) Save(ctx context.Context, key, value string) error {
 	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
 		return kv.MetaKv.Save(ctx, key, value)
-	})
+	}, true)
 }
 
 func (kv *ReliableWriteMetaKv) MultiSave(ctx context.Context, kvs map[string]string) error {
 	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
 		return kv.MetaKv.MultiSave(ctx, kvs)
-	})
+	}, true)
 }
 
 func (kv *ReliableWriteMetaKv) Remove(ctx context.Context, key string) error {
 	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
 		return kv.MetaKv.Remove(ctx, key)
-	})
+	}, true)
 }
 
 func (kv *ReliableWriteMetaKv) MultiRemove(ctx context.Context, keys []string) error {
 	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
 		return kv.MetaKv.MultiRemove(ctx, keys)
-	})
+	}, true)
 }
 
 func (kv *ReliableWriteMetaKv) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
 		return kv.MetaKv.MultiSaveAndRemove(ctx, saves, removals, preds...)
-	})
+	}, len(preds) == 0)
 }
 
 func (kv *ReliableWriteMetaKv) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
 		return kv.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, saves, removals, preds...)
-	})
+	}, len(preds) == 0)
 }
 
 func (kv *ReliableWriteMetaKv) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
@@ -74,12 +74,22 @@ func (kv *ReliableWriteMetaKv) CompareVersionAndSwap(ctx context.Context, key st
 		var err error
 		result, err = kv.MetaKv.CompareVersionAndSwap(ctx, key, version, target)
 		return err
-	})
+	}, false)
 	return result, err
 }
 
 // retryWithBackoff retries the function with backoff.
-func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx context.Context) error) error {
+//
+// A TiKV "undetermined" write result means the 2PC commit outcome is unknown:
+// the operation may or may not have been applied. For an unconditional
+// (predicate-free) write this is harmless — re-running the identical
+// key→value operation converges to the same final state whether or not the
+// first attempt committed, so it is retried like any other transient error.
+// For a conditional write (predicates or CAS) the outcome ambiguity cannot be
+// resolved by re-running it — the first attempt may already have consumed the
+// condition being guarded — so undetermined results are surfaced to the caller
+// immediately. Callers pass retryUndetermined accordingly.
+func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx context.Context) error, retryUndetermined bool) error {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
@@ -90,7 +100,7 @@ func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx
 		if err == nil {
 			return nil
 		}
-		if tikverr.IsErrorUndetermined(err) {
+		if tikverr.IsErrorUndetermined(err) && !retryUndetermined {
 			return err
 		}
 		if ctx.Err() != nil {
