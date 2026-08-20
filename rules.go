@@ -479,9 +479,9 @@ func merrsentinel(m dsl.Matcher) {
 }
 
 // fieldDataValidDataAccess prevents code outside the validity compatibility
-// layer from depending on protobuf storage details. Validity must be read and
-// written through typeutil so callers do not need to distinguish the legacy
-// FieldData location from the field-specific ScalarField/VectorField location.
+// layer from depending on protobuf storage details. Row validity and nested
+// Array element validity must be read and written through their corresponding
+// typeutil helpers.
 func fieldDataValidDataAccess(m dsl.Matcher) {
 	m.Import("github.com/milvus-io/milvus-proto/go-api/v3/schemapb")
 	isFieldDataType := func(v dsl.Var) bool {
@@ -493,7 +493,7 @@ func fieldDataValidDataAccess(m dsl.Matcher) {
 	// method values are all rejected for both pointer and value receivers.
 	m.Match("$x.ValidData", "$x.GetValidData").
 		Where(isFieldDataType(m["x"])).
-		Report("do not access protobuf valid_data directly; use typeutil.GetFieldDataValidData or typeutil.SetFieldDataValidData")
+		Report("do not access protobuf valid_data directly; use the row-level or element-level validity helpers in typeutil")
 
 	// A keyed composite literal bypasses selector matching, so reject setting
 	// ValidData while constructing any of the three protobuf message types too.
@@ -501,5 +501,5 @@ func fieldDataValidDataAccess(m dsl.Matcher) {
 		Where(m["x"].Type.Is("schemapb.FieldData") ||
 			m["x"].Type.Is("schemapb.ScalarField") ||
 			m["x"].Type.Is("schemapb.VectorField")).
-		Report("do not access protobuf valid_data directly; use typeutil.GetFieldDataValidData or typeutil.SetFieldDataValidData")
+		Report("do not access protobuf valid_data directly; use the row-level or element-level validity helpers in typeutil")
 }
