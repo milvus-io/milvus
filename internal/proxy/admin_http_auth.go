@@ -14,36 +14,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package paramtable
+package proxy
 
-type credentialConfig struct {
-	Credential ParamGroup `refreshable:"true"`
-}
+import (
+	"github.com/gin-gonic/gin"
 
-func (p *credentialConfig) init(base *BaseTable) {
-	p.Credential = ParamGroup{
-		KeyPrefix: "credential.",
-		Version:   "2.6.0",
-		Export:    true,
-		Sensitive: true,
-		DocFunc: func(key string) string {
-			switch key {
-			case "apikey1.apikey":
-				return "Your apikey credential"
-			case "aksk1.access_key_id":
-				return "Your access_key_id"
-			case "aksk1.secret_access_key":
-				return "Your secret_access_key"
-			case "gcp1.credential_json":
-				return "base64 based gcp credential data"
-			default:
-				return ""
-			}
-		},
+	mhttp "github.com/milvus-io/milvus/internal/http"
+)
+
+// adminAuthMiddleware adapts the management-plane root authentication policy
+// to routes served by the proxy's Gin tree. Most management routes are served
+// by net/http and use Handler.AuthPolicy directly, but a few operator-facing
+// endpoints live under /api/v1 and need the same policy there.
+func adminAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !mhttp.AuthByAdminFlag() {
+			c.Next()
+			return
+		}
+
+		if err := mhttp.CheckAdminAuth(c.Request.Context(), c.Request); err != nil {
+			c.AbortWithStatusJSON(mhttp.HTTPStatusFromPrivilegeError(err), gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+
+		c.Next()
 	}
-	p.Credential.Init(base.mgr)
-}
-
-func (p *credentialConfig) GetCredentials() map[string]string {
-	return p.Credential.GetValue()
 }

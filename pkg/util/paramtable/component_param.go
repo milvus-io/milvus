@@ -195,8 +195,21 @@ func (p *ComponentParam) GetAll() map[string]string {
 	return p.baseTable.mgr.GetConfigs()
 }
 
+// GetAllRaw returns all configuration values without projection redaction.
+// It is reserved for internal consumers that must read credentials or other
+// values in their original form (for example, cipher configuration loading).
+func (p *ComponentParam) GetAllRaw() map[string]string {
+	return p.baseTable.mgr.GetConfigsRaw()
+}
+
 func (p *ComponentParam) GetConfigsView() map[string]string {
 	return p.baseTable.mgr.GetConfigsView()
+}
+
+// GetConfigsViewRaw returns configuration values and sources without
+// projection redaction. Do not use it for externally visible diagnostics.
+func (p *ComponentParam) GetConfigsViewRaw() map[string]string {
+	return p.baseTable.mgr.GetConfigsViewRaw()
 }
 
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
@@ -280,6 +293,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -963,6 +977,49 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
 
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether to require HTTP Basic Auth with root credentials for operator
+endpoints. This covers /management/*, /log/level, /eventlog and /debug/pprof/*
+on the metrics port (default 9091), plus proxy config views and telemetry
+operator routes under /api/v1.
+When false (default, for upgrade compatibility), these endpoints are
+unauthenticated. Treat this as an opt-in mitigation, not as a network security
+boundary.
+When true, requests must provide the milvus root user's credentials via HTTP
+Basic Auth. The auth check is independent of common.security.authorizationEnabled,
+so deployments may run with the data-plane (gRPC, /api/v1/*) authenticated
+while leaving the management plane open, or vice versa.
+Liveness endpoints stay open in both cases (/healthz, /livez, /metrics and
+/management/check/ready) so that k8s probes and Prometheus keep working.
+Note for worker nodes: querynode, datanode and streamingnode hold no credential
+metadata, so when this is true they verify the password through the mix coord.
+If the mix coord is unreachable, their management plane and pprof answer 503
+until it recovers.
+Recommended: true whenever the metrics port is exposed beyond localhost. Port
+9091 uses plaintext HTTP, so expose it only on a trusted private network or
+behind a TLS-terminating proxy, and rotate the default root password before
+enabling this option.`,
+		Export: true,
+		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
+		// Immutable key's value into etcd on first startup, and the etcd source
+		// outranks file and env. Since this flag defaults to false, the very
+		// first boot of any cluster would pin "false" there, and an operator
+		// later setting adminAuthEnabled: true in yaml would get no gate and no
+		// warning — the security fix would be inert on exactly the existing
+		// deployments it is meant to protect, and could only be enabled by
+		// deleting the etcd key by hand. Verified against a live cluster.
+		//
+		// Marking it Immutable was intended to stop an attacker from disabling
+		// the gate through /management/config/alter, but reaching that endpoint
+		// already requires root credentials that the gate itself demands, and
+		// such an attacker could stop the component outright anyway. The
+		// protection bought nothing and cost the feature its usability.
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
+
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
 		Version: "2.2.1",
@@ -970,16 +1027,26 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.SuperUsers.Init(base.mgr)
 
 	p.DefaultRootPassword = ParamItem{
 		Key:     "common.security.defaultRootPassword",
 		Version: "2.4.7",
-		Doc: `default password for root user. The maximum length is 72 characters. 
+		Doc: `default password for root user. The maximum length is 72 characters.
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		// Sensitive but deliberately NOT Immutable: ProcessImmutableConfigs
+		// persists every Immutable key's current value into etcd on first
+		// startup, so marking a credential Immutable would copy it into etcd in
+		// cleartext — the opposite of what redacting it from
+		// /management/config/get is for. Unauthorized mutation of this key is
+		// prevented by the management-plane auth gate instead. The same
+		// reasoning keeps minio/etcd/kafka credentials Sensitive-only; see
+		// TestNoCredentialIsImmutable.
+		Sensitive: true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -1732,18 +1799,20 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.SampleFraction.Init(base.mgr)
 
 	t.JaegerURL = ParamItem{
-		Key:     "trace.jaeger.url",
-		Version: "2.3.0",
-		Doc:     "when exporter is jaeger should set the jaeger's URL",
-		Export:  true,
+		Key:       "trace.jaeger.url",
+		Version:   "2.3.0",
+		Doc:       "when exporter is jaeger should set the jaeger's URL",
+		Export:    true,
+		Sensitive: true,
 	}
 	t.JaegerURL.Init(base.mgr)
 
 	t.OtlpEndpoint = ParamItem{
-		Key:     "trace.otlp.endpoint",
-		Version: "2.3.0",
-		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
-		Export:  true,
+		Key:       "trace.otlp.endpoint",
+		Version:   "2.3.0",
+		Doc:       `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
+		Export:    true,
+		Sensitive: true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
@@ -1770,6 +1839,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
+		Sensitive:    true,
 	}
 	t.OtlpHeaders.Init(base.mgr)
 
@@ -2334,6 +2404,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "6",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
+		NonSensitive: true,
 	}
 	p.MinPasswordLength.Init(base.mgr)
 
@@ -2357,6 +2428,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Key:          "proxy.maxPasswordLength",
 		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		NonSensitive: true,
 		Formatter: func(v string) string {
 			n := getAsInt(v)
 			if n <= 0 || n > 72 {
@@ -6148,6 +6220,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
+		NonSensitive: true,
 	}
 	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
 
@@ -6595,7 +6668,8 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 			"server-side cross-bucket copy with custom object storage endpoints. " +
 			"Canonical cloud endpoints derived from cloud_provider and region are " +
 			"allowed without this list.",
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
 
@@ -6721,6 +6795,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Version:      "2.0.0",
 		DefaultValue: "localhost:22930",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.IndexNodeAddress.Init(base.mgr)
 

@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
@@ -180,6 +181,13 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
+	// Register a password verifier for /management/* HTTP basic-auth. Mix coord
+	// processes do not host the proxy package (where the verifier is normally
+	// registered), so without this the auth wrapper returns
+	// "password verification is not available on this node" when adminAuthEnabled=true.
+	// We bind directly to rootcoord's credential RPC to avoid an extra cache layer.
+	internalhttp.RegisterCoordinatorCredentialVerifyFunc(s.verifyRootCredential)
+
 	// DataCoord and QueryCoord are independent of each other;
 	// both only depend on RootCoord being ready. Initialize and start them in parallel.
 	g, _ := errgroup.WithContext(s.ctx)
@@ -249,6 +257,39 @@ func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 	return s.queryCoordServer.ServerExist(serverID) ||
 		s.datacoordServer.ServerExist(serverID) ||
 		s.rootcoordServer.ServerExist(serverID)
+}
+
+// verifyRootCredential validates the given username/password pair against the
+// credential metadata owned by the rootcoord embedded in this mix coord.
+// Used to back the /management/* HTTP basic-auth wrapper on coord-only nodes
+// (where the proxy package's verifier is not registered).
+//
+// Only the root user is permitted: the management endpoints are administrative
+// and should not be reachable by non-root users even if their credentials are
+// valid. The username==root check is also enforced in CheckRootAuth, so
+// this is defense-in-depth.
+func (s *mixCoordImpl) verifyRootCredential(ctx context.Context, username, password string) error {
+	if username != util.UserRoot {
+		return internalhttp.NewAuthenticationError("invalid root password")
+	}
+	resp, err := s.rootcoordServer.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
+		Username: username,
+	})
+	if err != nil {
+		mlog.Warn(ctx, "verifyRootCredential: GetCredential failed", mlog.Err(err))
+		return merr.Wrap(err, "GetCredential failed")
+	}
+	if resp == nil {
+		return merr.WrapErrServiceInternal("GetCredential returned an empty response")
+	}
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		mlog.Warn(ctx, "verifyRootCredential: GetCredential returned error", mlog.Err(err))
+		return merr.Wrap(err, "GetCredential returned error")
+	}
+	if resp.GetPassword() == "" {
+		return merr.WrapErrServiceInternal("credential store returned an empty hash")
+	}
+	return internalhttp.VerifyStoredRootPassword(resp.GetPassword(), password)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
@@ -339,6 +380,7 @@ func (s *mixCoordImpl) posixCleanupLoop(ctx context.Context) {
 
 func (s *mixCoordImpl) Stop() error {
 	mlog.Info(s.ctx, "graceful stop")
+	internalhttp.RegisterCoordinatorCredentialVerifyFunc(nil)
 
 	s.stopPosixCleanupTask()
 

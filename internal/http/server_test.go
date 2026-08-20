@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
@@ -45,6 +46,28 @@ import (
 
 type HTTPServerTestSuite struct {
 	suite.Suite
+}
+
+func TestConfigureEventlogListenerModeHandlesFormattedCreate(t *testing.T) {
+	manager := config.NewManager()
+	adminAuth := &paramtable.ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		DefaultValue: "false",
+	}
+	adminAuth.Init(manager)
+
+	var modes []bool
+	configureEventlogListenerMode(adminAuth, func(localOnly bool) error {
+		modes = append(modes, localOnly)
+		return nil
+	})
+	manager.Dispatcher.Dispatch(&config.Event{
+		EventType: config.CreateType,
+		Key:       "commonsecurityadminauthenabled",
+		Value:     "true",
+	})
+
+	assert.Equal(t, []bool{false, true}, modes)
 }
 
 func (suite *HTTPServerTestSuite) SetupSuite() {
@@ -527,8 +550,11 @@ func TestRegisterWebUIHandler(t *testing.T) {
 		RegisterWebUIHandler()
 	}()
 
-	// Create a test server
-	ts := httptest.NewServer(http.DefaultServeMux)
+	// Register() now always uses a private ServeMux instead of opportunistically
+	// falling back to http.DefaultServeMux when pprof is enabled, so the test
+	// server must be backed by the package-level metricsServer that
+	// RegisterWebUIHandler populates.
+	ts := httptest.NewServer(metricsServer)
 	defer ts.Close()
 
 	// Test cases
@@ -606,5 +632,101 @@ func TestServeFile(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		resp := w.Result()
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	}
+}
+
+// TestAdminAuthGatesManagementPlane exercises the gate against the real server
+// on the metrics port, covering exactly what was reported: /management/stop (the
+// unauthenticated DoS) and /log/level (the log-level mutation), plus /eventlog.
+//
+// It also pins the other half of the contract — that the liveness surface stays
+// open — because gating /healthz or /management/check/ready would take down
+// every k8s probe in the fleet, a far worse outage than the bug being fixed.
+func (suite *HTTPServerTestSuite) TestAdminAuthGatesManagementPlane() {
+	RegisterStopComponent(func(role string) error { return nil })
+	RegisterCheckComponentReady(func(role string) error { return nil })
+
+	params := paramtable.Get()
+	suite.NoError(params.Save(params.CommonCfg.AdminAuthEnabled.Key, "true"))
+	defer params.Reset(params.CommonCfg.AdminAuthEnabled.Key)
+
+	passwordVerifyMu.Lock()
+	prevTyped, prevCoordinator, prevPrimary, prevFallback := credentialVerifyFunc, coordinatorCredentialVerifyFunc, passwordVerifyFunc, fallbackPasswordVerifyFunc
+	credentialVerifyFunc = nil
+	coordinatorCredentialVerifyFunc = nil
+	passwordVerifyFunc = func(_ context.Context, username, password string) bool {
+		return username == util.UserRoot && password == "s3cr3t"
+	}
+	fallbackPasswordVerifyFunc = nil
+	passwordVerifyMu.Unlock()
+	defer func() {
+		passwordVerifyMu.Lock()
+		defer passwordVerifyMu.Unlock()
+		credentialVerifyFunc, coordinatorCredentialVerifyFunc, passwordVerifyFunc, fallbackPasswordVerifyFunc = prevTyped, prevCoordinator, prevPrimary, prevFallback
+	}()
+
+	base := "http://localhost:" + DefaultListenPort
+	gated := []string{RouteTriggerStopPath, LogLevelRouterPath, EventLogRouterPath}
+
+	for _, path := range gated {
+		resp, err := http.Get(base + path)
+		suite.Require().NoError(err, path)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.Equal(http.StatusUnauthorized, resp.StatusCode,
+			"%s must reject unauthenticated callers, got body %q", path, string(body))
+	}
+
+	// A non-root user is rejected with 403 rather than 401 — retrying cannot help.
+	for _, path := range gated {
+		req, err := http.NewRequest(http.MethodGet, base+path, nil)
+		suite.Require().NoError(err)
+		req.SetBasicAuth("alice", "s3cr3t")
+		resp, err := http.DefaultClient.Do(req)
+		suite.Require().NoError(err, path)
+		resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode, "%s with non-root user", path)
+	}
+
+	// Correct root credentials get past the gate. The handlers' own status codes
+	// vary, so assert only that authentication no longer blocks the request.
+	for _, path := range gated {
+		req, err := http.NewRequest(http.MethodGet, base+path, nil)
+		suite.Require().NoError(err)
+		req.SetBasicAuth(util.UserRoot, "s3cr3t")
+		resp, err := http.DefaultClient.Do(req)
+		suite.Require().NoError(err, path)
+		resp.Body.Close()
+		suite.NotEqual(http.StatusUnauthorized, resp.StatusCode, "%s with root creds", path)
+		suite.NotEqual(http.StatusForbidden, resp.StatusCode, "%s with root creds", path)
+	}
+
+	// Probe endpoints must remain reachable with no credentials at all.
+	for _, path := range []string{HealthzRouterPath, LivezRouterPath, RouteCheckComponentReady} {
+		resp, err := http.Get(base + path)
+		suite.Require().NoError(err, path)
+		resp.Body.Close()
+		suite.NotEqual(http.StatusUnauthorized, resp.StatusCode,
+			"%s must stay open for k8s probes", path)
+		suite.NotEqual(http.StatusServiceUnavailable, resp.StatusCode,
+			"%s must stay open for k8s probes", path)
+	}
+}
+
+// TestAdminAuthDisabledKeepsManagementPlaneOpen is the back-compat half: with
+// the flag at its default of false, nothing on the management plane starts
+// demanding credentials.
+func (suite *HTTPServerTestSuite) TestAdminAuthDisabledKeepsManagementPlaneOpen() {
+	params := paramtable.Get()
+	suite.False(params.CommonCfg.AdminAuthEnabled.GetAsBool(),
+		"adminAuthEnabled must default to false so upgrades are transparent")
+
+	base := "http://localhost:" + DefaultListenPort
+	for _, path := range []string{LogLevelRouterPath, EventLogRouterPath} {
+		resp, err := http.Get(base + path)
+		suite.Require().NoError(err, path)
+		resp.Body.Close()
+		suite.NotEqual(http.StatusUnauthorized, resp.StatusCode,
+			"%s must not require auth while adminAuthEnabled is false", path)
 	}
 }

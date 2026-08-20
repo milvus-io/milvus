@@ -17,9 +17,11 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +31,8 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestAllConfigFromManager(t *testing.T) {
@@ -37,8 +41,14 @@ func TestAllConfigFromManager(t *testing.T) {
 	assert.Equal(t, 0, len(all))
 
 	mgr, _ = Init(WithEnvSource(formatKey))
+	raw := mgr.GetConfigsRaw()
+	assert.Less(t, 0, len(raw))
+
 	all = mgr.GetConfigs()
-	assert.Less(t, 0, len(all))
+	assert.Equal(t, len(raw), len(all))
+	for _, value := range all {
+		assert.Equal(t, RedactedValue, value)
+	}
 }
 
 func TestConfigChangeEvent(t *testing.T) {
@@ -125,6 +135,82 @@ func TestBasic(t *testing.T) {
 	assert.Len(t, configs, 0)
 }
 
+func TestSensitiveConfigRedaction(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigKey("querynode.gracefulStopTimeout")
+	mgr.RegisterConfigPrefix("credential.")
+	mgr.SensitiveUpdate("minio.address")
+	mgr.SensitivePrefixUpdate("credential.")
+	assert.True(t, mgr.IsConfigRegistered("querynode.graceful_stop_timeout"))
+	assert.True(t, mgr.IsConfigRegistered("credential.aksk1.secret_access_key"))
+	assert.False(t, mgr.IsConfigRegistered("OPAQUE_RUNTIME_VALUE"))
+
+	for _, key := range []string{
+		"minio.address",
+		"MINIO_ADDRESS",
+		"credential.aksk1.secret_access_key",
+		"AWS_SECRET_ACCESS_KEY",
+		"service.api_key",
+		"tls.private-key",
+	} {
+		assert.True(t, mgr.IsSensitive(key), key)
+	}
+	assert.False(t, mgr.IsSensitive("querynode.gracefulStopTimeout"))
+
+	values := map[string]string{
+		"credential.aksk1.secret_access_key": "group-secret",
+		"AWS_SESSION_TOKEN":                  "env-secret",
+		"OPAQUE_RUNTIME_VALUE":               "opaque-env-secret",
+		"querynode.gracefulStopTimeout":      "30",
+	}
+	redacted := mgr.RedactedValues(values)
+	assert.Equal(t, RedactedValue, redacted["credential.aksk1.secret_access_key"])
+	assert.Equal(t, RedactedValue, redacted["AWS_SESSION_TOKEN"])
+	assert.Equal(t, RedactedValue, redacted["OPAQUE_RUNTIME_VALUE"])
+	assert.Equal(t, "30", redacted["querynode.gracefulStopTimeout"])
+	assert.Equal(t, "group-secret", values["credential.aksk1.secret_access_key"], "input must not be mutated")
+}
+
+// syncBuffer adapts a bytes.Buffer to the WriteSyncer the logger expects.
+// Declared locally rather than using zapcore.AddSync because depguard forbids
+// importing zap outside pkg/mlog; the interface is structural, so naming the
+// package is unnecessary. Same pattern as mlog's own benchmark test.
+type syncBuffer struct {
+	bytes.Buffer
+}
+
+func (s *syncBuffer) Sync() error { return nil }
+
+func TestSensitiveConfigEventLogRedaction(t *testing.T) {
+	var logs syncBuffer
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "info",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, &logs)
+	require.NoError(t, err)
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	mlog.ReplaceGlobals(logger, props)
+	defer mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("credential.")
+	mgr.SensitivePrefixUpdate("credential.")
+	mgr.OnEvent(&Event{
+		EventSource: "test",
+		EventType:   CreateType,
+		Key:         "credential.aksk1.secret_access_key",
+		Value:       "must-not-appear-in-logs",
+	})
+
+	assert.NotContains(t, logs.String(), "must-not-appear-in-logs")
+	assert.True(t, strings.Contains(logs.String(), RedactedValue), logs.String())
+}
+
 func TestOnEvent(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
 	cfg.Dir = t.TempDir()
@@ -199,7 +285,7 @@ func TestGetConfigAndSource(t *testing.T) {
 	assert.Equal(t, value, "ac-value")
 
 	// test get all configs
-	configs := mgr.GetConfigsView()
+	configs := mgr.GetConfigsViewRaw()
 	v, ok := configs["ab-key"]
 	assert.True(t, ok)
 	assert.Contains(t, v, "EnvironmentSource")
@@ -207,6 +293,154 @@ func TestGetConfigAndSource(t *testing.T) {
 	v, ok = configs["ac-key"]
 	assert.True(t, ok)
 	assert.Contains(t, v, RuntimeSource)
+}
+
+func TestConfigProjectionsRedactByDefault(t *testing.T) {
+	mgr, _ := Init()
+
+	mgr.RegisterConfigKey("public.key")
+	mgr.RegisterConfigKey("opaque.key")
+	mgr.RegisterSensitiveKey("opaque.key")
+	mgr.RegisterConfigPrefix("dynamic.")
+	mgr.RegisterConfigPrefix("sensitive.group.")
+	mgr.RegisterSensitivePrefix("sensitive.group.")
+
+	mgr.SetConfig("public.key", "visible")
+	mgr.SetConfig("opaque.key", "opaque-secret")
+	mgr.SetConfig("unknown.key", "unknown-secret")
+	mgr.SetMapConfig("dynamic.visible", "dynamic-value")
+	mgr.SetMapConfig("dynamic.password", "dynamic-secret")
+	mgr.SetMapConfig("sensitive.group.value", "group-secret")
+	mgr.SetMapConfig("sensitive/group/slash", "slash-group-secret")
+
+	publicKey := formatKey("public.key")
+	opaqueKey := formatKey("opaque.key")
+	unknownKey := formatKey("unknown.key")
+	dynamicKey := "dynamic.visible"
+	dynamicSecretKey := "dynamic.password"
+	groupKey := "sensitive.group.value"
+	slashGroupKey := "sensitive/group/slash"
+
+	safe := mgr.GetConfigs()
+	assert.Equal(t, "visible", safe[publicKey])
+	assert.Equal(t, RedactedValue, safe[opaqueKey])
+	assert.Equal(t, RedactedValue, safe[unknownKey])
+	assert.Equal(t, "dynamic-value", safe[dynamicKey])
+	assert.Equal(t, RedactedValue, safe[dynamicSecretKey])
+	assert.Equal(t, RedactedValue, safe[groupKey])
+	assert.Equal(t, RedactedValue, safe[slashGroupKey])
+
+	raw := mgr.GetConfigsRaw()
+	assert.Equal(t, "opaque-secret", raw[opaqueKey])
+	assert.Equal(t, "unknown-secret", raw[unknownKey])
+	assert.Equal(t, "group-secret", raw[groupKey])
+	assert.Equal(t, "dynamic-secret", raw[dynamicSecretKey])
+	assert.Equal(t, "slash-group-secret", raw[slashGroupKey])
+
+	safeView := mgr.GetConfigsView()
+	assert.Contains(t, safeView[publicKey], RuntimeSource)
+	assert.Equal(t, RedactedValue, safeView[opaqueKey])
+	assert.Equal(t, RedactedValue, safeView[unknownKey])
+
+	rawView := mgr.GetConfigsViewRaw()
+	assert.Contains(t, rawView[opaqueKey], "opaque-secret")
+	assert.Contains(t, rawView[unknownKey], "unknown-secret")
+
+	assert.Equal(t, "dynamic-value", mgr.GetBy(WithPrefix("dynamic"))[dynamicKey])
+	assert.Equal(t, RedactedValue, mgr.GetBy(WithPrefix("dynamic"))[dynamicSecretKey])
+	assert.Equal(t, "group-secret", mgr.GetByRaw(WithPrefix("sensitive"))[groupKey])
+
+	source, value, err := mgr.GetRegisteredConfig("dynamic/visible")
+	require.NoError(t, err)
+	assert.Equal(t, RuntimeSource, source)
+	assert.Equal(t, "dynamic-value", value)
+}
+
+func TestEnvironmentSecretsAreRedacted(t *testing.T) {
+	sentinelValue := strings.Repeat("config-view-sentinel-", 2)
+	t.Setenv("MILVUS_CONF_SERVICE_TOKEN", sentinelValue)
+	t.Setenv("AWS_SESSION_TOKEN", sentinelValue)
+	t.Setenv("OPENAI_API_KEY", sentinelValue)
+	t.Setenv("DATABASE_URL", sentinelValue)
+	t.Setenv("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL", sentinelValue)
+	t.Setenv("proxy.accesslog.formatters.database_url", sentinelValue)
+	t.Setenv("PUBLIC_KEY", "scalar-visible")
+
+	mgr, _ := Init(WithEnvSource(formatKey))
+	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
+	mgr.RegisterConfigKey("public.key")
+	canonical, kind := mgr.ResolveRegisteredConfigKey("proxy/accessLog/formatters/DATABASE_URL")
+	assert.Equal(t, "proxy.accesslog.formatters.database_url", canonical)
+	assert.Equal(t, RegisteredConfigGroup, kind)
+	assert.False(t, mgr.IsConfigRegistered("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL"))
+	assert.False(t, mgr.IsConfigRegistered(formatKey("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL")))
+	assert.True(t, mgr.IsConfigRegistered("proxy.accessLog.formatters.DATABASE_URL"))
+	_, resolved, err := mgr.GetConfig("proxy.accessLog.formatters.DATABASE_URL")
+	require.NoError(t, err)
+	assert.Equal(t, sentinelValue, resolved, "the legacy internal lookup still resolves the ambiguous alias")
+	_, _, err = mgr.GetRegisteredConfig("proxy.accessLog.formatters.DATABASE_URL")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+	_, scalarValue, err := mgr.GetRegisteredConfig("public.key")
+	require.NoError(t, err)
+	assert.Equal(t, "scalar-visible", scalarValue, "explicit ParamItems may still use environment overrides")
+	for key, value := range mgr.GetConfigsView() {
+		assert.NotContains(t, value, sentinelValue, key)
+	}
+
+	foundRaw := false
+	for _, value := range mgr.GetConfigsViewRaw() {
+		if strings.Contains(value, sentinelValue) {
+			foundRaw = true
+			break
+		}
+	}
+	assert.True(t, foundRaw)
+}
+
+func TestRegisteredConfigKeyResolutionPreservesKnowhereSuffixCase(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix(NotFormatPrefix)
+
+	canonical, kind := mgr.ResolveRegisteredConfigKey("knowhere.DISKANN/build/search_list")
+	assert.Equal(t, "knowhere.DISKANN.build.search_list", canonical)
+	assert.Equal(t, RegisteredConfigGroup, kind)
+
+	_, kind = mgr.ResolveRegisteredConfigKey("knowhere.")
+	assert.Equal(t, RegisteredConfigUnknown, kind, "a ParamGroup prefix without a suffix is not a concrete config key")
+}
+
+func TestRegisteredMetadataOverridesSecretNameFallback(t *testing.T) {
+	mgr := NewManager()
+	for _, key := range []string{
+		"proxy.minPasswordLength",
+		"proxy.maxPasswordLength",
+		"dataCoord.compaction.storageVersion.rateLimitTokens",
+	} {
+		mgr.RegisterConfigKey(key)
+		mgr.RegisterNonSensitiveKey(key)
+		mgr.SetConfig(key, "visible")
+		assert.False(t, mgr.IsSensitive(key), key)
+		assert.Equal(t, "visible", mgr.GetConfigs()[formatKey(key)], key)
+	}
+}
+
+func TestFileConfigProjectionRedactsByDefault(t *testing.T) {
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile, []byte("public.key: visible\nopaque.key: opaque-secret\nunknown.key: unknown-secret\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigKey("public.key")
+	mgr.RegisterConfigKey("opaque.key")
+	mgr.RegisterSensitiveKey("opaque.key")
+
+	safe := mgr.FileConfigs()
+	assert.Equal(t, "visible", safe["public.key"])
+	assert.Equal(t, RedactedValue, safe["opaque.key"])
+	assert.Equal(t, RedactedValue, safe["unknown.key"])
+
+	raw := mgr.FileConfigsRaw()
+	assert.Equal(t, "opaque-secret", raw["opaque.key"])
+	assert.Equal(t, "unknown-secret", raw["unknown.key"])
 }
 
 func TestDeadlock(t *testing.T) {

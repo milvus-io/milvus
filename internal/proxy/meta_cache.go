@@ -76,6 +76,7 @@ func initMetaCache(ctx context.Context, mixCoord types.MixCoordClient) (Cache, e
 	}
 
 	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
+	internalhttp.RegisterProxyCredentialVerifyFunc(PasswordVerifyForHTTP)
 	internalhttp.RegisterGetUserRoleFunc(GetRole)
 
 	return metaCache, nil

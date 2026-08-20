@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -1588,6 +1589,38 @@ func GetRole(username string) ([]string, error) {
 
 func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 	return passwordVerify(ctx, username, rawPwd, privilege.GetPrivilegeCache())
+}
+
+// PasswordVerifyForHTTP is the typed verifier used by the management-plane
+// Basic Auth gate. The legacy PasswordVerify bool API remains for data-plane
+// authentication, where callers historically treat every failure alike.
+func PasswordVerifyForHTTP(ctx context.Context, username, rawPwd string) error {
+	cache := privilege.GetPrivilegeCache()
+	if cache == nil {
+		return merr.WrapErrServiceUnavailable("privilege cache is not ready")
+	}
+	credInfo, err := cache.GetCredentialInfo(ctx, username)
+	if err != nil {
+		return merr.Wrap(err, "get credential info")
+	}
+	if credInfo == nil {
+		return merr.WrapErrServiceInternal("credential store returned empty credential info")
+	}
+	if credInfo.Sha256Password != "" {
+		if crypto.SHA256(rawPwd, credInfo.Username) == credInfo.Sha256Password {
+			return nil
+		}
+		return internalhttp.NewAuthenticationError("invalid root password")
+	}
+	if credInfo.EncryptedPassword == "" {
+		return merr.WrapErrServiceInternal("credential store returned an empty hash")
+	}
+	if err := internalhttp.VerifyStoredRootPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
+		return err
+	}
+	credInfo.Sha256Password = crypto.SHA256(rawPwd, credInfo.Username)
+	cache.UpdateCredential(credInfo)
+	return nil
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {

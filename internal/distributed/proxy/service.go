@@ -127,10 +127,37 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
+	if mhttp.AuthByAdminFlag() && isAdminAPIPath(c.Request.URL.Path) {
+		if err := mhttp.CheckAdminAuth(c.Request.Context(), c.Request); err == nil {
+			username, password, _ := c.Request.BasicAuth()
+			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
+			c.Set(httpserver.ContextUsername, username)
+			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
+			return
+		} else {
+			statusCode := mhttp.HTTPStatusFromPrivilegeError(err)
+			var statusErr error = merr.ErrNeedAuthenticate
+			switch statusCode {
+			case http.StatusForbidden:
+				statusErr = merr.ErrPrivilegeNotPermitted
+			case http.StatusServiceUnavailable:
+				statusErr = merr.ErrServiceUnavailable
+			}
+			hookutil.GetExtension().ReportAction(c.Request.Context(), nil, &milvuspb.BoolResponse{
+				Status: merr.Status(statusErr),
+			}, nil, c.FullPath(), hookutil.ActionAuthorize)
+			c.AbortWithStatusJSON(statusCode, gin.H{
+				mhttp.HTTPReturnCode:    merr.Code(statusErr),
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+	}
+
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
+			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -144,13 +171,22 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
-		mlog.Warn(context.TODO(), "fail to verify apikey", mlog.Err(err))
+		mlog.Warn(c.Request.Context(), "fail to verify apikey", mlog.Err(err))
 	}
 
 	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
 	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+}
+
+func isAdminAPIPath(path string) bool {
+	path = strings.TrimPrefix(path, apiPathPrefix)
+	if path == mhttp.ClusterConfigsPath || path == mhttp.HookConfigsPath {
+		return true
+	}
+	return path == mhttp.TelemetryClientsPath || strings.HasPrefix(path, mhttp.TelemetryClientsPath+"/") ||
+		path == mhttp.TelemetryCommandsPath || strings.HasPrefix(path, mhttp.TelemetryCommandsPath+"/")
 }
 
 // registerHTTPServer register the http server, panic when failed

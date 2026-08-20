@@ -24,21 +24,25 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
-	grpcLog atomic.Pointer[grpcLogger]
-	sf      conc.Singleflight[*grpcLogger]
+	grpcLog                 atomic.Pointer[grpcLogger]
+	grpcLogMu               sync.Mutex
+	grpcListenerModeSet     bool
+	grpcListenerModeIsLocal bool
+	grpcListenFunc          = net.Listen
 )
 
 // grpcLogger is a Logger with dispatches streaming Evt to client listeners.
 type grpcLogger struct {
-	level atomic.Int32
-	lis   net.Listener
-	port  int
+	level     atomic.Int32
+	lis       net.Listener
+	server    *grpc.Server
+	port      int
+	localOnly bool
 
 	clients *typeutil.ConcurrentMap[string, *listenerClient]
 }
@@ -99,50 +103,115 @@ func (l *grpcLogger) Listen(req *ListenRequest, svr EventLogService_ListenServer
 		case <-svr.Context().Done():
 			return nil
 		case <-client.closed:
+			return nil
 		}
 	}
 }
 
 func (l *grpcLogger) Close() {
+	if l.server != nil {
+		l.server.Stop()
+		return
+	}
 	if l.lis != nil {
 		l.lis.Close()
 	}
 }
 
+func grpcListenAddress(localOnly bool) string {
+	if localOnly {
+		// The HTTP /eventlog discovery endpoint is protected in secured mode,
+		// but the spawned gRPC service has no authentication protocol of its
+		// own. Keep that data channel local so learning/scanning the random port
+		// cannot bypass the HTTP root-auth gate.
+		return "127.0.0.1:0"
+	}
+
+	// Flag-off mode intentionally retains the historical remote-listener
+	// behavior for compatibility.
+	return ":0"
+}
+
 // getGrpcLogger starts or returns the singleton grpcLogger listening port.
 func getGrpcLogger() (int, error) {
-	if l := grpcLog.Load(); l != nil {
-		return l.port, nil
+	return getGrpcLoggerWithLocalOnly(false)
+}
+
+// EnsureLocalOnly starts a loopback listener, or replaces an existing wildcard
+// listener with one. It is called when management authentication is enabled at
+// runtime so a previously discovered eventlog port cannot remain remotely
+// reachable until the next HTTP discovery request.
+func EnsureLocalOnly() error {
+	return EnsureListenerMode(true)
+}
+
+// EnsureListenerMode records the configured listener mode and switches an
+// already-created listener when necessary. Recording the mode even before
+// discovery prevents a request that observed stale configuration from opening
+// a wildcard listener after management authentication has been enabled.
+func EnsureListenerMode(localOnly bool) error {
+	grpcLogMu.Lock()
+	defer grpcLogMu.Unlock()
+
+	grpcListenerModeSet = true
+	grpcListenerModeIsLocal = localOnly
+	if grpcLog.Load() == nil {
+		return nil
 	}
-	l, err, _ := sf.Do("grpc_evt_log", func() (*grpcLogger, error) {
-		if grpcLog.Load() != nil {
-			return grpcLog.Load(), nil
-		}
-		lis, err := net.Listen("tcp", ":0")
-		if err != nil {
-			return nil, err
-		}
+	_, err := getGrpcLoggerLocked(localOnly)
+	return err
+}
 
-		port := lis.Addr().(*net.TCPAddr).Port
+// getGrpcLoggerWithLocalOnly starts or returns the singleton grpcLogger. The
+// localOnly option is selected by the authenticated HTTP discovery handler;
+// the parameter keeps this package independent from Milvus's config package.
+func getGrpcLoggerWithLocalOnly(localOnly bool) (int, error) {
+	// Serialize creation and security upgrades. A singleflight keyed only by
+	// logger name is insufficient here: concurrent localOnly=false/true callers
+	// can otherwise share the wildcard result and let the secured caller return
+	// success while the listener remains remotely reachable.
+	grpcLogMu.Lock()
+	defer grpcLogMu.Unlock()
+	if grpcListenerModeSet {
+		localOnly = grpcListenerModeIsLocal
+	}
+	return getGrpcLoggerLocked(localOnly)
+}
 
-		svr := grpc.NewServer()
-		l := &grpcLogger{
-			lis:     lis,
-			port:    port,
-			clients: typeutil.NewConcurrentMap[string, *listenerClient](),
+func getGrpcLoggerLocked(localOnly bool) (int, error) {
+	if current := grpcLog.Load(); current != nil {
+		if current.localOnly == localOnly {
+			return current.port, nil
 		}
-		l.SetLevel(Level_Debug)
-		RegisterEventLogServiceServer(svr, l)
-		go svr.Serve(lis)
+		// Stop existing streams and replace the listener so dynamic transitions
+		// match the configured mode in both directions.
+		current.Close()
+		grpcLog.Store(nil)
+	}
 
-		grpcLog.Store(l)
-		getGlobalLogger().Register("grpc_logger", l)
-		return l, nil
-	})
+	lis, err := grpcListenFunc("tcp", grpcListenAddress(localOnly))
 	if err != nil {
 		return -1, err
 	}
 
+	port := lis.Addr().(*net.TCPAddr).Port
+
+	svr := grpc.NewServer()
+	l := &grpcLogger{
+		lis:       lis,
+		server:    svr,
+		port:      port,
+		localOnly: localOnly,
+		clients:   typeutil.NewConcurrentMap[string, *listenerClient](),
+	}
+	l.SetLevel(Level_Debug)
+	RegisterEventLogServiceServer(svr, l)
+	go svr.Serve(lis)
+
+	grpcLog.Store(l)
+	// Insert (rather than GetOrInsert) is intentional: switching secured mode
+	// at runtime replaces the wildcard logger with the loopback-only logger.
+	getGlobalLogger().loggers.Insert("grpc_logger", l)
 	return l.port, nil
 }
 
@@ -161,6 +230,8 @@ func newListenerClient() *listenerClient {
 
 func (c *listenerClient) Notify(l Evt) {
 	select {
+	case <-c.closed:
+		return
 	case c.ch <- l:
 	default:
 	}
@@ -168,6 +239,11 @@ func (c *listenerClient) Notify(l Evt) {
 
 func (c *listenerClient) Stop() {
 	c.once.Do(func() {
-		close(c.ch)
+		// Keep ch open: Record may already have loaded this client from the
+		// concurrent map and be about to Notify it. Closing the send channel
+		// would turn a normal listener shutdown or mode switch into a
+		// send-on-closed-channel panic. closed is the ownership signal; queued
+		// events may be discarded once the listener exits.
+		close(c.closed)
 	})
 }

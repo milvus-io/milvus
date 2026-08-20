@@ -32,11 +32,21 @@ const (
 	ContentTypeJSON = "application/json"
 )
 
-// eventLogHandler is the event log http handler
-type eventLogHandler struct{}
+// eventLogHandler is the event log http handler.
+type eventLogHandler struct {
+	localOnlyPolicy func() bool
+}
 
 func Handler() http.Handler {
 	return &eventLogHandler{}
+}
+
+// HandlerWithLocalOnlyPolicy creates an eventlog discovery handler whose gRPC
+// data channel binds to loopback when policy returns true. The policy is
+// supplied by the HTTP server so this package does not need to depend on the
+// server's configuration implementation.
+func HandlerWithLocalOnlyPolicy(policy func() bool) http.Handler {
+	return &eventLogHandler{localOnlyPolicy: policy}
 }
 
 type eventLogResponse struct {
@@ -50,7 +60,8 @@ func (h *eventLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Status: http.StatusOK,
 	}
 
-	port, err := getGrpcLogger()
+	localOnly := h.localOnlyPolicy != nil && h.localOnlyPolicy()
+	port, err := getGrpcLoggerWithLocalOnly(localOnly)
 	if err != nil {
 		resp.Status = http.StatusInternalServerError
 		writeJSON(w, r, resp)

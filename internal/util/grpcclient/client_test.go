@@ -92,6 +92,31 @@ func TestClientBase_connect(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, errMock))
 	})
+
+	t.Run("context-aware resolver observes request cancellation", func(t *testing.T) {
+		base := ClientBase[*mockClient]{DialTimeout: time.Hour}
+		resolverStarted := make(chan struct{})
+		base.SetGetAddrFuncWithContext(func(ctx context.Context) (string, error) {
+			close(resolverStarted)
+			<-ctx.Done()
+			return "", ctx.Err()
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		result := make(chan error, 1)
+		go func() {
+			result <- base.connect(ctx)
+		}()
+
+		<-resolverStarted
+		cancel()
+		select {
+		case err := <-result:
+			assert.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("context-aware address resolution did not stop after cancellation")
+		}
+	})
 }
 
 func TestClientBase_NodeSessionNotExist(t *testing.T) {

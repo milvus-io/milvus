@@ -254,6 +254,11 @@ func (bt *BaseTable) FileConfigs() map[string]string {
 	return bt.mgr.FileConfigs()
 }
 
+// FileConfigsRaw returns file-source values without projection redaction.
+func (bt *BaseTable) FileConfigsRaw() map[string]string {
+	return bt.mgr.FileConfigsRaw()
+}
+
 func (bt *BaseTable) UpdateSourceOptions(opts ...config.Option) {
 	bt.mgr.UpdateSourceOptions(opts...)
 }
