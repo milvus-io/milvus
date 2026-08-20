@@ -1286,6 +1286,12 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 		return meta, meta.GetJob(1)
 	}
 
+	// gateClockRunning reports whether job 1's index-gate wait clock started.
+	gateClockRunning := func(c *externalCollectionRefreshChecker) bool {
+		gs, ok := c.loadIndexGate(int64(1))
+		return ok && !gs.enteredAt.IsZero()
+	}
+
 	t.Run("gate off keeps the native transition", func(t *testing.T) {
 		mockey.PatchConvey("off", t, func() {
 			pt := paramtable.Get()
@@ -1334,12 +1340,12 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 				"unindexed segments must hold the job open")
 			assert.Equal(t, int64(95), held.GetProgress(),
 				"progress 90-100 tracks the indexed fraction: one of two segments indexed is 95")
-			assert.Contains(t, checker.indexGateEntered, int64(1),
+			assert.True(t, gateClockRunning(checker),
 				"the gate wait must start its own clock")
 		})
 	})
 
-	t.Run("a held job times out on the gate clock, not the ingest clock", func(t *testing.T) {
+	t.Run("a held job is exempt from the exhausted ingest clock", func(t *testing.T) {
 		mockey.PatchConvey("gate clock", t, func() {
 			pt := paramtable.Get()
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
@@ -1353,7 +1359,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 				func(int64, []int64) []int64 { return []int64{556} })
 
 			checker.aggregateJobState(job)
-			require.Contains(t, checker.indexGateEntered, int64(1))
+			require.True(t, gateClockRunning(checker))
 
 			checker.tryTimeoutJob(job)
 			assert.NotEqual(t, indexpb.JobState_JobStateFailed, meta.GetJob(1).GetState(),
@@ -1377,11 +1383,11 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 				func(int64, []int64) []int64 { return []int64{556} })
 
 			checker.aggregateJobState(job) // enter the gate and hold
-			require.Contains(t, checker.indexGateEntered, int64(1))
+			require.True(t, gateClockRunning(checker))
 
 			// Age the gate clock past the whole budget.
 			checker.indexGateMu.Lock()
-			checker.indexGateEntered[int64(1)] = time.Now().Add(-1000 * time.Hour)
+			checker.indexGates[int64(1)] = indexGateState{enteredAt: time.Now().Add(-1000 * time.Hour)}
 			checker.indexGateMu.Unlock()
 
 			checker.aggregateJobState(meta.GetJob(1))
@@ -1390,7 +1396,8 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			assert.Equal(t, indexpb.JobState_JobStateFinished, expired.GetState(),
 				"an expired gate finishes the job; its data is committed and being served")
 			assert.Equal(t, int64(100), expired.GetProgress())
-			assert.NotContains(t, checker.indexGateEntered, int64(1))
+			_, still := checker.loadIndexGate(int64(1))
+			assert.False(t, still, "the gate bookkeeping is released with the persisted terminal state")
 		})
 	})
 
@@ -1414,14 +1421,14 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 				func(int64, []int64) []int64 { return debt })
 
 			checker.aggregateJobState(job) // hold: the gate clock starts
-			require.Contains(t, checker.indexGateEntered, int64(1))
+			require.True(t, gateClockRunning(checker))
 
 			debt = nil // all indexes finished
 			mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).
 				Return(errors.New("etcd unavailable")).Build()
 			checker.aggregateJobState(meta.GetJob(1)) // debt clear, but the finish write fails
 			assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState())
-			assert.Contains(t, checker.indexGateEntered, int64(1),
+			assert.True(t, gateClockRunning(checker),
 				"the gate clock must survive a failed finish write; releasing it early hands the timeout check the exhausted ingest clock")
 
 			mockSave.UnPatch()
@@ -1431,8 +1438,8 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 
 			checker.aggregateJobState(meta.GetJob(1)) // retry lands
 			assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
-			assert.NotContains(t, checker.indexGateEntered, int64(1),
-				"the gate clock is released once the terminal state persisted")
+			_, still := checker.loadIndexGate(int64(1))
+			assert.False(t, still, "the gate clock is released once the terminal state persisted")
 		})
 	})
 
@@ -1455,8 +1462,39 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			assert.False(t, debtAsked, "no debt judgment on unapplied segments")
 			assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState(),
 				"a transient apply failure leaves the job for the next tick; the job timeout is the terminal bound")
-			assert.NotContains(t, checker.indexGateEntered, int64(1),
+			assert.False(t, gateClockRunning(checker),
 				"the gate clock must not start until an apply landed")
+			gs, ok := checker.loadIndexGate(int64(1))
+			require.True(t, ok, "the failing apply must be recorded for the timeout fail reason")
+			assert.Contains(t, gs.lastApplyErr, "catalog write failed")
+		})
+	})
+
+	t.Run("a job stuck on a failing apply times out with the real cause", func(t *testing.T) {
+		// The gate retries the pre-gate apply every tick because the failure
+		// may be transient. A permanent one (a validation error in the task
+		// results) rides that retry loop into the job timeout - whose fail
+		// reason must surface the actual error, not a bare "timeout".
+		mockey.PatchConvey("apply error surfaces", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job := stage(t)
+			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					return errors.New("segment 555 is owned by both external refresh tasks 1001 and 1002")
+				}, nil, nil, nil,
+				func(int64, []int64) []int64 { return nil })
+
+			checker.aggregateJobState(job) // apply fails; the error is recorded
+			checker.tryTimeoutJob(job)     // the ingest clock is the terminal bound here
+
+			failed := meta.GetJob(1)
+			require.Equal(t, indexpb.JobState_JobStateFailed, failed.GetState())
+			assert.Contains(t, failed.GetFailReason(), "owned by both external refresh tasks",
+				"the timeout must surface the apply error that kept the job out of the gate")
 		})
 	})
 
@@ -1511,10 +1549,7 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			}
 			wg.Wait()
 
-			checker.indexGateMu.Lock()
-			_, entered := checker.indexGateEntered[int64(1)]
-			checker.indexGateMu.Unlock()
-			assert.True(t, entered, "the gate wait must have started its clock")
+			assert.True(t, gateClockRunning(checker), "the gate wait must have started its clock")
 		})
 	})
 }
