@@ -13,7 +13,6 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
