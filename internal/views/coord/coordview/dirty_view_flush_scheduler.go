@@ -388,18 +388,18 @@ func (s *DirtyViewFlushScheduler) persistViews(ctx context.Context, persists []*
 	if len(persists) <= s.maxTxnOps {
 		return s.catalog.SaveQueryViews(ctx, persists)
 	}
-	sorted := make([]*viewpb.QueryViewOfShard, len(persists))
-	copy(sorted, persists)
-	sort.Slice(sorted, func(i, j int) bool {
-		ki, kj := queryViewKeyFromProto(sorted[i]), queryViewKeyFromProto(sorted[j])
+	// The persist list is a local slice collected by flushBatch and consumed
+	// only here, so it is sorted in place.
+	sort.Slice(persists, func(i, j int) bool {
+		ki, kj := queryViewKeyFromProto(persists[i]), queryViewKeyFromProto(persists[j])
 		if ki.ShardID != kj.ShardID {
 			return ki.ShardID.String() < kj.ShardID.String()
 		}
 		return kj.QueryViewVersion.GT(ki.QueryViewVersion) // ascending
 	})
-	for start := 0; start < len(sorted); start += s.maxTxnOps {
-		end := min(start+s.maxTxnOps, len(sorted))
-		if err := s.catalog.SaveQueryViews(ctx, sorted[start:end]); err != nil {
+	for start := 0; start < len(persists); start += s.maxTxnOps {
+		end := min(start+s.maxTxnOps, len(persists))
+		if err := s.catalog.SaveQueryViews(ctx, persists[start:end]); err != nil {
 			return err
 		}
 	}
