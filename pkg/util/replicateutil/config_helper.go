@@ -127,6 +127,10 @@ type ConfigHelper struct {
 
 // GetReplicateConfiguration returns the replicate configuration of the graph.
 func (g *ConfigHelper) GetReplicateConfiguration() *commonpb.ReplicateConfiguration {
+	if g == nil {
+		// A nil helper is how "no replication configured" is represented.
+		return nil
+	}
 	return g.cfg
 }
 
@@ -144,6 +148,9 @@ func (g *ConfigHelper) IsJoinReplication() bool {
 
 // GetCluster returns the cluster from the graph.
 func (g *ConfigHelper) GetCluster(clusterID string) *MilvusCluster {
+	if g == nil {
+		return nil
+	}
 	return g.vs[clusterID]
 }
 

@@ -159,6 +159,17 @@ func (r *channelReplicator) startConsumeLoop() {
 			logger.Info("consume loop stopped")
 			return
 		case msg := <-r.msgChan:
+			// A topology change older than this task describes a past state, not an
+			// instruction. Forwarding it would make the secondary act on it — a
+			// configuration that no longer lists the secondary turns it back into a
+			// standalone primary — so it is dropped instead of replicated.
+			if msg.MessageType() == message.MessageTypeAlterReplicateConfig &&
+				util.IsStaleTopologyChange(msg, r.channel.Value) {
+				logger.Info("skip replicating topology change older than this replication task",
+					log.FieldMessage(msg),
+					zap.Uint64("initializedTimeTick", r.channel.Value.GetInitializedCheckpoint().GetTimeTick()))
+				continue
+			}
 			err := r.streamClient.Replicate(msg)
 			if err != nil {
 				if !errors.Is(err, replicatestream.ErrReplicateIgnored) {
