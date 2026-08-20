@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -262,30 +264,167 @@ func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOr
 // authorizeWALRead gates DumpMessages, which exposes raw WAL contents for
 // CDC/data salvage. Reading raw WAL is a cluster-scoped operation, so only
 // root or a user holding the built-in admin role is allowed.
-func authorizeWALRead(ctx context.Context) error {
+func authorizeWALRead(ctx context.Context) (context.Context, error) {
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		return nil
+		return ctx, nil
 	}
 	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
-		return nil
+		return ctx, nil
 	}
 	roles, err := GetRole(username)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 	for _, role := range roles {
 		if role == util.RoleAdmin {
-			return nil
+			return ctx, nil
 		}
 	}
 	mlog.Info(ctx, "dump WAL permission deny", mlog.String("username", username))
 	if password == util.PasswordHolder {
 		username = "apikey user"
 	}
-	return status.Error(codes.PermissionDenied,
+	return ctx, status.Error(codes.PermissionDenied,
 		fmt.Sprintf("dump WAL requires admin or root, deny to %s", username))
+}
+
+// StreamPrivilegeFunc is the streaming counterpart of PrivilegeFunc. It
+// authorizes a streaming call using the context (which already carries the
+// authenticated user) and the full method name (which identifies the required
+// authorization via the static streamMethodAuthorizers table). Streaming
+// interceptors have no `req` object to reflect the privilege from (unlike the
+// unary PrivilegeInterceptor which resolves it via
+// funcutil.GetPrivilegeExtObj(req)), so the required authorization is declared
+// statically per full-method name.
+type StreamPrivilegeFunc func(ctx context.Context, fullMethod string) (context.Context, error)
+
+// streamHealthServicePrefix is the full-method-name prefix of the gRPC health
+// service. Health probing (grpc.health.v1.Health/Watch) is an infrastructure
+// concern; it is exempt from RBAC authorization (the stream is still
+// authenticated, matching the unary health.Check behavior), otherwise health
+// checks would fail once authorization is enabled.
+const streamHealthServicePrefix = "/grpc.health.v1.Health/"
+
+// streamMethodAuthorizers is the static authorization table for streaming RPCs
+// on the external gRPC server. It maps a streaming RPC's full method name to the
+// authorization check it requires. Streaming methods touch the WAL data plane:
+//   - CreateReplicateStream writes replicated messages into the WAL. It is
+//     authorized via casbin against the cluster-level
+//     PrivilegeUpdateReplicateConfiguration privilege (Global scope), so that a
+//     dedicated role can be granted replication rights.
+//   - DumpMessages streams raw WAL messages out for data salvage. It exposes
+//     raw, unfiltered cluster data, so it is restricted to root or the built-in
+//     admin role via authorizeWALRead.
+//
+// Any streaming method NOT present in this table is denied by default
+// (fail-closed) in StreamPrivilegeInterceptor, which prevents a newly-added
+// stream RPC from silently bypassing the RBAC chain.
+var streamMethodAuthorizers = map[string]func(ctx context.Context) (context.Context, error){
+	milvuspb.MilvusService_CreateReplicateStream_FullMethodName: authorizeCreateReplicateStream,
+	milvuspb.MilvusService_DumpMessages_FullMethodName:          authorizeWALRead,
+}
+
+// PrivilegeStreamInterceptor returns a new stream server interceptor that
+// performs per-stream privilege access. It mirrors UnaryServerInterceptor: it
+// wraps the authorization function into a grpc.StreamServerInterceptor,
+// propagating the authorized context to the handler via a wrapped ServerStream.
+func PrivilegeStreamInterceptor(privilegeFunc StreamPrivilegeFunc) grpc.StreamServerInterceptor {
+	privilege.InitPrivilegeGroups()
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		newCtx, err := privilegeFunc(ss.Context(), info.FullMethod)
+		if err != nil {
+			hookutil.GetExtension().ReportAction(newCtx, nil, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
+			return err
+		}
+		wrapped := grpc_middleware.WrapServerStream(ss)
+		wrapped.WrappedContext = newCtx
+		return handler(srv, wrapped)
+	}
+}
+
+// StreamPrivilegeInterceptor resolves the authorization for a streaming RPC from
+// its full method name via streamMethodAuthorizers. Unregistered methods are
+// denied (fail-closed); the health service is exempted so infrastructure
+// liveness probes keep working.
+func StreamPrivilegeInterceptor(ctx context.Context, fullMethod string) (context.Context, error) {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return ctx, nil
+	}
+	if strings.HasPrefix(fullMethod, streamHealthServicePrefix) {
+		return ctx, nil
+	}
+	authorize, ok := streamMethodAuthorizers[fullMethod]
+	if !ok {
+		// Unregistered streaming method: deny by default so no stream RPC can
+		// slip through the authorization chain unnoticed.
+		mlog.Warn(ctx, "stream method not registered for authorization check, denying", mlog.String("method", fullMethod))
+		return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("streaming method %s is not authorized", fullMethod))
+	}
+	return authorize(ctx)
+}
+
+// authorizeCreateReplicateStream authorizes CreateReplicateStream, which writes
+// replicated messages into the WAL data plane. It is a cluster-scoped operation
+// and is authorized via casbin against PrivilegeUpdateReplicateConfiguration
+// (Global scope). Like the unary PrivilegeInterceptor, cluster-level privileges
+// are authorized against util.AnyWord ("*") db scope, independent of the
+// connection namespace.
+func authorizeCreateReplicateStream(ctx context.Context) (context.Context, error) {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return ctx, nil
+	}
+	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "GetAuthInfoFromContext fail for stream", mlog.Err(err))
+		return ctx, err
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return ctx, nil
+	}
+	roleNames, err := GetRole(username)
+	if err != nil {
+		mlog.Warn(ctx, "GetRole fail for stream", mlog.String("username", username), mlog.Err(err))
+		return ctx, err
+	}
+	roleNames = append(roleNames, util.RolePublic)
+	ctx = SetRBACRolesToContext(ctx, roleNames)
+
+	objectType := commonpb.ObjectType_Global.String()
+	objectPrivilege := commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()
+	// Cluster-level privileges are authorized globally (db = util.AnyWord),
+	// mirroring the unary interceptor's handling of cluster-level grants.
+	dbName := util.AnyWord
+	object := funcutil.PolicyForResource(dbName, objectType, util.AnyWord)
+	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
+		mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),
+		mlog.FieldDbName(dbName))
+
+	e := privilege.GetEnforcer()
+	for _, roleName := range roleNames {
+		isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+		if !cached {
+			isPermit, err = e.Enforce(roleName, object, objectPrivilege)
+			if err != nil {
+				log.Warn(ctx, "fail to execute permit func for stream", mlog.Err(err))
+				return ctx, err
+			}
+			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+		}
+		if isPermit {
+			return ctx, nil
+		}
+	}
+
+	log.Info(ctx, "permission deny for stream", mlog.Strings("roles", roleNames))
+	if password == util.PasswordHolder {
+		username = "apikey user"
+	}
+	return ctx, status.Error(codes.PermissionDenied,
+		fmt.Sprintf("%s: permission deny to %s", objectPrivilege, username))
 }

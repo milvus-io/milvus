@@ -20,21 +20,23 @@ import (
 	"context"
 	"testing"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestAuthorizeWALRead(t *testing.T) {
@@ -42,7 +44,8 @@ func TestAuthorizeWALRead(t *testing.T) {
 		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 
-		assert.NoError(t, authorizeWALRead(context.Background()))
+		_, err := authorizeWALRead(context.Background())
+		assert.NoError(t, err)
 	})
 
 	t.Run("authorization enabled", func(t *testing.T) {
@@ -51,7 +54,8 @@ func TestAuthorizeWALRead(t *testing.T) {
 		defer privilege.CleanPrivilegeCache()
 
 		t.Run("root is exempt", func(t *testing.T) {
-			assert.NoError(t, authorizeWALRead(GetContext(context.Background(), "root:pwd")))
+			_, err := authorizeWALRead(GetContext(context.Background(), "root:pwd"))
+			assert.NoError(t, err)
 		})
 
 		client := &MockMixCoordClientInterface{}
@@ -67,11 +71,12 @@ func TestAuthorizeWALRead(t *testing.T) {
 		require.NoError(t, InitMetaCache(context.Background(), client))
 
 		t.Run("admin role is allowed", func(t *testing.T) {
-			assert.NoError(t, authorizeWALRead(GetContext(context.Background(), "dbadmin:pwd")))
+			_, err := authorizeWALRead(GetContext(context.Background(), "dbadmin:pwd"))
+			assert.NoError(t, err)
 		})
 
 		t.Run("non-admin role is denied", func(t *testing.T) {
-			err := authorizeWALRead(GetContext(context.Background(), "bob:pwd"))
+			_, err := authorizeWALRead(GetContext(context.Background(), "bob:pwd"))
 			require.Error(t, err)
 			assert.Equal(t, codes.PermissionDenied, status.Code(err))
 		})
@@ -79,7 +84,8 @@ func TestAuthorizeWALRead(t *testing.T) {
 		t.Run("missing authorization is denied", func(t *testing.T) {
 			// GetAuthInfoFromContext fails with a merr error (no auth metadata),
 			// which is fail-closed rather than a PermissionDenied status.
-			assert.Error(t, authorizeWALRead(context.Background()))
+			_, err := authorizeWALRead(context.Background())
+			assert.Error(t, err)
 		})
 
 		t.Run("root requires admin role when bind role enabled", func(t *testing.T) {
@@ -98,8 +104,9 @@ func TestAuthorizeWALRead(t *testing.T) {
 			}
 			require.NoError(t, InitMetaCache(context.Background(), rootClient))
 
-			assert.NoError(t, authorizeWALRead(GetContext(context.Background(), "root:pwd")))
-			err := authorizeWALRead(GetContext(context.Background(), "plain:pwd"))
+			_, err := authorizeWALRead(GetContext(context.Background(), "root:pwd"))
+			assert.NoError(t, err)
+			_, err = authorizeWALRead(GetContext(context.Background(), "plain:pwd"))
 			require.Error(t, err)
 			assert.Equal(t, codes.PermissionDenied, status.Code(err))
 		})
@@ -122,23 +129,22 @@ func TestDumpMessages_UnauthorizedUserDenied(t *testing.T) {
 	}
 	require.NoError(t, InitMetaCache(context.Background(), client))
 
-	node := &Proxy{}
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-
-	mockWAL := mock_streaming.NewMockWALAccesser(t)
-	prevWAL := streaming.WAL()
-	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(prevWAL)
-
+	// The DumpMessages stream is authorized at the gRPC interceptor layer
+	// (GrpcAuthStreamInterceptor + PrivilegeStreamInterceptor), so exercise that
+	// path directly rather than the handler: an unauthorized user must be
+	// rejected before the handler observes the stream.
+	handlerCalled := false
+	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:mockPass")}
-	err := node.DumpMessages(&milvuspb.DumpMessagesRequest{
-		Pchannel:       "test-channel",
-		StartMessageId: testStartMessageID(),
-	}, stream)
+	err := interceptor(nil, stream, &grpc.StreamServerInfo{
+		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
+	}, func(srv interface{}, ss grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	})
 	require.Error(t, err)
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
-	assert.Empty(t, stream.getSent())
-	mockWAL.AssertNotCalled(t, "Read", mock.Anything, mock.Anything)
+	assert.False(t, handlerCalled)
 }
 
 func TestDumpMessages_UnauthenticatedUserDenied(t *testing.T) {
@@ -149,21 +155,199 @@ func TestDumpMessages_UnauthenticatedUserDenied(t *testing.T) {
 	client := &MockMixCoordClientInterface{}
 	require.NoError(t, InitMetaCache(context.Background(), client))
 
-	node := &Proxy{}
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-
-	mockWAL := mock_streaming.NewMockWALAccesser(t)
-	prevWAL := streaming.WAL()
-	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(prevWAL)
-
+	// The DumpMessages stream is authenticated at the gRPC interceptor layer
+	// (GrpcAuthStreamInterceptor) before authorization runs, so exercise that
+	// path directly: a request without valid credentials must be rejected
+	// before the privilege interceptor or the handler runs.
+	handlerCalled := false
+	authInterceptor := GrpcAuthStreamInterceptor(AuthenticationInterceptor)
 	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:wrongPass")}
-	err := node.DumpMessages(&milvuspb.DumpMessagesRequest{
-		Pchannel:       "test-channel",
-		StartMessageId: testStartMessageID(),
-	}, stream)
+	err := authInterceptor(nil, stream, &grpc.StreamServerInfo{
+		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
+	}, func(srv interface{}, ss grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	})
 	require.Error(t, err)
 	assert.Equal(t, codes.Unauthenticated, status.Code(err))
-	assert.Empty(t, stream.getSent())
-	mockWAL.AssertNotCalled(t, "Read", mock.Anything, mock.Anything)
+	assert.False(t, handlerCalled)
+}
+
+// TestStreamPrivilegeInterceptor_CreateReplicateStream exercises the casbin
+// authorization path for CreateReplicateStream: a role granted the
+// cluster-level PrivilegeUpdateReplicateConfiguration at the global (db="*")
+// scope is allowed regardless of the connection namespace, matching the unary
+// interceptor's handling of cluster-level grants.
+func TestStreamPrivilegeInterceptor_CreateReplicateStream(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// Cluster-level grant stored with db="*", the way rootcoord
+				// normalizes cluster-level privileges (see #52386 review).
+				funcutil.PolicyForPrivilege("role_replicate", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("carol", "role_replicate"),
+				funcutil.EncodeUserRoleCache("dave", "role_readonly"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(context.Background(), client))
+
+	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
+
+	t.Run("role with cluster grant is allowed", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: GetContextWithDB(context.Background(), "carol:pwd", "some_namespace")}
+		err := interceptor(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: milvuspb.MilvusService_CreateReplicateStream_FullMethodName,
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, handlerCalled)
+	})
+
+	t.Run("role without grant is denied", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "dave:pwd")}
+		err := interceptor(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: milvuspb.MilvusService_CreateReplicateStream_FullMethodName,
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("root is exempt", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "root:pwd")}
+		err := interceptor(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: milvuspb.MilvusService_CreateReplicateStream_FullMethodName,
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, handlerCalled)
+	})
+}
+
+// TestStreamPrivilegeInterceptor_FailClosed covers the fail-closed default:
+// a streaming method not present in streamMethodAuthorizers is denied, while
+// the gRPC health service (used for infrastructure liveness probing) is
+// exempted.
+func TestStreamPrivilegeInterceptor_FailClosed(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
+
+	t.Run("unregistered stream method is denied", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "root:pwd")}
+		err := interceptor(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: "/milvus.proto.milvus.MilvusService/FutureStreamRPC",
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("health watch is exempt", func(t *testing.T) {
+		handlerCalled := false
+		stream := &mockDumpMessagesServer{ctx: context.Background()}
+		err := interceptor(nil, stream, &grpc.StreamServerInfo{
+			FullMethod: grpc_health_v1.Health_Watch_FullMethodName,
+		}, func(srv interface{}, ss grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, handlerCalled)
+	})
+}
+
+// TestGrpcAuthStreamInterceptorChain verifies the external stream interceptor
+// chain (authentication -> authorization) propagates the context end-to-end:
+// auth runs first, authorization sees the resolved user, and the handler
+// receives the wrapped context. Authorization is disabled here so the chain
+// exercises the full pass-through path.
+func TestGrpcAuthStreamInterceptorChain(t *testing.T) {
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	require.NoError(t, InitMetaCache(context.Background(), &MockMixCoordClientInterface{}))
+
+	chain := grpc_middleware.ChainStreamServer(
+		GrpcAuthStreamInterceptor(AuthenticationInterceptor),
+		PrivilegeStreamInterceptor(StreamPrivilegeInterceptor),
+	)
+	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "root:pwd")}
+	handlerCalled := false
+	err := chain(nil, stream, &grpc.StreamServerInfo{
+		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
+	}, func(srv interface{}, ss grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	})
+	require.NoError(t, err)
+	assert.True(t, handlerCalled)
+}
+
+// TestGrpcAuthStreamInterceptorChain_Authorized verifies the full chain with
+// authorization enabled: the handler receives a context that still carries the
+// authenticated user (incoming metadata). The mock credential store only knows
+// "mockUser:mockPass", so exercise the DumpMessages admin path by binding
+// mockUser to the admin role.
+func TestGrpcAuthStreamInterceptorChain_Authorized(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("mockUser", util.RoleAdmin),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(context.Background(), client))
+
+	chain := grpc_middleware.ChainStreamServer(
+		GrpcAuthStreamInterceptor(AuthenticationInterceptor),
+		PrivilegeStreamInterceptor(StreamPrivilegeInterceptor),
+	)
+	stream := &mockDumpMessagesServer{ctx: GetContext(context.Background(), "mockUser:mockPass")}
+	var handlerCtx context.Context
+	err := chain(nil, stream, &grpc.StreamServerInfo{
+		FullMethod: milvuspb.MilvusService_DumpMessages_FullMethodName,
+	}, func(srv interface{}, ss grpc.ServerStream) error {
+		handlerCtx = ss.Context()
+		return nil
+	})
+	require.NoError(t, err)
+
+	// The handler context must still carry the authenticated user so downstream
+	// checks can resolve identity from incoming metadata.
+	username, _, err := contextutil.GetAuthInfoFromContext(handlerCtx)
+	require.NoError(t, err)
+	assert.Equal(t, "mockUser", username)
 }
