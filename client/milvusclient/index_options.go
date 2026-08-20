@@ -41,11 +41,6 @@ func (opt *createIndexOption) WithExtraParam(key string, value any) {
 	opt.extraParams[key] = value
 }
 
-func (opt *createIndexOption) WithProperty(key string, value any) *createIndexOption {
-	opt.WithExtraParam(key, value)
-	return opt
-}
-
 func (opt *createIndexOption) Request() *milvuspb.CreateIndexRequest {
 	params := opt.indexDef.Params()
 	for key, value := range opt.extraParams {
