@@ -217,6 +217,12 @@ PhyRoaringFilterExpr::ExecVisitorImpl(EvalCtx& context) {
     };
 
     int64_t processed_size;
+    // TODO(#52094): teach roaring_match to skip. Every skip_func in this file
+    // is std::nullptr_t{}, so SkipIndex never drops a chunk. bloom_match has no
+    // choice -- an SBBF exposes no range -- but a Roaring bitmap has
+    // Minimum()/Maximum() in O(1), and TermExpr's numeric path shows the shape.
+    // Note the keys are two's-complement: a range spanning zero is two disjoint
+    // key ranges, not one, and getting that wrong silently drops matching rows.
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(
             execute_sub_batch, std::nullptr_t{}, input, res, valid_res);

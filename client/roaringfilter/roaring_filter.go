@@ -14,9 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package roaringfilter implements the exact MRB1 membership-filter envelope,
-// as specified by the roaring-membership design doc
-// (docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md).
+// Package roaringfilter builds the exact MRB1 membership-filter envelope for
+// roaring_match(field, {bitmap}), as specified by the roaring-membership design
+// doc (docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md).
+//
+// This package only builds. Blobs are validated by the proxy
+// (pkg/v3/util/roaringfilter) and decoded by segcore
+// (internal/core/src/common/RoaringMembership.cpp); a builder does not need to
+// re-validate its own output, and shipping a third copy of the validator here
+// would be one more implementation to keep bit-compatible.
 //
 // Its body is the portable 64-bit Roaring format implemented by Go Roaring v2
 // and CRoaring C++, so a blob built here is readable by the C++ prober without
@@ -39,14 +45,14 @@
 //	32      ...   body: portable Roaring64
 //
 // Unlike the MBF1 bloom envelope, cardinality here is verified rather than
-// informational: Validate scans the body and rejects a blob whose actual
-// cardinality disagrees, so a caller cannot understate the cost of a filter it
-// asks the cluster to fan out.
+// informational: the proxy validator scans the body and rejects a blob whose
+// actual cardinality disagrees, so a caller cannot understate the cost of a
+// filter it asks the cluster to fan out. Build therefore writes the count the
+// encoder produced, never a caller-supplied one.
 //
-// This package deliberately mirrors client/v3/sbbf's shape and, like it, is
-// validated independently on the server (internal/parser/planparserv2) rather
-// than imported there — the plan parser is compiled into a c-shared library
-// that must not depend on the standalone client module.
+// Like client/v3/sbbf, the server validates independently rather than importing
+// this package: the plan parser is compiled into a c-shared library that must
+// not depend on the standalone client module.
 package roaringfilter
 
 import (
@@ -84,25 +90,7 @@ const (
 	// keys/typecodes, the container header, and allocator metadata. The portable
 	// payload itself is already charged through body bytes.
 	EstimatedLowContainerOverheadBytes = 64
-
-	portableRoaring64PrefixBytes   = 8
-	portableRoaring64MinEntryBytes = 12
 )
-
-// ValidationSummary describes a structurally valid MRB1 blob without
-// materializing a roaring64.Bitmap.
-type ValidationSummary struct {
-	Cardinality           uint64
-	BodyBytes             uint64
-	HighContainerCount    uint64
-	LowContainerCount     uint64
-	EstimatedDecodedBytes uint64
-}
-
-// Filter is an immutable exact-membership bitmap after construction.
-type Filter struct {
-	bitmap *roaring64.Bitmap
-}
 
 // Build deduplicates members into a portable Roaring64 bitmap and wraps it in
 // an MRB1 envelope.
@@ -231,96 +219,6 @@ func sortedKeyContainerCounts(keys []uint64) (uint64, uint64) {
 	return highContainerCount, lowContainerCount
 }
 
-func prevalidatePortableRoaring64Body(body []byte) error {
-	if len(body) < portableRoaring64PrefixBytes {
-		return errors.Errorf(
-			"invalid portable roaring64 body: too short for high-container count: %d bytes",
-			len(body))
-	}
-
-	highContainerCount := binary.LittleEndian.Uint64(body[:portableRoaring64PrefixBytes])
-	// Every high container needs a 4-byte high key plus at least an 8-byte
-	// portable Roaring32 child: the no-run cookie followed by a container
-	// count of zero. CRoaring 3.0.0 emits exactly that for an empty child, and
-	// both CRoaring and roaring/v2 consume it, so the bound must admit 12 bytes
-	// per entry rather than assuming every child carries a value. This
-	// necessary bound prevents ReadFrom from allocating its three top-level
-	// slices from an attacker-controlled count that the body cannot possibly
-	// contain.
-	maxCountFromBody := uint64(len(body)-portableRoaring64PrefixBytes) / portableRoaring64MinEntryBytes
-	if highContainerCount > maxCountFromBody {
-		return errors.Errorf(
-			"invalid portable roaring64 body: high-container count %d exceeds body-derived maximum %d",
-			highContainerCount, maxCountFromBody)
-	}
-	if highContainerCount > MaxHighContainerCount {
-		return errors.Errorf(
-			"roaring bitmap high-container count %d exceeds maximum %d",
-			highContainerCount, MaxHighContainerCount)
-	}
-	return nil
-}
-
-func decodePortableRoaring64(body []byte) (bitmap *roaring64.Bitmap, consumed int64, err error) {
-	bitmap = roaring64.New()
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			bitmap = nil
-			consumed = 0
-			err = errors.Errorf(
-				"invalid portable roaring64 body: decoder panic: %v", recovered)
-		}
-	}()
-
-	consumed, err = bitmap.ReadFrom(bytes.NewReader(body))
-	if err != nil {
-		return nil, consumed, errors.Errorf(
-			"invalid portable roaring64 body: %v", err)
-	}
-	return bitmap, consumed, nil
-}
-
-func validateEnvelope(blob []byte) (uint64, []byte, error) {
-	if len(blob) < HeaderSize {
-		return 0, nil, errors.Errorf(
-			"roaring bitmap blob too short: %d bytes, need at least %d", len(blob), HeaderSize)
-	}
-	if len(blob) > HeaderSize+MaxBodyBytes {
-		return 0, nil, errors.Errorf(
-			"roaring bitmap blob too large: %d bytes, exceeds max %d",
-			len(blob), HeaderSize+MaxBodyBytes)
-	}
-	if !bytes.Equal(blob[0:4], []byte(Magic)) {
-		return 0, nil, errors.Errorf(
-			"roaring bitmap blob has invalid magic, expected %q", Magic)
-	}
-	if version := binary.LittleEndian.Uint16(blob[4:6]); version != Version {
-		return 0, nil, errors.Errorf(
-			"unsupported roaring bitmap version %d, expected %d", version, Version)
-	}
-	if format := binary.LittleEndian.Uint16(blob[6:8]); format != FormatPortableRoaring64 {
-		return 0, nil, errors.Errorf(
-			"unsupported roaring bitmap format %d, expected %d", format, FormatPortableRoaring64)
-	}
-	if reserved := binary.LittleEndian.Uint64(blob[24:32]); reserved != 0 {
-		return 0, nil, errors.Errorf(
-			"roaring bitmap reserved field must be 0, got %d", reserved)
-	}
-
-	bodyLen := binary.LittleEndian.Uint64(blob[16:24])
-	if bodyLen > MaxBodyBytes {
-		return 0, nil, errors.Errorf(
-			"roaring bitmap body too large: %d bytes, exceeds max %d", bodyLen, MaxBodyBytes)
-	}
-	actualBodyLen := uint64(len(blob) - HeaderSize)
-	if bodyLen != actualBodyLen {
-		return 0, nil, errors.Errorf(
-			"roaring bitmap body length %d does not match header value %d", actualBodyLen, bodyLen)
-	}
-
-	return binary.LittleEndian.Uint64(blob[8:16]), blob[HeaderSize:], nil
-}
-
 func estimateAndCheckDecodedBytes(bodyBytes, highContainerCount, lowContainerCount uint64) (uint64, error) {
 	if highContainerCount > MaxHighContainerCount {
 		return 0, errors.Errorf(
@@ -335,67 +233,4 @@ func estimateAndCheckDecodedBytes(bodyBytes, highContainerCount, lowContainerCou
 			estimated, MaxEstimatedDecodedBytes)
 	}
 	return estimated, nil
-}
-
-// Validate checks an MRB1 blob and reports its resource shape without
-// materializing a roaring64.Bitmap. Its success path is allocation-free.
-func Validate(blob []byte) (ValidationSummary, error) {
-	declaredCardinality, body, err := validateEnvelope(blob)
-	if err != nil {
-		return ValidationSummary{}, err
-	}
-	wire, err := scanPortableRoaring64Body(body)
-	if err != nil {
-		return ValidationSummary{}, err
-	}
-	if wire.cardinality != declaredCardinality {
-		return ValidationSummary{}, errors.Errorf(
-			"roaring bitmap cardinality %d does not match declared value %d",
-			wire.cardinality, declaredCardinality)
-	}
-	estimatedDecodedBytes, err := estimateAndCheckDecodedBytes(
-		uint64(len(body)), wire.highContainerCount, wire.lowContainerCount)
-	if err != nil {
-		return ValidationSummary{}, err
-	}
-	return ValidationSummary{
-		Cardinality:           wire.cardinality,
-		BodyBytes:             uint64(len(body)),
-		HighContainerCount:    wire.highContainerCount,
-		LowContainerCount:     wire.lowContainerCount,
-		EstimatedDecodedBytes: estimatedDecodedBytes,
-	}, nil
-}
-
-// Parse validates an MRB1 blob and deserializes its portable Roaring64 body.
-func Parse(blob []byte) (*Filter, error) {
-	summary, err := Validate(blob)
-	if err != nil {
-		return nil, err
-	}
-	body := blob[HeaderSize:]
-	bitmap, consumed, err := decodePortableRoaring64(body)
-	if err != nil {
-		return nil, err
-	}
-	if uint64(consumed) != summary.BodyBytes {
-		return nil, errors.Errorf(
-			"portable roaring64 body consumed %d bytes, expected %d", consumed, summary.BodyBytes)
-	}
-	if cardinality := bitmap.GetCardinality(); cardinality != summary.Cardinality {
-		return nil, errors.Errorf(
-			"roaring bitmap cardinality %d does not match declared value %d",
-			cardinality, summary.Cardinality)
-	}
-	return &Filter{bitmap: bitmap}, nil
-}
-
-// ContainsInt64 reports exact membership for v.
-func (f *Filter) ContainsInt64(v int64) bool {
-	return f.bitmap.Contains(uint64(v))
-}
-
-// Cardinality returns the number of distinct values in the bitmap.
-func (f *Filter) Cardinality() uint64 {
-	return f.bitmap.GetCardinality()
 }
