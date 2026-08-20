@@ -168,9 +168,7 @@ SkipIndexStatsBuilder::Build(
             int64_t null_count = 0;
             milvus::UUID min{};
             milvus::UUID max{};
-            ankerl::unordered_dense::set<milvus::UUID,
-                                         hasher<milvus::UUID>>
-                unique_values;
+            ankerl::unordered_dense::set<milvus::UUID> unique_values;
             bool has_first_valid = false;
             for (const auto& batch : batches) {
                 auto arr = batch->column(col_idx);
@@ -278,8 +276,7 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
             milvus::UUID min{};
             milvus::UUID max{};
             int64_t null_count = 0;
-            ankerl::unordered_dense::set<milvus::UUID, hasher<milvus::UUID>>
-                unique_values;
+            ankerl::unordered_dense::set<milvus::UUID> unique_values;
             for (int64_t i = 0; i < count; ++i) {
                 if (validity && !validity[i]) {
                     null_count++;

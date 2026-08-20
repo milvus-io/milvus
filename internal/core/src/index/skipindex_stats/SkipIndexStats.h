@@ -54,6 +54,7 @@ using Metrics = std::variant<bool,
                              int64_t,
                              float,
                              double,
+                             milvus::UUID,
                              std::string,
                              std::string_view>;
 

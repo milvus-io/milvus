@@ -39,6 +39,7 @@ SupportsSkipIndex(arrow::Type::type type) {
         case arrow::Type::FLOAT:
         case arrow::Type::DOUBLE:
         case arrow::Type::STRING:
+        case arrow::Type::FIXED_SIZE_BINARY:
             return true;
         default:
             return false;
