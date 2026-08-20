@@ -353,7 +353,7 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 		afterPersist = append(afterPersist, event.afterPersist...)
 	}
 	if len(persists) > 0 {
-		if err := s.catalog.SaveQueryViews(ctx, persists); err != nil {
+		if err := s.persistViews(ctx, persists); err != nil {
 			return err
 		}
 	}
@@ -362,6 +362,44 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 	}
 	if len(viewsByNode) > 0 {
 		if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{ViewsByNode: viewsByNode}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// persistViews writes all views of one flush batch to the catalog in one or
+// more transactions of at most maxTxnOps.
+//
+// A batch is capped at maxTxnOps by claim()'s budget as long as it spans more
+// than one shard, so this only ever chunks when the batch is a single shard's
+// event that grew past the limit while earlier flushes were in flight (the
+// first shard is not subject to the claim budget). In that case the persist
+// list is sorted version-ascending within each shard and split into
+// transactions of at most maxTxnOps.
+//
+// The ascending order is what keeps a partially committed prefix recoverable:
+// a prefix that committed leaves "older view state changed, newer view state
+// absent" on the catalog, so recovery can never observe two active views for
+// one shard (a regression and a promotion both durable). A flush failure is
+// unrecoverable by design (see dirtyViewFlushTask.Execute), so the partial
+// prefix is repaired by the coordinator restart that follows.
+func (s *DirtyViewFlushScheduler) persistViews(ctx context.Context, persists []*viewpb.QueryViewOfShard) error {
+	if len(persists) <= s.maxTxnOps {
+		return s.catalog.SaveQueryViews(ctx, persists)
+	}
+	sorted := make([]*viewpb.QueryViewOfShard, len(persists))
+	copy(sorted, persists)
+	sort.Slice(sorted, func(i, j int) bool {
+		ki, kj := queryViewKeyFromProto(sorted[i]), queryViewKeyFromProto(sorted[j])
+		if ki.ShardID != kj.ShardID {
+			return ki.ShardID.String() < kj.ShardID.String()
+		}
+		return kj.QueryViewVersion.GT(ki.QueryViewVersion) // ascending
+	})
+	for start := 0; start < len(sorted); start += s.maxTxnOps {
+		end := min(start+s.maxTxnOps, len(sorted))
+		if err := s.catalog.SaveQueryViews(ctx, sorted[start:end]); err != nil {
 			return err
 		}
 	}

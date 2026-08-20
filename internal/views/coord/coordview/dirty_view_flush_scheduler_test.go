@@ -2,6 +2,7 @@ package coordview
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -615,4 +616,71 @@ func TestDirtyViewFlushTaskPanicsOnSyncerClosedError(t *testing.T) {
 	}()
 	_ = task.Execute(context.Background())
 	t.Fatal("Execute must panic on ErrSyncerClosed")
+}
+
+func TestDirtyViewFlushSchedulerChunksOversizedSingleShardAtFlush(t *testing.T) {
+	catalog := newMockCatalog()
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, newMockSyncer(), 2)
+	t.Cleanup(scheduler.Close)
+
+	// A single shard accumulates more persists than maxTxnOps while earlier
+	// flushes are in flight. Claim's budget only caps multi-shard batches, so
+	// this event is claimed whole and chunked at flush time into transactions
+	// of at most maxTxnOps, in version-ascending order.
+	views := []*viewpb.QueryViewOfShard{
+		buildTestViewWithVersion(1, 1, 1, 1),
+		buildTestViewWithVersion(1, 1, 1, 2),
+		buildTestViewWithVersion(1, 1, 1, 3),
+		buildTestViewWithVersion(1, 1, 1, 4),
+		buildTestViewWithVersion(1, 1, 1, 5),
+	}
+	scheduler.Submit(dirtyViewEvent{shardID: testShardID, persists: views})
+
+	require.NoError(t, scheduler.Flush(context.Background()))
+
+	catalog.mu.Lock()
+	batches := catalog.saveCalls
+	catalog.mu.Unlock()
+	require.Len(t, batches, 3) // 2 + 2 + 1
+	total := 0
+	for i, b := range batches {
+		require.LessOrEqual(t, len(b), 2, "batch %d exceeds maxTxnOps", i)
+		total += len(b)
+		versions := make([]int64, 0, len(b))
+		for _, v := range b {
+			versions = append(versions, v.GetMeta().GetVersion().GetQueryVersion())
+		}
+		require.True(t, sort.SliceIsSorted(versions, func(a, b int) bool { return versions[a] < versions[b] }),
+			"batch %d is not version-ascending: %v", i, versions)
+	}
+	require.Equal(t, len(views), total)
+}
+
+func TestPersistViewsSortsVersionAscendingBeforeChunk(t *testing.T) {
+	catalog := newMockCatalog()
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, newMockSyncer(), 2)
+
+	// Deliberately shuffled: the chunked persist must be deterministic and
+	// version-ascending so any committed prefix is recovery-safe.
+	views := []*viewpb.QueryViewOfShard{
+		buildTestViewWithVersion(1, 1, 1, 5),
+		buildTestViewWithVersion(1, 1, 1, 2),
+		buildTestViewWithVersion(1, 1, 1, 4),
+		buildTestViewWithVersion(1, 1, 1, 1),
+		buildTestViewWithVersion(1, 1, 1, 3),
+	}
+	require.NoError(t, scheduler.persistViews(context.Background(), views))
+
+	catalog.mu.Lock()
+	batches := catalog.saveCalls
+	catalog.mu.Unlock()
+	require.Len(t, batches, 3)
+	expected := [][]int64{{1, 2}, {3, 4}, {5}}
+	for i, b := range batches {
+		versions := make([]int64, 0, len(b))
+		for _, v := range b {
+			versions = append(versions, v.GetMeta().GetVersion().GetQueryVersion())
+		}
+		assert.Equal(t, expected[i], versions, "batch %d versions", i)
+	}
 }
