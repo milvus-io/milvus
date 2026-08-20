@@ -873,7 +873,8 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			req.GetExternalSpec() != "" || hasExternalSourceRoot(req.GetSources())
 		return node.copySegment(ctx, req, external)
 	default:
-		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		mlog.Warn(ctx, "CreateTask failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}
@@ -1036,7 +1037,8 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
 	default:
-		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		mlog.Warn(ctx, "QueryTask failed", mlog.Err(err))
 		return &workerpb.QueryTaskResponse{
 			Status: merr.Status(err),
@@ -1096,7 +1098,8 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			mlog.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:
-		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		mlog.Warn(ctx, "DropTask failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}

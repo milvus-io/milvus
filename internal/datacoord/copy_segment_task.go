@@ -336,8 +336,9 @@ func (t *copySegmentTask) GetTaskVersion() int64 {
 //
 // Error handling:
 //   - Permanent snapshot assembly errors mark the task and job failed
-//   - Transient assembly or DataNode RPC errors leave the task Pending so the
-//     scheduler can retry it on a later cycle
+//   - An external task rejected as unsupported marks the task and job failed
+//   - Other transient assembly or DataNode RPC errors leave the task Pending
+//     so the scheduler can retry it on a later cycle
 //
 // Why load the snapshot during dispatch:
 // - Snapshot data contains full binlog paths needed for copy
@@ -360,6 +361,10 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		if job.GetExternal() && errors.Is(err, merr.ErrServiceUnimplemented) {
+			t.markTaskAndJobFailed(merr.Wrap(err,
+				"datanode does not support external copy segment tasks").Error())
+		}
 		return
 	}
 	mlog.Info(ctx, "create copy segment task on datanode done",

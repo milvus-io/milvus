@@ -55,6 +55,10 @@ type CopySegmentTaskSuite struct {
 	suite.Suite
 }
 
+type copySegmentClusterMock struct {
+	session.Cluster
+}
+
 func TestCopySegmentTask(t *testing.T) {
 	suite.Run(t, new(CopySegmentTaskSuite))
 }
@@ -507,6 +511,85 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerUsesJobExternalFlag() {
 			updated := copyMeta.GetTask(context.Background(), task.GetTaskId())
 			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updated.GetState())
 			s.EqualValues(10, updated.GetNodeId())
+		})
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedExternalTask() {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	task.copyMeta = copyMeta
+
+	job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+	job.External = true
+	s.NoError(copyMeta.AddJob(context.Background(), job))
+
+	req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
+	defer assembleMock.UnPatch()
+
+	cluster := &copySegmentClusterMock{}
+	createMock := mockey.Mock((*copySegmentClusterMock).CreateCopySegment).
+		Return(merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s'", taskcommon.ExternalCopySegment)).Build()
+	defer createMock.UnPatch()
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "datanode does not support external copy segment tasks")
+	updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
+}
+
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
+	tests := []struct {
+		name     string
+		external bool
+		err      error
+	}{
+		{
+			name:     "external service not ready",
+			external: true,
+			err:      merr.WrapErrServiceNotReady("datanode", 10, "Initializing"),
+		},
+		{
+			name:     "local unimplemented",
+			external: false,
+			err:      merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported local task"),
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			task := createTestCopyTask(100, 2001).(*copySegmentTask)
+			task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+			copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+			task.copyMeta = copyMeta
+
+			job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+			job.External = test.external
+			s.NoError(copyMeta.AddJob(context.Background(), job))
+
+			req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
+			assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
+			defer assembleMock.UnPatch()
+
+			cluster := &copySegmentClusterMock{}
+			createMock := mockey.Mock((*copySegmentClusterMock).CreateCopySegment).
+				Return(test.err).Build()
+			defer createMock.UnPatch()
+
+			task.CreateTaskOnWorker(10, cluster)
+
+			updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
+			s.Empty(updatedTask.GetReason())
+			updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
+			s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
 		})
 	}
 }

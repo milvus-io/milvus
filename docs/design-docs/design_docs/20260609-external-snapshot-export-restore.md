@@ -686,8 +686,10 @@ Restore tests:
   paths.
 - During a rolling upgrade, DataCoord submits external restore work as
   `ExternalCopySegment`. An older worker rejects the unknown task type without
-  side effects; the scheduler leaves the task pending and retries with backoff.
-  Local restore, import, index, and compaction keep their existing task types.
+  side effects; DataCoord recognizes that capability error and fails the
+  restore immediately instead of retrying it until the job timeout. Other
+  transient DataNode errors remain retryable. Local restore, import, index, and
+  compaction keep their existing task types.
 - DataNode invokes each provider copy once within one bounded object-copy
   deadline; provider SDKs retain their request-level retries.
 - Azure retries transient copy-status polling without replaying
