@@ -140,6 +140,11 @@ class FMIndex : public ScalarIndex<std::string> {
     const TargetBitmap
     IsNull() override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<std::string>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override;
 
