@@ -40,8 +40,6 @@ func setupMembershipElementCollection(t *testing.T, ctx CtxT, mc MC, namePrefix 
 	collName := common.GenRandomString(namePrefix, 6)
 	opt := hp.DefaultStructAElementSchemaOption(collName)
 	opt.IncludeDocVChar = false
-	opt.IncludeStrVal = false
-	opt.IncludeFloatVal = false
 	opt.IncludeCategory = false
 
 	schema, structSchema := hp.CreateStructAElementSchema(opt)
@@ -131,6 +129,24 @@ func TestMembershipFilterRejectedInElementPredicates(t *testing.T) {
 
 	t.Run("roaring_match on struct sub-field rejected", func(t *testing.T) {
 		err := query(`roaring_match(structA[int_val], {rb})`, "rb", roaringBlob)
+		common.CheckErr(t, err, false, "roaring_match only supports INT8/INT16/INT32/INT64 fields")
+	})
+
+	t.Run("bloom_match on struct varchar sub-field rejected", func(t *testing.T) {
+		// A VARCHAR-typed struct sub-field is still an ARRAY to the parser.
+		strBlob, err := client.NewBloomFilterBlob([]string{"a", "b"}, 0.001)
+		require.NoError(t, err)
+		err = query(`bloom_match(structA[str_val], {bf})`, "bf", strBlob)
+		common.CheckErr(t, err, false, "bloom_match only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths")
+	})
+
+	t.Run("bloom_match on struct float sub-field rejected", func(t *testing.T) {
+		err := query(`bloom_match(structA[float_val], {bf})`, "bf", bloomBlob)
+		common.CheckErr(t, err, false, "bloom_match only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths")
+	})
+
+	t.Run("roaring_match on struct varchar sub-field rejected", func(t *testing.T) {
+		err := query(`roaring_match(structA[str_val], {rb})`, "rb", roaringBlob)
 		common.CheckErr(t, err, false, "roaring_match only supports INT8/INT16/INT32/INT64 fields")
 	})
 }

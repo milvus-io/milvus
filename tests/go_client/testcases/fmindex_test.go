@@ -442,7 +442,8 @@ func TestFMIndexNonASCII(t *testing.T) {
 	})
 
 	values := []string{"中文测试数据", "测试中文", "emoji😀测试", "纯英文english", "中文😀中文"}
-	totalRows := len(values) * 40
+	// Keep the row count above the segment index threshold (1024) so FMINDEX is really built.
+	totalRows := len(values) * 300
 	ids := make([]int64, totalRows)
 	content := make([]string, totalRows)
 	noIndex := make([]string, totalRows)
@@ -573,7 +574,8 @@ func TestFMIndexEmptyPatternAndGeneralFallback(t *testing.T) {
 		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 	})
 
-	totalRows := 400
+	// Keep the row count above the segment index threshold (1024) so FMINDEX is really built.
+	totalRows := 2000
 	ids := make([]int64, totalRows)
 	content := make([]string, totalRows)
 	noIndex := make([]string, totalRows)
@@ -703,7 +705,8 @@ func TestFMIndexEscapedWildcards(t *testing.T) {
 
 	// Rows carrying the literal special characters, cycled.
 	values := []string{"100%done", "under_score", "back\\slash", "plain", "50%_mixed"}
-	totalRows := len(values) * 40
+	// Keep the row count above the segment index threshold (1024) so FMINDEX is really built.
+	totalRows := len(values) * 300
 	ids := make([]int64, totalRows)
 	content := make([]string, totalRows)
 	noIndex := make([]string, totalRows)

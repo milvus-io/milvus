@@ -37,8 +37,10 @@ const (
 	bloomCreatorField = "creator_id"
 	bloomVectorField  = "vector"
 	bloomVectorDim    = 8
-	bloomTotalRows    = 1000
-	bloomDomain       = 50
+	// Keep the row count above indexCoord.segment.minSegmentNumRowsToEnableIndex
+	// (1024) so scalar indexes are really built, not fake-finished.
+	bloomTotalRows = 2000
+	bloomDomain    = 50
 )
 
 func bloomIntSchema(collectionName string) *entity.Schema {
@@ -619,6 +621,170 @@ func TestBloomMatchJsonPathStrictTyping(t *testing.T) {
 		}
 	}
 	require.Positive(t, floatEncodedPresent, "fixture must contain float-encoded member rows")
+}
+
+// TestBloomMatchJsonWholeDocNestedAndDynamicPath verifies the JSON-path forms
+// beyond a single key: the whole JSON document, a nested path, and a dynamic
+// field (an unknown identifier resolving to a $meta path). Each is strictly
+// typed, so a float-encoded value never matches an int64 member.
+func TestBloomMatchJsonWholeDocNestedAndDynamicPath(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collectionName := common.GenRandomString("bloom_json_forms", 6)
+
+	schema := entity.NewSchema().WithName(collectionName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("meta").WithDataType(entity.FieldTypeJSON)).
+		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
+		WithConsistencyLevel(entity.ClStrong)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
+	})
+
+	const totalRows = 1000
+	ids := make([]int64, totalRows)
+	jsonValues := make([][]byte, totalRows)
+	vectors := make([][]float32, totalRows)
+	for i := 0; i < totalRows; i++ {
+		ids[i] = int64(i)
+		v := make([]float32, bloomVectorDim)
+		v[0] = float32(i)
+		vectors[i] = v
+		switch i % 3 {
+		case 0:
+			// nested object: {"a": {"b": <int>}} — int-encoded
+			jsonValues[i] = []byte(fmt.Sprintf(`{"a": {"b": %d}}`, i%10))
+		case 1:
+			// nested object with float-encoded value
+			jsonValues[i] = []byte(fmt.Sprintf(`{"a": {"b": %d.0}}`, i%10))
+		default:
+			// bare scalar whole-document value (int)
+			jsonValues[i] = []byte(fmt.Sprintf(`%d`, i%10))
+		}
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", ids).
+		WithColumns(column.NewColumnJSONBytes("meta", jsonValues)).
+		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+	require.NoError(t, err)
+	flushAndLoadBloom(t, ctx, mc, collectionName)
+
+	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0.001)
+	require.NoError(t, err)
+
+	// nested path: meta["a"]["b"] — int-encoded rows (i%3==0) match, float-encoded
+	// rows (i%3==1) never match.
+	nested := queryBloomIDs(t, ctx, mc, collectionName, `bloom_match(meta["a"]["b"], {bf})`, blob)
+	require.NotEmpty(t, nested)
+	for _, id := range nested {
+		require.EqualValuesf(t, 0, id%3, "bloom_match(nested) matched a non-int row id=%d", id)
+	}
+
+	// whole document: meta — bare-scalar int rows (i%3==2) match.
+	whole := queryBloomIDs(t, ctx, mc, collectionName, `bloom_match(meta, {bf})`, blob)
+	require.NotEmpty(t, whole)
+	for _, id := range whole {
+		require.EqualValuesf(t, 2, id%3, "bloom_match(whole doc) matched a non-bare-scalar row id=%d", id)
+	}
+}
+
+// TestBloomMatchDynamicFieldPath verifies bloom_match over a dynamic field: an
+// unknown identifier resolves to a $meta path, strictly typed per row value.
+func TestBloomMatchDynamicFieldPath(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collectionName := common.GenRandomString("bloom_dynfield", 6)
+
+	schema := entity.NewSchema().WithName(collectionName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(bloomVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(bloomVectorDim)).
+		WithDynamicFieldEnabled(true)
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
+		WithConsistencyLevel(entity.ClStrong)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
+	})
+
+	const totalRows = 1000
+	ids := make([]int64, totalRows)
+	dynInts := make([]int64, totalRows)
+	vectors := make([][]float32, totalRows)
+	for i := 0; i < totalRows; i++ {
+		ids[i] = int64(i)
+		dynInts[i] = int64(i % 10)
+		v := make([]float32, bloomVectorDim)
+		v[0] = float32(i)
+		vectors[i] = v
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", ids).
+		WithInt64Column("uid", dynInts).
+		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, vectors))
+	require.NoError(t, err)
+	flushAndLoadBloom(t, ctx, mc, collectionName)
+
+	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0.001)
+	require.NoError(t, err)
+
+	// "uid" is not a schema field -> resolves to a $meta dynamic path.
+	res := queryBloomIDs(t, ctx, mc, collectionName, `bloom_match(uid, {bf})`, blob)
+	require.NotEmpty(t, res)
+	// Every member is present, so all rows match.
+	require.Len(t, res, totalRows)
+}
+
+// TestBloomMatchGrowingAndSealedMixed verifies bloom_match evaluates both sealed
+// and growing segments in one query. A blob spanning a sealed member (0..4) and a
+// growing-only member (500..504) must return rows from both.
+func TestBloomMatchGrowingAndSealedMixed(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collectionName := common.GenRandomString("bloom_growing", 6)
+
+	createBloomIntCollection(t, ctx, mc, collectionName)
+	insertBloomIntRows(t, ctx, mc, collectionName)
+	flushAndLoadBloom(t, ctx, mc, collectionName)
+
+	// A second batch NOT flushed stays in a growing segment; creator ids 500..509
+	// are disjoint from the sealed batch's 0..49.
+	const growingN = 200
+	gids := make([]int64, growingN)
+	gcreators := make([]int64, growingN)
+	gvectors := make([][]float32, growingN)
+	for i := 0; i < growingN; i++ {
+		gids[i] = int64(bloomTotalRows + i)
+		gcreators[i] = int64(500 + i%10)
+		v := make([]float32, bloomVectorDim)
+		v[0] = float32(bloomTotalRows + i)
+		gvectors[i] = v
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", gids).
+		WithInt64Column(bloomCreatorField, gcreators).
+		WithFloatVectorColumn(bloomVectorField, bloomVectorDim, gvectors))
+	require.NoError(t, err)
+
+	blob, err := client.NewBloomFilterBlob([]int64{0, 1, 2, 3, 4, 500, 501, 502, 503, 504}, 0.001)
+	require.NoError(t, err)
+
+	got := queryBloomIDs(t, ctx, mc, collectionName,
+		fmt.Sprintf("bloom_match(%s, {bf})", bloomCreatorField), blob)
+	require.NotEmpty(t, got)
+	sawSealed, sawGrowing := false, false
+	for _, id := range got {
+		if id < bloomTotalRows {
+			sawSealed = true
+		} else {
+			sawGrowing = true
+		}
+	}
+	require.True(t, sawSealed, "bloom_match missed sealed-segment members")
+	require.True(t, sawGrowing, "bloom_match missed growing-segment members")
 }
 
 // TestBloomMatchFalsePositiveRateSanity verifies the measured false-positive

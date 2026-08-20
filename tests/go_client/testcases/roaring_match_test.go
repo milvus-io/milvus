@@ -38,8 +38,10 @@ const (
 	roaringCreatorField = "creator_id"
 	roaringVectorField  = "vector"
 	roaringVectorDim    = 8
-	roaringTotalRows    = 1000
-	roaringDomain       = 50
+	// Keep the row count above indexCoord.segment.minSegmentNumRowsToEnableIndex
+	// (1024) so scalar indexes are really built, not fake-finished.
+	roaringTotalRows = 2000
+	roaringDomain    = 50
 )
 
 func roaringIntSchema(collectionName string, nullable bool) *entity.Schema {
@@ -226,6 +228,52 @@ func TestRoaringMatchDelete(t *testing.T) {
 	require.Empty(t, remaining, "victim rows must be deleted")
 }
 
+// TestRoaringMatchGrowingAndSealedMixed verifies roaring_match evaluates both
+// sealed and growing segments in one query, exactly.
+func TestRoaringMatchGrowingAndSealedMixed(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collectionName := common.GenRandomString("roaring_growing", 6)
+
+	createRoaringCollection(t, ctx, mc, collectionName, false)
+	insertRoaringRows(t, ctx, mc, collectionName, false)
+	flushLoadRoaring(t, ctx, mc, collectionName)
+
+	const growingN = 200
+	gids := make([]int64, growingN)
+	gcreators := make([]int64, growingN)
+	gvectors := make([][]float32, growingN)
+	for i := 0; i < growingN; i++ {
+		gids[i] = int64(roaringTotalRows + i)
+		gcreators[i] = int64(500 + i%10)
+		v := make([]float32, roaringVectorDim)
+		v[0] = float32(roaringTotalRows + i)
+		gvectors[i] = v
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
+		WithInt64Column("id", gids).
+		WithInt64Column(roaringCreatorField, gcreators).
+		WithFloatVectorColumn(roaringVectorField, roaringVectorDim, gvectors))
+	require.NoError(t, err)
+
+	blob, err := client.NewRoaringBitmapBlob([]int64{0, 1, 2, 3, 4, 500, 501, 502, 503, 504})
+	require.NoError(t, err)
+
+	got := queryRoaringIDs(t, ctx, mc, collectionName,
+		fmt.Sprintf("roaring_match(%s, {rb})", roaringCreatorField), blob)
+	require.NotEmpty(t, got)
+	sawSealed, sawGrowing := false, false
+	for _, id := range got {
+		if id < roaringTotalRows {
+			sawSealed = true
+		} else {
+			sawGrowing = true
+		}
+	}
+	require.True(t, sawSealed, "roaring_match missed sealed-segment members")
+	require.True(t, sawGrowing, "roaring_match missed growing-segment members")
+}
+
 // TestRoaringMatchEmptyBitmap verifies an empty bitmap matches nothing.
 func TestRoaringMatchEmptyBitmap(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
@@ -322,7 +370,7 @@ func TestRoaringMatchNegativeValues(t *testing.T) {
 	const (
 		domain    = 100
 		negShift  = 50 // creator = i % domain - negShift, straddling zero
-		totalRows = 1000
+		totalRows = 2000
 	)
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
@@ -546,7 +594,7 @@ func TestRoaringMatchIntTypeMatrix(t *testing.T) {
 		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 	})
 
-	const totalRows = 1000
+	const totalRows = 2000
 	ids := make([]int64, totalRows)
 	i8 := make([]int8, totalRows)
 	i16 := make([]int16, totalRows)
@@ -625,7 +673,7 @@ func TestRoaringMatchInt64Bounds(t *testing.T) {
 		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
 	})
 
-	const totalRows = 1000
+	const totalRows = 2000
 	ids := make([]int64, totalRows)
 	creators := make([]int64, totalRows)
 	vectors := make([][]float32, totalRows)
