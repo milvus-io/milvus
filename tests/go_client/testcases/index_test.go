@@ -503,7 +503,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 				if field.DataType == entity.FieldTypeJSON {
 					require.ErrorContains(t, err, "json index must specify cast type")
 				} else {
-					require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
+					require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar, timestamptz, date or time field")
 				}
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
@@ -695,7 +695,7 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
+		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar, timestamptz, date or time field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 
