@@ -80,6 +80,8 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 
 	initialRate := &params.CommonCfg.StorageIopsInitialRate
 	maxRate := &params.CommonCfg.StorageIopsMaxRate
+	assert.Equal(t, "3.0.1", initialRate.Version)
+	assert.Equal(t, "3.0.1", maxRate.Version)
 	assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
 	assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
 

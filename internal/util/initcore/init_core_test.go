@@ -220,17 +220,6 @@ func TestInitLoonReaderConfigRejectsOutOfRangeWindow(t *testing.T) {
 	}
 }
 
-func TestSetExternalIopsConfig(t *testing.T) {
-	assert.Error(t, setExternalIopsConfig(0, 5000))
-	assert.NoError(t, setExternalIopsConfig(3000, 0))
-	t.Cleanup(func() {
-		assert.NoError(t, setExternalIopsConfig(
-			paramtable.DefaultStorageIopsInitialRate,
-			paramtable.DefaultStorageIopsMaxRate,
-		))
-	})
-}
-
 // TestInitLoonReaderConfigSerialized pins the read-then-apply critical
 // section. Config-event handlers run inline on the updating goroutine with no
 // cross-handler ordering guarantee, and resizing the reader pool is not

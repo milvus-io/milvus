@@ -144,9 +144,6 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 }
 
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
-	if err := InitExternalIopsConfig(params); err != nil {
-		return err
-	}
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
 	}
@@ -156,16 +153,9 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 // InitExternalIopsConfig publishes the process-local policy used only when
 // External Table filesystem properties are injected.
 func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
-	return setExternalIopsConfig(
-		params.CommonCfg.StorageIopsInitialRate.GetAsUint32(),
-		params.CommonCfg.StorageIopsMaxRate.GetAsUint32(),
-	)
-}
-
-func setExternalIopsConfig(initialRate, maxRate uint32) error {
 	status := C.InitExternalIopsConfig(
-		C.uint32_t(initialRate),
-		C.uint32_t(maxRate),
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
 	)
 	return HandleCStatus(&status, "InitExternalIopsConfig failed")
 }
@@ -572,9 +562,6 @@ func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 		return merr.WrapErrParameterInvalidMsg(
 			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
 			maxIndexBuildReadWindowBytes, window)
-	}
-	if err := InitExternalIopsConfig(params); err != nil {
-		return err
 	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
