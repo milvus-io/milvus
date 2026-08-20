@@ -173,7 +173,8 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
                 index_params,
                 load_index_info->enable_mmap,
                 load_index_info->num_rows,
-                load_index_info->dim);
+                load_index_info->dim,
+                load_index_info->schema.nullable());
         return request;
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,

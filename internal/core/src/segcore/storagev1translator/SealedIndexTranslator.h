@@ -71,6 +71,7 @@ class SealedIndexTranslator
         std::string field_id;
         int64_t num_rows;
         int64_t dim;
+        bool field_nullable;
         std::string
             warmup_policy;  // "disable" or "sync", empty means use global config
     };

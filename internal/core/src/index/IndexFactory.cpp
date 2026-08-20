@@ -15,9 +15,12 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
+#include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastType.h"
@@ -42,8 +45,76 @@
 #include "knowhere/comp/knowhere_check.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
+#include "storage/PluginLoader.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
+namespace {
+
+uint64_t
+SaturatingMultiply(uint64_t lhs, uint64_t rhs) {
+    if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs * rhs;
+}
+
+uint64_t
+TantivyRowOffsetVectorCount(
+    DataType field_type,
+    const std::string& index_type,
+    const std::map<std::string, std::string>& index_params,
+    std::optional<bool> field_nullable) {
+    const auto is_json_path =
+        field_type == DataType::JSON && index_params.count(JSON_PATH) > 0;
+    if (!is_json_path && !field_nullable.value_or(true)) {
+        return 0;
+    }
+
+    uint64_t vector_count = 1;
+    const auto cast_type = index_params.find(JSON_CAST_TYPE);
+    if (is_json_path && index_type == INVERTED_INDEX_TYPE &&
+        cast_type != index_params.end() && cast_type->second != "JSON") {
+        // Typed JSON path indexes retain both null offsets and non-existing
+        // path offsets. JsonFlat and NGRAM retain only null offsets.
+        ++vector_count;
+    }
+    return vector_count;
+}
+
+uint64_t
+TantivyRowOffsetsSize(DataType field_type,
+                      const std::string& index_type,
+                      const std::map<std::string, std::string>& index_params,
+                      int64_t num_rows,
+                      std::optional<bool> field_nullable) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+    const auto vector_count = TantivyRowOffsetVectorCount(
+        field_type, index_type, index_params, field_nullable);
+    return SaturatingMultiply(
+        SaturatingMultiply(static_cast<uint64_t>(num_rows), sizeof(size_t)),
+        vector_count);
+}
+
+uint64_t
+TantivyV3MmapDownloadPeak(uint64_t index_size_in_bytes) {
+    // Without persisted slice metadata an encrypted slice has no trustworthy
+    // ciphertext bound. Keep the existing whole-index estimate whenever a
+    // cipher plugin is active.
+    if (storage::PluginLoader::GetInstance().getCipherPlugin() != nullptr) {
+        return index_size_in_bytes;
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+    const auto worker_count = std::max<size_t>(1, pool.GetMaxThreadNum());
+    const auto pool_download_peak = SaturatingMultiply(
+        worker_count, static_cast<uint64_t>(DEFAULT_INDEX_FILE_SLICE_SIZE));
+    return std::min(index_size_in_bytes, pool_download_peak);
+}
+
+}  // namespace
 
 bool
 IndexFactory::CanUseIndexRawDataForField(DataType field_type,
@@ -119,7 +190,8 @@ IndexFactory::IndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    int64_t dim) {
+    int64_t dim,
+    std::optional<bool> field_nullable) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
@@ -134,7 +206,9 @@ IndexFactory::IndexLoadResource(
                                        index_version,
                                        index_size_in_bytes,
                                        index_params,
-                                       mmap_enable);
+                                       mmap_enable,
+                                       num_rows,
+                                       field_nullable);
     }
 }
 
@@ -328,12 +402,17 @@ IndexFactory::ScalarIndexLoadResource(
     IndexVersion index_version,
     uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows,
+    std::optional<bool> field_nullable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
     AssertInfo(index_type_it != index_params.end(), "index type is empty");
     const std::string& index_type = index_type_it->second;
+    const auto scalar_version =
+        GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
 
     knowhere::expected<knowhere::Resource> resource;
 
@@ -361,8 +440,36 @@ IndexFactory::ScalarIndexLoadResource(
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
-               index_type == milvus::index::NGRAM_INDEX_TYPE ||
-               index_type == milvus::index::RTREE_INDEX_TYPE) {
+               index_type == milvus::index::NGRAM_INDEX_TYPE) {
+        request.final_memory_cost = 0;
+        request.final_disk_cost = index_size_in_bytes;
+        request.max_memory_cost = index_size_in_bytes;
+        request.max_disk_cost = index_size_in_bytes;
+
+        if (mmap_enable && scalar_version >= 3) {
+            const auto row_offset_vector_count = TantivyRowOffsetVectorCount(
+                field_type, index_type, index_params, field_nullable);
+            const auto row_offsets_size = TantivyRowOffsetsSize(
+                field_type, index_type, index_params, num_rows, field_nullable);
+            const auto one_row_offset_vector_size = SaturatingMultiply(
+                static_cast<uint64_t>(std::max<int64_t>(num_rows, 0)),
+                sizeof(size_t));
+            // Metadata entries load sequentially. Previously loaded vectors
+            // stay resident while the next entry and its destination vector
+            // coexist, so N vectors peak at N + 1 vector-sized buffers.
+            const auto row_offsets_loading_peak =
+                row_offset_vector_count == 0
+                    ? 0
+                    : SaturatingMultiply(one_row_offset_vector_size,
+                                         row_offset_vector_count + 1);
+            request.final_memory_cost = row_offsets_size;
+            request.max_memory_cost =
+                std::max(TantivyV3MmapDownloadPeak(index_size_in_bytes),
+                         row_offsets_loading_peak);
+        }
+
+        request.has_raw_data = false;
+    } else if (index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = 0;
         request.final_disk_cost = index_size_in_bytes;
         request.max_memory_cost = index_size_in_bytes;

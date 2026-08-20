@@ -44,6 +44,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                         std::to_string(load_index_info->field_id),
                         load_index_info->num_rows,
                         load_index_info->dim,
+                        load_index_info->schema.nullable(),
                         load_index_info->warmup_policy}),
       meta_(
           load_index_info->enable_mmap
@@ -99,7 +100,8 @@ SealedIndexTranslator::estimated_loading_usage(
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_load_info_.dim);
+            index_load_info_.dim,
+            index_load_info_.field_nullable);
     // this is an estimation, error could be up to 20%.
     return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
                                                 request.final_disk_cost),
@@ -130,7 +132,8 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_load_info_.dim);
+            index_load_info_.dim,
+            index_load_info_.field_nullable);
     index->SetCellSize(milvus::cachinglayer::ResourceUsage(
         request.final_memory_cost, request.final_disk_cost));
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
