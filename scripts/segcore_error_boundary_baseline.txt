@@ -77,6 +77,7 @@ knowhere	internal/core/src/storage/Event.cpp
 arrow	internal/core/src/common/ArrowDataWrapper.h
 arrow	internal/core/src/common/ChunkWriter.cpp
 arrow	internal/core/src/common/ChunkWriter.h
+arrow	internal/core/src/common/ColumnarArrayChunkBuilder.cpp
 arrow	internal/core/src/common/FieldData.cpp
 arrow	internal/core/src/common/FieldData.h
 arrow	internal/core/src/common/FieldDataInterface.h
