@@ -5507,10 +5507,11 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 
 	t.Run("invalid external spec rejected", func(t *testing.T) {
 		schema := buildSchema()
-		schema.ExternalSpec = `{`
+		schema.ExternalSpec = `{"format":"FORMAT_SCHEMA_SECRET_SENTINEL"}`
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid external spec JSON")
+		assert.Contains(t, err.Error(), "FORMAT_SCHEMA_SECRET_SENTINEL")
+		assert.Contains(t, err.Error(), "unsupported format")
 	})
 
 	t.Run("partition key disabled", func(t *testing.T) {
@@ -5558,20 +5559,24 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 
 	t.Run("source set without spec rejected", func(t *testing.T) {
 		schema := buildSchema()
-		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSource = "s3://SOURCE_ACCESS_SENTINEL:SOURCE_SECRET_SENTINEL@bucket/path"
 		schema.ExternalSpec = ""
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "both set or both empty")
+		assert.NotContains(t, err.Error(), "SOURCE_ACCESS_SENTINEL")
+		assert.NotContains(t, err.Error(), "SOURCE_SECRET_SENTINEL")
 	})
 
 	t.Run("spec set without source rejected", func(t *testing.T) {
 		schema := buildSchema()
 		schema.ExternalSource = ""
-		schema.ExternalSpec = `{"format":"parquet"}`
+		schema.ExternalSpec = `{"format":"parquet","extfs":{"access_key_id":"AKIA_ERROR_SENTINEL","access_key_value":"SECRET_ERROR_SENTINEL"}}`
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "both set or both empty")
+		assert.NotContains(t, err.Error(), "AKIA_ERROR_SENTINEL")
+		assert.NotContains(t, err.Error(), "SECRET_ERROR_SENTINEL")
 	})
 
 	t.Run("source/spec pair validated without external fields", func(t *testing.T) {
