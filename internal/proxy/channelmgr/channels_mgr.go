@@ -17,6 +17,7 @@
 package channelmgr
 
 import (
+	"context"
 	"strconv"
 	"sync"
 
@@ -69,7 +70,7 @@ func removeDuplicate(ss []string) []string {
 
 func newChannels(vchans []string, pchans []string) (ChannelInfo, error) {
 	if len(vchans) != len(pchans) {
-		mlog.Error(nil, "physical channels mismatch virtual channels", mlog.Int("len(VirtualChannelNames)", len(vchans)), mlog.Int("len(PhysicalChannelNames)", len(pchans)))
+		mlog.Error(context.TODO(), "physical channels mismatch virtual channels", mlog.Int("len(VirtualChannelNames)", len(vchans)), mlog.Int("len(PhysicalChannelNames)", len(pchans)))
 		// Channel lists come from DescribeCollection (coordinator-allocated
 		// metadata), never from the caller: a mismatch is a server-side bug.
 		return ChannelInfo{}, merr.WrapErrServiceInternalMsg("physical channels mismatch virtual channels, len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v", len(vchans), len(pchans))
@@ -156,7 +157,7 @@ func (mgr *channelsMgrImpl) RemoveStream(collectionID typeutil.UniqueID) {
 		decPChanMetrics(info.channelInfo.PChans)
 		delete(mgr.infos, collectionID)
 	}
-	mlog.Info(nil, "dml stream removed", mlog.Int64("collection_id", collectionID))
+	mlog.Info(context.TODO(), "dml stream removed", mlog.Int64("collection_id", collectionID))
 }
 
 // NewChannelsMgr constructs a channels manager backed by the given resolver.
