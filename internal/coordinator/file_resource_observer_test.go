@@ -263,6 +263,61 @@ func (s *FileResourceObserverSuite) TestCheckAllQnReady() {
 }
 
 func (s *FileResourceObserverSuite) TestSync() {
+	s.Run("skip_initial_sync_before_any_resource_is_added", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		mockCluster := qcsession.NewMockCluster(s.T())
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		mockDNManager := dcsession.NewMockNodeManager(s.T())
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyManager.GetProxyClients().Insert(200, mocks.NewMockProxyClient(s.T()))
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			dnManager:    mockDNManager,
+			cluster:      mockCluster,
+			proxyManager: proxyManager,
+			qnMode:       fileresource.SyncMode,
+			dnMode:       fileresource.SyncMode,
+			proxyMode:    fileresource.SyncMode,
+		}
+
+		err := observer.Sync()
+		s.NoError(err)
+		s.Equal(0, observer.distribution.Len())
+	})
+
+	s.Run("sync_empty_resources_after_last_resource_is_removed", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2))
+
+		mockCluster := qcsession.NewMockCluster(s.T())
+		mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.MatchedBy(func(req *internalpb.SyncFileResourceRequest) bool {
+			return req.GetVersion() == 2 && len(req.GetResources()) == 0
+		})).Return(merr.Success(), nil)
+
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			cluster:      mockCluster,
+			qnMode:       fileresource.SyncMode,
+			dnMode:       fileresource.CloseMode,
+		}
+
+		err := observer.Sync()
+		s.NoError(err)
+	})
+
 	s.Run("sync_query_nodes_success", func() {
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
