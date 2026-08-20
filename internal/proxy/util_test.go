@@ -1139,6 +1139,9 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	logs := captureProxyLogs(t)
 	rawToken := "API_KEY_SENTINEL_DO_NOT_LOG"
 	encodedToken := crypto.Base64Encode(rawToken)
+	// initHook() installs the default hook, so consume it before installing the
+	// mock, otherwise the mock is clobbered on the first GetHook() call.
+	hookutil.InitOnceHook()
 	hookutil.SetMockAPIHook("", errors.New("API key provider unavailable"))
 	t.Cleanup(func() {
 		hookutil.SetTestHook(hookutil.DefaultHook{})
