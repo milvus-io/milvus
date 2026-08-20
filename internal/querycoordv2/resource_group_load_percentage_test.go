@@ -266,6 +266,17 @@ func TestGetLoadPercentageByResourceGroup_MultipleReplicasSameRG(t *testing.T) {
 	assert.EqualValues(t, 0, percentage)
 }
 
+// seedFailedLoadCache installs a fresh GlobalFailedLoadCache holding err for
+// collectionID, and restores the previous cache when the test ends so the
+// package-global state does not leak into other tests in this package.
+func seedFailedLoadCache(t *testing.T, collectionID int64, err error) {
+	t.Helper()
+	prev := meta.GlobalFailedLoadCache
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	meta.GlobalFailedLoadCache.Put(collectionID, err)
+	t.Cleanup(func() { meta.GlobalFailedLoadCache = prev })
+}
+
 // TestGetLoadPercentageByResourceGroup_FailedLoad asserts that when the
 // collection has a replica in the requested resource group but the
 // collection itself is not currently registered as loaded, a recorded
@@ -280,14 +291,52 @@ func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 	// so meta.Exist(700) is false even though a replica record exists.
 	f.putReplica(t, 700, 70, "rg-target")
 
-	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	loadErr := errors.New("mocked load failure")
-	meta.GlobalFailedLoadCache.Put(700, loadErr)
+	seedFailedLoadCache(t, 700, loadErr)
 
 	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 700, "rg-target")
 
 	assert.EqualValues(t, -1, percentage)
 	assert.ErrorIs(t, err, loadErr)
+}
+
+// TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup pins
+// the terminal failed-load state, which is also the common one:
+// CollectionObserver.observeTimeout removes BOTH the collection registration
+// and every replica record, leaving only the GlobalFailedLoadCache entry
+// behind. The recorded failure must still reach the caller from that state;
+// checking replicas before consulting the cache would swallow it into a bare
+// (-1, nil), which reads as "nothing here" rather than "the load failed".
+func TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	// No putTarget, no putReplica: collection 1200 has been fully cleaned up
+	// after its load timed out; only the failure record remains.
+	loadErr := errors.New("mocked load failure")
+	seedFailedLoadCache(t, 1200, loadErr)
+
+	percentage, err := f.freeFn(context.Background(), 1200, "")
+
+	assert.EqualValues(t, -1, percentage)
+	assert.ErrorIs(t, err, loadErr,
+		"the recorded load failure must survive the removal of the replica records")
+}
+
+// TestGetLoadPercentageByResourceGroup_NilDist asserts that a Server whose
+// distribution manager has not been wired up yet answers -1 rather than
+// panicking, extending the nil-meta guard to the rest of the dependency set
+// the same way ShardLeaderReadinessByResourceGroup guards all of its stores.
+func TestGetLoadPercentageByResourceGroup_NilDist(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 1100, 11000, "1100-dmc0", 1)
+	f.putReplica(t, 1100, 110, "rg-target")
+
+	s := &Server{meta: f.meta, targetMgr: f.targetMgr} // dist not wired yet
+
+	assert.NotPanics(t, func() {
+		percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1100, "rg-target")
+		assert.NoError(t, err)
+		assert.EqualValues(t, -1, percentage)
+	})
 }
 
 // TestGetLoadPercentageByResourceGroup_NilMeta asserts that a Server whose
