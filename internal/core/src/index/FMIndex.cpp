@@ -323,8 +323,8 @@ FMIndex::MatchGuardAccepts(const std::string& pattern) const {
     if (parts.empty()) {
         return false;
     }
-    int64_t occ = static_cast<int64_t>(
-        fm_.Count(bytes(parts[0]), parts[0].size()));
+    int64_t occ =
+        static_cast<int64_t>(fm_.Count(bytes(parts[0]), parts[0].size()));
     for (size_t i = 1; i < parts.size(); ++i) {
         int64_t c =
             static_cast<int64_t>(fm_.Count(bytes(parts[i]), parts[i].size()));
@@ -419,14 +419,12 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
                 }
             }
             TargetBitmap candidates(total_rows_);
-            fm_.VisitMatchingDocs(bytes(*rarest),
-                                  rarest->size(),
-                                  [&](uint64_t d) {
-                                      if (d < static_cast<uint64_t>(
-                                                  total_rows_)) {
-                                          candidates.set(d);
-                                      }
-                                  });
+            fm_.VisitMatchingDocs(
+                bytes(*rarest), rarest->size(), [&](uint64_t d) {
+                    if (d < static_cast<uint64_t>(total_rows_)) {
+                        candidates.set(d);
+                    }
+                });
             TargetBitmap bitset(total_rows_);
             for (int64_t i = 0; i < total_rows_; ++i) {
                 if (candidates[i] && recheck(static_cast<uint64_t>(i))) {

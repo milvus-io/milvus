@@ -1152,31 +1152,11 @@ TEST(FMIndex, MatchOracleEqualsBruteForce) {
     auto idx = MakeRawDataIndex(data);
 
     const std::vector<std::string> patterns{
-        "a%e",
-        "%foo%bar%",
-        "foo%bar",
-        "%app%",
-        "app%",
-        "%app",
-        "a_c",
-        "a_pple",
-        "%_%",
-        "%",
-        "%%",
-        "_",
-        "a\\_b",
-        "%\\%%",
-        "100\\%",
-        "%café%",
-        "%你好%",
-        "hello%world",
-        "%NEEDLE%",
-        "%q%",
-        "nope%nope",
-        "",
-        "app",
-        "%zz%NEEDLE%",
-        "application",
+        "a%e",       "%foo%bar%", "foo%bar",     "%app%",       "app%",
+        "%app",      "a_c",       "a_pple",      "%_%",         "%",
+        "%%",        "_",         "a\\_b",       "%\\%%",       "100\\%",
+        "%café%",    "%你好%",    "hello%world", "%NEEDLE%",    "%q%",
+        "nope%nope", "",          "app",         "%zz%NEEDLE%", "application",
         "%X%",
     };
 
@@ -1188,8 +1168,8 @@ TEST(FMIndex, MatchOracleEqualsBruteForce) {
                 expected.push_back(static_cast<int64_t>(i));
             }
         }
-        EXPECT_EQ(Match(idx.get(), pattern), expected) << "pattern=[" << pattern
-                                                      << "]";
+        EXPECT_EQ(Match(idx.get(), pattern), expected)
+            << "pattern=[" << pattern << "]";
     }
 }
 
