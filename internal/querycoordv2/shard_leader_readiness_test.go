@@ -107,6 +107,22 @@ func (f *shardLeaderReadinessFixture) putReplica(t *testing.T, collectionID int6
 	})))
 }
 
+// putInvisibleReplica registers a replica of collectionID in rgName holding
+// nodeIDs, in the not-yet-query-visible state load-config updates spawn
+// replicas in (job_update.go passes WithQueryInvisible; visibility is flipped
+// later, all-or-nothing, by tryPromoteReadyLoadConfigReplicas).
+func (f *shardLeaderReadinessFixture) putInvisibleReplica(t *testing.T, collectionID int64, rgName string, nodeIDs ...int64) {
+	require.NotEmpty(t, nodeIDs)
+	mutable := meta.NewReplica(&querypb.Replica{
+		ID:            nodeIDs[0],
+		CollectionID:  collectionID,
+		ResourceGroup: rgName,
+		Nodes:         nodeIDs,
+	}).CopyForWrite()
+	mutable.SetQueryInvisible(true)
+	require.NoError(t, f.meta.Put(context.Background(), mutable.IntoReplica()))
+}
+
 // registerNode makes nodeID one the coordinator knows about. A leader on an
 // unregistered node is not usable, which the native shard-leader builder
 // enforces by dropping any leader whose NodeManager entry is missing.
@@ -416,6 +432,36 @@ func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T)
 		"the recorded load failure must survive the removal of the replica records")
 	assert.False(t, got.Ready)
 	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
+}
+
+// TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount asserts that
+// readiness agrees with the routing surface about which replicas exist for
+// queries. Both the native and the resource-group-scoped GetShardLeaders
+// filter on replica.IsQueryVisible(), so a query-invisible replica's leader is
+// one the proxy can never route to; counting it here would report Ready for a
+// resource group whose scoped GetShardLeaders answer is empty — exactly the
+// load-config switch window this check exists to keep honest. Once visibility
+// is flipped (the same all-or-nothing promotion tryPromoteReadyLoadConfigReplicas
+// performs), the same leader must start counting.
+func TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1300, 13000, "1300-dmc0")
+	f.putInvisibleReplica(t, 1300, "rg-a", 130)
+	f.putLeader(1300, 130, "1300-dmc0", true)
+
+	got := f.readiness(t, 1300, "rg-a")
+
+	assert.False(t, got.Ready,
+		"a serviceable leader on a query-invisible replica must not make the resource group ready: no query can route to it")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, got.Reason)
+	assert.Equal(t, []string{"1300-dmc0"}, got.UnreadyShards)
+
+	require.NotEmpty(t, f.meta.SetReplicasQueryVisible(ctx, 130),
+		"the fixture must actually flip the replica visible")
+	promoted := f.readiness(t, 1300, "rg-a")
+	assert.True(t, promoted.Ready,
+		"after visibility is flipped the very same leader must count, proving visibility was the only gate")
 }
 
 // TestShardLeaderReadinessByRG_UninitializedServer asserts that a Server whose
