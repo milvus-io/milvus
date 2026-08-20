@@ -11,8 +11,10 @@
 
 #pragma once
 
+#include <atomic>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <sstream>
 #include <string>
 
@@ -34,47 +36,83 @@
 
 class RTreeSerializer {
  public:
+    enum class BinaryIOResult {
+        Success,
+        OpenFailed,
+        StreamFailed,
+        ArchiveFailed,
+    };
+
+    /**
+     * Test-only one-shot fault injection for the close() check in saveBinary.
+     *
+     * A close(2) that fails after a successful flush needs a filesystem that
+     * defers ENOSPC/EIO to close (ext4 delalloc, XFS, NFS) on a full or
+     * failing device; a unit test cannot provoke that, so the branch would
+     * otherwise be unreachable from a test. Production code never sets it.
+     */
+    static std::atomic<bool>&
+    CloseFailureForTesting() {
+        static std::atomic<bool> flag{false};
+        return flag;
+    }
+
     template <typename RTreeType>
-    static bool
+    static BinaryIOResult
     saveBinary(const RTreeType& tree, const std::string& filename) {
         try {
             std::ofstream ofs(filename, std::ios::binary);
             if (!ofs.is_open()) {
-                std::cerr << "Cannot open file for writing: " << filename
-                          << std::endl;
-                return false;
+                return BinaryIOResult::OpenFailed;
             }
 
-            boost::archive::binary_oarchive oa(ofs);
-            oa << tree;
-
+            {
+                boost::archive::binary_oarchive oa(ofs);
+                oa << tree;
+            }
+            ofs.flush();
+            if (!ofs.good()) {
+                return BinaryIOResult::StreamFailed;
+            }
+            // close() explicitly, and check it. flush() only guarantees the
+            // streambuf reached write(2); on a delayed-allocation filesystem
+            // (ext4 delalloc, XFS) ENOSPC/EIO for those blocks is reported at
+            // close(2). Letting ~basic_ofstream do the closing swallows that
+            // failbit, so a truncated .bgi would be reported as Success and
+            // uploaded as a successfully built index -- the exact outcome
+            // finish() must never produce -- resurfacing much later at load
+            // as ArchiveFailed/DataFormatBroken.
             ofs.close();
-            return true;
-        } catch (const std::exception& e) {
-            std::cerr << "Serialization error: " << e.what() << std::endl;
-            return false;
+            if (CloseFailureForTesting().exchange(false) || !ofs.good()) {
+                return BinaryIOResult::StreamFailed;
+            }
+            return BinaryIOResult::Success;
+        } catch (const std::bad_alloc&) {
+            throw;
+        } catch (const std::exception&) {
+            return BinaryIOResult::ArchiveFailed;
         }
     }
 
     template <typename RTreeType>
-    static bool
+    static BinaryIOResult
     loadBinary(RTreeType& tree, const std::string& filename) {
         try {
             std::ifstream ifs(filename, std::ios::binary);
             if (!ifs.is_open()) {
-                std::cerr << "Cannot open file for reading: " << filename
-                          << std::endl;
-                return false;
+                return BinaryIOResult::OpenFailed;
             }
 
             boost::archive::binary_iarchive ia(ifs);
             ia >> tree;
-
-            ifs.close();
-            return true;
-        } catch (const std::exception& e) {
-            std::cerr << "Deserialization error: " << e.what() << std::endl;
-            return false;
+            if (ifs.bad()) {
+                return BinaryIOResult::StreamFailed;
+            }
+            return BinaryIOResult::Success;
+        } catch (const std::bad_alloc&) {
+            throw;
+        } catch (const std::exception&) {
+            return BinaryIOResult::ArchiveFailed;
         }
     }
 
