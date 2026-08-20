@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/ipc"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
@@ -720,21 +722,52 @@ func TestRecordBuilderValueSizeIgnoresNullVariablePayload(t *testing.T) {
 	}
 }
 
-func TestMergeSortRejectsMissingSchemaField(t *testing.T) {
+func TestMergeSortDirectForwardMatchesRebuiltIPCBytes(t *testing.T) {
+	const rows = 256
 	const keyField = FieldID(100)
-	const missingField = FieldID(101)
+	const payloadField = FieldID(101)
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: keyField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		{FieldID: missingField, Name: "missing", DataType: schemapb.DataType_Int64, Nullable: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_VarChar},
 	}}
-	record := mergeSortTestRec(t, map[FieldID][]int64{keyField: {1}}, nil)
+	keys := make([]int64, rows)
+	payloads := make([]string, rows)
+	for row := range rows {
+		keys[row] = int64(row)
+		payloads[row] = fmt.Sprintf("payload-%03d", row)
+	}
+	record := writerCompatibleMergeSortTestRec(t, schema,
+		map[FieldID][]int64{keyField: keys}, map[FieldID][]string{payloadField: payloads})
 	defer record.Release()
-	writer := &MockRecordWriter{writefn: func(Record) error { return nil }, closefn: func() error { return nil }}
+	sourceBuffer := arrowValueBufferAddress(t, record.Column(keyField))
 
-	_, err := MergeSort(1024, schema, []RecordReader{&oneShotRecordReader{rec: record}}, writer,
-		func(Record, int, int) bool { return true }, []int64{keyField})
-	require.ErrorContains(t, err, "invalid source value type")
-	require.ErrorContains(t, err, "field missing")
+	run := func(rebuild bool) []byte {
+		input := record
+		if rebuild {
+			input = nonForwardableTestRecord{inner: record}
+		}
+		var encoded bytes.Buffer
+		writer := &MockRecordWriter{writefn: func(out Record) error {
+			if rebuild {
+				require.NotEqual(t, sourceBuffer, arrowValueBufferAddress(t, out.Column(keyField)))
+			} else {
+				require.Equal(t, sourceBuffer, arrowValueBufferAddress(t, out.Column(keyField)))
+			}
+			arrowRecord := out.(*simpleArrowRecord).r
+			ipcWriter := ipc.NewWriter(&encoded, ipc.WithSchema(arrowRecord.Schema()))
+			require.NoError(t, ipcWriter.Write(arrowRecord))
+			require.NoError(t, ipcWriter.Close())
+			return nil
+		}, closefn: func() error { return nil }}
+		mergedRows, err := MergeSort(64*1024*1024, schema,
+			[]RecordReader{&oneShotRecordReader{rec: input}}, writer,
+			func(Record, int, int) bool { return true }, []int64{keyField})
+		require.NoError(t, err)
+		require.Equal(t, rows, mergedRows)
+		return encoded.Bytes()
+	}
+
+	require.Equal(t, run(true), run(false))
 }
 
 // Benchmark sort

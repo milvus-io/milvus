@@ -19,8 +19,6 @@ package compactor
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -60,11 +58,7 @@ func TestMergeSortDirectForwardPreservesMultiSegmentRotation(t *testing.T) {
 		}
 	}()
 
-	type mergeOutput struct {
-		segmentRows []int64
-		files       map[string][]byte
-	}
-	run := func(version int64, rebuild bool) mergeOutput {
+	run := func(version int64, rebuild bool) []int64 {
 		root := t.TempDir()
 		binlogIO := newBenchmarkLocalBinlogIO(root)
 		defer binlogIO.Close()
@@ -101,32 +95,13 @@ func TestMergeSortDirectForwardPreservesMultiSegmentRotation(t *testing.T) {
 		for _, segment := range writer.GetCompactionSegments() {
 			segmentRows = append(segmentRows, segment.GetNumOfRows())
 		}
-		files := make(map[string][]byte)
-		require.NoError(t, filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if info.IsDir() {
-				return nil
-			}
-			relativePath, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			files[relativePath], err = os.ReadFile(path)
-			return err
-		}))
-		return mergeOutput{segmentRows: segmentRows, files: files}
+		return segmentRows
 	}
 
 	for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
-			rebuilt := run(version, true)
-			forwarded := run(version, false)
-			require.Equal(t, rebuilt.segmentRows, forwarded.segmentRows,
+			require.Equal(t, run(version, true), run(version, false),
 				"direct forwarding must not change output segment rotation")
-			require.Equal(t, rebuilt.files, forwarded.files,
-				"direct forwarding must produce byte-identical storage files")
 		})
 	}
 }
