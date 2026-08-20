@@ -70,7 +70,20 @@ func LoadPercentageByResourceGroup(
 	collectionID int64,
 	rgName string,
 ) (int32, error) {
-	if m == nil {
+	if m == nil || targetMgr == nil || dist == nil {
+		return -1, nil
+	}
+
+	// The load-registration check comes BEFORE the replica scan: the terminal
+	// failed-load state is the one CollectionObserver.observeTimeout leaves
+	// behind, with the collection registration AND every replica record
+	// removed and only the GlobalFailedLoadCache entry remaining. Scanning
+	// replicas first would turn that state into a bare (-1, nil) and swallow
+	// the recorded failure.
+	if !m.Exist(ctx, collectionID) {
+		if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
+			return -1, err
+		}
 		return -1, nil
 	}
 
@@ -81,13 +94,6 @@ func LoadPercentageByResourceGroup(
 		}
 	}
 	if len(replicas) == 0 {
-		return -1, nil
-	}
-
-	if !m.Exist(ctx, collectionID) {
-		if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
-			return -1, err
-		}
 		return -1, nil
 	}
 

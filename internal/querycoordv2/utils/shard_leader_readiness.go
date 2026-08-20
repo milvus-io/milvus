@@ -83,6 +83,20 @@ func ShardLeaderReadinessByResourceGroup(
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady}, nil
 	}
 
+	// The load-registration check comes BEFORE the replica scan, and surfaces
+	// a recorded load failure rather than making the caller wait out its
+	// timeout on a load that is never coming back, matching what
+	// LoadPercentageByResourceGroup does with the same cache. The order
+	// matters: the terminal failed-load state is the one
+	// CollectionObserver.observeTimeout leaves behind, with the collection
+	// registration AND every replica record removed, and a no-replica early
+	// return would swallow the recorded failure into "nothing is loading
+	// here".
+	if !m.Exist(ctx, collectionID) {
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonCollectionNotLoaded},
+			meta.GlobalFailedLoadCache.Get(collectionID)
+	}
+
 	var replicas []*meta.Replica
 	for _, replica := range m.GetByCollection(ctx, collectionID) {
 		if rgName == "" || replica.GetResourceGroup() == rgName {
@@ -91,15 +105,6 @@ func ShardLeaderReadinessByResourceGroup(
 	}
 	if len(replicas) == 0 {
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoReplicaInResourceGroup}, nil
-	}
-
-	// A replica record can outlive the load registration, for instance when the
-	// load failed. Surface the recorded failure rather than making the caller
-	// wait out its timeout on a load that is never coming back, matching what
-	// LoadPercentageByResourceGroup does with the same cache.
-	if !m.Exist(ctx, collectionID) {
-		return ShardLeaderReadiness{Reason: ShardLeadersReasonCollectionNotLoaded},
-			meta.GlobalFailedLoadCache.Get(collectionID)
 	}
 
 	// CurrentTarget, not NextTarget: a shard is only servable once the leader

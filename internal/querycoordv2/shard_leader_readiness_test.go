@@ -385,13 +385,35 @@ func TestShardLeaderReadinessByRG_FailedLoadIsSurfaced(t *testing.T) {
 	// even though a replica record exists.
 	f.putReplica(t, 1000, "rg-a", 100)
 
-	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	loadErr := errors.New("mocked load failure")
-	meta.GlobalFailedLoadCache.Put(1000, loadErr)
+	seedFailedLoadCache(t, 1000, loadErr)
 
 	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1000, "rg-a")
 
 	assert.ErrorIs(t, err, loadErr, "a recorded load failure must reach the caller unwrapped")
+	assert.False(t, got.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
+}
+
+// TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup pins the
+// terminal failed-load state, which is also the common one:
+// CollectionObserver.observeTimeout removes BOTH the collection registration
+// and every replica record, leaving only the GlobalFailedLoadCache entry
+// behind. The recorded failure must still reach the caller from that state;
+// checking replicas before consulting the cache would swallow it into
+// (NoReplicaInResourceGroup, nil), which tells the caller nothing is loading
+// here when the truth is that the load failed.
+func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	// No putLoadedCollection, no putReplica: collection 1400 has been fully
+	// cleaned up after its load timed out; only the failure record remains.
+	loadErr := errors.New("mocked load failure")
+	seedFailedLoadCache(t, 1400, loadErr)
+
+	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1400, "rg-a")
+
+	assert.ErrorIs(t, err, loadErr,
+		"the recorded load failure must survive the removal of the replica records")
 	assert.False(t, got.Ready)
 	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
 }
