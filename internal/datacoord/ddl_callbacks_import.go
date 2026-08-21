@@ -89,10 +89,15 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
 //
-// Everything here must be a pure function of the request: it runs before the
-// broadcaster's idempotency lookup, so a legitimate retry has to pass it again, and it
-// does, carrying the same request. Admission checks over mutable cluster state must
-// not live here -- see the BroadcastWithAdmission call in broadcastImport.
+// This runs before the broadcaster's idempotency lookup, so a retry has to pass it
+// again. Two of the checks read mutable cluster state rather than the request alone --
+// ValidateBinlogImportRequest lists the backup files in object storage, and
+// validateImportReplication reads the replication topology -- so a retry sent after
+// that state changed is rejected here instead of resolving to its original jobID. They
+// stay ahead of the lookup deliberately: both can be slow, and the lookup holds the
+// collection's exclusive resource key. Checks that only gate the creation of a new job
+// belong in the admission callback instead -- see BroadcastWithAdmission in
+// broadcastImport.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
@@ -247,6 +252,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// (SharedDBName + ExclusiveCollectionName, see startBroadcastWithCollectionID),
 		// so the collection is already part of the scope. Prefixing the key here would
 		// only eat into the length budget the broadcaster validates against.
+		//
+		// Those resource keys name the collection, they do not identify it: dropping a
+		// collection and recreating one with the same name keeps the same scope, so a
+		// key reused across the recreation resolves to the dropped incarnation's job for
+		// as long as its tombstone lives. Keys are expected to be unique per logical
+		// request, which a re-import into a rebuilt collection is.
 		WithIdempotencyKey(idempotencyKey).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
