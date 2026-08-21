@@ -685,10 +685,14 @@ func TestRecordBuilderValueSizeIgnoresNullVariablePayload(t *testing.T) {
 		arrowType  arrow.DataType
 		buildArray func(arrow.ArrayData) arrow.Array
 	}{
-		{name: "string", dataType: schemapb.DataType_VarChar, arrowType: arrow.BinaryTypes.String,
-			buildArray: func(data arrow.ArrayData) arrow.Array { return array.NewStringData(data) }},
-		{name: "binary", dataType: schemapb.DataType_JSON, arrowType: arrow.BinaryTypes.Binary,
-			buildArray: func(data arrow.ArrayData) arrow.Array { return array.NewBinaryData(data) }},
+		{
+			name: "string", dataType: schemapb.DataType_VarChar, arrowType: arrow.BinaryTypes.String,
+			buildArray: func(data arrow.ArrayData) arrow.Array { return array.NewStringData(data) },
+		},
+		{
+			name: "binary", dataType: schemapb.DataType_JSON, arrowType: arrow.BinaryTypes.Binary,
+			buildArray: func(data arrow.ArrayData) arrow.Array { return array.NewBinaryData(data) },
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
