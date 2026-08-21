@@ -438,9 +438,24 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			if _, ok := alreadyAppliedNewSegments[incoming.GetID()]; ok {
 				return true
 			}
-			existing := modPack.Get(incoming.GetID())
+			// Peek read-only first: modPack.Get stages the segment for
+			// persistence as a side effect, which would turn the
+			// already-applied short-circuit below into a spurious meta write.
+			existing := modPack.meta.segments.GetSegment(incoming.GetID())
 			if existing != nil {
-				patched := applyExternalRefreshPatch(existing, incoming)
+				// Idempotent-replay short-circuit, mirroring
+				// externalRefreshNewSegmentAlreadyApplied: an existing
+				// manifest at or past the incoming version means this patch
+				// already landed (or was superseded). Re-patching would
+				// erase TextStatsLogs/JsonKeyStats rebuilt since the first
+				// apply and could regress a newer manifest.
+				if cmp, cmpErr := packed.CompareManifestPath(existing.GetManifestPath(), incoming.GetManifestPath()); cmpErr == nil && cmp >= 0 {
+					mlog.Info(ctx, "segment patch already applied, skipping replay",
+						mlog.FieldSegmentID(incoming.GetID()),
+						mlog.String("manifestPath", incoming.GetManifestPath()))
+					return true
+				}
+				patched := applyExternalRefreshPatch(modPack.Get(incoming.GetID()), incoming)
 				modPack.segments[incoming.GetID()] = patched
 				modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
 					Segment: patched.SegmentInfo,
