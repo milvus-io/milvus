@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -202,36 +201,4 @@ func ValidateTimeMicros(micros int64) error {
 		return merr.WrapErrParameterInvalidMsg("TIME microseconds %d is out of range [0, %d]", micros, MaxTimeMicros)
 	}
 	return nil
-}
-
-// MustParseDateDays is a convenience for tests. Panic is not used; the name
-// stays Parse-shaped helpers above.
-func ParseDateOrInt(value string) (int32, error) {
-	if isSignedInteger(value) {
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return 0, merr.WrapErrParameterInvalidMsg("invalid DATE integer '%s'", value)
-		}
-		return ValidateDateDays(n)
-	}
-	return ParseDate(value)
-}
-
-func isSignedInteger(s string) bool {
-	if s == "" {
-		return false
-	}
-	i := 0
-	if s[0] == '-' || s[0] == '+' {
-		if len(s) == 1 {
-			return false
-		}
-		i = 1
-	}
-	for ; i < len(s); i++ {
-		if !unicode.IsDigit(rune(s[i])) {
-			return false
-		}
-	}
-	return true
 }
