@@ -2499,25 +2499,25 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         TargetBitmapView compact_view(compact);
         TargetBitmapView compact_valid_view(compact_valid);
 
-        auto execute_sub_batch =
-            [matcher]<FilterType filter_type = FilterType::sequential>(
-                const std::string_view* data,
-                ValidityView valid_data,
-                const int32_t* /*offsets*/,
-                const int size,
-                TargetBitmapView res,
-                TargetBitmapView /*valid_res*/) {
-                if (data == nullptr) {
-                    return;
+        auto execute_sub_batch = [matcher]<FilterType filter_type =
+                                               FilterType::sequential>(
+            const std::string_view* data,
+            ValidityView valid_data,
+            const int32_t* /*offsets*/,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView /*valid_res*/) {
+            if (data == nullptr) {
+                return;
+            }
+            for (int i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
                 }
-                for (int i = 0; i < size; ++i) {
-                    if (valid_data && !valid_data[i]) {
-                        res[i] = false;
-                        continue;
-                    }
-                    res[i] = (*matcher)(data[i]);
-                }
-            };
+                res[i] = (*matcher)(data[i]);
+            }
+        };
 
         ProcessDataByOffsets<std::string_view>(execute_sub_batch,
                                                nullptr,
@@ -2534,9 +2534,8 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
     }
 
     TargetBitmap valid_result;
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        segment_offset,
-                        real_batch_size);
+    valid_result.append(
+        *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(batch_candidates),
                                           std::move(valid_result));
