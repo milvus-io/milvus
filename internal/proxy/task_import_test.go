@@ -425,10 +425,6 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 		DBID: 42,
 	}, nil)
 
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	var capturedCtx context.Context
 	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
 	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
@@ -455,6 +451,7 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.metaCache = mockCache
 
 	err := task.Execute(ctx)
 

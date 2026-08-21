@@ -1807,8 +1807,8 @@ func TestProxy_ImportV2(t *testing.T) {
 		node.sched = scheduler
 		assert.NoError(t, node.sched.Start())
 		defer node.sched.Close()
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"ch0"}, nil)
 		node.chMgr = chMgr
 
 		mc := NewMockCache(t)
@@ -1818,7 +1818,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 1}, nil)
-		globalMetaCache = mc
+		node.setMetaCache(mc)
 
 		capturedKey := make(chan string, 1)
 		mixCoord := mocks.NewMockMixCoordClient(t)
