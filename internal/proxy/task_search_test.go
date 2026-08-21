@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -5573,12 +5574,19 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		request.FunctionChains = []*schemapb.FunctionChain{chainPB}
 		return request, chainPB
 	}
-	newMixedFunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain, *schemapb.FunctionChain) {
+	newL1FunctionChainRequest := func(ops ...*schemapb.FunctionChainOp) (*milvuspb.SearchRequest, *schemapb.FunctionChain) {
+		request := newRequest()
+		chainPB := l1FunctionChain(ops...)
+		request.FunctionChains = []*schemapb.FunctionChain{chainPB}
+		return request, chainPB
+	}
+	newMixedFunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain, *schemapb.FunctionChain, *schemapb.FunctionChain) {
 		request := newRequest()
 		l0Chain := l0FunctionChain()
+		l1Chain := l1FunctionChain(mapOp("$score", "expr", columnArg("$score")))
 		l2Chain := l2FunctionChain(mapOp("score1", "expr", columnArg("ts")), mapOp("$score", "expr", columnArg("score1"), columnArg("$score")))
-		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l2Chain}
-		return request, l0Chain, l2Chain
+		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l1Chain, l2Chain}
+		return request, l0Chain, l1Chain, l2Chain
 	}
 	newFunctionScoreRequest := func() *milvuspb.SearchRequest {
 		request := newRequest()
@@ -5599,9 +5607,15 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		}
 		return request
 	}
-	withSearchIteratorV2 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	withSearchIteratorV1 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
 		request.SearchParams = append(request.SearchParams,
 			&commonpb.KeyValuePair{Key: IteratorField, Value: "true"},
+		)
+		return request
+	}
+	withSearchIteratorV2 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+		request = withSearchIteratorV1(request)
+		request.SearchParams = append(request.SearchParams,
 			&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "true"},
 			&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "10"},
 		)
@@ -5693,12 +5707,46 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
 	})
 
+	t.Run("search iterator v1 rejects function score", func(t *testing.T) {
+		task := newTask(withSearchIteratorV1(newFunctionScoreRequest()))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v1 rejects l2 function chain", func(t *testing.T) {
+		task := newTask(withSearchIteratorV1(newFunctionChainRequest()))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v1 rejects l0 function chain", func(t *testing.T) {
+		request, _ := newL0FunctionChainRequest()
+		task := newTask(withSearchIteratorV1(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v1 rejects l1 function chain", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(withSearchIteratorV1(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
 	t.Run("search iterator v2 rejects function score", func(t *testing.T) {
 		task := newTask(withSearchIteratorV2(newFunctionScoreRequest()))
 
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
 	})
 
 	t.Run("search iterator v2 rejects l2 function chain", func(t *testing.T) {
@@ -5706,7 +5754,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
 	})
 
 	t.Run("search iterator v2 rejects l0 function chain", func(t *testing.T) {
@@ -5715,7 +5763,16 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v2 rejects l1 function chain", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(withSearchIteratorV2(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
 	})
 
 	t.Run("ordinary search routes l0 chain to querynode plan", func(t *testing.T) {
@@ -5731,8 +5788,21 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
 	})
 
-	t.Run("ordinary search routes l0 chain and keeps l2 rerank meta", func(t *testing.T) {
-		request, l0Chain, _ := newMixedFunctionChainRequest()
+	t.Run("ordinary search routes l1 chain to querynode plan", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		assert.Nil(t, task.rerankMeta)
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search routes l0 and l1 chains and keeps l2 rerank meta", func(t *testing.T) {
+		request, l0Chain, l1Chain, _ := newMixedFunctionChainRequest()
 		task := newTask(request)
 
 		require.NoError(t, task.initSearchRequest(ctx))
@@ -5742,12 +5812,75 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
-		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 2)
 		assert.True(t, proto.Equal(l0Chain, plan.GetQuerynodeFunctionChains()[0]))
+		assert.True(t, proto.Equal(l1Chain, plan.GetQuerynodeFunctionChains()[1]))
+	})
+
+	t.Run("ordinary search rejects l1 with search aggregation", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(request)
+		task.aggCtx = &search_agg.SearchAggregationContext{}
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "L1 function chain is not supported with search_aggregation")
+	})
+
+	t.Run("ordinary search allows l1 limit with group by", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(l1LimitFunctionChain(3).GetOps()...)
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search allows l1 map with group by", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search allows l1 sort with group by", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(&schemapb.FunctionChainOp{
+			Op:     chaintypes.OpTypeSort,
+			Inputs: []string{"$score"},
+			Params: map[string]*schemapb.FunctionParamValue{
+				"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+			},
+		})
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
 	})
 
 	t.Run("ordinary search rejects order by with l0 function chain", func(t *testing.T) {
 		request, _ := newL0FunctionChainRequest()
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
+	})
+
+	t.Run("ordinary search rejects order by with l1 function chain", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
 		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
 		task := newTask(request)
 

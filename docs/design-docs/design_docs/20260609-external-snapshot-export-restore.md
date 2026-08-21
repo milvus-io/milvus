@@ -538,9 +538,14 @@ DataCoord:
 DataNode:
 
 - Executes copy segment tasks.
-- Reports its Milvus build version in the slot query response. External
-  snapshot copy tasks require DataNode `3.0.1` or later; workers that omit the
-  version field are treated as pre-feature nodes.
+- Accepts external restore copies through the `ExternalCopySegment` worker task
+  type. This task type is the capability handshake: workers that predate
+  foreign-source copy support reject it before decoding or executing the
+  `CopySegmentRequest`.
+- Keeps local restore on the existing `CopySegment` task type so it remains
+  compatible with older workers. Capability detection does not depend on the
+  Milvus version returned by a slot endpoint, which may represent a pooled
+  gateway rather than the worker that executes the task.
 - Rebuilds source storage config for external restore tasks.
 - Copies StorageV1 PB paths, treats a StorageV2 manifest as a concrete object,
   and enumerates StorageV3 manifest objects and LOB files before copying them
@@ -679,9 +684,12 @@ Restore tests:
   state with `external_spec`.
 - DataNode copy tasks rebuild source storage config and copy into local target
   paths.
-- During a rolling upgrade, external restore tasks remain pending until a
-  compatible DataNode is available. Version filtering does not block ordinary
-  restore, import, index, or compaction tasks from using older workers.
+- During a rolling upgrade, DataCoord submits external restore work as
+  `ExternalCopySegment`. An older worker rejects the unknown task type without
+  side effects; DataCoord recognizes that capability error and fails the
+  restore immediately instead of retrying it until the job timeout. Other
+  transient DataNode errors remain retryable. Local restore, import, index, and
+  compaction keep their existing task types.
 - DataNode invokes each provider copy once within one bounded object-copy
   deadline; provider SDKs retain their request-level retries.
 - Azure retries transient copy-status polling without replaying

@@ -1119,6 +1119,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
 	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
+	QueryNodeSearchFTSNumTokens.DeletePartialMatch(labels)
 }
 
 // PoolStats holds the snapshot of a single pool's state.

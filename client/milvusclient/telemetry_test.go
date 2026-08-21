@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +39,7 @@ import (
 func TestDefaultTelemetryConfig(t *testing.T) {
 	config := DefaultTelemetryConfig()
 	assert.True(t, config.Enabled)
-	assert.Equal(t, 30*time.Second, config.HeartbeatInterval)
+	assert.Equal(t, 10*time.Second, config.HeartbeatInterval, "默认心跳=窗口长度，改动会影响服务端负载与数据新鲜度")
 	assert.Equal(t, 1.0, config.SamplingRate)
 	assert.Equal(t, 100, config.ErrorMaxCount)
 }
@@ -119,7 +121,7 @@ func TestClientTelemetryManager(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, nil)
 		assert.NotNil(t, manager)
 		assert.True(t, manager.config.Enabled)
-		assert.Equal(t, 30*time.Second, manager.config.HeartbeatInterval)
+		assert.Equal(t, DefaultTelemetryConfig().HeartbeatInterval, manager.config.HeartbeatInterval)
 	})
 
 	t.Run("creation with custom config", func(t *testing.T) {
@@ -1150,6 +1152,229 @@ func TestPublicHandleMethods(t *testing.T) {
 	})
 }
 
+// A push_config reply used to say Success for any payload at all, because unknown JSON
+// fields are dropped silently by encoding/json and nothing else was reported. Pushing a
+// misspelled key, or one this client is too old to know, looked exactly like a config that
+// took effect. The reply now says which keys were applied and which were ignored, so the
+// sender can tell the difference.
+func TestPushConfigReplyReportsAppliedAndIgnoredKeys(t *testing.T) {
+	decode := func(t *testing.T, reply *CommandReply) ConfigApplyResult {
+		t.Helper()
+		var result ConfigApplyResult
+		require.NoError(t, json.Unmarshal(reply.Payload, &result))
+		return result
+	}
+
+	t.Run("applied keys are named", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"sampling_rate": 0.25, "heartbeat_interval_ms": 3000}`),
+		})
+		assert.True(t, reply.Success)
+
+		result := decode(t, reply)
+		assert.ElementsMatch(t, []string{"sampling_rate", "heartbeat_interval_ms"}, result.Applied)
+		assert.Empty(t, result.Ignored)
+	})
+
+	t.Run("unknown keys are reported rather than silently dropped", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"unsupported_probe": true, "sampling_rate": 0.5}`),
+		})
+		// Still a success: the known key was applied, and an unknown key must not fail the
+		// whole command, or a newer server could not push to an older client at all.
+		assert.True(t, reply.Success)
+
+		result := decode(t, reply)
+		assert.Equal(t, []string{"sampling_rate"}, result.Applied)
+		assert.Equal(t, []string{"unsupported_probe"}, result.Ignored)
+	})
+
+	t.Run("a payload of only unknown keys applies nothing", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		manager.configMu.RLock()
+		beforeRate, beforeInterval, beforeEnabled := manager.config.SamplingRate, manager.config.HeartbeatInterval, manager.config.Enabled
+		manager.configMu.RUnlock()
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"unsupported_probe": true}`),
+		})
+		assert.True(t, reply.Success)
+
+		result := decode(t, reply)
+		assert.Empty(t, result.Applied)
+		assert.Equal(t, []string{"unsupported_probe"}, result.Ignored)
+
+		manager.configMu.RLock()
+		defer manager.configMu.RUnlock()
+		assert.Equal(t, beforeRate, manager.config.SamplingRate)
+		assert.Equal(t, beforeInterval, manager.config.HeartbeatInterval)
+		assert.Equal(t, beforeEnabled, manager.config.Enabled)
+	})
+
+	// ttl_seconds sits in ConfigPayload and the web UI sends it, but nothing has ever read
+	// it. Naming it in the reply is how that stops being invisible.
+	t.Run("ttl_seconds is reported as ignored", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"ttl_seconds": 300}`),
+		})
+		assert.True(t, reply.Success)
+		assert.Equal(t, []string{"ttl_seconds"}, decode(t, reply).Ignored)
+	})
+
+	// A payload is applied whole or not at all. The check on heartbeat_interval_ms used to
+	// run after enabled had already been written, so a payload carrying both left telemetry
+	// switched off while the reply said the command had failed -- the one case where
+	// knowing what was applied matters most, and the one case that reported nothing.
+	t.Run("a rejected value leaves every field untouched", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		// Copied by value: m.config is a pointer, so holding it would compare the struct
+		// with itself and pass no matter what the handler did.
+		manager.configMu.RLock()
+		before := *manager.config
+		manager.configMu.RUnlock()
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"enabled": false, "sampling_rate": 0.1, "heartbeat_interval_ms": 0}`),
+		})
+		assert.False(t, reply.Success)
+		assert.Contains(t, reply.ErrorMessage, "must be positive")
+
+		manager.configMu.RLock()
+		defer manager.configMu.RUnlock()
+		assert.Equal(t, before.Enabled, manager.config.Enabled, "telemetry was switched off by a command that failed")
+		assert.Equal(t, before.SamplingRate, manager.config.SamplingRate)
+		assert.Equal(t, before.HeartbeatInterval, manager.config.HeartbeatInterval)
+	})
+
+	t.Run("a rejected value reports no applied keys", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		reply := manager.handlePushConfig(&ClientCommand{
+			CommandId: "test-1",
+			Payload:   []byte(`{"heartbeat_interval_ms": 0}`),
+		})
+		assert.False(t, reply.Success)
+		assert.Contains(t, reply.ErrorMessage, "must be positive")
+	})
+}
+
+// Sampling used to be a contiguous block: a counter modulo 10000, sampling while the
+// remainder was under rate*10000. The long-run ratio was right, but the ratio inside any
+// one heartbeat window -- the only unit the telemetry API reports -- was not: a window is
+// tens or hundreds of operations against a cycle of ten thousand, so windows came out
+// wholly sampled or wholly dropped. At 3 QPS that is minutes of full metrics followed by
+// three quarters of an hour reporting nothing while the client is plainly busy.
+func TestSamplingIsUniformWithinEveryWindow(t *testing.T) {
+	sampleN := func(m *ClientTelemetryManager, rate float64, n int) int {
+		count := 0
+		for i := 0; i < n; i++ {
+			if m.shouldSample(rate) {
+				count++
+			}
+		}
+		return count
+	}
+
+	t.Run("every window of a run holds the configured ratio", func(t *testing.T) {
+		const (
+			rate       = 0.25
+			windowSize = 100
+			windows    = 50
+		)
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		for w := 0; w < windows; w++ {
+			got := sampleN(manager, rate, windowSize)
+			// One either side: a window boundary can fall mid-interval, which shifts a
+			// single sample across it.
+			assert.InDelta(t, float64(windowSize)*rate, float64(got), 1,
+				"window %d sampled %d of %d", w, got, windowSize)
+		}
+	})
+
+	t.Run("a rate of one in four samples exactly every fourth operation", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		var pattern []bool
+		for i := 0; i < 12; i++ {
+			pattern = append(pattern, manager.shouldSample(0.25))
+		}
+		assert.Equal(t, []bool{
+			false, false, false, true,
+			false, false, false, true,
+			false, false, false, true,
+		}, pattern)
+	})
+
+	// The old threshold was rate*10000 truncated to an integer, so any rate below 1e-4
+	// became zero and the code then returned false forever: a configured rate silently
+	// meant "off".
+	t.Run("a very small rate still samples", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		got := sampleN(manager, 0.00001, 1_000_000)
+		assert.InDelta(t, 10, got, 1, "1e-5 over a million operations")
+	})
+
+	t.Run("the boundary rates are unchanged", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		assert.Equal(t, 100, sampleN(manager, 1.0, 100))
+		assert.Equal(t, 0, sampleN(manager, 0.0, 100))
+		assert.Equal(t, 100, sampleN(manager, 1.5, 100))
+		assert.Equal(t, 0, sampleN(manager, -0.5, 100))
+	})
+
+	// Lowering the rate from 1.0 used to hand out a burst of full sampling: the 1.0 path
+	// returns before touching the counter, so the counter sat at zero and the first
+	// rate*10000 operations after the change all fell inside the sampled block.
+	t.Run("lowering the rate from 1.0 does not start with a burst", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		sampleN(manager, 1.0, 5000)
+
+		got := sampleN(manager, 0.25, 100)
+		assert.InDelta(t, 25, got, 1)
+	})
+
+	t.Run("concurrent callers still see the configured ratio", func(t *testing.T) {
+		const (
+			rate       = 0.1
+			goroutines = 8
+			perG       = 1000
+		)
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+		var wg sync.WaitGroup
+		var sampled atomic.Int64
+		for g := 0; g < goroutines; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < perG; i++ {
+					if manager.shouldSample(rate) {
+						sampled.Add(1)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+
+		// Exact, not approximate: the decision is a boundary crossing of a shared
+		// accumulator, so concurrency reorders which caller samples but never how many do.
+		assert.InDelta(t, float64(goroutines*perG)*rate, float64(sampled.Load()), 1)
+	})
+}
+
 func TestHandlePushConfigEdgeCases(t *testing.T) {
 	t.Run("invalid payload", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
@@ -1721,7 +1946,7 @@ func TestGetHeartbeatInterval(t *testing.T) {
 		})
 
 		interval := manager.getHeartbeatInterval()
-		assert.Equal(t, 30*time.Second, interval)
+		assert.Equal(t, DefaultTelemetryConfig().HeartbeatInterval, interval)
 	})
 
 	t.Run("returns default for negative interval", func(t *testing.T) {
@@ -1731,7 +1956,7 @@ func TestGetHeartbeatInterval(t *testing.T) {
 		})
 
 		interval := manager.getHeartbeatInterval()
-		assert.Equal(t, 30*time.Second, interval)
+		assert.Equal(t, DefaultTelemetryConfig().HeartbeatInterval, interval)
 	})
 }
 

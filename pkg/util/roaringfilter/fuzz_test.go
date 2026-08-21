@@ -23,15 +23,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// FuzzParse feeds arbitrary bytes to the envelope and body parsers. A blob
-// arrives from a client, so no input may panic, and a rejection must be a typed
-// parameter error rather than a runtime failure.
+// FuzzValidate feeds arbitrary bytes to Validate, the only entry point this
+// package exposes and the one the proxy calls on an untrusted blob. No input may
+// panic, and a rejection must be a typed parameter error rather than a runtime
+// failure.
 //
-// Validate must additionally agree with Parse: anything Validate accepts must
-// parse, and the cardinality it reports without building a bitmap must match
-// the one the decoded bitmap has. That equivalence is what lets Proxy admit a
-// request from Validate alone.
-func FuzzParse(f *testing.F) {
+// It also pins the equivalence Proxy relies on: anything Validate accepts must
+// decode, and the cardinality Validate reports without building a bitmap must
+// match the decoded bitmap's. parseFixture is the decode side -- it calls
+// Validate first, so that direction is trivially true; the load-bearing
+// assertion is the cardinality agreement, which is computed two different ways.
+func FuzzValidate(f *testing.F) {
 	for _, values := range [][]int64{
 		{},
 		{0},
@@ -39,7 +41,7 @@ func FuzzParse(f *testing.F) {
 		{math.MinInt64, -1, 0, 1, 42, math.MaxInt64},
 		{1, 5, 9, 4242},
 	} {
-		blob, err := Build(values)
+		blob, err := buildFixture(values)
 		require.NoError(f, err)
 		f.Add(blob)
 	}
@@ -50,12 +52,12 @@ func FuzzParse(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, blob []byte) {
 		summary, validateErr := Validate(blob)
-		filter, parseErr := Parse(blob)
+		filter, parseErr := parseFixture(blob)
 
 		if validateErr != nil {
-			// Validate is the admission gate; when it rejects, Parse must not
+			// Validate is the admission gate; when it rejects, parseFixture must not
 			// succeed, or Proxy would refuse a request QueryNode would accept.
-			require.Error(t, parseErr, "Validate rejected but Parse accepted")
+			require.Error(t, parseErr, "Validate rejected but parseFixture accepted")
 			require.Nil(t, filter)
 			return
 		}

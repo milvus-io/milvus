@@ -52,6 +52,7 @@ require (
 
 require (
 	cloud.google.com/go/storage v1.50.0
+	github.com/RoaringBitmap/roaring/v2 v2.8.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/apache/pulsar-client-go v0.19.0
@@ -85,7 +86,6 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.8.0 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cloudfoundry/gosigar v1.3.6 // indirect

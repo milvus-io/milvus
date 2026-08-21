@@ -706,7 +706,7 @@ Existing collections, segments, and indexes require no rewrite.
   containers.
 - Exercise adversarial maximum run counts and assert validation cost remains
   linear in input bytes.
-- Fuzz `Parse` and require no panic, bounded allocation, and bounded runtime.
+- Fuzz `Validate` and require no panic, bounded allocation, and bounded runtime.
 - Assert `Validate` performs zero successful-path heap allocations and reports
   cardinality plus high/low container counts without constructing a bitmap.
 - Reject valid bodies that exceed the per-filter decoded-resource admission limit.

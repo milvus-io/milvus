@@ -1,6 +1,7 @@
 // Licensed to the LF AI & Data foundation under Apache-2.0.
 // Portions translated from Lance (lance_index::scalar::fmindex), Apache-2.0.
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -150,9 +151,9 @@ class FMIndex {
     std::string
     Extract(uint64_t doc_id, uint64_t offset, size_t len) const;
 
-    // Build isa_sample_ if it is still empty. The scalar wrapper calls this on
-    // the single-threaded load/build path so cache cell size includes Extract
-    // storage before any query. Thread-safe; a no-op after the first call.
+    // Build isa_sample_ if it is still empty. The scalar wrapper does not
+    // call this at load; Match rechecks sealed VARCHAR. Thread-safe; a no-op
+    // after the first call.
     void
     MaterializeIsaSample() const {
         ensureIsaSample();
@@ -199,6 +200,14 @@ class FMIndex {
     // LIKE '%a%' over repetitive text) makes MatchingDocs allocate GBs while
     // this stays at the caller's single bitmap. An empty pattern visits nothing
     // (as MatchingDocs).
+    //
+    // The interval is walked in TILES rather than one row at a time. Each
+    // occurrence's LF-walk is an independent chain of dependent cache misses,
+    // so walking them one by one leaves the core stalled on a single
+    // outstanding miss; advancing a tile in lock-step keeps many misses in
+    // flight at once (memory-level parallelism), the same trick CountBatch
+    // uses across patterns. The tile is fixed-size, so peak memory stays O(1)
+    // and the streaming contract above is preserved.
     template <typename Visitor>
     void
     VisitMatchingDocs(const uint8_t* pat, size_t plen, Visitor&& visit) const {
@@ -206,10 +215,74 @@ class FMIndex {
             return;
         }
         auto r = BackwardSearch(pat, plen);
-        for (size_t i = r.first; i < r.second; ++i) {
-            uint64_t pos = locateRow(i);
-            if (pos < text_len_) {  // skip the sentinel suffix
-                visit(docOf(pos));
+        if (r.first >= r.second) {
+            return;
+        }
+
+        // 128 measured best on a 96 MB corpus: 64 leaves memory-level
+        // parallelism on the table, 256 buys ~nothing more and doubles the
+        // stack frame.
+        constexpr size_t kTile = 128;
+        // Below a tile's worth of hits there are too few chains to overlap, and
+        // the per-tile bookkeeping (and its stack frame) costs more than it
+        // saves - measured as a ~40% regression on single-hit patterns, which
+        // are exactly the selective ones a filter sees most. Walk those one at
+        // a time.
+        constexpr size_t kSerialBelow = 8;
+        if (r.second - r.first <= kSerialBelow) {
+            for (size_t i = r.first; i < r.second; ++i) {
+                const uint64_t p = locateRow(i);
+                if (p < text_len_) {
+                    visit(docOf(p));
+                }
+            }
+            return;
+        }
+
+        size_t rows[kTile];
+        uint64_t steps[kTile];
+        uint64_t pos[kTile];
+        size_t pend[kTile];
+
+        for (size_t t0 = r.first; t0 < r.second; t0 += kTile) {
+            const size_t tn = std::min(kTile, r.second - t0);
+            for (size_t s = 0; s < tn; ++s) {
+                rows[s] = t0 + s;
+                steps[s] = 0;
+                pos[s] = kUnresolved;
+            }
+            // Lock-step LF-walk: every round retires the rows that landed on a
+            // sampled position and advances the rest together.
+            for (;;) {
+                size_t np = 0;
+                for (size_t s = 0; s < tn; ++s) {
+                    if (pos[s] != kUnresolved) {
+                        continue;
+                    }
+                    if (sampled_bv_.get(rows[s])) {
+                        pos[s] =
+                            sample_val(sampled_bv_.rank1(rows[s])) + steps[s];
+                        continue;
+                    }
+                    pend[np++] = s;
+                }
+                if (np == 0) {
+                    break;
+                }
+                for (size_t j = 0; j < np; ++j) {
+                    wm_.prefetch_access(rows[pend[j]]);
+                }
+                for (size_t j = 0; j < np; ++j) {
+                    const size_t s = pend[j];
+                    rows[s] = LF(rows[s]);
+                    ++steps[s];
+                    sampled_bv_.prefetch(rows[s]);
+                }
+            }
+            for (size_t s = 0; s < tn; ++s) {
+                if (pos[s] < text_len_) {  // skip the sentinel suffix
+                    visit(docOf(pos[s]));
+                }
             }
         }
     }
@@ -292,6 +365,7 @@ class FMIndex {
                sample_vals_narrow_owned_.capacity() * sizeof(uint32_t) +
                sample_vals_wide_owned_.capacity() * sizeof(uint64_t) +
                doc_bounds_owned_.capacity() * sizeof(uint64_t) +
+               doc_ckpt_.capacity() * sizeof(uint32_t) +
                id_to_byte_.capacity() * sizeof(uint8_t) +
                isa_sample_.capacity() * sizeof(uint64_t) +
                owned_blob_.capacity() * sizeof(uint8_t);
@@ -355,6 +429,12 @@ class FMIndex {
     std::vector<uint64_t>
     locateInternal(const uint8_t* pattern, size_t plen) const;
     // Document id whose internal range contains internal position p.
+    // CONTRACT: internal_pos < text_len_. Callers must reject the sentinel
+    // suffix first (`pos < text_len_`) — a position at or past text_len_ is not
+    // inside any document, and the two implementations below disagree on what
+    // to return for it (the checkpoint path clamps to the last document, the
+    // binary-search fallback runs off the end of doc_start_). Every call site
+    // already guards; this note is here so a new one does too.
     uint64_t
     docOf(uint64_t internal_pos) const;
     // Half-open SA interval of "pattern<separator>" — the occurrences of the
@@ -365,9 +445,10 @@ class FMIndex {
     std::pair<size_t, size_t>
     suffixDocInterval(const uint8_t* pattern, size_t plen) const;
     // Rebuild the (small) in-RAM-only structures derived from the serialized
-    // fields: id_to_byte_ (from byte_to_id_). Called after Build and after a
-    // load. isa_sample_ is NOT built here — see ensureIsaSample() /
-    // MaterializeIsaSample().
+    // fields: id_to_byte_ (from byte_to_id_) and doc_ckpt_ (from doc_start_).
+    // Called after Build and after a load; requires doc_start_/n_doc_bounds_/
+    // text_len_ to be set already. isa_sample_ is NOT built here — see
+    // ensureIsaSample().
     void
     buildDerived();
     // Build isa_sample_ on first use (Extract is its only consumer). Thread-safe
@@ -433,6 +514,20 @@ class FMIndex {
     std::vector<uint64_t> doc_bounds_owned_;  // Build-mode storage only
     const uint64_t* doc_start_ = nullptr;
     size_t n_doc_bounds_ = 0;
+
+    // Bucket index over doc_start_, rebuilt by buildDerived() and never
+    // serialized: doc_ckpt_[b] is the document covering internal byte
+    // b << ckpt_shift_, so docOf() starts from a lower bound instead of
+    // binary-searching. Sized by document count (~n_docs/8 entries), not by
+    // text length. Empty means "fall back to the binary search" (no documents,
+    // or more documents than a uint32_t can name).
+    std::vector<uint32_t> doc_ckpt_;
+    uint32_t ckpt_shift_ = 0;
+
+    // Sentinel for a tile slot whose LF-walk has not reached a sampled row yet.
+    // Not a representable text position (text_len_ < 2^63), so the resolved
+    // check `pos < text_len_` also rejects it.
+    static constexpr uint64_t kUnresolved = ~uint64_t{0};
 
     int32_t sep_id_ =
         1;  // dense id of the separator symbol (constant; not a byte)

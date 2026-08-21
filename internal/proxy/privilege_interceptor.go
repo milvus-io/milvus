@@ -88,9 +88,12 @@ func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc 
 		objectNameIndex := privilegeExt.ObjectNameIndex
 		objectName := funcutil.GetObjectName(req, objectNameIndex)
 		objectPrivilege := privilegeExt.ObjectPrivilege.String()
-		// Authorize against the db the request actually operates on, resolved by
-		// privilege level (mirrors the grant-side validation; see
-		// milvus-io/milvus#50678):
+		// Resolve resources against the database the request actually reads from,
+		// while keeping the database used by the policy check separate. Alias
+		// resolution must remain database-scoped even when a cross-database
+		// operation requires a cluster-scoped policy (db="*").
+		//
+		// Policy scope mirrors the grant-side validation (see milvus-io/milvus#50678):
 		//   - Cluster-level privileges (CreateDatabase/ResourceGroup/...) are not
 		//     scoped to a database, so authorize them globally (AnyWord),
 		//     independent of the connection namespace.
@@ -98,14 +101,27 @@ func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc 
 		//     targets: the request-body DbName takes precedence, falling back to the
 		//     connection-context db.
 		dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+		policyDBName := dbName
 		if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
-			dbName = util.AnyWord
+			policyDBName = util.AnyWord
 		}
 		// RenameCollection is a database-admin privilege: a same-db rename is
 		// authorized against the target db (database level, handled above), while a
 		// cross-db rename additionally requires a cluster-scoped (global) grant.
 		if r, ok := req.(*milvuspb.RenameCollectionRequest); ok && r.GetDbName() != r.GetNewDBName() {
-			dbName = util.AnyWord
+			policyDBName = util.AnyWord
+		}
+		// RestoreSnapshot is collection-scoped within one database. Restoring into
+		// another database creates a collection there, so require the same privilege
+		// at cluster scope (db="*") instead of authorizing only against the source.
+		if r, ok := req.(*milvuspb.RestoreSnapshotRequest); ok {
+			targetDBName := r.GetTargetDbName()
+			if targetDBName == "" {
+				targetDBName = GetCurDBNameFromContextOrDefault(ctx)
+			}
+			if dbName != targetDBName {
+				policyDBName = util.AnyWord
+			}
 		}
 
 		// Resolve alias to actual collection name for RBAC checks
@@ -152,14 +168,14 @@ func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc 
 
 		log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
 			mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),
-			mlog.FieldDbName(dbName),
+			mlog.FieldDbName(policyDBName),
 			mlog.Int32("object_index", objectNameIndex), mlog.String("object_name", objectName),
 			mlog.Int32("object_indexs", objectNameIndexs), mlog.Strings("object_names", objectNames))
 
 		e := privilege.GetEnforcer()
 		for _, roleName := range roleNames {
 			permitFunc := func(objectName string) (bool, error) {
-				object := funcutil.PolicyForResource(dbName, objectType, objectName)
+				object := funcutil.PolicyForResource(policyDBName, objectType, objectName)
 				isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
 				if cached {
 					return isPermit, nil
@@ -211,7 +227,7 @@ func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc 
 		}
 
 		return ctx, status.Error(codes.PermissionDenied,
-			fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, dbName))
+			fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, policyDBName))
 	}
 }
 

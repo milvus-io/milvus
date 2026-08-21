@@ -1366,10 +1366,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                int64_t,
                                T>
         HighPrecisionType;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
     if (!arg_inited_) {
         value_arg_.SetValue<HighPrecisionType>(expr_->value_);
@@ -2278,10 +2283,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                T>
         HighPrecisionType;
 
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
 
     auto res_vec =
@@ -3061,7 +3071,7 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
     auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
 
     std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; ++i) {
+    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
         auto skip =
             skip_index->CanSkipBinaryArithRange<T>(field_id_,
                                                    i,

@@ -203,6 +203,21 @@ service RootCoord {
     rpc GetClientTelemetry(milvus.GetClientTelemetryRequest) returns (milvus.GetClientTelemetryResponse) {}
     rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
     rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
+    rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
+}
+
+// ListClientCommandsRequest asks for the commands the coordinator is currently holding for
+// clients: one-time commands that have not expired or been answered, and persistent
+// configs. Unlike the other telemetry RPCs it carries no filter -- the set is small and
+// bounded by the command store's own limits, and the caller (the telemetry UI) shows all
+// of it.
+message ListClientCommandsRequest {
+  common.MsgBase base = 1;
+}
+
+message ListClientCommandsResponse {
+  common.Status status = 1;
+  repeated common.ClientCommand commands = 2;
 }
 
 message AllocTimestampRequest {
