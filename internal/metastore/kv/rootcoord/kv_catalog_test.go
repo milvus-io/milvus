@@ -4591,6 +4591,103 @@ func TestRBACReadSkipsEmptyKeySegments(t *testing.T) {
 	})
 }
 
+func TestRBACReadSkipsObsoleteExprPrivilege(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	const obsoletePrivilege = "PrivilegeExpr"
+
+	t.Run("ListGrant", func(t *testing.T) {
+		roleName := "role1"
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, roleName)
+		granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{granteePrefix + "Global/*"},
+			[]string{"grant-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeIDPrefix).Return(
+			[]string{granteeIDPrefix + obsoletePrivilege},
+			[]string{"root"},
+			nil,
+		)
+
+		grants, err := c.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+			Role:   &milvuspb.RoleEntity{Name: roleName},
+			DbName: util.AnyWord,
+		})
+		require.NoError(t, err)
+		require.Empty(t, grants)
+	})
+
+	t.Run("ListPolicy", func(t *testing.T) {
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{granteePrefix + "role1/Global/*"},
+			[]string{"grant-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeIDPrefix).Return(
+			[]string{granteeIDPrefix + obsoletePrivilege},
+			nil,
+			nil,
+		)
+
+		policies, err := c.ListPolicy(ctx, tenant)
+		require.NoError(t, err)
+		require.Empty(t, policies)
+	})
+
+	t.Run("ListPrivilegeGroups", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		group := &milvuspb.PrivilegeGroupInfo{
+			GroupName: "legacy_group",
+			Privileges: []*milvuspb.PrivilegeEntity{
+				{Name: "Expr"},
+				{Name: "Load"},
+			},
+		}
+		value, err := proto.Marshal(group)
+		require.NoError(t, err)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, PrivilegeGroupPrefix+"/").Return(
+			[]string{BuildPrivilegeGroupkey(group.GroupName)},
+			[]string{string(value)},
+			nil,
+		)
+
+		groups, err := c.ListPrivilegeGroups(ctx)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Equal(t, group.GroupName, groups[0].GetGroupName())
+		require.Equal(t, []string{"Load"}, getPrivilegeNames(groups[0].GetPrivileges()))
+	})
+}
+
+func TestRestoreRBACSkipsObsoleteExprPrivilege(t *testing.T) {
+	ctx := context.Background()
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	err := c.RestoreRBAC(ctx, util.DefaultTenant, &milvuspb.RBACMeta{
+		Grants: []*milvuspb.GrantEntity{
+			{
+				Grantor: &milvuspb.GrantorEntity{
+					Privilege: &milvuspb.PrivilegeEntity{Name: util.ObsoletePrivilegeExprForAPI},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+}
+
 func TestCatalog_FileResource(t *testing.T) {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")

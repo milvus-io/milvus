@@ -19,7 +19,6 @@ package http
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -43,17 +41,7 @@ const (
 var (
 	metricsServer *http.ServeMux
 	server        *http.Server
-
-	// passwordVerifyFunc is a callback function to verify user password.
-	// This is set by the proxy package to avoid circular dependency.
-	passwordVerifyFunc func(ctx context.Context, username, password string) bool
 )
-
-// RegisterPasswordVerifyFunc registers a function to verify user password.
-// This should be called by the proxy package during initialization.
-func RegisterPasswordVerifyFunc(fn func(ctx context.Context, username, password string) bool) {
-	passwordVerifyFunc = fn
-}
 
 // Embedding all static files of webui folder to binary
 //
@@ -72,12 +60,6 @@ type Handler struct {
 	Path        string
 	HandlerFunc http.HandlerFunc
 	Handler     http.Handler
-}
-
-func writeJSONError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
 }
 
 func registerDefaults() {
@@ -100,51 +82,6 @@ func registerDefaults() {
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
 	})
-	Register(&Handler{
-		Path: ExprPath,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			// Check if expr endpoint is enabled
-			if !paramtable.Get().CommonCfg.ExprEnabled.GetAsBool() {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "expr endpoint is disabled. Set common.security.exprEnabled to true to enable it."}`))
-				return
-			}
-
-			code := req.URL.Query().Get("code")
-			var auth string
-
-			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
-				return
-			}
-
-			if err := CheckExprAuth(req.Context(), req); err != nil {
-				writeJSONError(w, HTTPStatusFromPrivilegeError(err), err.Error())
-				return
-			}
-			// Use bypass since we've already authenticated
-			auth = expr.AuthBypass
-
-			output, err := expr.Exec(code, auth)
-			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError,
-					fmt.Sprintf("failed to execute expression, %s", err.Error()))
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			resp := make(map[string]string)
-			resp["output"] = output
-			json.NewEncoder(w).Encode(resp)
-		}),
-	})
-	Register(&Handler{
-		Path:    StaticPath,
-		Handler: GetStaticHandler(),
-	})
-
 	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {
 		RegisterWebUIHandler()
 	}

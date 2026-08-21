@@ -3496,6 +3496,31 @@ func TestMetaTable_CheckIfRBACRestorable_Wildcard(t *testing.T) {
 	assert.NoError(t, mt.CheckIfRBACRestorable(context.TODO(), req))
 }
 
+func TestMetaTable_CheckIfRBACRestorable_ObsoleteExprPrivilege(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListRole(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).
+		Return(nil, nil)
+	catalog.EXPECT().ListUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	mt := &MetaTable{catalog: catalog}
+	req := &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Grants: []*milvuspb.GrantEntity{
+				{
+					Grantor: &milvuspb.GrantorEntity{
+						Privilege: &milvuspb.PrivilegeEntity{Name: util.ObsoletePrivilegeExprForAPI},
+					},
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, mt.CheckIfRBACRestorable(context.TODO(), req))
+}
+
 func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).Return([]*milvuspb.PrivilegeGroupInfo{
@@ -3525,6 +3550,10 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	assert.Error(t, err)
 	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: "Insert",
+	})
+	assert.Error(t, err)
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: util.ObsoletePrivilegeExprForAPI,
 	})
 	assert.Error(t, err)
 	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{

@@ -38,6 +38,11 @@ import (
 // prefix/fields/collection_id/field_id				-> FieldSchema
 // prefix/file_resource/resource_id             -> Resource
 
+const (
+	obsoleteExprPrivilege       = util.ObsoletePrivilegeExpr
+	obsoleteExprPrivilegeForAPI = util.ObsoletePrivilegeExprForAPI
+)
+
 type Catalog struct {
 	Txn kv.TxnKV
 
@@ -1797,6 +1802,8 @@ func (kc *Catalog) listGrantWithLoadedGranteeProvider(ctx context.Context, tenan
 			privilegeName := util.PrivilegeNameForAPI(granteeIDInfos[0])
 			if granteeIDInfos[0] == util.AnyWord {
 				privilegeName = util.AnyWord
+			} else if granteeIDInfos[0] == obsoleteExprPrivilege {
+				continue
 			}
 			entities = append(entities, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: entity.Role.Name},
@@ -2117,6 +2124,8 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 			var privilegeName string
 			if granteeIDInfos[0] == util.AnyWord {
 				privilegeName = util.AnyWord
+			} else if granteeIDInfos[0] == obsoleteExprPrivilege {
+				continue
 			} else {
 				privilegeName = util.PrivilegeNameForAPI(granteeIDInfos[0])
 			}
@@ -2242,6 +2251,9 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if privName == obsoleteExprPrivilegeForAPI {
+			continue
+		}
 		switch {
 		case util.IsAnyWord(privName):
 		case util.IsPrivilegeNameDefined(privName):
@@ -2336,6 +2348,9 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 			mlog.Error(ctx, "failed to unmarshal privilege group info", mlog.Err(err))
 			return nil, err
 		}
+		privGroupInfo.Privileges = lo.Reject(privGroupInfo.Privileges, func(privilege *milvuspb.PrivilegeEntity, _ int) bool {
+			return privilege.GetName() == obsoleteExprPrivilegeForAPI
+		})
 		privGroups = append(privGroups, privGroupInfo)
 	}
 	return privGroups, nil

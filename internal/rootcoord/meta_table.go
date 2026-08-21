@@ -2275,7 +2275,7 @@ func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.Re
 	// check if grant can be restored
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
-		if util.IsAnyWord(privName) {
+		if util.IsAnyWord(privName) || privName == util.ObsoletePrivilegeExprForAPI {
 			continue
 		}
 		if _, ok := existPrivGroupAfterRestoreMap[privName]; !ok && !util.IsPrivilegeNameDefined(privName) {
@@ -2339,7 +2339,7 @@ func (mt *MetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *mi
 	if definedByUsers {
 		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", req.GetGroupName())
 	}
-	if util.IsPrivilegeNameDefined(req.GetGroupName()) {
+	if util.IsReservedPrivilegeName(req.GetGroupName()) {
 		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", req.GetGroupName())
 	}
 	return nil

@@ -59,7 +59,13 @@ const (
 
 	PrivilegeWord      = "Privilege"
 	PrivilegeGroupWord = "PrivilegeGroup"
-	AnyWord            = "*"
+	// ObsoletePrivilegeExpr is kept for compatibility with RBAC metadata written
+	// before the diagnostic expression executor was removed. It is not a
+	// grantable privilege, but its API name remains reserved and legacy grants
+	// are ignored during restore.
+	ObsoletePrivilegeExpr       = "PrivilegeExpr"
+	ObsoletePrivilegeExprForAPI = "Expr"
+	AnyWord                     = "*"
 
 	IdentifierKey = "identifier"
 
@@ -73,8 +79,6 @@ const (
 	RoleConfigPrivilege  = "privilege"
 
 	PreserveFieldIdsKey = "preserve_field_ids"
-
-	PrivilegeExpr = "PrivilegeExpr"
 )
 
 var (
@@ -175,8 +179,6 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
-
-			MetaStore2API(PrivilegeExpr),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -434,7 +436,6 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
-			PrivilegeExpr,
 			commonpb.ObjectPrivilege_PrivilegeRestoreExternalSnapshot.String(),
 			commonpb.ObjectPrivilege_PrivilegeExportSnapshot.String(),
 		})...,
@@ -515,17 +516,17 @@ func PrivilegeNameForMetastore(name string) string {
 }
 
 func isPrivilegeNameForMetastoreDefined(name string) bool {
-	if _, ok := commonpb.ObjectPrivilege_value[name]; ok {
-		return true
-	}
-	// TODO: drop this special case once PrivilegeExpr is promoted to a proto enum value
-	// in milvus-io/milvus-proto (commonpb.ObjectPrivilege_PrivilegeExpr).
-	return name == PrivilegeExpr
+	_, ok := commonpb.ObjectPrivilege_value[name]
+	return ok
 }
 
 // check if the name is defined by built in privileges or privilege groups in system
 func IsPrivilegeNameDefined(name string) bool {
 	return PrivilegeNameForMetastore(name) != ""
+}
+
+func IsReservedPrivilegeName(name string) bool {
+	return IsPrivilegeNameDefined(name) || name == ObsoletePrivilegeExprForAPI
 }
 
 func IsBuiltinPrivilegeGroup(name string) bool {
