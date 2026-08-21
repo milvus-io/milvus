@@ -1196,6 +1196,9 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
         if (i >= 100 && (i - 100) % 250 == 0) {
             row = "QOP" + row;
         }
+        if (i == 0) {
+            row = "QOP" + row;
+        }
         data.push_back(std::move(row));
     }
     const size_t nb = data.size();

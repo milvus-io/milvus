@@ -1535,11 +1535,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
 
     if constexpr (std::is_same_v<T, std::string> ||
                   std::is_same_v<T, std::string_view>) {
-        if (CanUseFMMatch()) {
-            auto res = ExecFMMatch(context);
-            if (res.has_value()) {
-                return res.value();
+        // PatternMatch(Match) is candidates only. Never serve it through
+        // UnaryIndexFuncForMatch. Recheck on VARCHAR, or scan.
+        if (expr_->op_type_ == proto::plan::OpType::Match &&
+            PinnedIndexIsFMIndex() && !has_offset_input_) {
+            if (CanUseFMMatch()) {
+                auto res = ExecFMMatch(context);
+                if (res.has_value()) {
+                    return res.value();
+                }
+                return nullptr;
             }
+            return ExecRangeVisitorImplForData<T>(context);
         }
     }
 
@@ -2399,6 +2406,17 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
 }
 
 bool
+PhyUnaryRangeFilterExpr::PinnedIndexIsFMIndex() const {
+    if (pinned_index_.empty() || pinned_index_[0].get() == nullptr) {
+        return false;
+    }
+    auto* scalar = dynamic_cast<const index::ScalarIndex<std::string>*>(
+        pinned_index_[0].get());
+    return scalar != nullptr &&
+           scalar->GetIndexType() == index::ScalarIndexType::FMINDEX;
+}
+
+bool
 PhyUnaryRangeFilterExpr::CanUseFMMatch() {
     if (has_offset_input_ || exec_path_ != ExprExecPath::ScalarIndex) {
         return false;
@@ -2409,14 +2427,10 @@ PhyUnaryRangeFilterExpr::CanUseFMMatch() {
     if (segment_->type() != SegmentType::Sealed) {
         return false;
     }
-    if (pinned_index_.empty() || pinned_index_[0].get() == nullptr) {
-        return false;
-    }
-    auto* scalar = dynamic_cast<const index::ScalarIndex<std::string>*>(
-        pinned_index_[0].get());
-    return scalar != nullptr &&
-           scalar->GetIndexType() == index::ScalarIndexType::FMINDEX &&
-           segment_->HasFieldData(field_id_);
+    // num_data_chunk_ is the construction snapshot. ProcessDataByOffsets on a
+    // ScalarIndex cursor with no data chunks Reverse_Lookups, which FMINDEX
+    // does not implement.
+    return PinnedIndexIsFMIndex() && num_data_chunk_ > 0;
 }
 
 std::optional<VectorPtr>

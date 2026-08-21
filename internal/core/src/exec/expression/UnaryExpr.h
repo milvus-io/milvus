@@ -1157,6 +1157,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     CanUseFMMatch();
 
+    bool
+    PinnedIndexIsFMIndex() const;
+
     std::optional<VectorPtr>
     ExecFMMatch(EvalCtx& context);
 
