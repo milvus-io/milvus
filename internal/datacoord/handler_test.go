@@ -29,7 +29,89 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRetrieveSegmentFallsBackOneGeneration(t *testing.T) {
+	segment := func(id int64, state commonpb.SegmentState, parents ...int64) *SegmentInfo {
+		return NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             id,
+			State:          state,
+			CompactionFrom: parents,
+		})
+	}
+
+	t.Run("all direct parents indexed", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			indexed.Contain,
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Empty(t, dropped.Collect())
+	})
+
+	t.Run("one direct parent unindexed", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			indexed.Contain,
+		)
+
+		assert.Equal(t, []int64{3}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2}, dropped.Collect())
+	})
+
+	t.Run("does not walk to indexed grandparent", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped, 1),
+			3: segment(3, commonpb.SegmentState_Flushed, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			indexed.Contain,
+		)
+
+		assert.Equal(t, []int64{3}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2}, dropped.Collect())
+	})
+
+	t.Run("indexed child wins", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Flushed, 1),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(2),
+			typeutil.NewUniqueSet(1),
+			indexed.Contain,
+		)
+
+		assert.Equal(t, []int64{2}, flushed.Collect())
+		assert.Equal(t, []int64{1}, dropped.Collect())
+	})
+}
 
 func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	svr := newTestServer(t)
@@ -1174,7 +1256,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		assert.NoError(t, err)
 
 		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		assert.ElementsMatch(t, []int64{5, 6}, vchan.FlushedSegmentIds)
+		assert.ElementsMatch(t, []int64{5, 6, 9, 10}, vchan.FlushedSegmentIds)
 		assert.ElementsMatch(t, []int64{}, vchan.UnflushedSegmentIds)
 		assert.ElementsMatch(t, []int64{1, 2}, vchan.DroppedSegmentIds)
 	})
