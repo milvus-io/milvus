@@ -89,21 +89,30 @@ func (suite *DistControllerTestSuite) TearDownSuite() {
 }
 
 func (suite *DistControllerTestSuite) TestStart() {
+	params := paramtable.Get()
+	params.Save(params.QueryCoordCfg.DistPullInterval.Key, "1500")
+	params.Save(params.QueryCoordCfg.DispatchInterval.Key, "10")
+	defer params.Reset(params.QueryCoordCfg.DistPullInterval.Key)
+	defer params.Reset(params.QueryCoordCfg.DispatchInterval.Key)
+
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
+	distributionCalled := atomic.NewBool(false)
 	dispatchCalled := atomic.NewBool(false)
 	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(
 		&querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: 1},
 		nil,
-	)
+	).Run(func(context.Context, int64, *querypb.GetDataDistributionRequest) {
+		distributionCalled.Store(true)
+	})
 	suite.mockScheduler.EXPECT().Dispatch(int64(1)).Run(func(node int64) { dispatchCalled.Store(true) })
 	suite.controller.StartDistInstance(context.TODO(), 1)
 	suite.Eventually(
 		func() bool {
-			return dispatchCalled.Load()
+			return distributionCalled.Load() && dispatchCalled.Load()
 		},
 		10*time.Second,
 		500*time.Millisecond,

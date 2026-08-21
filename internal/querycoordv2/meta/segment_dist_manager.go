@@ -189,7 +189,8 @@ type SegmentDistManagerInterface interface {
 }
 
 type SegmentDistManager struct {
-	rwmutex sync.RWMutex
+	publishMu *sync.RWMutex
+	rwmutex   sync.RWMutex
 
 	// nodeID -> []*Segment
 	segments map[typeutil.UniqueID]nodeSegments
@@ -240,13 +241,24 @@ func composeNodeSegments(segments []*Segment) nodeSegments {
 	}
 }
 
-func NewSegmentDistManager() *SegmentDistManager {
+func NewSegmentDistManager(publishLocks ...*sync.RWMutex) *SegmentDistManager {
+	publishMu := &sync.RWMutex{}
+	if len(publishLocks) > 0 && publishLocks[0] != nil {
+		publishMu = publishLocks[0]
+	}
 	return &SegmentDistManager{
-		segments: make(map[typeutil.UniqueID]nodeSegments),
+		publishMu: publishMu,
+		segments:  make(map[typeutil.UniqueID]nodeSegments),
 	}
 }
 
 func (m *SegmentDistManager) Update(nodeID typeutil.UniqueID, segments ...*Segment) {
+	m.publishMu.Lock()
+	defer m.publishMu.Unlock()
+	m.updateLocked(nodeID, segments...)
+}
+
+func (m *SegmentDistManager) updateLocked(nodeID typeutil.UniqueID, segments ...*Segment) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -265,6 +277,14 @@ func (m *SegmentDistManager) Update(nodeID typeutil.UniqueID, segments ...*Segme
 }
 
 func (m *SegmentDistManager) Patch(nodeID typeutil.UniqueID, upserts []*Segment, removedSegmentIDs []int64) {
+	m.publishMu.Lock()
+	defer m.publishMu.Unlock()
+	m.patchLocked(nodeID, upserts, removedSegmentIDs)
+}
+
+// patchLocked applies a delta distribution update. It takes the data lock only,
+// so callers publishing several managers atomically must already hold publishMu.
+func (m *SegmentDistManager) patchLocked(nodeID typeutil.UniqueID, upserts []*Segment, removedSegmentIDs []int64) {
 	if len(upserts) == 0 && len(removedSegmentIDs) == 0 {
 		return
 	}

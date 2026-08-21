@@ -236,7 +236,8 @@ type ChannelDistManagerInterface interface {
 }
 
 type ChannelDistManager struct {
-	rwmutex sync.RWMutex
+	publishMu *sync.RWMutex
+	rwmutex   sync.RWMutex
 
 	// NodeID -> Channels
 	channels map[typeutil.UniqueID]nodeChannels
@@ -251,8 +252,13 @@ func (m *ChannelDistManager) GetVersion() int64 {
 	return m.version
 }
 
-func NewChannelDistManager(nodeManager *session.NodeManager) *ChannelDistManager {
+func NewChannelDistManager(nodeManager *session.NodeManager, publishLocks ...*sync.RWMutex) *ChannelDistManager {
+	publishMu := &sync.RWMutex{}
+	if len(publishLocks) > 0 && publishLocks[0] != nil {
+		publishMu = publishLocks[0]
+	}
 	return &ChannelDistManager{
+		publishMu:   publishMu,
 		channels:    make(map[typeutil.UniqueID]nodeChannels),
 		nodeManager: nodeManager,
 	}
@@ -292,6 +298,12 @@ func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChan
 }
 
 func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmChannel) []*DmChannel {
+	m.publishMu.Lock()
+	defer m.publishMu.Unlock()
+	return m.updateLocked(nodeID, channels...)
+}
+
+func (m *ChannelDistManager) updateLocked(nodeID typeutil.UniqueID, channels ...*DmChannel) []*DmChannel {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -318,6 +330,14 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 }
 
 func (m *ChannelDistManager) Patch(nodeID typeutil.UniqueID, updates []*DmChannel, removedChannels []string) []*DmChannel {
+	m.publishMu.Lock()
+	defer m.publishMu.Unlock()
+	return m.patchLocked(nodeID, updates, removedChannels)
+}
+
+// patchLocked applies a delta distribution update. It takes the data lock only,
+// so callers publishing several managers atomically must already hold publishMu.
+func (m *ChannelDistManager) patchLocked(nodeID typeutil.UniqueID, updates []*DmChannel, removedChannels []string) []*DmChannel {
 	if len(updates) == 0 && len(removedChannels) == 0 {
 		return nil
 	}

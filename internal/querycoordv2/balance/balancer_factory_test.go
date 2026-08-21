@@ -20,11 +20,85 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestBalancerFactoryEpochPolicyForFrozenSelection(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryCoordCfg.Balancer.Key, meta.RoundRobinBalancerName)
+	params.Save(params.QueryCoordCfg.AutoBalanceChannel.Key, "true")
+	streamingutil.SetStreamingServiceEnabled()
+	t.Cleanup(func() {
+		streamingutil.UnsetStreamingServiceEnabled()
+		params.Reset(params.QueryCoordCfg.Balancer.Key)
+		params.Reset(params.QueryCoordCfg.AutoBalanceChannel.Key)
+	})
+
+	factory := NewBalancerFactory(nil, nil, nil, nil)
+	tests := []struct {
+		name         string
+		balancer     string
+		config       EpochPolicyConfig
+		supported    bool
+		channelLevel bool
+	}{
+		{
+			name:      "score without streaming",
+			balancer:  meta.ScoreBasedBalancerName,
+			config:    EpochPolicyConfig{AutoBalanceChannel: true, StreamingServiceEnabled: false},
+			supported: true,
+		},
+		{
+			name:      "score with streaming but channel balance disabled",
+			balancer:  meta.ScoreBasedBalancerName,
+			config:    EpochPolicyConfig{AutoBalanceChannel: false, StreamingServiceEnabled: true},
+			supported: true,
+		},
+		{
+			name:      "score with streaming channel balance",
+			balancer:  meta.ScoreBasedBalancerName,
+			config:    EpochPolicyConfig{AutoBalanceChannel: true, StreamingServiceEnabled: true},
+			supported: false,
+		},
+		{
+			name:         "channel level without streaming",
+			balancer:     meta.ChannelLevelScoreBalancerName,
+			config:       EpochPolicyConfig{StreamingServiceEnabled: false},
+			supported:    true,
+			channelLevel: true,
+		},
+		{
+			name:      "channel level with streaming",
+			balancer:  meta.ChannelLevelScoreBalancerName,
+			config:    EpochPolicyConfig{StreamingServiceEnabled: true},
+			supported: false,
+		},
+		{name: "round robin", balancer: meta.RoundRobinBalancerName},
+		{name: "row count", balancer: meta.RowCountBasedBalancerName},
+		{name: "multiple target", balancer: meta.MultiTargetBalancerName},
+		{name: "unknown", balancer: "UnknownBalancerType"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy, supported := factory.GetEpochPolicyFor(test.balancer, test.config)
+			require.Equal(t, test.supported, supported)
+			if !test.supported {
+				require.Nil(t, policy)
+				return
+			}
+			require.IsType(t, &scoreEpochPolicy{}, policy)
+			scorePolicy := policy.(*scoreEpochPolicy)
+			require.Equal(t, test.channelLevel, scorePolicy.channelLevel)
+		})
+	}
+}
 
 func TestBalancerFactory_GetBalancer(t *testing.T) {
 	paramtable.Init()

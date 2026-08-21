@@ -313,7 +313,7 @@ func (s *Server) initQueryCoord() error {
 	// Init schedulers
 	mlog.Info(s.ctx, "init schedulers")
 	s.jobScheduler = job.NewScheduler()
-	s.taskScheduler = task.NewScheduler(
+	concreteTaskScheduler := task.NewScheduler(
 		s.ctx,
 		s.meta,
 		s.dist,
@@ -322,6 +322,7 @@ func (s *Server) initQueryCoord() error {
 		s.cluster,
 		s.nodeMgr,
 	)
+	s.taskScheduler = concreteTaskScheduler
 
 	// init proxy client manager
 	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
@@ -779,8 +780,7 @@ func (s *Server) handleNodeDown(node int64) {
 	s.distController.Remove(node)
 
 	// Clear dist
-	s.dist.ChannelDistManager.Update(node)
-	s.dist.SegmentDistManager.Update(node)
+	s.dist.RemoveNodeDistribution(node)
 
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)

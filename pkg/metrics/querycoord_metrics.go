@@ -41,6 +41,8 @@ const (
 	UnknownTaskLabel = "unknown"
 
 	QueryCoordTaskType = "querycoord_task_type"
+
+	queryCoordBalanceEpochResourceGroupLabel = "resource_group"
 )
 
 var (
@@ -176,6 +178,71 @@ var (
 			Name:      "last_heartbeat_timestamp",
 			Help:      "heartbeat timestamp of query node",
 		}, []string{nodeIDLabelName})
+
+	QueryCoordBalanceEpochActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_active",
+			Help:      "active resource-group balance epochs by lifecycle state",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "state"})
+
+	QueryCoordBalanceEpochTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_total",
+			Help:      "terminal resource-group balance epochs by result",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "result"})
+
+	QueryCoordBalanceEpochPlansTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_plans_total",
+			Help:      "resource-group balance epoch plans by kind and result",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "kind", "result"})
+
+	QueryCoordBalanceEpochAdmissionTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_admission_total",
+			Help:      "resource-group balance epoch admission attempts by reason",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "reason"})
+
+	QueryCoordBalanceEpochSnapshotRetriesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_snapshot_retries_total",
+			Help:      "discarded optimistic placement snapshot attempts by resource group",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel})
+
+	QueryCoordBalanceEpochObjective = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_objective",
+			Help:      "latest resource-group balance objective by phase",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "phase"})
+
+	QueryCoordBalanceEpochCarryOver = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_carry_over",
+			Help:      "resource-group balance objects retaining constraints by kind",
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "kind"})
+
+	QueryCoordBalanceEpochDurationSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_epoch_duration_seconds",
+			Help:      "resource-group balance epoch duration in seconds by terminal result",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{queryCoordBalanceEpochResourceGroupLabel, "result"})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -195,6 +262,14 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 	registry.MustRegister(QueryCoordReplicaRONodeTotal)
 	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
+	registry.MustRegister(QueryCoordBalanceEpochActive)
+	registry.MustRegister(QueryCoordBalanceEpochTotal)
+	registry.MustRegister(QueryCoordBalanceEpochPlansTotal)
+	registry.MustRegister(QueryCoordBalanceEpochAdmissionTotal)
+	registry.MustRegister(QueryCoordBalanceEpochSnapshotRetriesTotal)
+	registry.MustRegister(QueryCoordBalanceEpochObjective)
+	registry.MustRegister(QueryCoordBalanceEpochCarryOver)
+	registry.MustRegister(QueryCoordBalanceEpochDurationSeconds)
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {
