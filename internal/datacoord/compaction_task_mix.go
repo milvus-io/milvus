@@ -84,10 +84,7 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to build compaction request", mlog.Err(err))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
-		if err != nil {
-			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
-		}
+		classifyFailure(context.TODO(), "mixCompactionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 		return
 	}
 
@@ -135,16 +132,13 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			classifyFailure(context.TODO(), "mixCompactionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 			return
 		}
 		if err := t.saveSegmentMeta(result); err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to save segment meta", mlog.Err(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
-				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
-				if err != nil {
-					mlog.Warn(context.TODO(), "mixCompactionTask failed to setState failed", mlog.Err(err))
-				}
+				classifyFailure(context.TODO(), "mixCompactionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 			}
 			return
 		}

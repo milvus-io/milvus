@@ -220,10 +220,7 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to build compaction request", mlog.Err(err))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
-		if err != nil {
-			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
-		}
+		classifyFailure(context.TODO(), "bumpSchemaVersionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 		return
 	}
 
@@ -269,26 +266,19 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_completed:
 		if len(result.GetSegments()) == 0 {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask illegal compaction results: no segments returned")
-			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
-				setFailReason("illegal compaction results: no segments returned")); err != nil {
-				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to setState failed", mlog.Err(err))
-			}
+			classifyFailure(context.TODO(), "bumpSchemaVersionTask", t.GetTaskProto(),
+				merr.WrapErrIllegalCompactionPlan("illegal compaction results: no segments returned"), t.updateAndSaveTaskMeta)
 			return
 		}
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
-			if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error())); saveErr != nil {
-				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to setState failed", mlog.Err(saveErr))
-			}
+			classifyFailure(context.TODO(), "bumpSchemaVersionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 			return
 		}
 		if err := t.saveSegmentMeta(result); err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to save segment meta", mlog.Err(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
-				if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
-					setFailReason(err.Error())); saveErr != nil {
-					log.Warn(context.TODO(), "bumpSchemaVersionTask failed to setState failed", mlog.Err(saveErr))
-				}
+				classifyFailure(context.TODO(), "bumpSchemaVersionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 			}
 			return
 		}

@@ -820,6 +820,7 @@ dataCoord:
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
+    maxRetryTimes: 3 # Max number of times a compaction task retries a retryable failure before it is marked failed permanently.
     gcInterval: 1800 # The time interval in seconds for compaction gc
     scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms
     mix:
