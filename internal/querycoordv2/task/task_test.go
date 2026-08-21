@@ -2263,6 +2263,55 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 	suite.False(suite.nodeMgr.IsResourceExhausted(nodeID))
 }
 
+// TestRemoveStartedTaskReturnsError pins that a task dropped while still
+// Started (node down via RemoveByNode, or shutdown via Stop) is canceled with a
+// real error, so a synchronous Wait caller can distinguish it from a
+// successful completion whose err is nil.
+func (suite *TaskSuite) TestRemoveStartedTaskReturnsError() {
+	ctx := context.Background()
+	nodeID := int64(1)
+
+	// A Started task removed via RemoveByNode (its node went down) must surface
+	// a real error, exercising the production entry point rather than calling
+	// scheduler.remove directly.
+	task, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(nodeID, ActionTypeGrow, "ch-0", 999),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task))
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.scheduler.RemoveByNode(nodeID)
+
+	suite.Equal(TaskStatusCanceled, task.Status())
+	suite.Error(task.Err())
+	suite.ErrorIs(task.Err(), merr.ErrServiceUnavailable)
+
+	// A task that already finished successfully keeps its nil err on remove.
+	task2, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(nodeID, ActionTypeGrow, "ch-0", 998),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task2))
+	task2.SetStatus(TaskStatusSucceeded)
+
+	suite.scheduler.RemoveByNode(nodeID)
+
+	suite.NoError(task2.Err())
+}
+
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
 }
