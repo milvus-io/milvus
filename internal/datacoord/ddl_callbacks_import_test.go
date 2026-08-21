@@ -628,18 +628,6 @@ func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
 	return mock
 }
 
-// BroadcastWithAdmission mirrors the real broadcaster: admit runs only when the
-// broadcast is not deduplicated, so a test whose configured result carries Duplicated
-// must never see it called.
-func (m *mockBroadcastAPIImpl) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
-	if admit != nil && (m.broadcastResult == nil || m.broadcastResult.Duplicated == nil) {
-		if err := admit(ctx); err != nil {
-			return nil, err
-		}
-	}
-	return m.Broadcast(ctx, msg)
-}
-
 func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 	// Add operations to ensure the function is long enough for mockey
 	if ctx == nil {
@@ -1171,15 +1159,6 @@ type captureBroadcastAPI struct {
 func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 	c.captured = msg
 	return &types.BroadcastAppendResult{BroadcastID: 1}, nil
-}
-
-func (c *captureBroadcastAPI) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
-	if admit != nil {
-		if err := admit(ctx); err != nil {
-			return nil, err
-		}
-	}
-	return c.Broadcast(ctx, msg)
 }
 
 func (c *captureBroadcastAPI) Close() {}

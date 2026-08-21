@@ -93,15 +93,16 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
 //
-// This runs before the broadcaster's idempotency lookup, so a retry has to pass it
-// again. Two of the checks read mutable cluster state rather than the request alone --
+// All of this runs before the broadcaster's idempotency lookup, which cannot happen
+// until the resource keys are held inside Broadcast. A retry therefore has to pass
+// these checks again before it can resolve to its original jobID, and not all of them
+// are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs,
 // ValidateBinlogImportRequest lists the backup files in object storage, and
-// validateImportReplication reads the replication topology -- so a retry sent after
-// that state changed is rejected here instead of resolving to its original jobID. They
-// stay ahead of the lookup deliberately: both can be slow, and the lookup holds the
-// collection's exclusive resource key. Checks that only gate the creation of a new job
-// belong in the admission callback instead -- see BroadcastWithAdmission in
-// broadcastImport.
+// validateImportReplication reads the replication topology. A retry sent while the job
+// limit is saturated -- by the original request among others -- or after the backup
+// files or the replication topology changed is rejected here rather than returning the
+// original jobID. Retrying the same key once the limit frees up resolves normally;
+// minting a fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
@@ -115,6 +116,12 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		if err != nil {
 			return err
 		}
+	}
+
+	// Validate max import job count
+	err = ValidateMaxImportJobExceed(ctx, s.importMeta)
+	if err != nil {
+		return err
 	}
 
 	if err := s.validateImportReplication(ctx, options); err != nil {
@@ -303,14 +310,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
-	// Broadcast the message. The job-count limit is checked here rather than in
-	// validateImportRequest so that a retry carrying a known idempotency key can still
-	// reach its original job: the original is itself counted against the limit while it
-	// executes, so checking before the lookup would reject the retry and leave the
-	// client without the original jobID.
-	result, err := broadcaster.BroadcastWithAdmission(ctx, msg, func(ctx context.Context) error {
-		return ValidateMaxImportJobExceed(ctx, s.importMeta)
-	})
+	// Broadcast the message
+	result, err := broadcaster.Broadcast(ctx, msg)
 	if err != nil {
 		return 0, false, err
 	}
