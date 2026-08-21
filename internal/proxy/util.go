@@ -759,6 +759,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
 		}
 	}
+	if err := validateEvictableProperty("field", field.GetName(), field.GetTypeParams()); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -802,7 +805,24 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
 		}
 	}
+	if err := validateEvictableProperty("field", field.GetName(), field.GetTypeParams()); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func validateEvictableProperty(entityType, entityName string, properties []*commonpb.KeyValuePair) error {
+	for _, property := range properties {
+		if common.IsCollectionEvictableKey(property.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("evictable key '%s' is only allowed at collection level, use %s at field level", property.GetKey(), common.EvictableKey)
+		}
+		if common.IsFieldEvictableKey(property.GetKey()) {
+			if err := common.ValidateEvictableEnabled(property.GetValue()); err != nil {
+				return merr.Wrapf(err, "invalid evictable value for %s %s", entityType, entityName)
+			}
+		}
+	}
 	return nil
 }
 
@@ -843,6 +863,9 @@ func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 		if err := common.ValidateWarmupPolicy(warmupPolicy); err != nil {
 			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for struct field %s: %s", structArrayField.Name, err.Error())
 		}
+	}
+	if err := validateEvictableProperty("struct field", structArrayField.GetName(), structArrayField.GetTypeParams()); err != nil {
+		return err
 	}
 
 	for _, subField := range structArrayField.Fields {

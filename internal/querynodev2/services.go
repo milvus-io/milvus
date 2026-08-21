@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -71,6 +72,100 @@ import (
 // so it cannot be reused, while recognizing it here to return a precise
 // mixed-version protocol error.
 const legacyLoadScopeIndex = querypb.LoadScope(2)
+
+// materializeLoadSegmentsEvictableOverrides clones a worker-bound load request
+// and propagates collection-level eviction defaults to fields and indexes.
+// QueryNode-local defaults remain unset so each cache slot can resolve the
+// latest local configuration when it is created. The clone is required because
+// a delegator may reuse the coordinator request for multiple workers.
+func materializeLoadSegmentsEvictableOverrides(req *querypb.LoadSegmentsRequest) *querypb.LoadSegmentsRequest {
+	materialized := typeutil.Clone(req)
+	schema := materialized.GetSchema()
+	if schema == nil {
+		return materialized
+	}
+
+	scalarFieldDefault, hasScalarFieldDefault := common.GetEvictableByKey(
+		common.EvictableScalarFieldKey, schema.GetProperties()...)
+	vectorFieldDefault, hasVectorFieldDefault := common.GetEvictableByKey(
+		common.EvictableVectorFieldKey, schema.GetProperties()...)
+	scalarIndexDefault, hasScalarIndexDefault := common.GetEvictableByKey(
+		common.EvictableScalarIndexKey, schema.GetProperties()...)
+	vectorIndexDefault, hasVectorIndexDefault := common.GetEvictableByKey(
+		common.EvictableVectorIndexKey, schema.GetProperties()...)
+
+	fieldDefault := func(field *schemapb.FieldSchema) (bool, bool) {
+		if typeutil.IsVectorType(field.GetDataType()) {
+			return vectorFieldDefault, hasVectorFieldDefault
+		}
+		return scalarFieldDefault, hasScalarFieldDefault
+	}
+
+	indexDefault := func(field *schemapb.FieldSchema) (bool, bool) {
+		if typeutil.IsVectorType(field.GetDataType()) {
+			return vectorIndexDefault, hasVectorIndexDefault
+		}
+		return scalarIndexDefault, hasScalarIndexDefault
+	}
+
+	fieldByID := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
+	materializeField := func(field *schemapb.FieldSchema, inherited *bool) {
+		fieldByID[field.GetFieldID()] = field
+		if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); exist {
+			return
+		}
+
+		enabled, hasDefault := fieldDefault(field)
+		if inherited != nil {
+			enabled = *inherited
+			hasDefault = true
+		}
+		if !hasDefault {
+			return
+		}
+		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+			Key:   common.EvictableKey,
+			Value: strconv.FormatBool(enabled),
+		})
+	}
+
+	for _, field := range schema.GetFields() {
+		materializeField(field, nil)
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		structDefault, hasStructDefault := common.IsEvictableEnabled(structField.GetTypeParams()...)
+		for _, field := range structField.GetFields() {
+			if hasStructDefault {
+				materializeField(field, &structDefault)
+			} else {
+				materializeField(field, nil)
+			}
+		}
+	}
+
+	for _, info := range materialized.GetInfos() {
+		for _, indexInfo := range info.GetIndexInfos() {
+			if _, exist := common.IsEvictableEnabled(indexInfo.GetIndexParams()...); exist {
+				continue
+			}
+			field, ok := fieldByID[indexInfo.GetFieldID()]
+			if !ok {
+				continue
+			}
+
+			enabled, hasDefault := indexDefault(field)
+			if !hasDefault {
+				continue
+			}
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.EvictableKey,
+				Value: strconv.FormatBool(enabled),
+			})
+		}
+	}
+
+	return materialized
+}
 
 type segmentDetacher interface {
 	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
@@ -544,6 +639,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 		return merr.Success(), nil
 	}
+
+	// Propagate collection-level settings to fields and indexes on a clone so
+	// neither the coordinator request nor another worker is affected. Leave
+	// QueryNode-local defaults unset for segcore to resolve when it creates each
+	// cache slot. Both full load and Reopen consume the cloned request below.
+	req = materializeLoadSegmentsEvictableOverrides(req)
 
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())

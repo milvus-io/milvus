@@ -244,6 +244,28 @@ field_exists_in_schema(const SchemaPtr& schema, FieldId field_id) {
 }
 
 static inline bool
+field_evictable_enabled(const SchemaPtr& schema,
+                        FieldId field_id,
+                        bool is_index) {
+    const auto& field_meta = schema->operator[](field_id);
+    auto [has_setting, enabled] = schema->EvictableEnabled(
+        field_id, IsVectorDataType(field_meta.get_data_type()), is_index);
+    return has_setting
+               ? enabled
+               : SegcoreConfig::default_config().get_evictable_default(
+                     IsVectorDataType(field_meta.get_data_type()), is_index);
+}
+
+static inline bool
+all_fields_evictable_enabled(const SchemaPtr& schema,
+                             const std::vector<FieldId>& field_ids,
+                             bool is_index) {
+    return std::all_of(field_ids.begin(), field_ids.end(), [&](auto field_id) {
+        return field_evictable_enabled(schema, field_id, is_index);
+    });
+}
+
+static inline bool
 has_bit_position(const BitsetType& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     return pos >= 0 && static_cast<size_t>(pos) < bitset.size();
@@ -2613,6 +2635,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                mmap_dir_path,
                                                merged_in_load_list,
                                                load_info.shard);
+        column_group_info.support_eviction =
+            info.support_eviction &&
+            all_fields_evictable_enabled(
+                schema_snapshot, milvus_field_ids, /*is_index=*/false);
         LOG_INFO(
             "[StorageV2] segment {} loads column group {} with field ids "
             "{} "
@@ -2766,6 +2792,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                mmap_dir_path,
                                                merged_in_load_list,
                                                load_info.shard);
+        column_group_info.support_eviction =
+            info.support_eviction &&
+            all_fields_evictable_enabled(
+                schema_snapshot, milvus_field_ids, /*is_index=*/false);
         LOG_INFO(
             "[StorageV2] segment {} loads column group {} with field ids "
             "{} "
@@ -2942,6 +2972,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                           mmap_dir_path,
                           schema_snapshot->ShouldLoadField(field_id),
                           load_info.shard);
+        field_data_info.support_eviction = info.support_eviction;
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -3062,6 +3093,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                           mmap_dir_path,
                           schema_snapshot->ShouldLoadField(field_id),
                           load_info.shard);
+        field_data_info.support_eviction = info.support_eviction;
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -5677,7 +5709,8 @@ ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
         info_proto->warmup_policy(),
-        segment_load_info.GetInsertChannel()};
+        segment_load_info.GetInsertChannel(),
+        info_proto->support_eviction()};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
@@ -5759,6 +5792,7 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
         config[milvus::index::WARMUP] = info_proto->warmup_policy();
     }
     config[milvus::index::INDEX_SIZE] = info_proto->stats_size();
+    config[milvus::index::SUPPORT_EVICTION] = info_proto->support_eviction();
     if (!info_proto->base_path().empty()) {
         config[STATS_BASE_PATH_KEY] = info_proto->base_path();
     }
@@ -8334,6 +8368,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
+    bool support_eviction = true;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -8346,6 +8381,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+        support_eviction = support_eviction &&
+                           field_evictable_enabled(
+                               schema_snapshot, field_id, /*is_index=*/false);
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -8421,6 +8459,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetPriority(),
             eager_load,
             warmup_policy,
+            support_eviction,
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel());
@@ -8495,6 +8534,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
+    bool support_eviction = true;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -8503,6 +8543,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+        support_eviction = support_eviction &&
+                           field_evictable_enabled(
+                               schema_snapshot, field_id, /*is_index=*/false);
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -8566,6 +8609,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetPriority(),
             eager_load,
             warmup_policy,
+            support_eviction,
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
@@ -8834,6 +8878,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool is_vector = false;
 
         std::string aggregated_warmup_policy;
+        bool support_eviction = true;
         for (const auto& child_field_id : fields_to_load) {
             auto& field_meta = schema_snapshot->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -8864,6 +8909,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                 resolve_field_data_warmup_policy(
                     child_field_id, segment_load_info, schema_snapshot),
                 aggregated_warmup_policy);
+            support_eviction =
+                support_eviction && field_evictable_enabled(schema_snapshot,
+                                                            child_field_id,
+                                                            /*is_index=*/false);
         }
 
         auto group_id = field_binlog.fieldid();
@@ -8913,6 +8962,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Determine group warmup policy: use per-field settings if any,
         // otherwise fall back to global warmup policy
         field_binlog_info.warmup_policy = aggregated_warmup_policy;
+        field_binlog_info.support_eviction = support_eviction;
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;

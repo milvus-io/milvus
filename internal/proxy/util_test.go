@@ -4850,6 +4850,22 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("invalid evictable value", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "invalid_evictable",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int32,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "100"},
+				{Key: common.EvictableKey, Value: "not-bool"},
+			},
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for field invalid_evictable")
+	})
+
 	t.Run("valid array of vector field", func(t *testing.T) {
 		field := &schemapb.FieldSchema{
 			Name:        "valid_array_vector",
@@ -5090,6 +5106,64 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			assert.NoError(t, err)
 		}
 	})
+}
+
+func TestValidateEvictableProperties(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "test_collection"}
+
+	t.Run("ordinary field rejects invalid evictable", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:       "scalar",
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "1"}},
+		}
+		err := ValidateField(field, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for field scalar")
+	})
+
+	t.Run("ordinary field rejects collection-only key", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:       "scalar",
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableScalarFieldKey, Value: "false"}},
+		}
+		err := ValidateField(field, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only allowed at collection level")
+	})
+
+	t.Run("struct field rejects invalid evictable", func(t *testing.T) {
+		structField := &schemapb.StructArrayFieldSchema{
+			Name:       "profile",
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "not-bool"}},
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "ints",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				},
+			},
+		}
+		err := ValidateStructArrayField(structField, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for struct field profile")
+	})
+
+	for _, value := range []string{"true", "false"} {
+		t.Run("canonical value "+value+" accepted", func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				Name:       "scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: value}},
+			}
+			assert.NoError(t, ValidateField(field, schema))
+		})
+	}
 }
 
 func TestValidateStructArrayField_MaxCapacity(t *testing.T) {

@@ -1419,6 +1419,26 @@ func TestValidateAddStructFieldRequest(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("invalid struct evictable value", func(t *testing.T) {
+		structField := newAddStructFieldSchema("profile")
+		structField.TypeParams = append(structField.TypeParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "not-bool"})
+
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), structField)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for struct field profile")
+	})
+
+	t.Run("invalid nested evictable value", func(t *testing.T) {
+		structField := newAddStructFieldSchema("profile")
+		structField.Fields[0].TypeParams = append(structField.Fields[0].TypeParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "t"})
+
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), structField)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for field ints")
+	})
+
 	t.Run("struct must be nullable", func(t *testing.T) {
 		structField := newAddStructFieldSchema("profile")
 		structField.Nullable = false
@@ -2014,6 +2034,105 @@ func TestCreateCollectionTask(t *testing.T) {
 
 		err = task2.PreExecute(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+func TestCreateCollectionEvictableValidation(t *testing.T) {
+	ctx := context.Background()
+	baseSchema := &schemapb.CollectionSchema{
+		Name: "test_create_collection_evictable",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				Name:       "vector",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
+		},
+	}
+
+	newTask := func(t *testing.T, schema *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) *createCollectionTask {
+		t.Helper()
+		marshaledSchema, err := proto.Marshal(schema)
+		require.NoError(t, err)
+		return &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           commonpbutil.NewMsgBase(),
+				CollectionName: schema.GetName(),
+				Schema:         marshaledSchema,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties:     properties,
+			},
+			ctx:      ctx,
+			mixCoord: NewMixCoordMock(),
+		}
+	}
+
+	t.Run("collection rejects field-only key", func(t *testing.T) {
+		task := newTask(t, proto.Clone(baseSchema).(*schemapb.CollectionSchema), []*commonpb.KeyValuePair{
+			{Key: common.EvictableKey, Value: "false"},
+		})
+		err := task.PreExecute(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only allowed at field level")
+	})
+
+	t.Run("collection rejects invalid default", func(t *testing.T) {
+		task := newTask(t, proto.Clone(baseSchema).(*schemapb.CollectionSchema), []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "not-bool"},
+		})
+		err := task.PreExecute(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value")
+	})
+
+	t.Run("ordinary field rejects invalid value", func(t *testing.T) {
+		schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+		schema.Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "t"}}
+		task := newTask(t, schema, nil)
+		err := task.PreExecute(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for field id")
+	})
+
+	t.Run("struct and nested fields reject invalid values", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*schemapb.StructArrayFieldSchema)
+			want   string
+		}{
+			{
+				name: "struct field",
+				mutate: func(field *schemapb.StructArrayFieldSchema) {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "yes"})
+				},
+				want: "invalid evictable value for struct field profile",
+			},
+			{
+				name: "nested field",
+				mutate: func(field *schemapb.StructArrayFieldSchema) {
+					field.Fields[0].TypeParams = append(field.Fields[0].TypeParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "0"})
+				},
+				want: "invalid evictable value for field ints",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+				structField := newAddStructFieldSchema("profile")
+				structField.Nullable = false
+				tc.mutate(structField)
+				schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{structField}
+				task := newTask(t, schema, nil)
+				err := task.PreExecute(ctx)
+				require.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), tc.want)
+			})
+		}
 	})
 }
 
@@ -5569,6 +5688,100 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
+func TestAlterCollectionEvictable(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	cache, err := initMetaCache(ctx, qc)
+	assert.NoError(t, err)
+
+	createCollection := func(t *testing.T, name string) int64 {
+		t.Helper()
+		schema := &schemapb.CollectionSchema{
+			Name: name,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			},
+		}
+		schemaBytes, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		_, err = qc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			DbName:         dbName,
+			CollectionName: name,
+			Schema:         schemaBytes,
+			ShardsNum:      1,
+		})
+		assert.NoError(t, err)
+		resp, err := qc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: name})
+		assert.NoError(t, err)
+		return resp.GetCollectionID()
+	}
+
+	runAlter := func(name string, props []*commonpb.KeyValuePair, deleteKeys []string) error {
+		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: name,
+				Properties:     props,
+				DeleteKeys:     deleteKeys,
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		return task.PreExecute(ctx)
+	}
+
+	t.Run("accepts collection evictable keys", func(t *testing.T) {
+		collectionName := "test_alter_collection_evictable_" + funcutil.GenRandomStr()
+		createCollection(t, collectionName)
+		props := []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "false"},
+			{Key: common.EvictableScalarIndexKey, Value: "true"},
+			{Key: common.EvictableVectorFieldKey, Value: "false"},
+			{Key: common.EvictableVectorIndexKey, Value: "true"},
+		}
+		assert.NoError(t, runAlter(collectionName, props, nil))
+	})
+
+	t.Run("rejects field-level evictable key at collection level", func(t *testing.T) {
+		collectionName := "test_alter_collection_field_evictable_" + funcutil.GenRandomStr()
+		createCollection(t, collectionName)
+		err := runAlter(collectionName, []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}}, nil)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "field level")
+	})
+
+	t.Run("rejects invalid evictable value", func(t *testing.T) {
+		collectionName := "test_alter_collection_invalid_evictable_" + funcutil.GenRandomStr()
+		createCollection(t, collectionName)
+		err := runAlter(collectionName, []*commonpb.KeyValuePair{{Key: common.EvictableScalarFieldKey, Value: "not-bool"}}, nil)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("rejects modifying loaded collection", func(t *testing.T) {
+		collectionName := "test_alter_collection_loaded_evictable_" + funcutil.GenRandomStr()
+		collectionID := createCollection(t, collectionName)
+		qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+			return &querypb.ShowCollectionsResponse{
+				Status:              merr.Success(),
+				CollectionIDs:       []int64{collectionID},
+				InMemoryPercentages: []int64{100},
+			}, nil
+		}
+		t.Cleanup(func() { qc.ShowLoadCollectionsFunc = nil })
+
+		err := runAlter(collectionName, []*commonpb.KeyValuePair{{Key: common.EvictableScalarFieldKey, Value: "false"}}, nil)
+		assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+		err = runAlter(collectionName, nil, []string{common.EvictableScalarFieldKey})
+		assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+	})
+}
+
 func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
@@ -6375,6 +6588,30 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+	// update property "evictable" but the collection is loaded
+	task = &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+	// delete property "evictable" but the collection is loaded
+	task = &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			DeleteKeys:     []string{common.EvictableKey},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
 func TestAlterCollectionField(t *testing.T) {
@@ -6514,6 +6751,14 @@ func TestAlterCollectionField(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:      "update evictable enabled",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "false"},
+			},
+			expectError: false,
+		},
+		{
 			name:      "update analyzer params without enable analyzer",
 			fieldName: "string_field",
 			properties: []*commonpb.KeyValuePair{
@@ -6554,6 +6799,15 @@ func TestAlterCollectionField(t *testing.T) {
 			fieldName: "bm25_input_field",
 			properties: []*commonpb.KeyValuePair{
 				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"whitespace"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "invalid evictable enabled value",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "not-bool"},
 			},
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
@@ -6634,6 +6888,12 @@ func TestAlterCollectionField(t *testing.T) {
 			name:        "delete mmap.enabled is allowed",
 			fieldName:   "string_field",
 			deleteKeys:  []string{common.MmapEnabledKey},
+			expectError: false,
+		},
+		{
+			name:        "delete evictable is allowed",
+			fieldName:   "string_field",
+			deleteKeys:  []string{common.EvictableKey},
 			expectError: false,
 		},
 		{
@@ -7496,6 +7756,25 @@ func TestHasWarmupProp(t *testing.T) {
 	})
 }
 
+func TestHasEvictableProp(t *testing.T) {
+	t.Run("has field-level evictable key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}}
+		assert.True(t, hasEvictableProp(props...))
+	})
+
+	t.Run("has collection evictable keys", func(t *testing.T) {
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableScalarFieldKey, Value: "false"}))
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableScalarIndexKey, Value: "false"}))
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableVectorFieldKey, Value: "false"}))
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableVectorIndexKey, Value: "false"}))
+	})
+
+	t.Run("no evictable key", func(t *testing.T) {
+		assert.False(t, hasEvictableProp(&commonpb.KeyValuePair{Key: "other_key", Value: "other_value"}))
+		assert.False(t, hasEvictableProp())
+	})
+}
+
 func TestHasPropInDeletekeys(t *testing.T) {
 	t.Run("has mmap key", func(t *testing.T) {
 		keys := []string{common.MmapEnabledKey}
@@ -7512,6 +7791,14 @@ func TestHasPropInDeletekeys(t *testing.T) {
 		assert.Equal(t, common.WarmupScalarIndexKey, hasPropInDeletekeys([]string{common.WarmupScalarIndexKey}))
 		assert.Equal(t, common.WarmupVectorFieldKey, hasPropInDeletekeys([]string{common.WarmupVectorFieldKey}))
 		assert.Equal(t, common.WarmupVectorIndexKey, hasPropInDeletekeys([]string{common.WarmupVectorIndexKey}))
+	})
+
+	t.Run("has evictable keys", func(t *testing.T) {
+		assert.Equal(t, common.EvictableKey, hasPropInDeletekeys([]string{common.EvictableKey}))
+		assert.Equal(t, common.EvictableScalarFieldKey, hasPropInDeletekeys([]string{common.EvictableScalarFieldKey}))
+		assert.Equal(t, common.EvictableScalarIndexKey, hasPropInDeletekeys([]string{common.EvictableScalarIndexKey}))
+		assert.Equal(t, common.EvictableVectorFieldKey, hasPropInDeletekeys([]string{common.EvictableVectorFieldKey}))
+		assert.Equal(t, common.EvictableVectorIndexKey, hasPropInDeletekeys([]string{common.EvictableVectorIndexKey}))
 	})
 
 	t.Run("no special key", func(t *testing.T) {
@@ -7548,6 +7835,34 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		}
 		err := validateAddFieldRequest(schema, newField)
 		assert.NoError(t, err)
+	})
+
+	t.Run("rejects invalid evictable value", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:       "new_field",
+			DataType:   schemapb.DataType_Int64,
+			Nullable:   true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "not-bool"}},
+		}
+		err := ValidateField(newField, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "invalid evictable value for field new_field")
+	})
+
+	t.Run("rejects collection-level evictable key", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:       "new_field",
+			DataType:   schemapb.DataType_Int64,
+			Nullable:   true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableScalarFieldKey, Value: "false"}},
+		}
+		err := ValidateField(newField, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only allowed at collection level")
 	})
 
 	t.Run("text field requires storage v3", func(t *testing.T) {
