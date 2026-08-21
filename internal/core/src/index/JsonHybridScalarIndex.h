@@ -67,7 +67,6 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 
         auto n = result.field_data->get_num_rows();
-        non_exist_row_count_ = n;
         std::set<T> distinct_vals;
         for (size_t i = 0; i < n; ++i) {
             if (result.field_data->is_valid(i)) {
@@ -84,7 +83,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;
-        BuildExistsBitset(non_exist_row_count_);
+        BuildExistsBitset(n);
         this->ComputeByteSize();
     }
 
@@ -123,7 +122,6 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 
         auto n = result.field_data->get_num_rows();
-        non_exist_row_count_ = n;
         // Do cardinality counting that respects is_valid(), unlike the base
         // class SelectBuildTypeForPrimitiveType which counts invalid rows too.
         std::set<T> distinct_vals;
@@ -142,7 +140,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;
-        BuildExistsBitset(non_exist_row_count_);
+        BuildExistsBitset(n);
         this->ComputeByteSize();
     }
 
@@ -184,10 +182,10 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         }
         LOG_INFO("LoadEntries JsonHybridScalarIndex done, has_non_exist: {}",
                  has_non_exist);
-        non_exist_row_count_ =
+        const auto row_count =
             GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
                 .value_or(this->Count());
-        BuildExistsBitset(non_exist_row_count_);
+        BuildExistsBitset(row_count);
         ComputeByteSize();
     }
 
@@ -209,7 +207,6 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
     proto::schema::FieldSchema json_schema_;
     storage::MemFileManagerImplPtr json_file_manager_;
     roaring::Roaring non_exist_offsets_;
-    size_t non_exist_row_count_{0};
     TargetBitmap exists_bitset_;
 };
 

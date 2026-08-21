@@ -61,7 +61,8 @@ class IndexFactory {
                       const std::map<std::string, std::string>& index_params,
                       bool mmap_enable,
                       int64_t num_rows,
-                      int64_t dim);
+                      int64_t dim,
+                      std::optional<bool> field_nullable = std::nullopt);
 
     LoadResourceRequest
     IndexLoadResource(
