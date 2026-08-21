@@ -41,7 +41,13 @@ LoonErrCodeToErrorCode(int err_code) {
     switch (err_code) {
         case LOON_INVALID_ARGS:
         case LOON_INVALID_PROPERTIES:
-            return ErrorCode::InvalidParameter;
+            // Neither is the API caller's fault: the args are milvus's own FFI
+            // call arguments and the properties are built by
+            // MakePropertiesFromStorageConfig out of indexpb.StorageConfig.
+            // InvalidParameter carries InputError, which would make the proxy
+            // abort cross-replica failover and blame the user for a milvus-side
+            // or deployment defect.
+            return ErrorCode::ConfigInvalid;
         case LOON_MEMORY_ERROR:
             return ErrorCode::MemAllocateFailed;
         case LOON_FILE_NOT_FOUND:

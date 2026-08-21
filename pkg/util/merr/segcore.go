@@ -189,6 +189,15 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 		return segcoreClass{sentinel: KnowhereError}, true
 
 	// Caller-input errors -> InputError (non-retriable by construction).
+	//
+	// NO SEGCORE PRODUCER as of this writing: JsonKeyInvalid, MetricTypeInvalid
+	// (only SearchBruteForceTest.cpp, a test), MetricTypeNotMatch. Their
+	// placement here is inference from the name, not from an audited throw site,
+	// so it is unverified in the way every other entry in this switch is not. If
+	// a knowhere or storage mapping later starts producing one, re-derive its
+	// class from that producer instead of trusting this line -- an InputError
+	// mark makes the proxy abort cross-replica failover (lb_policy.go), which is
+	// wrong for anything internal.
 	case CodeJsonKeyInvalid, CodeMetricTypeInvalid, CodeExprInvalid,
 		CodeMetricTypeNotMatch, CodeDimNotMatch, CodeInvalidParameter:
 		return segcoreClass{sentinel: ErrSegcore, inputError: true}, true
@@ -222,6 +231,8 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 	// Transient system errors -> retriable (a retry / reroute to another replica
 	// can succeed): object storage, local IO, OOM, mmap, field-not-loaded,
 	// insufficient resource, and the retriable storage fallback (2045).
+	// InsufficientResource has NO segcore producer as of this writing; retriable
+	// is inference from the name, not from an audited throw site.
 	case CodeFileOpenFailed, CodeFileCreateFailed, CodeFileReadFailed, CodeFileWriteFailed,
 		CodeS3Error, CodeFieldNotLoaded, CodeMemAllocateFailed, CodeMmapError,
 		CodeInsufficientResource, CodeStorageTransientError:
@@ -235,6 +246,8 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 	// is the permanent storage fallback.
 	case CodeUnexpectedError, CodeNotImplemented, CodeIndexBuildError, CodeIndexAlreadyBuild,
 		CodeConfigInvalid, CodePathInvalid, CodePathAlreadyExist, CodePathNotExist,
+		// RetrieveError likewise has no segcore producer; permanent is the
+		// conservative default rather than an audited verdict.
 		CodeBucketInvalid, CodeObjectNotExist, CodeRetrieveError, CodeDataFormatBroken,
 		CodeUnistdError, CodeMemAllocateSizeNotMatch, CodeTextIndexNotFound, CodeStorageError:
 		return segcoreClass{sentinel: ErrSegcore}, true
