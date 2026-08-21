@@ -496,13 +496,6 @@ func applyCollectionEvictableSetting(schema *schemapb.CollectionSchema,
 
 	for _, structField := range schema.GetStructArrayFields() {
 		structEvictable, structHasExplicitEvictable := common.IsEvictableEnabled(structField.GetTypeParams()...)
-		if !structHasExplicitEvictable && scalarFieldExist &&
-			!common.FieldHasEvictableKey(schema, structField.GetFieldID()) {
-			structField.TypeParams = append(structField.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.EvictableKey,
-				Value: strconv.FormatBool(scalarFieldEvictable),
-			})
-		}
 
 		for _, field := range structField.GetFields() {
 			if common.FieldHasEvictableKey(schema, field.GetFieldID()) {

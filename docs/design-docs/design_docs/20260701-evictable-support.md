@@ -167,6 +167,39 @@ QueryNode parses the final properties:
 Storage V2 column groups use a conservative aggregation rule: a group is marked
 evictable only when every child field in that group is evictable.
 
+#### StructArray Semantics
+
+StructArray follows the same configuration-versus-storage model as `warmup`:
+configuration is resolved through its nested fields, while the physical column
+group is managed as one cache resource.
+
+For raw field data, precedence within a StructArray is:
+
+```text
+nested field property > struct field property > collection property > QueryNode global default
+```
+
+- An explicit `evictable` value on a nested field affects that field.
+- An explicit `evictable` value on the StructArray is propagated to nested
+  fields that do not have their own override.
+- Without a StructArray-level value, each nested field inherits the collection
+  default for its own type: `Array` uses `evictable.scalarField`, while
+  `ArrayOfVector` uses `evictable.vectorField`.
+- QueryCoord does not materialize `evictable.scalarField` onto the StructArray
+  container itself.
+
+Segcore flattens the nested fields into its field schema, but the StructArray
+binlog/column group still has a single cache slot and therefore a single
+`support_eviction` value. The effective group value is the logical AND of its
+nested field values: if any nested field is non-evictable, the entire group is
+non-evictable. This is analogous to `warmup`, which resolves policies per
+nested field and then folds them into one group policy using
+`sync > async > disable`.
+
+Indexes belong to individual nested fields and use their own scalar/vector
+index evictable settings; they are not combined with the raw StructArray column
+group setting.
+
 ### Segcore Integration
 
 The CGo load messages now carry `support_eviction` for:
@@ -206,6 +239,8 @@ The implementation includes tests for:
 - Proxy collection and field validation.
 - DataCoord index validation, alter, idempotency, and snapshot filtering.
 - QueryCoord load-info propagation and precedence.
+- StructArray parent/child propagation, type-specific collection defaults, and
+  conservative physical-group aggregation.
 - QueryNode parsing, resource estimates, and CGo request construction.
 - C++ load structs and translator propagation into `support_eviction`.
 - Go client generic property and extra-parameter helpers.

@@ -919,6 +919,8 @@ func TestApplyCollectionEvictableSetting(t *testing.T) {
 	assert.True(t, exist)
 	assert.True(t, structEvictable)
 	assertEvictable(result.GetStructArrayFields()[0].GetFields()[0], true)
+	_, exist = common.IsEvictableEnabled(result.GetStructArrayFields()[1].GetTypeParams()...)
+	assert.False(t, exist, "collection scalar-field default should be applied to struct sub-fields, not the struct container")
 	assertEvictable(result.GetStructArrayFields()[1].GetFields()[0], false)
 	assertEvictable(result.GetStructArrayFields()[1].GetFields()[1], true)
 	assertEvictable(result.GetStructArrayFields()[1].GetFields()[2], true)
