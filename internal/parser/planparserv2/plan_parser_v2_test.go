@@ -3005,13 +3005,23 @@ func Test_ArrayLengthNestedArray(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 
-	for _, expr := range []string{
+	validRowLevelExprs := []string{
 		`array_length(NestedArrayField) == 1`,
 		`array_length(struct_array[nested]) == 1`,
-	} {
-		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
-		require.ErrorContains(t, err, "array_length operation is not supported on nested array field", expr)
 	}
+	for _, expr := range validRowLevelExprs {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+	}
+
+	rowLevelExpr, err := ParseExpr(helper, validRowLevelExprs[0], nil)
+	require.NoError(t, err)
+	rowLevelLengthExpr := rowLevelExpr.GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, rowLevelLengthExpr)
+	rowLevelColumnInfo := rowLevelLengthExpr.GetColumnInfo()
+	require.NotNil(t, rowLevelColumnInfo)
+	assert.Equal(t, int64(10000), rowLevelColumnInfo.GetFieldId())
+	assert.False(t, rowLevelColumnInfo.GetIsElementLevel())
 
 	_, err = CreateSearchPlan(helper, `array_length(struct_array) == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
 	require.NoError(t, err)

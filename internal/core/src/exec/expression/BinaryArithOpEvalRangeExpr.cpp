@@ -123,9 +123,15 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
                     if (is_array_length) {
                         if (is_nested_array) {
-                            result =
-                                ExecArrayLength<ArrayValueView, int64_t, true>(
-                                    input);
+                            if (expr_->column_.element_level_) {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         int64_t,
+                                                         true>(input);
+                            } else {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         int64_t,
+                                                         false>(input);
+                            }
                         } else {
                             result = ExecArrayLength<ArrayView, int64_t, false>(
                                 input);
@@ -138,9 +144,15 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
                     if (is_array_length) {
                         if (is_nested_array) {
-                            result =
-                                ExecArrayLength<ArrayValueView, double, true>(
-                                    input);
+                            if (expr_->column_.element_level_) {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         double,
+                                                         true>(input);
+                            } else {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         double,
+                                                         false>(input);
+                            }
                         } else {
                             result = ExecArrayLength<ArrayView, double, false>(
                                 input);

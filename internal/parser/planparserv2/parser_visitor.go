@@ -2705,7 +2705,6 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
 	var columnInfo *planpb.ColumnInfo
 	var err error
-	isStructArrayParent := false
 	if ctx.StructFieldIdentifier() != nil {
 		// Handle struct_arr[sub_field] syntax: look up the full field name directly
 		identifier := ctx.StructFieldIdentifier().GetText()
@@ -2724,7 +2723,6 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.Identifier().GetText()); ok || parentErr != nil {
 				columnInfo = parentColumnInfo
 				err = parentErr
-				isStructArrayParent = ok
 			}
 		}
 		if columnInfo == nil && err == nil {
@@ -2737,17 +2735,6 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 		}
 		if err != nil {
 			return err
-		}
-	}
-	if columnInfo != nil && !isStructArrayParent && !columnInfo.GetIsElementLevel() {
-		// StructArray parents are not represented as FieldSchema and remain
-		// supported. Row-level recursive Array length remains unsupported;
-		// element-level access inside MATCH_* is evaluated through
-		// ArrayValueView.
-		field, fieldErr := v.schema.GetFieldFromID(columnInfo.GetFieldId())
-		if fieldErr == nil && typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-			return merr.WrapErrParameterInvalidMsg(
-				"array_length operation is not supported on nested array field %s", field.GetName())
 		}
 	}
 	if columnInfo == nil ||

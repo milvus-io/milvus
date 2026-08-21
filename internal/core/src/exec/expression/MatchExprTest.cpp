@@ -20,7 +20,9 @@
 #include <stddef.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -62,6 +64,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/segment_c.h"
 #include "storage/MmapManager.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -745,15 +748,15 @@ TEST(MatchExprZeroElementBatch,
     append_row({{1}});
     insert_data->set_num_rows(N);
 
-    GeneratedData generated_data;
-    generated_data.schema_ = schema;
-    generated_data.raw_ = insert_data.release();
-    for (int64_t i = 0; i < N; ++i) {
-        generated_data.row_ids_.push_back(i);
-        generated_data.timestamps_.push_back(i);
-    }
-
-    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    std::vector<Timestamp> timestamps(N);
+    std::iota(timestamps.begin(), timestamps.end(), 0);
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(2);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    const auto reserved_offset = segment->PreInsert(N);
+    segment->Insert(
+        reserved_offset, N, ids.data(), timestamps.data(), insert_data.get());
     ScopedSchemaHandle schema_handle(*schema);
     auto retrieve = [&](const std::string& expression)
         -> std::unique_ptr<proto::segcore::RetrieveResults> {
@@ -785,6 +788,17 @@ TEST(MatchExprZeroElementBatch,
     ASSERT_EQ(match_all->offset_size(), expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
         EXPECT_EQ(match_all->offset(i), expected[i]);
+    }
+
+    // Row-level length uses the recursive ARRAY root and must preserve field
+    // nullability: null rows 0 and 3 do not match length zero.
+    auto root_length =
+        retrieve("array_length(struct_array[nested_values]) == 0");
+    ASSERT_NE(root_length, nullptr);
+    const std::vector<int64_t> expected_empty = {1, 2, 4};
+    ASSERT_EQ(root_length->offset_size(), expected_empty.size());
+    for (size_t i = 0; i < expected_empty.size(); ++i) {
+        EXPECT_EQ(root_length->offset(i), expected_empty[i]);
     }
 }
 
@@ -890,6 +904,7 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         std::vector<int64_t> expected_offsets;
     };
     const std::vector<TestCase> cases = {
+        {"array_length(struct_array[nested_values]) == 2", {0, 1}},
         {"match_any(struct_array, "
          "array_length($[nested_values]) == 2)",
          {0, 1, 3}},
@@ -957,8 +972,10 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         auto plan = CreateRetrievePlanByExpr(
             schema, plan_bytes.data(), plan_bytes.size());
         ASSERT_NE(plan, nullptr);
-        auto* filter_node =
-            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get();
+        const auto& sources = plan->plan_node_->plannodes_->sources();
+        ASSERT_EQ(sources.size(), 1);
+        auto* filter_node = sources.front().get();
+        ASSERT_NE(filter_node, nullptr);
         exec::OffsetVector offsets = {3, 1, 0};
         auto output = test::gen_filter_res(
             filter_node, segment, row_count, MAX_TIMESTAMP, &offsets);
@@ -976,10 +993,11 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         auto length_plan = CreateRetrievePlanByExpr(
             schema, length_plan_bytes.data(), length_plan_bytes.size());
         ASSERT_NE(length_plan, nullptr);
-        auto* length_filter_node =
-            length_plan->plan_node_->plannodes_->sources()[0]
-                ->sources()[0]
-                .get();
+        const auto& length_sources =
+            length_plan->plan_node_->plannodes_->sources();
+        ASSERT_EQ(length_sources.size(), 1);
+        auto* length_filter_node = length_sources.front().get();
+        ASSERT_NE(length_filter_node, nullptr);
         exec::OffsetVector length_offsets = {3, 1, 0};
         auto length_output = test::gen_filter_res(length_filter_node,
                                                   segment,
@@ -992,6 +1010,31 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         EXPECT_FALSE(length_output_data[0]);
         EXPECT_FALSE(length_output_data[1]);
         EXPECT_TRUE(length_output_data[2]);
+
+        const std::string row_length_offset_expression =
+            "array_length(struct_array[nested_values]) == 2";
+        const auto row_length_plan_bytes =
+            schema_handle.Parse(row_length_offset_expression);
+        auto row_length_plan = CreateRetrievePlanByExpr(
+            schema, row_length_plan_bytes.data(), row_length_plan_bytes.size());
+        ASSERT_NE(row_length_plan, nullptr);
+        const auto& row_length_sources =
+            row_length_plan->plan_node_->plannodes_->sources();
+        ASSERT_EQ(row_length_sources.size(), 1);
+        auto* row_length_filter_node = row_length_sources.front().get();
+        ASSERT_NE(row_length_filter_node, nullptr);
+        exec::OffsetVector row_length_offsets = {3, 1, 0};
+        auto row_length_output = test::gen_filter_res(row_length_filter_node,
+                                                      segment,
+                                                      row_count,
+                                                      MAX_TIMESTAMP,
+                                                      &row_length_offsets);
+        ASSERT_EQ(row_length_output->size(), row_length_offsets.size());
+        TargetBitmapView row_length_output_data(row_length_output->GetRawData(),
+                                                row_length_output->size());
+        EXPECT_FALSE(row_length_output_data[0]);
+        EXPECT_TRUE(row_length_output_data[1]);
+        EXPECT_TRUE(row_length_output_data[2]);
     };
 
     std::vector<idx_t> row_ids = {0, 1, 2, 3};
@@ -1039,16 +1082,108 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         check_segment(growing.get(), "growing mmap multi-chunk");
     }
 
-    GeneratedData generated_data;
-    generated_data.schema_ = schema;
-    generated_data.raw_ = new InsertRecordProto(*insert_data);
-    generated_data.row_ids_ = row_ids;
-    generated_data.timestamps_ = timestamps;
-    auto sealed = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    proto::schema::CollectionSchema storage_schema_proto;
+    auto add_system_field = [&](FieldId field_id, const char* name) {
+        auto* field = storage_schema_proto.add_fields();
+        field->set_fieldid(field_id.get());
+        field->set_name(name);
+        field->set_data_type(proto::schema::DataType::Int64);
+    };
+    add_system_field(RowFieldID, "RowID");
+    add_system_field(TimestampFieldID, "Timestamp");
+    const auto user_schema_proto = schema->ToProto();
+    for (const auto& field : user_schema_proto.fields()) {
+        auto* storage_field = storage_schema_proto.add_fields();
+        *storage_field = field;
+        if (field.fieldid() == nested_int_fid.get() ||
+            field.fieldid() == nested_string_fid.get()) {
+            auto* mmap = storage_field->add_type_params();
+            mmap->set_key(MMAP_ENABLED_KEY);
+            mmap->set_value("false");
+        }
+    }
+    auto storage_schema = Schema::ParseFrom(storage_schema_proto);
+
+    auto storage_growing =
+        CreateGrowingSegment(storage_schema, empty_index_meta, 2);
+    const auto storage_offset = storage_growing->PreInsert(row_count);
+    storage_growing->Insert(storage_offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            insert_data.get());
+
+    const auto unique =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto segment_path =
+        (std::filesystem::temp_directory_path() /
+         ("milvus_match_nested_array_v3_" + std::to_string(unique)))
+            .string();
+    std::filesystem::remove_all(segment_path);
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+
+    auto schema_blob = storage_schema_proto.SerializeAsString();
+    const auto column_group_pattern =
+        "0|1|" + std::to_string(int64_fid.get()) + "," +
+        std::to_string(nested_int_fid.get()) + "," +
+        std::to_string(nested_string_fid.get());
+    CFlushConfig flush_config{};
+    flush_config.segment_path = segment_path.c_str();
+    flush_config.read_version = -1;
+    flush_config.retry_limit = 3;
+    flush_config.schema_blob = schema_blob.data();
+    flush_config.schema_length = static_cast<int64_t>(schema_blob.size());
+    flush_config.schema_based_pattern = column_group_pattern.c_str();
+
+    CFlushResult flush_result{};
+    auto flush_guard =
+        folly::makeGuard([&flush_result] { FreeFlushResult(&flush_result); });
+    const auto flush_status = FlushGrowingSegmentData(
+        storage_growing.get(), 0, row_count, &flush_config, &flush_result);
+    ASSERT_EQ(flush_status.error_code, Success) << flush_status.error_msg;
+    ASSERT_EQ(flush_result.num_rows, row_count);
+
+    const auto manifest_path =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(flush_result.committed_version) + "}";
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(row_count);
+    load_info.set_manifest_path(manifest_path);
+    load_info.set_insert_channel("nested-array-match-test");
+
+    auto load_sealed = [&](SchemaPtr load_schema, int64_t segment_id) {
+        auto segment_load_info = load_info;
+        segment_load_info.set_segmentid(segment_id);
+        auto sealed = CreateSealedSegment(
+            std::move(load_schema), empty_index_meta, segment_id);
+        sealed->SetLoadInfo(segment_load_info);
+        tracer::TraceContext trace_ctx;
+        sealed->Load(trace_ctx, nullptr);
+        return sealed;
+    };
+
+    auto sealed = load_sealed(storage_schema, 3);
+    EXPECT_FALSE(sealed->is_mmap_field(nested_int_fid));
     check_segment(sealed.get(), "sealed");
 
-    auto sealed_mmap =
-        CreateSealedWithFieldDataLoaded(schema, generated_data, true);
+    auto mmap_schema_proto = storage_schema_proto;
+    for (auto& field : *mmap_schema_proto.mutable_fields()) {
+        if (field.fieldid() != nested_int_fid.get() &&
+            field.fieldid() != nested_string_fid.get()) {
+            continue;
+        }
+        for (auto& type_param : *field.mutable_type_params()) {
+            if (type_param.key() == MMAP_ENABLED_KEY) {
+                type_param.set_value("true");
+            }
+        }
+    }
+    auto sealed_mmap = load_sealed(Schema::ParseFrom(mmap_schema_proto), 4);
+    EXPECT_TRUE(sealed_mmap->is_mmap_field(nested_int_fid));
     check_segment(sealed_mmap.get(), "sealed mmap");
 }
 
