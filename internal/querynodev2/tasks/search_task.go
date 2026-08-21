@@ -282,7 +282,11 @@ func (t *SearchTask) Execute() error {
 	}
 
 	// Export per-segment results as Arrow DataFrames
-	segDFs, err := t.exportSearchResultsAsArrow(results, searchReq.Plan(), preparedChains.extraFieldIDs)
+	var l0InputFieldIDs []int64
+	if preparedChains.l0 != nil {
+		l0InputFieldIDs = preparedChains.l0.inputFieldIDs
+	}
+	segDFs, err := t.exportSearchResultsAsArrow(results, searchReq.Plan(), l0InputFieldIDs)
 	if err != nil {
 		return err
 	}
@@ -294,13 +298,83 @@ func (t *SearchTask) Execute() error {
 		}
 	}()
 
-	if err := t.applyL0Rerank(segDFs, preparedChains, searchedSegments, searchReq); err != nil {
+	if err := t.applyL0Rerank(segDFs, preparedChains.l0, searchedSegments, searchReq); err != nil {
 		return err
 	}
 
-	if err := t.executeGoReduce(segDFs, results, searchReq, metricType, tr, relatedDataSize, allSearchCount); err != nil {
+	groupByOpts := resolveGroupByOptions(segDFs, results)
+	layout, err := t.buildReduceLayout(groupByOpts, preparedChains.l1 != nil)
+	if err != nil {
 		return err
 	}
+	if layout.PerRequestReduce {
+		for i, reduceRange := range layout.Ranges {
+			reduced, err := t.executeGoReduce(
+				segDFs,
+				reduceRange.ReduceTopK,
+				groupByOpts,
+				reduceRange.NQOffset,
+				reduceRange.NQCount,
+			)
+			if err != nil {
+				return err
+			}
+			if err := t.processReducedSlice(
+				i,
+				reduced,
+				results,
+				searchReq.Plan(),
+				preparedChains.l1,
+				metricType,
+				tr,
+				relatedDataSize,
+				allSearchCount,
+			); err != nil {
+				return err
+			}
+		}
+	} else {
+		reduced, err := t.executeGoReduce(segDFs, t.topk, groupByOpts, 0, layout.NQ)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if reduced != nil && reduced.DF != nil {
+				reduced.DF.Release()
+			}
+		}()
+
+		reduced, err = t.applyL1RerankResult(reduced, results, searchReq.Plan(), preparedChains.l1)
+		if err != nil {
+			return err
+		}
+
+		for i, reduceRange := range layout.Ranges {
+			rowLimit := reduceRange.OutputTopK * layout.GroupSize
+			sliced, err := extractSlice(reduced, reduceRange.NQOffset, reduceRange.NQCount, rowLimit)
+			if err != nil {
+				return err
+			}
+			if err := func() error {
+				if sliced != reduced && sliced.DF != nil {
+					defer sliced.DF.Release()
+				}
+				return t.materializeAndAssignResult(
+					i,
+					sliced,
+					results,
+					searchReq.Plan(),
+					metricType,
+					tr,
+					relatedDataSize,
+					allSearchCount,
+				)
+			}(); err != nil {
+				return err
+			}
+		}
+	}
+	t.attributeStorageCost(results)
 
 	// Reduce metric covers the full Go-reduce pipeline (Arrow export +
 	// heap merge + Late Materialization + proto marshal), aligned with the

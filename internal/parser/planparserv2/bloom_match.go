@@ -424,28 +424,29 @@ func PlanContainsMembershipFilter(plan *planpb.PlanNode) bool {
 	return PlanContainsBloomFilter(plan) || PlanContainsRoaringFilter(plan)
 }
 
+// planContainsFilter reports whether the plan's main predicate or any scorer
+// filter satisfies has. Scorer filters carry their own predicate tree and can
+// embed a membership blob too, so both plan-size accounting and delete safety
+// must see them. Keeping the plan traversal here means a new PlanNode variant
+// is picked up by every membership predicate at once.
+//
+// A nil plan needs no special case: the generated getters are nil-safe, so it
+// yields no scorers and a nil predicate, and walkExpr reports false for nil.
+func planContainsFilter(plan *planpb.PlanNode, has func(*planpb.Expr) bool) bool {
+	for _, scorer := range plan.GetScorers() {
+		if has(scorer.GetFilter()) {
+			return true
+		}
+	}
+	return has(planPredicates(plan))
+}
+
 // PlanContainsBloomFilter reports whether the plan's main predicate or a scorer
 // filter contains a bloom_match expression. bloom_match is approximate (false
 // positives) and is therefore also rejected by the proxy delete path, where a
 // false positive would delete rows outside the user's set.
 func PlanContainsBloomFilter(plan *planpb.PlanNode) bool {
-	if plan == nil {
-		return false
-	}
-	for _, scorer := range plan.GetScorers() {
-		if hasBloomFilterExpr(scorer.GetFilter()) {
-			return true
-		}
-	}
-	switch realPlan := plan.GetNode().(type) {
-	case *planpb.PlanNode_VectorAnns:
-		return hasBloomFilterExpr(realPlan.VectorAnns.GetPredicates())
-	case *planpb.PlanNode_Predicates:
-		return hasBloomFilterExpr(realPlan.Predicates)
-	case *planpb.PlanNode_Query:
-		return hasBloomFilterExpr(realPlan.Query.GetPredicates())
-	}
-	return false
+	return planContainsFilter(plan, hasBloomFilterExpr)
 }
 
 // collectBloomFilterExprs appends every BloomFilterExpr node in the tree.

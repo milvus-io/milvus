@@ -62,14 +62,15 @@ const (
 	// placeholders and the rest of the internal request retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
-	MaxClusterIDBits                = 3
+	DefaultMaxDegree                     = 56
+	DefaultSearchListSize                = 100
+	DefaultPQCodeBudgetGBRatio           = 0.125
+	DefaultBuildNumThreadsRatio          = 1.0
+	DefaultSearchCacheBudgetGBRatio      = 0.10
+	DefaultLoadNumThreadRatio            = 8.0
+	DefaultBeamWidthRatio                = 4.0
+	MaxClusterIDBits                     = 3
+	defaultTakeForOutputResultCountLimit = "10000"
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -2093,6 +2094,17 @@ type rootCoordConfig struct {
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
 	DefaultDBProperties         ParamItem `refreshable:"false"`
+
+	// Client telemetry. RootCoord reads these once, when it builds the telemetry manager,
+	// so they are not refreshable: a running manager keeps the values it started with.
+	ClientTelemetryCleanupInterval            ParamItem `refreshable:"false"`
+	ClientTelemetryInactiveClientThreshold    ParamItem `refreshable:"false"`
+	ClientTelemetryClientStatusThreshold      ParamItem `refreshable:"false"`
+	ClientTelemetryCommandCleanupTimeout      ParamItem `refreshable:"false"`
+	ClientTelemetryMaxMetricsPerClient        ParamItem `refreshable:"false"`
+	ClientTelemetryMaxOperationTypesPerClient ParamItem `refreshable:"false"`
+	ClientTelemetryMaxClientsInMemory         ParamItem `refreshable:"false"`
+	ClientTelemetryRetainedWindows            ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -2184,6 +2196,84 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.DefaultDBProperties.Init(base.mgr)
+
+	p.ClientTelemetryCleanupInterval = ParamItem{
+		Key:          "rootCoord.clientTelemetry.cleanupInterval",
+		Version:      "3.0.0",
+		DefaultValue: "60",
+		Doc:          "seconds. How often to sweep clients that stopped heartbeating and commands that expired.",
+		Export:       true,
+	}
+	p.ClientTelemetryCleanupInterval.Init(base.mgr)
+
+	p.ClientTelemetryInactiveClientThreshold = ParamItem{
+		Key:          "rootCoord.clientTelemetry.inactiveClientThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		Doc:          "seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.",
+		Export:       true,
+	}
+	p.ClientTelemetryInactiveClientThreshold.Init(base.mgr)
+
+	p.ClientTelemetryClientStatusThreshold = ParamItem{
+		Key:          "rootCoord.clientTelemetry.clientStatusThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "60",
+		Doc: `seconds. How long a client may go without a heartbeat before it is reported as inactive.
+It is still kept, and still reported, until inactiveClientThreshold.`,
+		Export: true,
+	}
+	p.ClientTelemetryClientStatusThreshold.Init(base.mgr)
+
+	p.ClientTelemetryCommandCleanupTimeout = ParamItem{
+		Key:          "rootCoord.clientTelemetry.commandCleanupTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Doc:          "seconds. Timeout for the etcd operations that remove expired client commands.",
+		Export:       true,
+	}
+	p.ClientTelemetryCommandCleanupTimeout.Init(base.mgr)
+
+	p.ClientTelemetryMaxMetricsPerClient = ParamItem{
+		Key:          "rootCoord.clientTelemetry.maxMetricsPerClient",
+		Version:      "3.0.0",
+		DefaultValue: "1048576",
+		Doc: `bytes. Largest metrics payload accepted from one client per heartbeat; anything beyond is truncated.
+Zero removes the cap entirely, unlike the other limits here, where a non-positive value falls back to the default.`,
+		Export: true,
+	}
+	p.ClientTelemetryMaxMetricsPerClient.Init(base.mgr)
+
+	p.ClientTelemetryMaxOperationTypesPerClient = ParamItem{
+		Key:          "rootCoord.clientTelemetry.maxOperationTypesPerClient",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Largest number of distinct operation types kept per client; anything beyond is truncated.",
+		Export:       true,
+	}
+	p.ClientTelemetryMaxOperationTypesPerClient.Init(base.mgr)
+
+	p.ClientTelemetryMaxClientsInMemory = ParamItem{
+		Key:          "rootCoord.clientTelemetry.maxClientsInMemory",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Doc:          "Largest number of clients tracked at once, so a misconfigured or malicious fleet cannot grow this memory without bound.",
+		Export:       true,
+	}
+	p.ClientTelemetryMaxClientsInMemory.Init(base.mgr)
+
+	p.ClientTelemetryRetainedWindows = ParamItem{
+		Key:          "rootCoord.clientTelemetry.retainedWindows",
+		Version:      "3.0.0",
+		DefaultValue: "2",
+		Doc: `How many heartbeat windows to keep per client.
+A telemetry query is answered from the oldest window kept, so this is also how far the answer lags
+the client and how many consecutive idle intervals it survives: at 2, one interval without traffic
+cannot blank the view; at 3, two cannot. Each extra window is another copy of every operation and
+per-collection breakdown for every connected client. Values below 1 are treated as the default.`,
+		Export: true,
+	}
+	p.ClientTelemetryRetainedWindows.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3947,6 +4037,7 @@ type queryNodeConfig struct {
 	// output fields take
 	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	TakeForOutputResultCountLimit      ParamItem `refreshable:"true"`
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
@@ -5406,6 +5497,25 @@ user-task-polling:
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
 
+	p.TakeForOutputResultCountLimit = ParamItem{
+		Key:          "queryNode.takeForOutput.resultCountLimit",
+		Version:      "3.0.0",
+		DefaultValue: defaultTakeForOutputResultCountLimit,
+		Doc:          `Maximum search topK, unique search offset count, or retrieve result row count that can use take() for output fields. Set to 0 to disable the limit`,
+		Export:       false,
+		Formatter: func(v string) string {
+			limit, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || limit < 0 {
+				mlog.Warn(context.TODO(), "queryNode.takeForOutput.resultCountLimit must be non-negative, using default",
+					mlog.String("configured", v),
+					mlog.String("default", defaultTakeForOutputResultCountLimit))
+				return defaultTakeForOutputResultCountLimit
+			}
+			return v
+		},
+	}
+	p.TakeForOutputResultCountLimit.Init(base.mgr)
+
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",
 		Version:      "3.0.0",
@@ -5623,10 +5733,13 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
-	EnableSortCompaction             ParamItem `refreshable:"true"`
-	TaskCheckInterval                ParamItem `refreshable:"true"`
-	SortCompactionTriggerCount       ParamItem `refreshable:"true"`
-	JSONStatsTriggerCount            ParamItem `refreshable:"true"`
+	EnableSortCompaction       ParamItem `refreshable:"true"`
+	TaskCheckInterval          ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount ParamItem `refreshable:"true"`
+	StatsTaskPendingLimit      ParamItem `refreshable:"true"`
+	// Deprecated: JSON stats tasks are throttled by StatsTaskPendingLimit.
+	JSONStatsTriggerCount ParamItem `refreshable:"true"`
+	// Deprecated: JSON stats tasks now run on TaskCheckInterval.
 	JSONStatsTriggerInterval         ParamItem `refreshable:"true"`
 	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
 	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
@@ -7232,25 +7345,35 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.SortCompactionTriggerCount.Init(base.mgr)
 
+	p.StatsTaskPendingLimit = ParamItem{
+		Key:          "dataCoord.statsTaskPendingLimit",
+		Version:      "3.0.0",
+		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks than this limit",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskPendingLimit.Init(base.mgr)
+
 	p.JSONStatsTriggerCount = ParamItem{
 		Key:          "dataCoord.jsonShreddingTriggerCount",
 		Version:      "2.6.5",
-		Doc:          "jsonkey stats task count per trigger",
+		Doc:          "Deprecated: JSON stats tasks are throttled by dataCoord.statsTaskPendingLimit.",
 		DefaultValue: "10",
 		FallbackKeys: []string{"dataCoord.jsonStatsTriggerCount"},
 		PanicIfEmpty: false,
-		Export:       true,
+		Export:       false,
 	}
 	p.JSONStatsTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerInterval = ParamItem{
 		Key:          "dataCoord.jsonShreddingTriggerInterval",
 		Version:      "2.6.5",
-		Doc:          "jsonkey task interval per trigger",
+		Doc:          "Deprecated: JSON stats tasks now run on dataCoord.taskCheckInterval.",
 		DefaultValue: "10",
 		FallbackKeys: []string{"dataCoord.jsonStatsTriggerInterval"},
 		PanicIfEmpty: false,
-		Export:       true,
+		Export:       false,
 	}
 	p.JSONStatsTriggerInterval.Init(base.mgr)
 

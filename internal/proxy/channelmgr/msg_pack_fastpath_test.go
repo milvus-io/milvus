@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package channelmgr
 
 import (
 	"context"
@@ -34,8 +34,8 @@ import (
 )
 
 func TestGenInsertMsgsByPartitionContiguousFastPath(t *testing.T) {
-	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
-	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "1048576"))
+	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
 
 	longData := []int64{10, 20, 30, 40}
 	jsonData := [][]byte{[]byte(`{"row":0}`), []byte(`{"row":1}`), []byte(`{"row":2}`), []byte(`{"row":3}`)}
@@ -87,7 +87,7 @@ func TestGenInsertMsgsByPartitionContiguousFastPath(t *testing.T) {
 		},
 	}
 
-	msgs, err := genInsertMsgsByPartition(
+	msgs, err := GenInsertMsgsByPartition(
 		context.Background(), 0, 1, "test_partition", []int{1, 2, 3}, "test_channel", insertMsg, message.WALNamePulsar,
 	)
 	require.NoError(t, err)
@@ -115,8 +115,8 @@ func TestGenInsertMsgsByPartitionContiguousFastPath(t *testing.T) {
 }
 
 func TestGenInsertMsgsByPartitionNonContiguousFallback(t *testing.T) {
-	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
-	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "1048576"))
+	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
 
 	floatData := []float32{1, 2, 3, 4, 5, 6}
 	fieldData := &schemapb.FieldData{
@@ -141,7 +141,7 @@ func TestGenInsertMsgsByPartitionNonContiguousFallback(t *testing.T) {
 		},
 	}
 
-	msgs, err := genInsertMsgsByPartition(
+	msgs, err := GenInsertMsgsByPartition(
 		context.Background(), 0, 1, "test_partition", []int{0, 2}, "test_channel", insertMsg, message.WALNamePulsar,
 	)
 	require.NoError(t, err)
@@ -152,8 +152,8 @@ func TestGenInsertMsgsByPartitionNonContiguousFallback(t *testing.T) {
 }
 
 func TestGenInsertMsgsByPartitionContiguousFastPathAfterSplit(t *testing.T) {
-	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "17"))
-	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "17"))
+	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
 
 	longData := []int64{10, 20, 30, 40}
 	insertMsg := &msgstream.InsertMsg{
@@ -176,7 +176,7 @@ func TestGenInsertMsgsByPartitionContiguousFastPathAfterSplit(t *testing.T) {
 		},
 	}
 
-	msgs, err := genInsertMsgsByPartition(
+	msgs, err := GenInsertMsgsByPartition(
 		context.Background(), 0, 1, "test_partition", []int{0, 1, 2, 3}, "test_channel", insertMsg, message.WALNamePulsar,
 	)
 	require.NoError(t, err)

@@ -63,6 +63,62 @@ func TestDatabaseInterceptor(t *testing.T) {
 		assert.Equal(t, "db-from-header", req.GetDbName())
 	})
 
+	t.Run("restore snapshot defaults databases independently from active database", func(t *testing.T) {
+		testCases := []struct {
+			name           string
+			dbName         string
+			targetDBName   string
+			metadataDBName string
+			expectedDBName string
+			expectedTarget string
+		}{
+			{
+				name:           "explicit source database",
+				dbName:         "source_db",
+				expectedDBName: "source_db",
+				expectedTarget: util.DefaultDBName,
+			},
+			{
+				name:           "explicit source database with different active database",
+				dbName:         "archive",
+				metadataDBName: "tenant_a",
+				expectedDBName: "archive",
+				expectedTarget: "tenant_a",
+			},
+			{
+				name:           "source database from metadata",
+				metadataDBName: "tenant_a",
+				expectedDBName: "tenant_a",
+				expectedTarget: "tenant_a",
+			},
+			{
+				name:           "explicit target database is preserved",
+				dbName:         "source_db",
+				targetDBName:   "target_db",
+				expectedDBName: "source_db",
+				expectedTarget: "target_db",
+			},
+		}
+
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				ctx := context.Background()
+				if testCase.metadataDBName != "" {
+					ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderDBName, testCase.metadataDBName))
+				}
+				req := &milvuspb.RestoreSnapshotRequest{
+					DbName:       testCase.dbName,
+					TargetDbName: testCase.targetDBName,
+				}
+
+				_, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
+				assert.NoError(t, err)
+				assert.Equal(t, testCase.expectedDBName, req.GetDbName())
+				assert.Equal(t, testCase.expectedTarget, req.GetTargetDbName())
+			})
+		}
+	})
+
 	t.Run("external snapshot requests get db from metadata", func(t *testing.T) {
 		md := metadata.Pairs(util.HeaderDBName, "db")
 		ctx := metadata.NewIncomingContext(context.Background(), md)

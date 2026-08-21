@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
@@ -1008,6 +1009,9 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	}
 
 	// --- new field property constraints ---
+	if err := typeutil.ValidateFieldTypeSchema(newFieldSchema); err != nil {
+		return err
+	}
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}
@@ -1457,7 +1461,7 @@ type dropCollectionTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-	chMgr    channelsMgr
+	chMgr    channelmgr.ChannelsMgr
 }
 
 func (t *dropCollectionTask) TraceCtx() context.Context {
@@ -1535,7 +1539,7 @@ type truncateCollectionTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *milvuspb.TruncateCollectionResponse
-	chMgr    channelsMgr
+	chMgr    channelmgr.ChannelsMgr
 }
 
 func (t *truncateCollectionTask) TraceCtx() context.Context {

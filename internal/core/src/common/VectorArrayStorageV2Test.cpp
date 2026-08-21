@@ -62,6 +62,7 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
+#include "knowhere/index/emb_list_strategy.h"
 #include "knowhere/version.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -598,7 +599,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         create_index_info.metric_type = knowhere::metric::MAX_SIM_COSINE;
         create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
         create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber();
+            knowhere::kEmbListMetaV2MinVersion;
 
         auto emb_list_hnsw_index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
