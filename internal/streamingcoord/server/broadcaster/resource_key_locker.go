@@ -85,6 +85,21 @@ func (l *lockGuard) Unlock() {
 // FastLock locks the resource keys without waiting.
 // return error if the resource key is already locked.
 func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, error) {
+	g, failedKey, ok := r.tryLock(keys...)
+	if !ok {
+		return nil, merr.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", failedKey.String())
+	}
+	return g, nil
+}
+
+// TryLock locks the resource keys without waiting and without allocating an error on lock contention.
+// It returns false if any resource key is already locked.
+func (r *resourceKeyLocker) TryLock(keys ...message.ResourceKey) (*lockGuards, bool) {
+	g, _, ok := r.tryLock(keys...)
+	return g, ok
+}
+
+func (r *resourceKeyLocker) tryLock(keys ...message.ResourceKey) (*lockGuards, message.ResourceKey, bool) {
 	keys = uniqueSortResourceKeys(keys)
 
 	g := &lockGuards{}
@@ -100,9 +115,9 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 			continue
 		}
 		g.Unlock()
-		return nil, merr.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", key.String())
+		return nil, key, false
 	}
-	return g, nil
+	return g, message.ResourceKey{}, true
 }
 
 // Lock locks the resource keys.
