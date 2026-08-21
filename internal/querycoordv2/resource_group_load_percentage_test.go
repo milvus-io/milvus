@@ -526,6 +526,7 @@ func (f *rgLoadPercentageFixture) putTargetTwoPartitions(t *testing.T, collectio
 //   - pooled (this function): 2 of 5 targets = 40;
 //   - observer-style: partition A = 2/2 = 100, partition B = 1/4 = 25,
 //     average = 62.
+//
 // Both agree at 0 and at 100; only the intermediate weighting differs. If
 // this test starts failing at 62, the function has silently switched to
 // per-partition averaging and its doc comment is now wrong.
