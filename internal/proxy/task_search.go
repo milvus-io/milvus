@@ -916,6 +916,14 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("order_by and function rerank cannot be used together: they specify conflicting sort criteria")
 	}
 
+	// search iterator and function rerank cannot be used together: the iterator
+	// derives its next-page bound from the returned scores, and rerank rewrites
+	// them, so continuation would resume from a bound in the wrong score space
+	// and repeat pages
+	if isIterator && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("function rerank is not permitted when using a search iterator")
+	}
+
 	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
 	if err == nil {
 		t.AnalyzerName = analyzer
