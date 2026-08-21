@@ -16,10 +16,6 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	return b.BroadcastWithAdmission(ctx, msg, nil)
-}
-
-func (b *broadcasterWithRK) BroadcastWithAdmission(ctx context.Context, msg message.BroadcastMutableMessage, admit func(context.Context) error) (*types.BroadcastAppendResult, error) {
 	// The idempotency lookup lives here rather than in an exported check method so
 	// it cannot be called before the resource keys are held: this object only
 	// exists once StartBroadcastWithResourceKeys acquired them. Two concurrent
@@ -50,12 +46,6 @@ func (b *broadcasterWithRK) BroadcastWithAdmission(ctx context.Context, msg mess
 		// that were accepted under the old one -- the retry would be rejected before it
 		// could recover the original broadcastID.
 		if err := validateIdempotencyKeyLength(clientKey); err != nil {
-			return nil, err
-		}
-	}
-
-	if admit != nil {
-		if err := admit(ctx); err != nil {
 			return nil, err
 		}
 	}

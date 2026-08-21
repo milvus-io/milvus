@@ -590,55 +590,6 @@ func TestNonImportBroadcastIsDeduplicated(t *testing.T) {
 	require.Equal(t, uint64(1), appendResult.TimeTick)
 }
 
-// TestAdmissionRunsOnlyWhenANewTaskIsCreated pins the ordering the import job-count
-// limit depends on: admission is what a caller uses to guard mutable cluster state, and
-// a deduplicated broadcast must reach the original task without passing it. Were admit
-// to run on a hit, a limit the original request is itself still counted against would
-// reject its own retry.
-func TestAdmissionRunsOnlyWhenANewTaskIsCreated(t *testing.T) {
-	bm := newBroadcastTaskManagerForTest(t)
-	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
-
-	admitted := 0
-	broadcast := func(broadcastID uint64, msg message.BroadcastMutableMessage) *types.BroadcastAppendResult {
-		api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, guards: bm.resourceKeyLocker.Lock(collKey)}
-		defer api.Close()
-		result, err := api.BroadcastWithAdmission(context.Background(), msg, func(context.Context) error {
-			admitted++
-			return nil
-		})
-		require.NoError(t, err)
-		return result
-	}
-
-	first := broadcast(1, newImportMsgWithKey("run-1"))
-	require.Nil(t, first.Duplicated)
-	require.Equal(t, 1, admitted)
-
-	second := broadcast(2, newImportMsgWithKey("run-1"))
-	require.NotNil(t, second.Duplicated, "the retry must resolve to the original broadcast")
-	require.Equal(t, uint64(1), second.BroadcastID)
-	require.Equal(t, 1, admitted, "admission must not run for a deduplicated broadcast")
-}
-
-// TestAdmissionFailureLeavesNoTask asserts a rejected admission is a clean rejection:
-// no task, no index entry, so the same key is still free once the condition clears.
-func TestAdmissionFailureLeavesNoTask(t *testing.T) {
-	bm := newBroadcastTaskManagerForTest(t)
-	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
-
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 1, guards: bm.resourceKeyLocker.Lock(collKey)}
-	_, err := api.BroadcastWithAdmission(context.Background(), newImportMsgWithKey("run-1"), func(context.Context) error {
-		return merr.WrapErrServiceInternal("at the limit")
-	})
-	require.Error(t, err)
-	api.Close()
-
-	retry := broadcastForTest(t, bm, 2, newImportMsgWithKey("run-1"), collKey)
-	require.Nil(t, retry.Duplicated, "the rejected attempt must not have claimed the key")
-	require.Equal(t, uint64(2), retry.BroadcastID)
-}
-
 // TestLoweringTheKeyLengthLimitDoesNotEndTheWindow guards the order of the length check
 // against the index lookup. streaming.idempotency.maxKeyLength is refreshable, so an
 // operator can lower it while keys accepted under the old value are still inside their
