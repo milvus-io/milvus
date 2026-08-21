@@ -150,6 +150,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	return InitRemoteArrowFileSystem(params)
 }
 
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
+}
+
 func InitLocalArrowFileSystem(path string) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")

@@ -51,6 +51,8 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
+	DefaultStorageIopsInitialRate              = uint32(2000)
+	DefaultStorageIopsMaxRate                  = uint32(5000)
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -322,6 +324,8 @@ type commonConfig struct {
 	StoragePathPrefix        ParamItem `refreshable:"false"`
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
+	StorageIopsInitialRate   ParamItem `refreshable:"false"`
+	StorageIopsMaxRate       ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -1261,6 +1265,42 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
+
+	p.StorageIopsInitialRate = ParamItem{
+		Key:          "common.storage.iops.initialRate",
+		Version:      "3.0.1",
+		DefaultValue: strconv.FormatUint(uint64(DefaultStorageIopsInitialRate), 10),
+		Doc: `Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+The default matches the milvus-storage default.`,
+		Formatter: func(value string) string {
+			rate, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || rate == 0 {
+				return strconv.FormatUint(uint64(DefaultStorageIopsInitialRate), 10)
+			}
+			return strconv.FormatUint(rate, 10)
+		},
+		Export: true,
+	}
+	p.StorageIopsInitialRate.Init(base.mgr)
+
+	p.StorageIopsMaxRate = ParamItem{
+		Key:          "common.storage.iops.maxRate",
+		Version:      "3.0.1",
+		DefaultValue: strconv.FormatUint(uint64(DefaultStorageIopsMaxRate), 10),
+		Doc: `Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+The default matches the milvus-storage default.`,
+		Formatter: func(value string) string {
+			rate, err := strconv.ParseUint(value, 10, 32)
+			if err != nil {
+				return strconv.FormatUint(uint64(DefaultStorageIopsMaxRate), 10)
+			}
+			return strconv.FormatUint(rate, 10)
+		},
+		Export: true,
+	}
+	p.StorageIopsMaxRate.Init(base.mgr)
 
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",

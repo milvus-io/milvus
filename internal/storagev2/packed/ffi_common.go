@@ -297,10 +297,11 @@ type ExternalSpecContext struct {
 	MilvusTablePKMode MilvusTablePrimaryKeyMode
 }
 
-// injectExternalSpecProperties appends every external_spec-derived property
-// (extfs.<collectionID>.* and format-layer keys) onto an existing
-// LoonProperties via the C++ InjectExternalSpecProperties pipeline. No-op
-// when externalSource is empty.
+// injectExternalSpecProperties appends External Table filesystem and
+// format-layer properties onto an existing LoonProperties via the C++
+// InjectExternalSpecProperties pipeline. The process-local IOPS policy is
+// applied only to the extfs.<collectionID> namespace. No-op when
+// externalSource is empty.
 func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int64,
 	externalSource, externalSpec string,
 ) error {
@@ -310,6 +311,7 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	if externalSource == "" {
 		return nil
 	}
+	params := paramtable.Get()
 	cSource := C.CString(externalSource)
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
@@ -318,7 +320,13 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 		defer C.free(unsafe.Pointer(cSpec))
 	}
 	result := C.loon_properties_inject_external_spec(
-		properties, C.int64_t(collectionID), cSource, cSpec)
+		properties,
+		C.int64_t(collectionID),
+		cSource,
+		cSpec,
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return merr.WrapErrStorage(err, "loon inject_external_spec failed")
 	}
