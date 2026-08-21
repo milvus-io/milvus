@@ -1032,13 +1032,15 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
+	evictableEnabled := isDataEvictableEnable(fieldSchema)
 	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema)
 
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{
-			Field:        field,
-			EnableMMap:   mmapEnabled,
-			WarmupPolicy: fieldWarmupPolicy,
+			Field:           field,
+			EnableMMap:      mmapEnabled,
+			SupportEviction: evictableEnabled,
+			WarmupPolicy:    fieldWarmupPolicy,
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
@@ -1163,6 +1165,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	// as Knowhere reports error if encounter an unknown param, we need to delete it
 	delete(indexParams, common.MmapEnabledKey)
+	delete(indexParams, common.EvictableKey)
 
 	// some build params also exist in indexParams, which are useless during loading process
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
@@ -1181,6 +1184,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	}
 
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+	supportEviction := isIndexEvictableEnable(fieldSchema, indexInfo)
 	// Add warmup policy to index_params if not already present
 	// C++ will pass it to Knowhere for index loading
 	if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
@@ -1216,6 +1220,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		NumRows:                   indexInfo.GetNumRows(),
 		CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
 		IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
+		SupportEviction:           supportEviction,
 	}
 
 	// 2.

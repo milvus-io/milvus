@@ -368,6 +368,43 @@ func (s *CollectionSuite) TestAlterCollectionProperties() {
 	})
 }
 
+func (s *CollectionSuite) TestCollectionEvictableProperties() {
+	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vector").WithDim(128).WithDataType(entity.FieldTypeFloatVector))
+
+	createReq := NewCreateCollectionOption(collectionName, schema).
+		WithProperty(common.EvictableScalarFieldKey, false).
+		WithProperty(common.EvictableVectorFieldKey, false).
+		WithProperty(common.EvictableScalarIndexKey, false).
+		WithProperty(common.EvictableVectorIndexKey, false).
+		Request()
+	createProps := entity.KvPairsMap(createReq.GetProperties())
+	s.Equal("false", createProps[common.EvictableScalarFieldKey])
+	s.Equal("false", createProps[common.EvictableVectorFieldKey])
+	s.Equal("false", createProps[common.EvictableScalarIndexKey])
+	s.Equal("false", createProps[common.EvictableVectorIndexKey])
+
+	alterReq := NewAlterCollectionPropertiesOption(collectionName).
+		WithProperty(common.EvictableScalarFieldKey, false).
+		WithProperty(common.EvictableVectorFieldKey, false).
+		WithProperty(common.EvictableScalarIndexKey, false).
+		WithProperty(common.EvictableVectorIndexKey, false).
+		Request()
+	alterProps := entity.KvPairsMap(alterReq.GetProperties())
+	s.Equal("false", alterProps[common.EvictableScalarFieldKey])
+	s.Equal("false", alterProps[common.EvictableVectorFieldKey])
+	s.Equal("false", alterProps[common.EvictableScalarIndexKey])
+	s.Equal("false", alterProps[common.EvictableVectorIndexKey])
+
+	fieldReq := NewAlterCollectionFieldPropertiesOption(collectionName, "vector").
+		WithProperty(common.EvictableKey, false).
+		Request()
+	fieldProps := entity.KvPairsMap(fieldReq.GetProperties())
+	s.Equal("false", fieldProps[common.EvictableKey])
+}
+
 func (s *CollectionSuite) TestDropCollectionProperties() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

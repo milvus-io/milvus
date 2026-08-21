@@ -282,10 +282,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-	// exclude the warmup policy param also, similar to mmap.enable param
-	typeParams = DeleteParams(typeParams, []string{common.WarmupKey})
+	// Exclude runtime configurable params because they do not affect index build identity.
+	typeParams := DeleteParams(req.GetTypeParams(), runtimeConfigTypeParamKeys())
 	index := &model.Index{
 		CollectionID:    req.GetCollectionID(),
 		FieldID:         req.GetFieldID(),
@@ -325,6 +323,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		mlog.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
+}
+
+func runtimeConfigTypeParamKeys() []string {
+	return []string{common.MmapEnabledKey, common.WarmupKey, common.EvictableKey}
+}
+
+func validateEvictableIndexParams(params []*commonpb.KeyValuePair) error {
+	for _, param := range params {
+		if param.GetKey() == common.EvictableKey {
+			return common.ValidateEvictableEnabled(param.GetValue())
+		}
+	}
+	return nil
 }
 
 func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
@@ -407,6 +418,9 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	}
 
 	reqIndexParamMap := funcutil.KeyValuePair2Map(req.GetParams())
+	if err := validateEvictableIndexParams(req.GetParams()); err != nil {
+		return merr.Status(merr.Wrap(err, "invalid evictable index params")), nil
+	}
 
 	for _, index := range indexes {
 		if len(req.GetParams()) > 0 {

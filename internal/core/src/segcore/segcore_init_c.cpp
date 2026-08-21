@@ -300,6 +300,10 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
                        const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
                        const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                       const bool scalarFieldEvictable,
+                       const bool vectorFieldEvictable,
+                       const bool scalarIndexEvictable,
+                       const bool vectorIndexEvictable,
                        const int64_t memory_low_watermark_bytes,
                        const int64_t memory_high_watermark_bytes,
                        const int64_t memory_max_bytes,
@@ -347,18 +351,26 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
         prefetch_pool_threads);
     milvus::segcore::SegcoreConfig::default_config()
         .set_reject_remote_vector_output(reject_remote_vector_output);
+    milvus::segcore::SegcoreConfig::default_config().set_evictable_defaults(
+        scalarFieldEvictable,
+        vectorFieldEvictable,
+        scalarIndexEvictable,
+        vectorIndexEvictable);
 }
 
 extern "C" void
-UpdateTieredStorageConfig(
-    const int64_t loading_timeout_ms,
-    const int64_t warmup_loading_timeout_ms,
-    const bool storage_usage_tracking_enabled,
-    const bool reject_remote_vector_output,
-    const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
-    const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
-    const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
-    const CacheWarmupPolicy vectorIndexCacheWarmupPolicy) {
+UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
+                          const int64_t warmup_loading_timeout_ms,
+                          const bool storage_usage_tracking_enabled,
+                          const bool reject_remote_vector_output,
+                          const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                          const bool scalarFieldEvictable,
+                          const bool vectorFieldEvictable,
+                          const bool scalarIndexEvictable,
+                          const bool vectorIndexEvictable) {
     milvus::cachinglayer::Manager::UpdateConfig(
         std::chrono::milliseconds(loading_timeout_ms),
         std::chrono::milliseconds(warmup_loading_timeout_ms),
@@ -369,6 +381,11 @@ UpdateTieredStorageConfig(
          vectorIndexCacheWarmupPolicy});
     milvus::segcore::SegcoreConfig::default_config()
         .set_reject_remote_vector_output(reject_remote_vector_output);
+    milvus::segcore::SegcoreConfig::default_config().set_evictable_defaults(
+        scalarFieldEvictable,
+        vectorFieldEvictable,
+        scalarIndexEvictable,
+        vectorIndexEvictable);
 }
 
 }  // namespace milvus::segcore

@@ -239,7 +239,8 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
             /*eager_load=*/true,
-            /*warmup_policy=*/"");
+            /*warmup_policy=*/"",
+            /*support_eviction=*/true);
     }
 
     SchemaPtr schema_;
@@ -374,6 +375,29 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     }
 }
 
+TEST_P(ManifestGroupTranslatorTest, TestSupportEviction) {
+    auto chunk_reader = test_data_->CreateChunkReader(0);
+    auto field_metas = test_data_->GetFieldMetas(0);
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        field_metas,
+        test_data_->GetColumnGroups()->at(0)->columns,
+        test_data_->GetColumnGroups()->at(0)->columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/true,
+        /*warmup_policy=*/"",
+        /*support_eviction=*/false);
+
+    EXPECT_FALSE(translator->meta()->support_eviction);
+}
+
 // Test the vector column group (cg 1): similar checks, single vector field.
 TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
     ASSERT_EQ(test_data_->NumColumnGroups(), 2);
@@ -497,7 +521,8 @@ TEST_P(ManifestGroupTranslatorTest,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/true,
-        /*warmup_policy=*/"");
+        /*warmup_policy=*/"",
+        /*support_eviction=*/true);
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
     EXPECT_EQ(column_lookup_count, 1);
@@ -551,7 +576,8 @@ TEST_P(ManifestGroupTranslatorTest,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/true,
-        /*warmup_policy=*/"");
+        /*warmup_policy=*/"",
+        /*support_eviction=*/true);
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
     EXPECT_EQ(column_lookup_count, 1);
@@ -599,6 +625,7 @@ TEST_P(ManifestGroupTranslatorTest, TestPrecomputedColumnEstimatesAreReused) {
             milvus::proto::common::LoadPriority::LOW,
             /*eager_load=*/false,
             /*warmup_policy=*/"",
+            /*support_eviction=*/true,
             projected_column,
             /*fallback_bytes_per_row=*/0,
             /*shard=*/"",
@@ -664,6 +691,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/true,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column);
 
     auto rgs_per_cell =
@@ -737,6 +765,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/false,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column + "_fallback",
         kFallbackBytesPerRow);
 
@@ -786,6 +815,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/false,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column + "_zero_estimate");
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
@@ -824,7 +854,8 @@ TEST_P(ManifestGroupTranslatorTest,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/true,
-        /*warmup_policy=*/"");
+        /*warmup_policy=*/"",
+        /*support_eviction=*/true);
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
     ASSERT_EQ(translator->num_cells(), 1);
@@ -907,6 +938,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/false,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column + "_mixed_zero_estimate");
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
@@ -974,6 +1006,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/false,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column + "_fallback_unavailable",
         kFallbackBytesPerRow);
 
@@ -1031,6 +1064,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/false,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column + "_total_fallback");
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
@@ -1084,6 +1118,7 @@ TEST_P(ManifestGroupTranslatorTest,
         milvus::proto::common::LoadPriority::LOW,
         /*eager_load=*/false,
         /*warmup_policy=*/"",
+        /*support_eviction=*/true,
         projected_column + "_last_resort");
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());

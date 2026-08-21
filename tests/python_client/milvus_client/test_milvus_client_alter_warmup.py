@@ -1354,8 +1354,8 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         """
         target: verify field/collection/index warmup do not break create_index idempotency
         method: set warmup at each level, create index twice
-        expected: 21.1/21.2 second create_index succeeds (idempotent);
-                  21.3 second create_index fails because index params contain warmup (distinct index)
+        expected: the second create_index succeeds for field, collection, and
+                  index-level warmup because warmup is runtime configurable
         """
         client = self._client()
 
@@ -1387,8 +1387,8 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.create_index(client, col2, index_params2)  # idempotent
         assert len(self.list_indexes(client, col2, field_name="vector")[0]) == 1
 
-        # 21.3 index level warmup - second create_index should fail
-        # because index params contain "warmup" making it a distinct index definition
+        # 21.3 index level warmup - create_index remains idempotent because
+        # warmup is runtime configurable and does not change index build identity.
         col3 = cf.gen_collection_name_by_testcase_name() + "_3"
         self.create_collection(client, col3, default_warmup_dim, consistency_level="Strong")
         self.release_collection(client, col3)
@@ -1397,10 +1397,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         index_params3.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
                                 params={"M": 8, "efConstruction": 200, "warmup": "sync"})
         self.create_index(client, col3, index_params3)
-        self.create_index(client, col3, index_params3,
-                          check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
-                                       ct.err_msg: "at most one distinct index is allowed per field"})
+        self.create_index(client, col3, index_params3)
         assert len(self.list_indexes(client, col3, field_name="vector")[0]) == 1
 
         self.drop_collection(client, col1)
@@ -4550,4 +4547,3 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert len(self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10)[0][0]) == 10
 
         self.drop_collection(client, collection_name)
-

@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -973,7 +974,34 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 				LoadScope:     querypb.LoadScope_Reopen,
 				IndexInfoList: indexInfos,
 			}
-			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, mock.MatchedBy(func(actual []*querypb.SegmentLoadInfo) bool {
+				if len(actual) != len(infos) {
+					return false
+				}
+				schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+				if err != nil {
+					return false
+				}
+				for i := range actual {
+					expected := typeutil.Clone(infos[i])
+					for _, indexInfo := range expected.GetIndexInfos() {
+						if _, exist := common.IsEvictableEnabled(indexInfo.GetIndexParams()...); !exist {
+							field, err := schemaHelper.GetFieldFromID(indexInfo.GetFieldID())
+							if err != nil {
+								return false
+							}
+							indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+								Key:   common.EvictableKey,
+								Value: strconv.FormatBool(typeutil.IsVectorType(field.GetDataType())),
+							})
+						}
+					}
+					if !proto.Equal(expected, actual[i]) {
+						return false
+					}
+				}
+				return true
+			})).Return(test.reopenErr).Once()
 
 			time.Sleep(time.Nanosecond)
 			status, err := suite.node.LoadSegments(ctx, req)
@@ -1115,6 +1143,251 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+}
+
+func TestMaterializeLoadSegmentsEvictableOverrides(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "true"},
+			{Key: common.EvictableVectorFieldKey, Value: "false"},
+			{Key: common.EvictableScalarIndexKey, Value: "false"},
+			{Key: common.EvictableVectorIndexKey, Value: "true"},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "scalar", DataType: schemapb.DataType_Int64},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector},
+			{
+				FieldID:    3,
+				Name:       "explicit_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    10,
+				Name:       "explicit_struct",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 11, Name: "nested_scalar", DataType: schemapb.DataType_Int64},
+					{
+						FieldID:    12,
+						Name:       "explicit_nested_vector",
+						DataType:   schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+					},
+				},
+			},
+			{
+				FieldID: 20,
+				Name:    "collection_struct",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 21, Name: "collection_nested_scalar", DataType: schemapb.DataType_Int64},
+					{FieldID: 22, Name: "collection_nested_vector", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: schema,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				IndexInfos: []*querypb.FieldIndexInfo{
+					{FieldID: 1},
+					{FieldID: 2},
+					{FieldID: 11},
+					{FieldID: 12},
+					{
+						FieldID:     3,
+						IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+					},
+				},
+			},
+		},
+	}
+
+	oldScalarField := paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+	oldVectorField := paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("false")
+	oldScalarIndex := paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("false")
+	oldVectorIndex := paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("false")
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue(oldScalarField)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue(oldVectorField)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue(oldScalarIndex)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue(oldVectorIndex)
+
+	materialized := materializeLoadSegmentsEvictableOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 1))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 2))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 11))
+	require.True(t, common.FieldHasEvictableKey(req.GetSchema(), 12))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 21))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 22))
+	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams())
+	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[1].GetIndexParams())
+
+	assertFieldEvictable := func(fieldID int64, expected bool) {
+		field, err := typeutil.CreateSchemaHelper(materialized.GetSchema())
+		require.NoError(t, err)
+		fieldSchema, err := field.GetFieldFromID(fieldID)
+		require.NoError(t, err)
+		actual, exist := common.IsEvictableEnabled(fieldSchema.GetTypeParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+	assertFieldEvictable(1, true)
+	assertFieldEvictable(2, false)
+	assertFieldEvictable(3, true)
+	assertFieldEvictable(11, false)
+	assertFieldEvictable(12, true)
+	assertFieldEvictable(21, true)
+	assertFieldEvictable(22, false)
+
+	// Index policies use the collection's index keys, independently of the raw
+	// field and struct-parent policies for the same field IDs.
+	for i, expected := range []bool{false, true, false, true, true} {
+		actual, exist := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[i].GetIndexParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+
+	paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+	paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("true")
+	paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+	paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("true")
+	second := materializeLoadSegmentsEvictableOverrides(req)
+	secondField, err := typeutil.CreateSchemaHelper(second.GetSchema())
+	require.NoError(t, err)
+	secondScalar, err := secondField.GetFieldFromID(1)
+	require.NoError(t, err)
+	actual, exist := common.IsEvictableEnabled(secondScalar.GetTypeParams()...)
+	require.True(t, exist)
+	assert.True(t, actual)
+	actual, exist = common.IsEvictableEnabled(second.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	require.True(t, exist)
+	assert.False(t, actual)
+
+	firstScalar, err := typeutil.CreateSchemaHelper(materialized.GetSchema())
+	require.NoError(t, err)
+	firstScalarField, err := firstScalar.GetFieldFromID(1)
+	require.NoError(t, err)
+	actual, exist = common.IsEvictableEnabled(firstScalarField.GetTypeParams()...)
+	require.True(t, exist)
+	assert.True(t, actual, "collection policy must keep precedence over a later local default")
+
+	firstVectorField, err := firstScalar.GetFieldFromID(2)
+	require.NoError(t, err)
+	actual, exist = common.IsEvictableEnabled(firstVectorField.GetTypeParams()...)
+	require.True(t, exist)
+	assert.False(t, actual, "a later materialization must not mutate an earlier clone")
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsLeavesEvictableDefaultsUnmaterializedAtWorkerBoundary() {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: suite.collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+	}
+	request := &querypb.LoadSegmentsRequest{
+		CollectionID:  suite.collectionID,
+		Schema:        schema,
+		LoadMeta:      &querypb.LoadMetaInfo{CollectionID: suite.collectionID},
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: []*indexpb.IndexInfo{{FieldID: 2}},
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     suite.validSegmentIDs[0],
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionIDs[0],
+				InsertChannel: suite.vchannel,
+				IndexInfos:    []*querypb.FieldIndexInfo{{FieldID: 2}},
+			},
+		},
+	}
+	original := typeutil.Clone(request)
+
+	oldScalarField := paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+	oldVectorField := paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("false")
+	oldScalarIndex := paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("false")
+	oldVectorIndex := paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("false")
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue(oldScalarField)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue(oldVectorField)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue(oldScalarIndex)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue(oldVectorIndex)
+
+	collectionManager := segments.NewMockCollectionManager(suite.T())
+	loader := segments.NewMockLoader(suite.T())
+	originalManager := suite.node.manager.Collection
+	originalLoader := suite.node.loader
+	suite.node.manager.Collection = collectionManager
+	suite.node.loader = loader
+	defer func() {
+		suite.node.manager.Collection = originalManager
+		suite.node.loader = originalLoader
+	}()
+
+	collectionManager.EXPECT().PutOrRef(
+		suite.collectionID,
+		mock.MatchedBy(func(schema *schemapb.CollectionSchema) bool {
+			for _, field := range schema.GetFields() {
+				if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); exist {
+					return false
+				}
+			}
+			return true
+		}),
+		mock.Anything,
+		request.GetLoadMeta(),
+	).Return(nil).Once()
+	collectionManager.EXPECT().Unref(suite.collectionID, uint32(1)).Return(true).Once()
+	loader.EXPECT().ReopenSegments(mock.Anything, mock.MatchedBy(func(infos []*querypb.SegmentLoadInfo) bool {
+		_, exist := common.IsEvictableEnabled(infos[0].GetIndexInfos()[0].GetIndexParams()...)
+		return !exist
+	})).Return(nil).Once()
+
+	status, err := suite.node.LoadSegments(ctx, request)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(status))
+	suite.True(proto.Equal(original, request), "worker materialization must not mutate the caller request")
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsTransferDoesNotMaterializeEvictableDefaults() {
+	ctx := context.Background()
+	channel := "transfer-before-materialize"
+	schema := &schemapb.CollectionSchema{
+		Name: suite.collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	request := &querypb.LoadSegmentsRequest{
+		Base:          &commonpb.MsgBase{},
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.GetNodeID(),
+		Schema:        schema,
+		NeedTransfer:  true,
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: []*indexpb.IndexInfo{{FieldID: 1}},
+		Infos:         []*querypb.SegmentLoadInfo{{SegmentID: 1, CollectionID: suite.collectionID, InsertChannel: channel, IndexInfos: []*querypb.FieldIndexInfo{{FieldID: 1}}}},
+	}
+
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	delegator.EXPECT().LoadSegments(mock.Anything, mock.MatchedBy(func(forwarded *querypb.LoadSegmentsRequest) bool {
+		_, fieldExist := common.IsEvictableEnabled(forwarded.GetSchema().GetFields()[0].GetTypeParams()...)
+		_, indexExist := common.IsEvictableEnabled(forwarded.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+		return !forwarded.GetNeedTransfer() && !fieldExist && !indexExist
+	})).Return(nil).Once()
+	suite.node.delegators.Insert(channel, delegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	status, err := suite.node.LoadSegments(ctx, request)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(status))
 }
 
 func (suite *ServiceSuite) TestReleaseCollection_Normal() {

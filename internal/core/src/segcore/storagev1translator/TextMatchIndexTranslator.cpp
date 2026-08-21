@@ -50,7 +50,7 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
                                                   /* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ true,
+            load_info_.support_eviction,
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
 }
