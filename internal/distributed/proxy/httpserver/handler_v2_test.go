@@ -6810,6 +6810,48 @@ func TestIdempotencyKeyHandlerFuncSetsIncomingMetadata(t *testing.T) {
 	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
 }
 
+// TestIdempotencyKeyHandlerFuncRejectsUnsendableKey pins the REST door found open by
+// the adversarial review on milvus#52544. Go's header parser accepts every byte
+// >= 0x80, gRPC refuses anything outside printable ASCII before the stream exists,
+// and ClientBase reads that codes.Internal as a broken connection -- so an unchecked
+// key turns one request into repeated resets of a shared connection. The middleware is
+// mounted on the whole engine, so this covers every v1 and v2 route.
+func TestIdempotencyKeyHandlerFuncRejectsUnsendableKey(t *testing.T) {
+	paramtable.Init()
+
+	for _, key := range []string{"批次-1", "run\t1"} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+		c.Request.Header.Set(HTTPHeaderIdempotencyKey, key)
+
+		IdempotencyKeyHandlerFunc(c)
+
+		assert.True(t, c.IsAborted())
+		assert.Contains(t, w.Body.String(), "printable ASCII")
+		// The key must not have been copied onto the outgoing path.
+		md, ok := metadata.FromIncomingContext(c.Request.Context())
+		if ok {
+			assert.Empty(t, md.Get(util.HeaderIdempotencyKey))
+		}
+	}
+}
+
+func TestIdempotencyKeyHandlerFuncRejectsOversizedKey(t *testing.T) {
+	paramtable.Init()
+	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, strings.Repeat("a", limit+1))
+
+	IdempotencyKeyHandlerFunc(c)
+
+	assert.True(t, c.IsAborted())
+	assert.Contains(t, w.Body.String(), "exceeds limit")
+}
+
 func TestIdempotencyKeyHandlerFuncPreservesExistingMetadata(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)

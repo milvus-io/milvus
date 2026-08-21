@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -5601,6 +5602,17 @@ func IdempotencyKeyHandlerFunc(c *gin.Context) {
 	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
 	if key == "" {
 		c.Next()
+		return
+	}
+	// Validate before the key reaches outgoing metadata. Go accepts header bytes
+	// gRPC does not, and this middleware is mounted on the whole engine, so an
+	// unchecked key would ride along on every coordinator RPC of any v1 or v2
+	// route -- see ValidateIdempotencyKey for what that costs.
+	if err := interceptor.ValidateIdempotencyKey(key); err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
 		return
 	}
 	ctx := c.Request.Context()

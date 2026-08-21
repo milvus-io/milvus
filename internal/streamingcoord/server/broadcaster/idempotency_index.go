@@ -78,9 +78,13 @@ func writeLengthPrefixed(b *strings.Builder, s string) {
 }
 
 // validateIdempotencyKeyLength rejects an oversized client key at the broadcaster.
-// This is the only place the bound is enforced: no entry path validates the key
-// earlier, and the broadcaster is the single point every one of them passes through,
-// as well as where the key is retained for the whole idempotency window.
+//
+// This is the backstop, not the first check. Both doors a client key can enter
+// through -- the REST middleware and the propagation interceptor -- bound it via
+// interceptor.ValidateIdempotencyKey, which they must, because by the time the key
+// reaches here it has already been copied onto every coordinator RPC of the
+// request. What this check still owns is the broadcaster's own admission: it is
+// where the key is retained for the whole idempotency window.
 //
 // The bound is inclusive and fails closed: a limit of 0 or less rejects every
 // non-empty key, i.e. the cluster accepts no idempotency keys at all. A broadcast that
