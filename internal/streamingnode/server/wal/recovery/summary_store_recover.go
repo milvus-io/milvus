@@ -302,6 +302,7 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 	if err != nil {
 		return err
 	}
+	invalidated := m.manifest.GetInvalidatedVchannels()
 	for vchannel, records := range recordsByVChannel {
 		if !hasIdempotencyContent(records) {
 			continue
@@ -310,10 +311,31 @@ func (m *summaryManager) recoverPChannelSummaryChunk(
 		if state == nil {
 			continue
 		}
+		// A DDL removed the rows these describe. The chunk still holds them --
+		// nothing rewrites a written chunk -- so the filter has to happen here, or
+		// the restart serves keys for data that no longer exists.
+		if until := invalidated[vchannel]; until > 0 {
+			records = dropSummaryRecordsAtOrBelow(records, until)
+			if len(records) == 0 {
+				continue
+			}
+		}
 		state.applySummaryRecordsAtGeneration(records)
 		state.capRecoveryBytes(m.evictionConfig.retainedBytes)
 	}
 	return nil
+}
+
+// dropSummaryRecordsAtOrBelow removes the records an invalidation covers.
+func dropSummaryRecordsAtOrBelow(records []*SummaryRecord, until uint64) []*SummaryRecord {
+	kept := make([]*SummaryRecord, 0, len(records))
+	for _, record := range records {
+		if record.SourceTimeTick <= until {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	return kept
 }
 
 func (m *summaryManager) readPChannelSummaryChunk(

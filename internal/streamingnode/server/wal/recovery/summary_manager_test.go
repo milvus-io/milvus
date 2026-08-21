@@ -68,10 +68,11 @@ func TestSummaryManagerTracksDirtyStaging(t *testing.T) {
 
 	// Peeking must NOT clear dirtiness: nothing is durable yet, so a persist that
 	// fails here has to leave the records for the next attempt to find.
-	require.Len(t, state.peekPendingSummaryRecords(), 2)
+	peeked, _ := state.peekPendingSummaryRecords()
+	require.Len(t, peeked, 2)
 	require.True(t, manager.hasDirtySummary())
 
-	state.dropPersistedSummaryRecords(2)
+	state.dropPersistedSummaryRecords(2, state.stagingEpoch)
 	require.False(t, manager.hasDirtySummary())
 }
 
@@ -81,14 +82,15 @@ func TestSummaryManagerConsumesPendingRecordsPerVChannel(t *testing.T) {
 	second.applySummaryRecord(newTestSummaryRecord("other", 500, 5), true)
 	manager.setSummary("v2", second)
 
-	records := manager.peekPendingSummaryRecordsUnsafe()
+	records, epochs := manager.peekPendingSummaryRecordsUnsafe()
 	require.Len(t, records, 2)
 	require.Len(t, records["v1"], 2)
 	require.Len(t, records["v2"], 1)
 
 	// Dropping is what releases them, and only what the chunk carried.
-	manager.dropPersistedSummaryRecordsUnsafe(records)
-	require.Empty(t, manager.peekPendingSummaryRecordsUnsafe())
+	manager.dropPersistedSummaryRecordsUnsafe(records, epochs)
+	drained, _ := manager.peekPendingSummaryRecordsUnsafe()
+	require.Empty(t, drained)
 }
 
 func TestSummaryManagerObserveOnlyTouchesTargetVChannel(t *testing.T) {
@@ -157,4 +159,31 @@ func TestSummaryManagerDiscardsRecordsOnInvalidatingDDL(t *testing.T) {
 	require.False(t, state.hasPendingSummaryRecords())
 	// Replay stays idempotent.
 	require.Equal(t, uint64(500), state.appliedTimetick)
+}
+
+// Observing an invalidating DDL must do two things: clear what is in memory, and
+// record the timetick for the next manifest. Only the second one survives a
+// restart, and without it the chunks already written resurrect the keys.
+func TestSummaryManagerRecordsInvalidationForTheNextManifest(t *testing.T) {
+	manager, state := newTestSummaryManagerWithRecords(t, "v1", 3)
+	manager.setNormalMode()
+	require.True(t, state.hasPendingSummaryRecords())
+
+	drop := message.NewDropCollectionMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		MustBuildMutable().
+		WithTimeTick(500).
+		WithLastConfirmed(rmq.NewRmqID(499)).
+		IntoImmutableMessage(rmq.NewRmqID(500))
+
+	manager.observeMessage(drop)
+
+	require.Empty(t, state.records)
+	require.False(t, state.hasPendingSummaryRecords())
+	require.Equal(t, uint64(500), manager.pendingInvalidations["v1"])
+	// The staging epoch moved, which is what stops an in-flight persist from
+	// releasing records staged after this point.
+	require.NotZero(t, state.stagingEpoch)
 }

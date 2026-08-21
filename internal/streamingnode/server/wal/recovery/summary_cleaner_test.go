@@ -184,7 +184,8 @@ func TestPersistFailureKeepsRecordsStaged(t *testing.T) {
 
 	// Still staged, and still reported dirty, so the close path's own persist
 	// attempt finds them rather than saving a checkpoint that outran them.
-	require.Len(t, state.peekPendingSummaryRecords(), 3)
+	peeked, _ := state.peekPendingSummaryRecords()
+	require.Len(t, peeked, 3)
 	require.True(t, manager.hasDirtySummary())
 	require.Len(t, state.records, 3)
 	// The generation is not consumed either: a hole would stop recovery's forward

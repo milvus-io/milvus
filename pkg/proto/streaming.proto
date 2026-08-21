@@ -759,6 +759,23 @@ message PChannelSummaryManifest {
     // against `chunks` either: an entry is only ever moved here by the same
     // manifest write that stopped recovery depending on it.
     repeated PChannelSummaryChunkRef pending_gc = 2;
+    // vchannel -> the timetick of the DDL that made every earlier record of that
+    // vchannel meaningless (a drop, an in-place truncate, a dropped partition).
+    //
+    // Clearing the in-memory window is not enough: the chunks already written
+    // still hold those keys verbatim, and recovery replays every retained chunk.
+    // Without this, a restart resurrects keys for rows that no longer exist, and
+    // an auto-derived key -- a hash of the destination and the payload, with no
+    // collection generation in it -- makes a client re-inserting the same rows
+    // hash to the same key and be answered as a duplicate, against an empty
+    // collection.
+    //
+    // Durability rides on the existing order: this map is written in the same
+    // manifest PUT that precedes saving the consume checkpoint, so a crash before
+    // it lands also leaves the checkpoint behind the DDL, and replay re-observes
+    // the DDL and re-records it. An entry is dropped once no retained chunk
+    // reaches below it.
+    map<string, uint64> invalidated_vchannels = 3;
 }
 
 // PChannelSummaryChunkIndexEntry describes one chunk. It mirrors that chunk's

@@ -34,6 +34,11 @@ type vchannelSummary struct {
 	// disagree was to report "clean" for records a failed persist had drained but
 	// never made durable.
 	pendingRecords []*SummaryRecord
+	// stagingEpoch changes whenever the buffer is emptied by something other than
+	// a completed persist. A persist captures it at peek and refuses to release
+	// anything if it moved, because "release the first N" only identifies the
+	// peeked records while the buffer is append-only.
+	stagingEpoch uint64
 }
 
 func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoint) *vchannelSummary {
@@ -88,18 +93,25 @@ func (s *vchannelSummary) advanceAppliedTo(checkpoint *WALCheckpoint) {
 // a terminal fenced/corrupted error -- and the records would be gone while the
 // consume checkpoint advanced past them, losing those keys with no error
 // anywhere.
-func (s *vchannelSummary) peekPendingSummaryRecords() []*SummaryRecord {
+func (s *vchannelSummary) peekPendingSummaryRecords() ([]*SummaryRecord, uint64) {
 	if len(s.pendingRecords) == 0 {
-		return nil
+		return nil, s.stagingEpoch
 	}
-	return sortedSummaryRecords(s.pendingRecords)
+	return sortedSummaryRecords(s.pendingRecords), s.stagingEpoch
 }
 
 // dropPersistedSummaryRecords removes the first count records, which are the
 // ones a completed chunk carried. Anything observed while that chunk was being
 // written sits after them and stays staged.
-func (s *vchannelSummary) dropPersistedSummaryRecords(count int) {
-	if count <= 0 {
+//
+// epoch is what the peek saw. If it moved, the buffer was emptied under the
+// persist -- a DDL invalidated the vchannel -- and "the first count" no longer
+// names the records that were written: it would consume whatever was staged
+// afterwards and lose it, since a chunk was never written for those. Releasing
+// nothing is the safe answer; the peeked records are already durable, and the
+// worst that follows is that a later chunk carries them again.
+func (s *vchannelSummary) dropPersistedSummaryRecords(count int, epoch uint64) {
+	if count <= 0 || epoch != s.stagingEpoch {
 		return
 	}
 	if count >= len(s.pendingRecords) {
@@ -181,6 +193,9 @@ func (s *vchannelSummary) discardForInvalidatedVChannel(timetick uint64) {
 	s.commitOrder = s.commitOrder[:0]
 	s.recordBytes = 0
 	s.pendingRecords = s.pendingRecords[:0]
+	// A persist may be mid-flight against these records. Moving the epoch is what
+	// stops its release from consuming whatever is staged after this point.
+	s.stagingEpoch++
 	s.advanceApplied(timetick)
 }
 

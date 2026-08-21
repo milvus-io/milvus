@@ -62,6 +62,12 @@ type summaryManager struct {
 	// retention measures time the way the write path does and simply stops
 	// advancing while the channel is idle.
 	latestCoveredTT uint64
+	// pendingInvalidations holds vchannel -> DDL timetick observed since the last
+	// manifest write. They are folded into the next manifest, which is what makes
+	// them survive a restart; until then the in-memory discard already covers this
+	// process, and a crash leaves the consume checkpoint behind the DDL so replay
+	// re-observes it.
+	pendingInvalidations map[string]uint64
 	// completedGC records the chunks the GC worker finished deleting. They are
 	// dropped from the manifest at the next write, so a crash before that only
 	// replays deletes that are already no-ops.
@@ -80,6 +86,7 @@ func newSummaryManager(pchannel string, term int64, cfg *config, metrics *recove
 		evictionConfig:                evictionCfg,
 		manifest:                      &streamingpb.PChannelSummaryManifest{},
 		completedGC:                   make(map[pchannelSummaryGCRef]struct{}),
+		pendingInvalidations:          make(map[string]uint64),
 	}
 }
 
@@ -198,10 +205,14 @@ func (m *summaryManager) observeMessage(msg message.ImmutableMessage) {
 	if InvalidatesIdempotencyWindow(msg.MessageType()) {
 		// The interceptor drops its live window for these; the staged records must
 		// go with it, or the next chunk would carry keys for rows that no longer
-		// exist and a restart would serve them again as duplicates. Replay reaches
-		// this the same way, so a recovered summary never rebuilds them either.
+		// exist. Chunks ALREADY written still hold them, so the timetick is also
+		// recorded for the next manifest -- recovery replays every retained chunk
+		// and would otherwise resurrect them.
 		if summary, ok := summaries[msg.VChannel()]; ok {
 			summary.discardForInvalidatedVChannel(msg.TimeTick())
+		}
+		if tt := msg.TimeTick(); tt > m.pendingInvalidations[msg.VChannel()] {
+			m.pendingInvalidations[msg.VChannel()] = tt
 		}
 		return
 	}

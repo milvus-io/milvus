@@ -113,6 +113,10 @@ func (m *summaryManager) refreshPChannelSummaryManifest(
 	for ref := range m.completedGC {
 		completed[ref] = struct{}{}
 	}
+	invalidations := make(map[string]uint64, len(m.pendingInvalidations))
+	for vchannel, tt := range m.pendingInvalidations {
+		invalidations[vchannel] = tt
+	}
 	latestCoveredTT := m.latestCoveredTT
 	term := m.term
 	m.mu.Unlock()
@@ -123,6 +127,7 @@ func (m *summaryManager) refreshPChannelSummaryManifest(
 			latestCoveredTT = end
 		}
 	}
+	recordInvalidatedVChannels(next, invalidations)
 	dropCompletedPendingGC(next, completed)
 	releaseBelowRetentionBoundary(next, retentionBoundary(
 		next,
@@ -130,6 +135,8 @@ func (m *summaryManager) refreshPChannelSummaryManifest(
 		m.cfg.idempotencyMaxRetainedChunks,
 		retentionTTLHorizon(latestCoveredTT, m.cfg.idempotencyRetentionTTL),
 	))
+	// After the release, so it is judged against what is actually retained.
+	pruneInvalidatedVChannels(next)
 
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelSummaryManifest")),
@@ -143,6 +150,11 @@ func (m *summaryManager) refreshPChannelSummaryManifest(
 	m.manifest = next
 	for ref := range completed {
 		delete(m.completedGC, ref)
+	}
+	for vchannel, tt := range invalidations {
+		if m.pendingInvalidations[vchannel] == tt {
+			delete(m.pendingInvalidations, vchannel)
+		}
 	}
 	m.mu.Unlock()
 	return nil

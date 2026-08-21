@@ -251,3 +251,56 @@ func TestSummaryStoreClaimIsIdempotentAtTheSameTerm(t *testing.T) {
 	recoverTestSummaryManager(t, ctx, 5, 10, "v1")
 	require.Len(t, catalogState.operations, writes)
 }
+
+// A DDL invalidation must survive a restart. Clearing the in-memory window is not
+// enough: the chunk already written still holds the keys verbatim, and recovery
+// replays every retained chunk.
+//
+// Without the durable record, an auto-derived key -- a hash of the destination and
+// the payload, with no collection generation in it -- makes a client re-inserting
+// the same rows after a truncate hash to the same key and be answered as a
+// duplicate, against a collection that is now empty.
+func TestSummaryStoreRecoveryDropsRecordsInvalidatedByDDL(t *testing.T) {
+	ctx := context.Background()
+	newTestSummaryStore(t)
+
+	writer := recoverTestSummaryManager(t, ctx, 1, 5, "v1")
+	writer.setNormalMode()
+	_, err := writer.persistPChannelSummary(ctx, writer.Logger(), map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("before-truncate", 20, 100)},
+	})
+	require.NoError(t, err)
+
+	// The truncate lands after that chunk is durable, and the next manifest write
+	// is what makes the invalidation outlive this process.
+	writer.summaries()["v1"].discardForInvalidatedVChannel(50)
+	writer.pendingInvalidations["v1"] = 50
+	_, err = writer.persistPChannelSummary(ctx, writer.Logger(), map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("after-truncate", 60, 200)},
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(50), writer.manifest.GetInvalidatedVchannels()["v1"])
+
+	reader := recoverTestSummaryManager(t, ctx, 2, 5, "v1")
+	records := reader.summaries()["v1"].records
+	require.NotContains(t, records, "before-truncate", "a key the truncate invalidated must not come back")
+	require.Contains(t, records, "after-truncate")
+}
+
+// The entry is dropped once retention has passed everything it could filter, so
+// a pchannel does not accumulate one per collection ever truncated on it.
+func TestInvalidatedVChannelEntryIsPrunedOnceUnreachable(t *testing.T) {
+	manifest := testManifestOf(newTestChunkIndexEntry(0, 1, 10, 100, "v1"))
+	manifest.InvalidatedVchannels = map[string]uint64{"v1": 5, "v2": 50}
+
+	pruneInvalidatedVChannels(manifest)
+
+	// The oldest retained chunk starts at 10, so an invalidation at 5 can no
+	// longer match anything; one at 50 still can.
+	require.NotContains(t, manifest.GetInvalidatedVchannels(), "v1")
+	require.Contains(t, manifest.GetInvalidatedVchannels(), "v2")
+
+	manifest.Chunks = nil
+	pruneInvalidatedVChannels(manifest)
+	require.Empty(t, manifest.GetInvalidatedVchannels())
+}

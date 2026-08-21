@@ -351,6 +351,47 @@ func releaseBelowRetentionBoundary(manifest *streamingpb.PChannelSummaryManifest
 	return boundary
 }
 
+// recordInvalidatedVChannels folds newly observed DDL invalidations into the
+// manifest, keeping the newest timetick per vchannel.
+func recordInvalidatedVChannels(manifest *streamingpb.PChannelSummaryManifest, invalidations map[string]uint64) {
+	if manifest == nil || len(invalidations) == 0 {
+		return
+	}
+	if manifest.InvalidatedVchannels == nil {
+		manifest.InvalidatedVchannels = make(map[string]uint64, len(invalidations))
+	}
+	for vchannel, timetick := range invalidations {
+		if timetick > manifest.InvalidatedVchannels[vchannel] {
+			manifest.InvalidatedVchannels[vchannel] = timetick
+		}
+	}
+}
+
+// pruneInvalidatedVChannels drops entries no retained chunk can be filtered by.
+//
+// An invalidation only matters while some retained chunk still holds records
+// below it. Once retention has passed them all, keeping the entry would grow the
+// manifest for every collection ever truncated on this pchannel.
+func pruneInvalidatedVChannels(manifest *streamingpb.PChannelSummaryManifest) {
+	if manifest == nil || len(manifest.GetInvalidatedVchannels()) == 0 {
+		return
+	}
+	oldest, ok := pchannelSummaryManifestOldest(manifest)
+	if !ok {
+		// Nothing is retained, so nothing can be resurrected.
+		manifest.InvalidatedVchannels = nil
+		return
+	}
+	for vchannel, timetick := range manifest.GetInvalidatedVchannels() {
+		if oldest.GetStartTimetick() > timetick {
+			delete(manifest.InvalidatedVchannels, vchannel)
+		}
+	}
+	if len(manifest.InvalidatedVchannels) == 0 {
+		manifest.InvalidatedVchannels = nil
+	}
+}
+
 // dropCompletedPendingGC removes the refs gc reported done. Completion is
 // tracked in memory and lands here at the next manifest write, so a crash in
 // between only replays deletes that are already no-ops.

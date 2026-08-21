@@ -51,12 +51,13 @@ func TestVChannelSummaryDoesNotStageKeylessRecord(t *testing.T) {
 
 func TestVChannelSummaryPeekDoesNotRelease(t *testing.T) {
 	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
-	require.Nil(t, state.peekPendingSummaryRecords())
+	empty, _ := state.peekPendingSummaryRecords()
+	require.Nil(t, empty)
 
 	for _, record := range newTestSummaryRecords("key", 100, 3) {
 		state.applySummaryRecord(record, true)
 	}
-	peeked := state.peekPendingSummaryRecords()
+	peeked, _ := state.peekPendingSummaryRecords()
 	require.Len(t, peeked, 3)
 	// Chunk order is by timetick, so a chunk's span is its first and last record.
 	require.Equal(t, uint64(100), peeked[0].SourceTimeTick)
@@ -65,9 +66,10 @@ func TestVChannelSummaryPeekDoesNotRelease(t *testing.T) {
 	// Nothing leaves the buffer on a peek: a persist that fails after this point
 	// must still find the records here.
 	require.True(t, state.hasPendingSummaryRecords())
-	require.Len(t, state.peekPendingSummaryRecords(), 3)
+	again, _ := state.peekPendingSummaryRecords()
+	require.Len(t, again, 3)
 
-	state.dropPersistedSummaryRecords(3)
+	state.dropPersistedSummaryRecords(3, state.stagingEpoch)
 	require.False(t, state.hasPendingSummaryRecords())
 	// Releasing the staging buffer does not drop what the consumer may still be
 	// served from.
@@ -81,14 +83,14 @@ func TestVChannelSummaryDropReleasesOnlyWhatWasPersisted(t *testing.T) {
 	for _, record := range newTestSummaryRecords("key", 100, 2) {
 		state.applySummaryRecord(record, true)
 	}
-	persisted := state.peekPendingSummaryRecords()
+	persisted, persistedEpoch := state.peekPendingSummaryRecords()
 	require.Len(t, persisted, 2)
 
 	// Observed during the write.
 	state.applySummaryRecord(newTestSummaryRecord("late", 200, 9), true)
 
-	state.dropPersistedSummaryRecords(len(persisted))
-	remaining := state.peekPendingSummaryRecords()
+	state.dropPersistedSummaryRecords(len(persisted), persistedEpoch)
+	remaining, _ := state.peekPendingSummaryRecords()
 	require.Len(t, remaining, 1)
 	require.Equal(t, "late", remaining[0].IdempotencyKey)
 }
@@ -151,4 +153,35 @@ func TestVChannelSummarySnapshotIsSortedAndKeyed(t *testing.T) {
 	require.Len(t, snapshot.Records, 2)
 	require.Equal(t, uint64(100), snapshot.Records[0].SourceTimeTick)
 	require.Equal(t, uint64(300), snapshot.Records[1].SourceTimeTick)
+}
+
+// A DDL landing BETWEEN the peek and the drop must not let the drop consume what
+// was staged afterwards.
+//
+// Releasing "the first N" only identifies the peeked records while the buffer is
+// append-only. An invalidation empties it, so a count-based release would fall
+// into its whole-buffer-clear branch and discard records that no chunk ever
+// carried -- and the consume checkpoint would still advance past their timeticks.
+func TestVChannelSummaryDropIsRefusedAfterInvalidation(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
+	for _, record := range newTestSummaryRecords("key", 100, 5) {
+		state.applySummaryRecord(record, true)
+	}
+
+	// The persist peeks and then releases the lock for object-storage IO.
+	persisted, epoch := state.peekPendingSummaryRecords()
+	require.Len(t, persisted, 5)
+
+	// A truncate lands, and a client writes again into the emptied collection.
+	state.discardForInvalidatedVChannel(500)
+	state.applySummaryRecord(newTestSummaryRecord("after-truncate", 600, 7), true)
+
+	// The IO completes. The release must be refused: those 5 records belong to a
+	// buffer that no longer exists.
+	state.dropPersistedSummaryRecords(len(persisted), epoch)
+
+	remaining, _ := state.peekPendingSummaryRecords()
+	require.Len(t, remaining, 1)
+	require.Equal(t, "after-truncate", remaining[0].IdempotencyKey)
+	require.True(t, state.hasPendingSummaryRecords())
 }

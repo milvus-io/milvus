@@ -71,7 +71,7 @@ func (m *summaryManager) persistSummaryForCheckpoint(ctx context.Context, logger
 		return nil
 	}
 	m.mu.Lock()
-	records := m.peekPendingSummaryRecordsUnsafe()
+	records, epochs := m.peekPendingSummaryRecordsUnsafe()
 	m.mu.Unlock()
 	if len(records) == 0 {
 		return nil
@@ -83,7 +83,7 @@ func (m *summaryManager) persistSummaryForCheckpoint(ctx context.Context, logger
 	m.metrics.ObserveIdempotencyPersist(true)
 
 	m.mu.Lock()
-	m.dropPersistedSummaryRecordsUnsafe(records)
+	m.dropPersistedSummaryRecordsUnsafe(records, epochs)
 	m.evictPersistedRecordsUnsafe()
 	m.mu.Unlock()
 	return nil
@@ -91,26 +91,29 @@ func (m *summaryManager) persistSummaryForCheckpoint(ctx context.Context, logger
 
 // peekPendingSummaryRecordsUnsafe collects what the next chunk should carry
 // without removing anything. Caller must hold m.mu.
-func (m *summaryManager) peekPendingSummaryRecordsUnsafe() map[string][]*SummaryRecord {
+func (m *summaryManager) peekPendingSummaryRecordsUnsafe() (map[string][]*SummaryRecord, map[string]uint64) {
 	if len(m.summaries()) == 0 {
-		return nil
+		return nil, nil
 	}
 	recordsByVChannel := make(map[string][]*SummaryRecord)
+	epochs := make(map[string]uint64)
 	for _, summary := range m.summaries() {
-		if records := summary.peekPendingSummaryRecords(); len(records) > 0 {
+		records, epoch := summary.peekPendingSummaryRecords()
+		if len(records) > 0 {
 			recordsByVChannel[summary.vchannel] = records
+			epochs[summary.vchannel] = epoch
 		}
 	}
-	return recordsByVChannel
+	return recordsByVChannel, epochs
 }
 
 // dropPersistedSummaryRecordsUnsafe releases exactly what the written chunk
 // carried, per vchannel. Records observed while the chunk was being written are
 // appended after them and stay staged for the next one. Caller must hold m.mu.
-func (m *summaryManager) dropPersistedSummaryRecordsUnsafe(persisted map[string][]*SummaryRecord) {
+func (m *summaryManager) dropPersistedSummaryRecordsUnsafe(persisted map[string][]*SummaryRecord, epochs map[string]uint64) {
 	for vchannel, records := range persisted {
 		if summary, ok := m.summaries()[vchannel]; ok {
-			summary.dropPersistedSummaryRecords(len(records))
+			summary.dropPersistedSummaryRecords(len(records), epochs[vchannel])
 		}
 	}
 }
