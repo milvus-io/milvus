@@ -692,10 +692,12 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		return
 	}
 
-	totalRows := lo.SumBy(view.GetSegmentsView(), func(v *SegmentView) int64 { return v.NumOfRows })
+	segmentViews := view.GetSegmentsView()
+	totalRows := lo.SumBy(segmentViews, func(v *SegmentView) int64 { return v.NumOfRows })
 
-	totalSize := view.GetTotalSize()
-	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, view.(*ForceMergeSegmentView).GetTargetSegmentSize())
+	forceMergeView := view.(*ForceMergeSegmentView)
+	totalSize := sumSegmentSize(segmentViews)
+	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(forceMergeView.GetTargetSegmentSize()))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
 		return
@@ -713,11 +715,11 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		PartitionID:            view.GetGroupLabel().PartitionID,
 		Channel:                view.GetGroupLabel().Channel,
 		Schema:                 collection.Schema,
-		InputSegments:          lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		InputSegments:          lo.Map(segmentViews, func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
 		ResultSegments:         []int64{},
 		TotalRows:              totalRows,
 		LastStateStartTime:     now,
-		MaxSize:                int64(view.(*ForceMergeSegmentView).GetTargetSegmentSize()),
+		MaxSize:                forceMergeView.GetTargetSegmentSize(),
 		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 	}
 

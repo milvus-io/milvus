@@ -272,7 +272,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AutoCalculate
 }
 
 func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_EmptySegments() {
-	segments := []*SegmentView{}
+	segments := []*SegmentInfo{}
 	result := groupByPartitionChannel(segments)
 
 	s.NotNil(result)
@@ -281,7 +281,7 @@ func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_EmptySegme
 
 func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_SingleGroup() {
 	segmentInfo := genTestSegmentInfo(s.testLabel, 100, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
-	segments := GetViewsByInfo(segmentInfo)
+	segments := []*SegmentInfo{segmentInfo}
 
 	result := groupByPartitionChannel(segments)
 
@@ -317,7 +317,7 @@ func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_MultipleGr
 	seg2 := genTestSegmentInfo(label2, 101, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
 	seg3 := genTestSegmentInfo(label3, 102, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
 
-	segments := GetViewsByInfo(seg1, seg2, seg3)
+	segments := []*SegmentInfo{seg1, seg2, seg3}
 	result := groupByPartitionChannel(segments)
 
 	s.NotNil(result)
@@ -329,7 +329,7 @@ func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_SameGroupM
 	seg2 := genTestSegmentInfo(s.testLabel, 101, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
 	seg3 := genTestSegmentInfo(s.testLabel, 102, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
 
-	segments := GetViewsByInfo(seg1, seg2, seg3)
+	segments := []*SegmentInfo{seg1, seg2, seg3}
 	result := groupByPartitionChannel(segments)
 
 	s.NotNil(result)
