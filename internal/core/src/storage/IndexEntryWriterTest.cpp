@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -300,6 +301,48 @@ class IndexEntryWriterV3Test : public testing::Test {
         auto info = fs_->GetFileInfo(path);
         EXPECT_TRUE(info.ok()) << info.status().ToString();
         return info.ValueOrDie().size();
+    }
+
+    // Rewrites the directory table of an existing V3 index file by applying
+    // `mutate` to the parsed directory JSON and writing the file back with an
+    // updated footer. Used to build malformed encrypted directories for
+    // reader-side validation tests. Reads and writes through the fixture's
+    // ArrowFileSystem so the bytes stay in the same store the writer used.
+    void
+    RewriteDirectory(const std::string& file_path,
+                     const std::function<void(nlohmann::json&)>& mutate) {
+        auto input = CreateInputStream(file_path);
+        auto file_size = input->Size();
+
+        std::vector<uint8_t> bytes(file_size);
+        size_t read = input->ReadAt(bytes.data(), 0, file_size);
+        ASSERT_EQ(read, file_size);
+        input.reset();
+
+        ASSERT_GE(file_size, MILVUS_V3_FOOTER_SIZE);
+        const uint8_t* footer_ptr =
+            bytes.data() + file_size - MILVUS_V3_FOOTER_SIZE;
+        uint32_t dir_size = 0;
+        std::memcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
+
+        size_t dir_offset = file_size - MILVUS_V3_FOOTER_SIZE - dir_size;
+        ASSERT_LE(dir_offset, file_size);
+
+        auto dir_json = nlohmann::json::parse(
+            bytes.data() + dir_offset, bytes.data() + dir_offset + dir_size);
+        mutate(dir_json);
+        std::string new_dir = dir_json.dump();
+
+        auto output = CreateOutputStream(file_path);
+        output->Write(bytes.data(), dir_offset);
+        output->Write(new_dir.data(), new_dir.size());
+
+        std::vector<uint8_t> new_footer(bytes.end() - MILVUS_V3_FOOTER_SIZE,
+                                        bytes.end());
+        uint32_t new_dir_size = static_cast<uint32_t>(new_dir.size());
+        std::memcpy(new_footer.data() + 28, &new_dir_size, sizeof(uint32_t));
+        output->Write(new_footer.data(), new_footer.size());
+        output->Close();
     }
 
     milvus_storage::ArrowFileSystemPtr fs_;
@@ -1079,6 +1122,141 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     EXPECT_GT(info.ValueOrDie().size(), entry_size);
 
     ::unlink(tmp_relative.c_str());
+}
+
+// ---- Encrypted directory validation tests ----
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationAcceptsValidDirectory) {
+    const std::string file_path = kV3FilePath + "_dir_valid";
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 2 * slice_size + 100;  // 3 slices
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+
+    // Directory validation must pass and let Open proceed to cipher-plugin
+    // resolution, which fails only because no plugin is registered in this
+    // unit test.
+    try {
+        IndexEntryReader::Open(input, file_size);
+        FAIL() << "expected Open to fail on the missing cipher plugin";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find("Cipher plugin required"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsUnalignedSliceSize) {
+    const std::string file_path = kV3FilePath + "_dir_unaligned";
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 2 * slice_size + 100;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    RewriteDirectory(file_path, [](nlohmann::json& dir) {
+        dir["slice_size"] = kStreamSliceAlignment + 1;
+    });
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    EXPECT_THROW(IndexEntryReader::Open(input, file_size),
+                 milvus::SegcoreError);
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsOutOfRangeSlice) {
+    const std::string file_path = kV3FilePath + "_dir_out_of_range";
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 2 * slice_size + 100;  // 3 slices
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    // Shrink original_size so the second slice would exceed the entry while
+    // the three slices stay intact.
+    RewriteDirectory(file_path, [slice_size](nlohmann::json& dir) {
+        for (auto& entry : dir["entries"]) {
+            if (entry["name"].get<std::string>() == "data") {
+                entry["original_size"] = slice_size;
+            }
+        }
+    });
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    EXPECT_THROW(IndexEntryReader::Open(input, file_size),
+                 milvus::SegcoreError);
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsIncompleteCoverage) {
+    const std::string file_path = kV3FilePath + "_dir_incomplete";
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 2 * slice_size + 100;  // 3 slices
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    // Drop the final slice so the remaining slices under-cover original_size.
+    RewriteDirectory(file_path, [](nlohmann::json& dir) {
+        for (auto& entry : dir["entries"]) {
+            if (entry["name"].get<std::string>() == "data") {
+                entry["slices"].erase(entry["slices"].end() - 1);
+            }
+        }
+    });
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    EXPECT_THROW(IndexEntryReader::Open(input, file_size),
+                 milvus::SegcoreError);
 }
 
 // ---- ReadEntryStream tests ----
