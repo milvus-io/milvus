@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -469,6 +471,7 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
 	var operators []UpdateOperator
+	v3Deltalogs := make(map[int64][]*datapb.FieldBinlog)
 	for _, seg := range outputSegs {
 		if len(seg.GetDeltalogs()) > 0 {
 			// The manifest transaction must run outside UpdateSegmentsInfo: that
@@ -476,9 +479,22 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 			// per-segment lock while it performs object-storage I/O.
 			current := t.meta.GetSegment(ctx, seg.GetSegmentID())
 			if current != nil && current.GetStorageVersion() == storage.StorageV3 && current.GetManifestPath() != "" {
-				if err := t.commitL0V3Deltalogs(ctx, seg.GetSegmentID(), seg.GetDeltalogs()); err != nil {
-					return err
+				// A target retired by a concurrent compaction while the L0 plan
+				// was executing is gone for publication purposes: GetSegment
+				// returns dropped segments, and CommitSegmentManifest would only
+				// reject one with ErrSegmentNotFound. Skip it so the
+				// input-segment retirement below still runs and the task reaches
+				// meta_saved instead of re-polling a permanent error forever.
+				if !isSegmentHealthy(current) {
+					mlog.Warn(ctx, "L0 target segment no longer healthy; skipping deltalog publication",
+						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+						mlog.FieldSegmentID(seg.GetSegmentID()))
+					continue
 				}
+				// Append rather than assign: a duplicated target in the worker
+				// output must keep both entries, as the serial path did (the
+				// commit-side dedup handles overlaps).
+				v3Deltalogs[seg.GetSegmentID()] = append(v3Deltalogs[seg.GetSegmentID()], seg.GetDeltalogs()...)
 				continue
 			}
 			operators = append(operators, AddL0DeltalogsAndUpdateManifestOperator(
@@ -490,6 +506,10 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 	}
 
+	if err := t.commitL0V3DeltalogsParallel(ctx, v3Deltalogs); err != nil {
+		return err
+	}
+
 	for _, segID := range t.GetTaskProto().InputSegments {
 		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
@@ -499,6 +519,52 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	)
 
 	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+}
+
+// commitL0V3DeltalogsParallel publishes the V3 targets' deltalogs through
+// CommitSegmentManifest with bounded concurrency. The expensive half of each
+// commit — the loon manifest transaction — is object-storage I/O performed
+// outside segMu, so the fan-out restores the parallelism the legacy operator
+// path gets from the same dataCoord.compaction.levelzero.manifestUpdatePoolSize
+// pool, while each segment keeps the per-segment ExpectedManifest CAS
+// semantics unchanged. The catalog half still lands as one catalog.Update per
+// segment; collapsing those into a single batched transaction is the batched
+// CommitSegmentManifests follow-up (see the TODO in
+// ddl_callbacks_batch_update_manifest.go).
+func (t *l0CompactionTask) commitL0V3DeltalogsParallel(ctx context.Context, deltalogsBySegment map[int64][]*datapb.FieldBinlog) error {
+	if len(deltalogsBySegment) == 0 {
+		return nil
+	}
+	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	if poolSize > len(deltalogsBySegment) {
+		poolSize = len(deltalogsBySegment)
+	}
+	pool := conc.NewPool[struct{}](poolSize)
+	defer pool.Release()
+
+	futures := make([]*conc.Future[struct{}], 0, len(deltalogsBySegment))
+	for segmentID, deltalogs := range deltalogsBySegment {
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			err := t.commitL0V3Deltalogs(ctx, segmentID, deltalogs)
+			// A target dropped between the saveSegmentMeta health check and the
+			// commit (or during manifest I/O) is the same benign terminal
+			// outcome as the pre-check there: the deltalogs are obsolete along
+			// with the segment. Swallow it so the input-segment retirement still
+			// runs — the ErrSegmentNotFound contract the stats caller already
+			// honors in SetJobInfo.
+			if err != nil && errors.Is(err, merr.ErrSegmentNotFound) {
+				mlog.Warn(ctx, "L0 target segment dropped during manifest commit; skipping deltalog publication",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.FieldSegmentID(segmentID), mlog.Err(err))
+				return struct{}{}, nil
+			}
+			return struct{}{}, err
+		}))
+	}
+	return conc.BlockOnAll(futures...)
 }
 
 func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID int64, deltalogs []*datapb.FieldBinlog) error {
