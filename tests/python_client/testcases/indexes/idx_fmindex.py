@@ -66,6 +66,11 @@ class FMINDEX:
             "expected": success,
         },
         {
+            "description": "block bytes below minimum (power of two but < 8)",
+            "params": {"fm_block_bytes": 4},
+            "expected": {"err_code": 1100, "err_msg": "fm_block_bytes for FM-index must be a power of two"},
+        },
+        {
             "description": "block bytes not a power of two",
             "params": {"fm_block_bytes": 24},
             "expected": {"err_code": 1100, "err_msg": "fm_block_bytes for FM-index must be a power of two"},

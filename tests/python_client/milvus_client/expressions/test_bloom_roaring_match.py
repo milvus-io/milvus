@@ -160,6 +160,29 @@ class _MembershipBase(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         return collection_name
 
+    def _build_nullable_int_collection(self, client):
+        """Create a nullable INT64 membership collection: rows with i % 8 == 7
+        carry NULL creator_id, the rest cycle 0..domain-1. Index + load."""
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(creator_field, datatype=DataType.INT64, nullable=True)
+        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
+        for i, row in enumerate(rows):
+            row[creator_field] = None if i % 8 == 7 else i % domain
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
+        self.load_collection(client, collection_name)
+        return collection_name
+
 
 class TestBloomMatch(_MembershipBase):
     @pytest.mark.tags(CaseLabel.L1)
@@ -395,6 +418,90 @@ class TestBloomMatch(_MembershipBase):
         assert saw_sealed, "bloom_match missed sealed-segment members"
         assert saw_growing, "bloom_match missed growing-segment members"
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bloom_match_null_rows_fold_to_false(self):
+        """NULL rows never match bloom_match nor its negation (NULL folds to
+        FALSE on both sides)."""
+        client = self._client()
+        collection_name = self._build_nullable_int_collection(client)
+
+        blob = build_bloom_filter(list(range(domain)), fpr=0.001)
+        got = self._query_ids(
+            client, collection_name, f"bloom_match({creator_field}, {{bf}})", filter_params={"bf": blob}
+        )
+        for i in got:
+            assert i % 8 != 7, f"bloom_match matched a NULL row id={i}"
+
+        not_got = self._query_ids(
+            client, collection_name, f"not bloom_match({creator_field}, {{bf}})", filter_params={"bf": blob}
+        )
+        for i in not_got:
+            assert i % 8 != 7, f"not bloom_match matched a NULL row id={i}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bloom_match_varchar_zero_false_negatives(self):
+        """VARCHAR membership has no false negatives (exact `in` ⊆ bloom_match)."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("tag", datatype=DataType.VARCHAR, max_length=64)
+        schema.add_field(vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
+        for i, row in enumerate(rows):
+            row["tag"] = f"tag{i % domain}"
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
+        self.load_collection(client, collection_name)
+
+        str_blob = build_bloom_filter([f"tag{v}" for v in range(5)], fpr=0.001)
+        exact = self._query_ids(client, collection_name, 'tag in ["tag0","tag1","tag2","tag3","tag4"]')
+        got = self._query_ids(client, collection_name, "bloom_match(tag, {bf})", filter_params={"bf": str_blob})
+        assert set(exact) <= set(got), "bloom_match(varchar) dropped true members"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bloom_match_malformed_blob_and_literal_rejected(self):
+        """A malformed blob and a literal array argument are rejected rather than
+        silently unfiltered."""
+        client = self._client()
+        collection_name = self._build_int_collection(client)
+
+        with pytest.raises(MilvusException):
+            client.query(
+                collection_name,
+                filter=f"bloom_match({creator_field}, {{bf}})",
+                output_fields=[pk_field],
+                filter_params={"bf": b"not-a-real-blob"},
+            )
+        with pytest.raises(MilvusException):
+            client.query(
+                collection_name,
+                filter=f"bloom_match({creator_field}, [1,2,3])",
+                output_fields=[pk_field],
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bloom_match_false_positive_rate_sanity(self):
+        """The measured false-positive count over the disjoint (non-member) rows
+        is bounded and in line with the configured fpr (loose upper bound)."""
+        client = self._client()
+        collection_name = self._build_int_collection(client)
+
+        blob = build_bloom_filter(list(range(10)), fpr=0.05)
+        got = self._query_ids(
+            client, collection_name, f"bloom_match({creator_field}, {{bf}})", filter_params={"bf": blob}
+        )
+        fp = sum(1 for i in got if i % domain >= 10)
+        non_member_rows = (domain - 10) * nb // domain
+        assert fp < non_member_rows * 3 // 10, f"false-positive count {fp} far exceeds fpr=0.05"
+
 
 class TestRoaringMatch(_MembershipBase):
     @pytest.mark.tags(CaseLabel.L1)
@@ -557,6 +664,15 @@ class TestRoaringMatch(_MembershipBase):
                 filter_params={"rb": b"not-an-mrb1-blob"},
             )
 
+        valid = build_roaring_bitmap([1, 2, 3])
+        with pytest.raises(MilvusException):
+            client.query(
+                collection_name,
+                filter=f"roaring_match({creator_field}, {{rb}})",
+                output_fields=[pk_field],
+                filter_params={"rb": valid[:-1]},
+            )
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_type", ["STL_SORT", "INVERTED"])
     def test_roaring_match_scalar_index_type_matrix(self, index_type):
@@ -640,6 +756,25 @@ class TestRoaringMatch(_MembershipBase):
         saw_growing = any(i >= nb for i in got)
         assert saw_sealed, "roaring_match missed sealed-segment members"
         assert saw_growing, "roaring_match missed growing-segment members"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_roaring_match_null_rows_fold_to_false(self):
+        """NULL rows never match roaring_match nor its negation."""
+        client = self._client()
+        collection_name = self._build_nullable_int_collection(client)
+
+        blob = build_roaring_bitmap(list(range(domain)))
+        got = self._query_ids(
+            client, collection_name, f"roaring_match({creator_field}, {{rb}})", filter_params={"rb": blob}
+        )
+        for i in got:
+            assert i % 8 != 7, f"roaring_match matched a NULL row id={i}"
+
+        not_got = self._query_ids(
+            client, collection_name, f"not roaring_match({creator_field}, {{rb}})", filter_params={"rb": blob}
+        )
+        for i in not_got:
+            assert i % 8 != 7, f"not roaring_match matched a NULL row id={i}"
 
 
 class TestMembershipStructArrayRejected(_MembershipBase):
