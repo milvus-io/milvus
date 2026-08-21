@@ -1770,6 +1770,10 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	clonedColl.Properties = properties
 	// add field will change the schema
 	clonedColl.Schema = req.GetSchema()
+	// Always refresh partition IDs as well. A collection first learned through
+	// this broadcast must be able to self-heal if an older RootCoord populated
+	// the cache with a malformed partition list.
+	clonedColl.Partitions = req.GetPartitionIDs()
 	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil
 }

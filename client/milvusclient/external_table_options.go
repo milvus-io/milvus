@@ -18,6 +18,8 @@ package milvusclient
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 // RefreshExternalCollectionOption is the interface for RefreshExternalCollection options.
@@ -118,5 +120,185 @@ func (opt *listRefreshExternalCollectionJobsOption) Request() *milvuspb.ListRefr
 func NewListRefreshExternalCollectionJobsOption(collectionName string) *listRefreshExternalCollectionJobsOption {
 	return &listRefreshExternalCollectionJobsOption{
 		collectionName: collectionName,
+	}
+}
+
+// AlterCollectionSchemaOption is the interface for AlterCollectionSchema options.
+type AlterCollectionSchemaOption interface {
+	Request() *milvuspb.AlterCollectionSchemaRequest
+}
+
+type alterCollectionSchemaBaseOption struct {
+	dbName         string
+	collectionName string
+}
+
+// fillBase copies the shared collection identity fields into the request.
+func (opt *alterCollectionSchemaBaseOption) fillBase(req *milvuspb.AlterCollectionSchemaRequest) {
+	req.CollectionName = opt.collectionName
+	if opt.dbName != "" {
+		req.DbName = opt.dbName
+	}
+}
+
+type alterCollectionSchemaAddFunctionOption struct {
+	alterCollectionSchemaBaseOption
+	function     *entity.Function
+	outputFields []*entity.Field
+}
+
+var _ AlterCollectionSchemaOption = (*alterCollectionSchemaAddFunctionOption)(nil)
+
+// WithDbName sets the target database for an add-function request.
+func (opt *alterCollectionSchemaAddFunctionOption) WithDbName(dbName string) *alterCollectionSchemaAddFunctionOption {
+	opt.dbName = dbName
+	return opt
+}
+
+// Request builds the RPC request for adding a function and its output fields.
+func (opt *alterCollectionSchemaAddFunctionOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	fieldInfos := make([]*milvuspb.AlterCollectionSchemaRequest_FieldInfo, 0, len(opt.outputFields))
+	for _, field := range opt.outputFields {
+		fieldInfos = append(fieldInfos, &milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+			FieldSchema: field.ProtoMessage(),
+			ExtraParams: entity.MapKvPairs(field.IndexParams),
+		})
+	}
+
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: fieldInfos,
+					FuncSchema: []*schemapb.FunctionSchema{opt.function.ProtoMessage()},
+				},
+			},
+		},
+	}
+	opt.fillBase(req)
+	return req
+}
+
+// NewAlterCollectionSchemaAddFunctionOption creates an AlterCollectionSchema option for adding a function.
+func NewAlterCollectionSchemaAddFunctionOption(
+	collectionName string,
+	function *entity.Function,
+	outputFields ...*entity.Field,
+) *alterCollectionSchemaAddFunctionOption {
+	return &alterCollectionSchemaAddFunctionOption{
+		alterCollectionSchemaBaseOption: alterCollectionSchemaBaseOption{collectionName: collectionName},
+		function:                        function,
+		outputFields:                    outputFields,
+	}
+}
+
+type alterCollectionSchemaAddFieldOption struct {
+	alterCollectionSchemaBaseOption
+	field *entity.Field
+}
+
+var _ AlterCollectionSchemaOption = (*alterCollectionSchemaAddFieldOption)(nil)
+
+// WithDbName sets the target database for an add-field request.
+func (opt *alterCollectionSchemaAddFieldOption) WithDbName(dbName string) *alterCollectionSchemaAddFieldOption {
+	opt.dbName = dbName
+	return opt
+}
+
+// Request builds the RPC request for adding a field.
+func (opt *alterCollectionSchemaAddFieldOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: opt.field.ProtoMessage()},
+					},
+				},
+			},
+		},
+	}
+	opt.fillBase(req)
+	return req
+}
+
+// NewAlterCollectionSchemaAddFieldOption creates an AlterCollectionSchema option for adding a source-backed external field.
+func NewAlterCollectionSchemaAddFieldOption(collectionName string, field *entity.Field) *alterCollectionSchemaAddFieldOption {
+	return &alterCollectionSchemaAddFieldOption{
+		alterCollectionSchemaBaseOption: alterCollectionSchemaBaseOption{collectionName: collectionName},
+		field:                           field,
+	}
+}
+
+type alterCollectionSchemaDropFieldOption struct {
+	alterCollectionSchemaBaseOption
+	fieldName string
+}
+
+var _ AlterCollectionSchemaOption = (*alterCollectionSchemaDropFieldOption)(nil)
+
+// WithDbName sets the target database for a drop-field request.
+func (opt *alterCollectionSchemaDropFieldOption) WithDbName(dbName string) *alterCollectionSchemaDropFieldOption {
+	opt.dbName = dbName
+	return opt
+}
+
+// Request builds the RPC request for dropping a field by name.
+func (opt *alterCollectionSchemaDropFieldOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: opt.fieldName},
+				},
+			},
+		},
+	}
+	opt.fillBase(req)
+	return req
+}
+
+// NewAlterCollectionSchemaDropFieldOption creates an AlterCollectionSchema option for dropping a field.
+func NewAlterCollectionSchemaDropFieldOption(collectionName string, fieldName string) *alterCollectionSchemaDropFieldOption {
+	return &alterCollectionSchemaDropFieldOption{
+		alterCollectionSchemaBaseOption: alterCollectionSchemaBaseOption{collectionName: collectionName},
+		fieldName:                       fieldName,
+	}
+}
+
+type alterCollectionSchemaDropFunctionOption struct {
+	alterCollectionSchemaBaseOption
+	functionName string
+}
+
+var _ AlterCollectionSchemaOption = (*alterCollectionSchemaDropFunctionOption)(nil)
+
+// WithDbName sets the target database for a drop-function request.
+func (opt *alterCollectionSchemaDropFunctionOption) WithDbName(dbName string) *alterCollectionSchemaDropFunctionOption {
+	opt.dbName = dbName
+	return opt
+}
+
+// Request builds the RPC request for dropping a function by name.
+func (opt *alterCollectionSchemaDropFunctionOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier:               &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{FunctionName: opt.functionName},
+					DropFunctionOutputFields: true,
+				},
+			},
+		},
+	}
+	opt.fillBase(req)
+	return req
+}
+
+// NewAlterCollectionSchemaDropFunctionOption creates an AlterCollectionSchema option for dropping a function and its output fields.
+func NewAlterCollectionSchemaDropFunctionOption(collectionName string, functionName string) *alterCollectionSchemaDropFunctionOption {
+	return &alterCollectionSchemaDropFunctionOption{
+		alterCollectionSchemaBaseOption: alterCollectionSchemaBaseOption{collectionName: collectionName},
+		functionName:                    functionName,
 	}
 }
