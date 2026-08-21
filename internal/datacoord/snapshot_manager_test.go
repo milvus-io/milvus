@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -1852,6 +1853,7 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 
 func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	ctx := context.Background()
+	sourceManifest := packed.MarshalManifestPath("files/insert_log/100/10/11", 7)
 
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
@@ -1862,7 +1864,8 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 			SegmentLevel:   datapb.SegmentLevel_L1,
 			ChannelName:    "src-ch",
 			NumOfRows:      123,
-			StorageVersion: 3,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   sourceManifest,
 			IsSorted:       true,
 		}},
 	}
@@ -1875,7 +1878,11 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		assert.Equal(t, "dst-ch", seg.GetInsertChannel())
 		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
 		assert.True(t, seg.GetIsImporting())
-		assert.Equal(t, int64(3), seg.GetStorageVersion())
+		assert.Equal(t, storage.StorageV3, seg.GetStorageVersion())
+		basePath, version, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+		require.NoError(t, err)
+		assert.Equal(t, "files/insert_log/200/20/2001", basePath)
+		assert.Equal(t, int64(7), version)
 		return nil
 	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
@@ -1911,9 +1918,86 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	assert.True(t, addJobCalled)
 }
 
+// TestCreateRestoreJob_ExternalPreRegistersTargetManifestUnderTargetRoot: for an
+// external restore the source manifest lives in the foreign bucket while
+// DataNode writes the target under this cluster's storage root. The manifest
+// path pre-registered here is the dropped-segment GC fallback for a target
+// whose worker never reports back, so it must be the path DataNode will
+// actually write — byte-identical to the DataNode transform for the very
+// (SourceRootPath, TargetRootPath) pair AssembleCopySegmentRequest sends.
+func TestCreateRestoreJob_ExternalPreRegistersTargetManifestUnderTargetRoot(t *testing.T) {
+	ctx := context.Background()
+	const snapshotLocation = "s3://srcbucket/bundle/snapshots/100/metadata/1.json"
+	sourceManifest := packed.MarshalManifestPath("s3://srcbucket/bundle/files/insert_log/100/10/11", 7)
+
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Collection:   &datapb.CollectionDescription{},
+		Layout:       datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId:      11,
+			PartitionId:    10,
+			SegmentLevel:   datapb.SegmentLevel_L1,
+			ChannelName:    "src-ch",
+			NumOfRows:      123,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   sourceManifest,
+		}},
+	}
+
+	// What DataNode will derive from the request DataCoord assembles for this job.
+	sourceRoot, targetRoot, err := deriveCopySegmentRootPaths(true, snapshotLocation, snapshotData.Layout)
+	require.NoError(t, err)
+	require.Equal(t, "s3://srcbucket/bundle/files", sourceRoot)
+	require.NotEmpty(t, targetRoot)
+	expectedManifest, err := snapshotstorage.TransformCopySegmentManifestPath(sourceManifest, sourceRoot, targetRoot, 200, 20, 2001)
+	require.NoError(t, err)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg *datapb.SegmentInfo) error {
+		assert.Equal(t, int64(2001), seg.GetID())
+		assert.Equal(t, storage.StorageV3, seg.GetStorageVersion())
+		assert.Equal(t, expectedManifest, seg.GetManifestPath())
+		basePath, version, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+		require.NoError(t, err)
+		assert.Equal(t, path.Join(targetRoot, "insert_log/200/20/2001"), basePath,
+			"pre-registered manifest must be rooted in the target storage root, not the source bucket")
+		assert.Equal(t, int64(7), version)
+		return nil
+	}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
+
+	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocN(int64(1)).Return(int64(2001), int64(2002), nil)
+
+	mockHandler := NewNMockHandler(t)
+	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&collectionInfo{StartPositions: []*commonpb.KeyDataPair{{Key: "dst-ch", Data: []byte{1}}}}, nil)
+
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).Return(nil).Build()
+	defer mAddJob.UnPatch()
+
+	sm := &snapshotManager{
+		meta:            mt,
+		allocator:       mockAlloc,
+		handler:         mockHandler,
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	fingerprint, err := snapshotstorage.SnapshotFingerprint(snapshotData)
+	require.NoError(t, err)
+	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20},
+		snapshotData, int64(42), int64(7), true, snapshotLocation, `{"extfs":{"region":"us-west-2"}}`, fingerprint)
+	require.NoError(t, err)
+}
+
 func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLookup(t *testing.T) {
 	ctx := context.Background()
-	const snapshotLocation = "s3://bucket/files/snapshots/meta.json"
+	// A validated snapshot URI: createRestoreJob now derives the source storage
+	// root from it (for the pre-registered V3 manifest paths), as the request
+	// assembly always did.
+	const snapshotLocation = "s3://bucket/files/snapshots/100/metadata/1.json"
 
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
@@ -1964,6 +2048,175 @@ func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLook
 	assert.Equal(t, expectedFingerprint, captured.GetSnapshotFingerprint())
 	assert.Equal(t, int64(1), captured.GetTotalSegments())
 	assert.Len(t, captured.GetIdMappings(), 1)
+}
+
+func TestDeriveCopySegmentTargetManifestPath(t *testing.T) {
+	const localRoot = "files"
+
+	t.Run("non V3 does not require manifest", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV2,
+		}, "", localRoot, 200, 20, 2001)
+		require.NoError(t, err)
+		assert.Empty(t, manifest)
+	})
+
+	t.Run("V3 requires manifest", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+		}, "", localRoot, 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "requires manifest_path")
+	})
+
+	t.Run("V3 rejects malformed manifest", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "not-json",
+		}, "", localRoot, 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "failed to unmarshal manifest path")
+	})
+
+	t.Run("V3 rejects unsupported base path", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("external/100/segments/11", 7),
+		}, "", localRoot, 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "failed to derive manifest path")
+	})
+
+	t.Run("local restore replaces IDs under the same root", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("files/insert_log/100/10/11", 7),
+		}, "", localRoot, 200, 20, 2001)
+		require.NoError(t, err)
+		assert.Equal(t, packed.MarshalManifestPath("files/insert_log/200/20/2001", 7), manifest)
+	})
+
+	// The regression the review caught: for an external restore the source
+	// manifest is rooted in the foreign bucket, and DataNode writes the target
+	// under this cluster's root. ID substitution alone would persist a
+	// source-rooted prefix that dropped-segment GC (which runs against the
+	// local chunk manager) can never find, so the pre-registered fallback the
+	// whole derivation exists for would delete nothing.
+	t.Run("external restore re-roots the manifest under the target root", func(t *testing.T) {
+		sourceRoot, err := deriveSnapshotSourceRootURI(
+			"s3://srcbucket/bundle/snapshots/100/metadata/1.json",
+			datapb.SnapshotLayout_SnapshotLayoutSelfContained)
+		require.NoError(t, err)
+		require.Equal(t, "s3://srcbucket/bundle/files", sourceRoot)
+
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("s3://srcbucket/bundle/files/insert_log/100/10/11", 7),
+		}, sourceRoot, "target-root", 200, 20, 2001)
+		require.NoError(t, err)
+		assert.Equal(t, packed.MarshalManifestPath("target-root/insert_log/200/20/2001", 7), manifest)
+	})
+
+	// DataNode's transformManifestPath is snapshotstorage.TransformCopySegmentManifestPath
+	// applied to (SourceRootPath, TargetRootPath, target IDs). Assert DataCoord's
+	// derivation is byte-identical to that transform for the same inputs an
+	// external restore hands to DataNode — the invariant is "the two agree",
+	// not "each matches its own expectation".
+	t.Run("matches DataNode transform byte for byte for an external root", func(t *testing.T) {
+		sourceRoot, err := deriveSnapshotSourceRootURI(
+			"https://storage.example.com/srcbucket/source-root/snapshots/100/metadata/1.json",
+			datapb.SnapshotLayout_SnapshotLayoutReferenced)
+		require.NoError(t, err)
+		const targetRoot = "files"
+		sourceManifest := packed.MarshalManifestPath(
+			"https://storage.example.com/srcbucket/source-root/insert_log/100/10/11", 3)
+
+		fromDataCoord, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   sourceManifest,
+		}, sourceRoot, targetRoot, 200, 20, 2001)
+		require.NoError(t, err)
+
+		fromDataNode, err := snapshotstorage.TransformCopySegmentManifestPath(
+			sourceManifest, sourceRoot, targetRoot, 200, 20, 2001)
+		require.NoError(t, err)
+
+		assert.Equal(t, fromDataNode, fromDataCoord)
+		assert.Equal(t, packed.MarshalManifestPath("files/insert_log/200/20/2001", 3), fromDataCoord)
+	})
+
+	t.Run("external manifest outside the source root is rejected", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("s3://otherbucket/files/insert_log/100/10/11", 7),
+		}, "s3://srcbucket/bundle/files", "files", 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "failed to derive manifest path")
+	})
+}
+
+func TestCreateRestoreJob_RejectsV3WithoutManifestBeforePreRegistration(t *testing.T) {
+	ctx := context.Background()
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId:      11,
+			PartitionId:    10,
+			SegmentLevel:   datapb.SegmentLevel_L1,
+			ChannelName:    "src-ch",
+			StorageVersion: storage.StorageV3,
+		}},
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}))
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocN(int64(1)).Return(int64(2001), int64(2002), nil)
+
+	addJobCalled := false
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+			addJobCalled = true
+			return nil
+		}).Build()
+	defer mAddJob.UnPatch()
+
+	sm := &snapshotManager{
+		meta:            mt,
+		allocator:       mockAlloc,
+		copySegmentMeta: &copySegmentMeta{},
+	}
+	err := sm.createRestoreJob(
+		ctx,
+		200,
+		map[string]string{"src-ch": "dst-ch"},
+		map[int64]int64{10: 20},
+		snapshotData,
+		42,
+		7,
+		false,
+		"",
+		"",
+		"",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires manifest_path")
+	assert.False(t, addJobCalled)
+	assert.Nil(t, mt.GetSegment(ctx, 2001), "invalid V3 input must fail before target metadata is persisted")
 }
 
 // TestSnapshotManager_HasActivePins_Delegation verifies the manager-layer wrapper

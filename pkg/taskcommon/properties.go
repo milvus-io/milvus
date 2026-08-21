@@ -33,8 +33,9 @@ const (
 	SubTypeKey      = "task_sub_type" // optional, only for Stats
 	SlotKey         = "task_slot"
 	NumRowsKey      = "num_row"      // optional, only for Index, Stats
-	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
+	TaskVersionKey  = "task_version" // optional, only for Index, Stats, Analyze and CopySegment
 	CollectionIDKey = "collection_id"
+	TaskAbortKey    = "task_abort"
 
 	// result
 	StateKey      = "task_state"
@@ -94,6 +95,10 @@ func (p Properties) AppendTaskVersion(version int64) {
 
 func (p Properties) AppendCollectionID(collectionID int64) {
 	p[CollectionIDKey] = fmt.Sprintf("%d", collectionID)
+}
+
+func (p Properties) AppendTaskAbort(abort bool) {
+	p[TaskAbortKey] = strconv.FormatBool(abort)
 }
 
 func (p Properties) AppendReason(reason string) {
@@ -215,6 +220,11 @@ func (p Properties) GetCollectionID() (int64, error) {
 		return 0, err
 	}
 	return collectionID, nil
+}
+
+func (p Properties) GetTaskAbort() bool {
+	abort, err := strconv.ParseBool(p[TaskAbortKey])
+	return err == nil && abort
 }
 
 func (p Properties) GetCostTime() int64 {

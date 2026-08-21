@@ -99,6 +99,19 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.CopySegmentJobEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Job == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil copy segment job in UpdateAction")
+			}
+			value, err := proto.Marshal(e.Job)
+			if err != nil {
+				return err
+			}
+			// Completed is the visibility marker for all target segment writes.
+			b.CommitSave(buildCopySegmentJobKey(e.Job.GetJobId()), string(value))
 		case metastore.AnalyzeTaskEntry:
 			if action.Type != metastore.ActionDelete {
 				return unsupportedAction(action)

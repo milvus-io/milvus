@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -100,6 +101,36 @@ func JoinIDPath(ids ...typeutil.UniqueID) string {
 		idStr = append(idStr, strconv.FormatInt(id, 10))
 	}
 	return path.Join(idStr...)
+}
+
+// ReplaceSegmentIDsInPath rewrites the collection, partition, and segment IDs
+// in a Milvus segment data path while preserving the remaining path layout.
+// The supported path roots are the four segment log directories whose layout
+// is {log_type}/{collectionID}/{partitionID}/{segmentID}/....
+func ReplaceSegmentIDsInPath(sourcePath string, collectionID, partitionID, segmentID typeutil.UniqueID) (string, error) {
+	parts := strings.Split(sourcePath, pathSep)
+	logTypeIndex := -1
+	for i, part := range parts {
+		switch part {
+		case common.SegmentInsertLogPath,
+			common.SegmentDeltaLogPath,
+			common.SegmentStatslogPath,
+			common.SegmentBm25LogPath:
+			logTypeIndex = i
+		}
+		if logTypeIndex >= 0 {
+			break
+		}
+	}
+
+	if logTypeIndex < 0 || logTypeIndex+3 >= len(parts) {
+		return "", merr.WrapErrParameterInvalidMsg("invalid binlog path structure: %s (expected log_type at a valid position)", sourcePath)
+	}
+
+	parts[logTypeIndex+1] = strconv.FormatInt(collectionID, 10)
+	parts[logTypeIndex+2] = strconv.FormatInt(partitionID, 10)
+	parts[logTypeIndex+3] = strconv.FormatInt(segmentID, 10)
+	return path.Join(parts...), nil
 }
 
 // ExtractTextLogFilenames extracts only filenames from full paths to save space.

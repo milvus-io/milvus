@@ -1305,6 +1305,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment() {
 		dropReq := &datapb.DropCopySegmentRequest{
 			TaskID: 400,
 			JobID:  100,
+			Abort:  true,
 		}
 
 		status, err := s.node.DropCopySegment(s.ctx, dropReq)
@@ -1372,6 +1373,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
 		dropReq := &datapb.DropCopySegmentRequest{
 			TaskID: 500,
 			JobID:  200,
+			Abort:  true,
 		}
 
 		status, err = s.node.DropCopySegment(s.ctx, dropReq)
@@ -1382,6 +1384,188 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
+}
+
+// TestDropCopySegment_StaleDispatchEpochIgnored is the worker half of the
+// untracked-drop/redispatch fence. Target object keys are a deterministic
+// transform of the source keys with no dispatch identity, so every dispatch of a
+// task writes the same objects: honoring a drop queued for a superseded
+// dispatch would delete the output the current one produced — output the restore
+// may already have published.
+func (s *DataNodeServicesSuite) TestDropCopySegment_StaleDispatchEpochIgnored() {
+	createReq := &datapb.CopySegmentRequest{
+		JobID:         300,
+		TaskID:        600,
+		TaskSlot:      1,
+		TaskVersion:   2,
+		StorageConfig: s.storageConfig,
+		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	status, err := s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	// A drop for an earlier dispatch is acknowledged — there is nothing left for
+	// it to clean — but must leave the tracked task alone.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 600, JobID: 300, Abort: true, TaskVersion: 1,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 600})
+	s.NoError(err)
+	s.NotEqual(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// The drop for the dispatch this task actually serves still applies.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 600, JobID: 300, Abort: true, TaskVersion: 2,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 600})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+}
+
+// TestDropCopySegment_UnversionedPeerStillDrops keeps a rolling upgrade working:
+// a coordinator that predates the fence sends no epoch, and a task created
+// before the upgrade holds none, so neither side can match and the drop must
+// keep its previous unconditional behavior.
+func (s *DataNodeServicesSuite) TestDropCopySegment_UnversionedPeerStillDrops() {
+	createReq := &datapb.CopySegmentRequest{
+		JobID:         301,
+		TaskID:        601,
+		TaskSlot:      1,
+		StorageConfig: s.storageConfig,
+		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	status, err := s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	// Old coordinator, new datanode: an epoch-less drop is still honored.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 601, JobID: 301, Abort: true,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 601})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// New coordinator, task created before the upgrade: no epoch to match either.
+	createReq.TaskID = 602
+	status, err = s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 602, JobID: 301, Abort: true, TaskVersion: 9,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 602})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+}
+
+// TestDropCopySegment_LegacyNonAbortDropOfLiveTaskAborts closes the remaining
+// rolling-upgrade combination: a legacy coordinator (no abort bit, no epoch)
+// converges a job by marking its side Failed and dropping the worker task while
+// the worker still runs it. Rejecting that drop would strand the task forever —
+// the legacy caller only logs the error, and the Drop RPC is the sole removal
+// path — so the datanode honors the release intent by aborting.
+func (s *DataNodeServicesSuite) TestDropCopySegment_LegacyNonAbortDropOfLiveTaskAborts() {
+	createReq := &datapb.CopySegmentRequest{
+		JobID:         303,
+		TaskID:        603,
+		TaskSlot:      1,
+		StorageConfig: s.storageConfig,
+		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	status, err := s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	// Task is Pending/InProgress; the legacy drop carries neither field.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 603, JobID: 303,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 603})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// An epoch-stamped caller asking to release a live task is still refused:
+	// every current call site sets the abort bit for any non-release drop, so
+	// this is a caller bug, not an upgrade artifact.
+	createReq.TaskID = 604
+	createReq.TaskVersion = 3
+	status, err = s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 604, JobID: 303, TaskVersion: 3,
+	})
+	s.Error(merr.CheckRPCCall(status, err))
+	s.ErrorContains(merr.CheckRPCCall(status, err), "cannot release copy segment task")
+
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 604})
+	s.NoError(err)
+	s.NotEqual(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// Clean up the still-registered task.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 604, JobID: 303, Abort: true, TaskVersion: 3,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+}
+
+// TestCopySegment_RedispatchAdoptsNewerEpoch covers the same-node redispatch:
+// TaskManager keeps the first entry for a duplicate taskID, so the re-dispatched
+// copy is served by the task already running here. Unless that task adopts the
+// new epoch, a drop queued for the earlier dispatch would still match and abort
+// the copy the new dispatch depends on.
+func (s *DataNodeServicesSuite) TestCopySegment_RedispatchAdoptsNewerEpoch() {
+	createReq := &datapb.CopySegmentRequest{
+		JobID:         302,
+		TaskID:        603,
+		TaskSlot:      1,
+		TaskVersion:   1,
+		StorageConfig: s.storageConfig,
+		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	status, err := s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	createReq.TaskVersion = 2
+	status, err = s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	// The queued drop of dispatch 1 no longer owns this task.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 603, JobID: 302, Abort: true, TaskVersion: 1,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 603})
+	s.NoError(err)
+	s.NotEqual(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// An out-of-order dispatch RPC must not hand ownership back to the older one.
+	createReq.TaskVersion = 1
+	status, err = s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 603, JobID: 302, Abort: true, TaskVersion: 2,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 603})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 }
 
 func (s *DataNodeServicesSuite) TestImportStateV2ToCopySegmentTaskState() {
@@ -1674,6 +1858,7 @@ func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
 				taskcommon.ClusterIDKey: "cluster-0",
 				taskcommon.TypeKey:      taskcommon.CopySegment,
 				taskcommon.TaskIDKey:    "701",
+				taskcommon.TaskAbortKey: "true",
 			},
 		}
 

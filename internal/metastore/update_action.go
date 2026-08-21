@@ -115,6 +115,13 @@ type RefreshJobEntry struct {
 	JobID int64
 }
 
+// CopySegmentJobEntry targets a copy-segment job update. When composed after
+// target segment updates, the job record is the publication commit marker and
+// must land last on the ordered transaction fallback path.
+type CopySegmentJobEntry struct {
+	Job *datapb.CopySegmentJob
+}
+
 // AnalyzeTaskEntry targets a single analyze task's removal.
 type AnalyzeTaskEntry struct {
 	TaskID int64
@@ -157,6 +164,7 @@ func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
 func (RefreshJobEntry) isEntry()            {}
+func (CopySegmentJobEntry) isEntry()        {}
 func (AnalyzeTaskEntry) isEntry()           {}
 func (PartitionStatsEntry) isEntry()        {}
 func (PartitionStatsVersionEntry) isEntry() {}
@@ -228,6 +236,12 @@ func AddRefreshTask(task *datapb.ExternalCollectionRefreshTask) UpdateAction {
 // job - the failover anchor - is written last as the commit marker.
 func SaveRefreshJob(job *datapb.ExternalCollectionRefreshJob) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: RefreshJobEntry{Job: job}}
+}
+
+// SaveCopySegmentJob persists job as an upsert. Compose it after every target
+// segment update so Completed is the publication commit marker.
+func SaveCopySegmentJob(job *datapb.CopySegmentJob) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: CopySegmentJobEntry{Job: job}}
 }
 
 // DropRefreshTask returns an UpdateAction that removes an external-collection

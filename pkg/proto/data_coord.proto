@@ -1212,6 +1212,12 @@ message CopySegmentRequest {
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
   string external_spec = 8;
+
+  // Dispatch epoch. DataCoord bumps it before every CreateCopySegment RPC and
+  // DataNode binds the accepted task to it, so a drop issued for an earlier
+  // dispatch can be recognized as stale. Zero means the coordinator predates
+  // the epoch fence (rolling upgrade).
+  int64 task_version = 9;
 }
 
 message QueryCopySegmentRequest {
@@ -1233,6 +1239,12 @@ message DropCopySegmentRequest {
   string clusterID = 1;
   int64 jobID = 2;
   int64 taskID = 3;
+  bool abort = 4;  // Cancel execution and remove copied output before dropping the task
+
+  // Dispatch epoch this drop was issued for. DataNode ignores the request when
+  // it no longer matches the tracked task, so a stale abort cannot delete the
+  // output of a later dispatch. Zero means unversioned (rolling upgrade).
+  int64 task_version = 5;
 }
 
 // VectorScalarIndexInfo contains metadata for copied vector/scalar indexes
@@ -1301,6 +1313,7 @@ enum CopySegmentJobState {
   CopySegmentJobExecuting = 2; // Executing copy segment tasks
   CopySegmentJobCompleted = 3; // All done
   CopySegmentJobFailed = 4;    // Failed
+  CopySegmentJobPublishing = 5; // Success claimed; atomically publishing target segments
 }
 
 // CopySegmentTaskState defines the state machine for copy segment tasks
