@@ -49,7 +49,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		vchannels, err := t.chMgr.getVChannels(collID)
+		vchannels, err := t.chMgr.GetVChannels(collID)
 		if err != nil {
 			return err
 		}
