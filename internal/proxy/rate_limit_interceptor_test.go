@@ -23,7 +23,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 type limiterMock struct {
@@ -54,6 +57,34 @@ func (l *limiterMock) Check(dbID int64, collectionIDToPartIDs map[int64][]int64,
 
 func (l *limiterMock) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
 	return l.Check(dbID, collectionIDToPartIDs, rt, n)
+}
+
+type snapshotLimiterCheck struct {
+	dbID            int64
+	collectionCount int
+	rateType        internalpb.RateType
+	n               int
+}
+
+type rejectingSnapshotLimiter struct {
+	checks []snapshotLimiterCheck
+}
+
+func (l *rejectingSnapshotLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
+	l.checks = append(l.checks, snapshotLimiterCheck{
+		dbID:            dbID,
+		collectionCount: len(collectionIDToPartIDs),
+		rateType:        rateType,
+		n:               n,
+	})
+	if n <= 0 {
+		return nil
+	}
+	return merr.ErrServiceRateLimit
+}
+
+func (l *rejectingSnapshotLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
+	return l.Check(dbID, collectionIDToPartIDs, rateType, n)
 }
 
 func TestRateLimitInterceptor(t *testing.T) {
@@ -382,6 +413,118 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Nil(t, rsp)
 		rsp = GetFailedResponse(nil, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
 		assert.Nil(t, rsp)
+	})
+
+	t.Run("snapshot mutations are rate limited", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		databaseNames := make([]string, 0)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, database string) {
+				databaseNames = append(databaseNames, database)
+			}).
+			Return(&databaseInfo{
+				DBID:             100,
+				CreatedTimestamp: 1,
+			}, nil)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+
+		testCases := []struct {
+			name            string
+			ctx             context.Context
+			request         proto.Message
+			expectedDBID    int64
+			expectedCollNum int
+		}{
+			{
+				name: "create snapshot",
+				request: &milvuspb.CreateSnapshotRequest{
+					DbName:         "db1",
+					CollectionName: "source",
+				},
+				expectedDBID:    100,
+				expectedCollNum: 1,
+			},
+			{
+				name: "drop snapshot",
+				request: &milvuspb.DropSnapshotRequest{
+					DbName:         "db1",
+					CollectionName: "source",
+				},
+				expectedDBID:    100,
+				expectedCollNum: 1,
+			},
+			{
+				name: "restore snapshot",
+				request: &milvuspb.RestoreSnapshotRequest{
+					DbName:               "source_db",
+					CollectionName:       "source",
+					TargetDbName:         "target_db",
+					TargetCollectionName: "target",
+				},
+				expectedDBID: 100,
+			},
+			{
+				name: "restore snapshot to active database",
+				ctx: metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+					util.HeaderDBName, "active_db",
+				)),
+				request: &milvuspb.RestoreSnapshotRequest{
+					DbName:               "source_db",
+					CollectionName:       "source",
+					TargetCollectionName: "target",
+				},
+				expectedDBID: 100,
+			},
+			{
+				name: "pin snapshot",
+				request: &milvuspb.PinSnapshotDataRequest{
+					DbName:         "db1",
+					CollectionName: "source",
+				},
+				expectedDBID:    100,
+				expectedCollNum: 1,
+			},
+			{
+				name:         "unpin snapshot",
+				request:      &milvuspb.UnpinSnapshotDataRequest{PinId: 1},
+				expectedDBID: util.InvalidDBID,
+			},
+		}
+
+		limiter := &rejectingSnapshotLimiter{}
+		handlerCalls := 0
+		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+			handlerCalls++
+			return merr.Success(), nil
+		}
+		interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, limiter)
+		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockSnapshotMethod"}
+
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				testCtx := testCase.ctx
+				if testCtx == nil {
+					testCtx = context.Background()
+				}
+				response, err := interceptor(testCtx, testCase.request, serverInfo, handler)
+				require.NoError(t, err)
+				status, ok := requestutil.GetStatusFromResponse(response)
+				require.True(t, ok)
+				assert.Equal(t, commonpb.ErrorCode_RateLimit, status.GetErrorCode())
+			})
+		}
+
+		assert.Zero(t, handlerCalls)
+		require.Len(t, limiter.checks, len(testCases))
+		for i, testCase := range testCases {
+			assert.Equal(t, snapshotLimiterCheck{
+				dbID:            testCase.expectedDBID,
+				collectionCount: testCase.expectedCollNum,
+				rateType:        internalpb.RateType_DDLCollection,
+				n:               1,
+			}, limiter.checks[i])
+		}
+		assert.Equal(t, []string{"db1", "db1", "target_db", "active_db", "db1"}, databaseNames)
 	})
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
