@@ -339,14 +339,24 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 // import.
 const importV2RequestFilePath = "/test/file.json"
 
+// importV2RequestCollectionID is the collection newImportV2IdempotentRequest targets.
+const importV2RequestCollectionID = int64(100)
+
 // newDuplicatedImportBroadcastResult builds the result the broadcaster returns on an
 // idempotency-key hit: no append results, plus the original broadcast message, which
-// carries the original jobID and the files that job was created from.
+// carries the original jobID, the collection that job targeted, and the files it was
+// created from. The collectionID must match the request's, or the duplicate is rejected
+// as belonging to another collection -- see newDuplicatedImportBroadcastResultForCollection.
 func newDuplicatedImportBroadcastResult(originalJobID int64, originalPaths ...string) *types.BroadcastAppendResult {
+	return newDuplicatedImportBroadcastResultForCollection(originalJobID, importV2RequestCollectionID, originalPaths...)
+}
+
+func newDuplicatedImportBroadcastResultForCollection(originalJobID int64, originalCollectionID int64, originalPaths ...string) *types.BroadcastAppendResult {
 	duplicated := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{
-			JobID: originalJobID,
+			JobID:        originalJobID,
+			CollectionID: originalCollectionID,
 			Files: lo.Map(originalPaths, func(path string, _ int) *msgpb.ImportFile {
 				return &msgpb.ImportFile{Paths: []string{path}}
 			}),
@@ -1061,6 +1071,29 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 }
 
 // Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)
+
+// Drop db1.c1, recreate a same-named db1.c1, reuse the key: the resource keys that
+// build the dedup scope carry names, not identities, so the scope is unchanged and the
+// index still hits. Returning the dropped incarnation's jobID here would be silent and
+// unrecoverable -- checkCollection leaves a Completed job alone when its collection
+// vanishes and GetImportProgress does not re-check collection existence, so the client
+// would poll that jobID and read Completed while the new collection stays empty.
+func (s *ImportServicesSuite) TestImportV2_DuplicateFromAnotherCollectionIsRejected() {
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
+
+	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+	// The original broadcast targeted collection 99; the request targets 100.
+	broadcastAPI.broadcastResult = newDuplicatedImportBroadcastResultForCollection(4242, 99, importV2RequestFilePath)
+
+	ctx := newImportV2IdempotentContext("run-1")
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.NotEqual(int32(0), resp.GetStatus().GetCode())
+	s.Contains(resp.GetStatus().GetReason(), "use a fresh key")
+	s.NotEqual("4242", resp.GetJobID(), "the dropped incarnation's jobID must not be handed back")
+}
 
 // The documented edge of the retry contract. Everything datacoord validates runs before
 // the broadcaster's idempotency lookup, and the job-count limit is one of those checks,
