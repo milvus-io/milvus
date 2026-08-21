@@ -153,11 +153,18 @@ class StringIndexSort : public StringIndex {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
- protected:
+    bool
+    SupportsDirectPlainLoad() const override {
+        return true;
+    }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
     void
-    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
-                             const Config& config,
-                             ScalarIndexV3AsyncLoadContext& async_ctx) override;
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override;
 
     int64_t
     CalculateTotalSize() const;

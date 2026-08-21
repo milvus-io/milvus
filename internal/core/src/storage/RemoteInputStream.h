@@ -41,6 +41,14 @@ class RemoteInputStream : public milvus::InputStream {
     arrow::Future<int64_t>
     ReadAtAsyncInto(int64_t position, int64_t nbytes, uint8_t* out);
 
+    bool
+    SupportsNativeAsyncReadInto() const noexcept;
+
+    // Caller-owned direct read with no Arrow Buffer fallback. This is the
+    // only API suitable for direct-to-final mmap materialization.
+    arrow::Future<int64_t>
+    ReadAtAsyncIntoNative(int64_t position, int64_t nbytes, uint8_t* out);
+
     size_t
     Read(int fd, size_t size) override;
 

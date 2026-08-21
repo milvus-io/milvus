@@ -29,15 +29,13 @@
 #include "common/EasyAssert.h"
 #include "folly/coro/AsyncScope.h"
 #include "folly/coro/WithCancellation.h"
-#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/ExecutorWithPriority.h"
-#include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/ThreadPool.h"
+#include "storage/LoadExecutor.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -86,17 +84,6 @@ class WindowFailureState {
     folly::CancellationSource cancellation_source_;
 };
 
-class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
- public:
-    PriorityThreadPoolExecutor()
-        : folly::CPUThreadPoolExecutor(
-              std::max(1, milvus::CPU_NUM),
-              folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(2),
-              std::make_shared<folly::NamedThreadFactory>(
-                  "MILVUS_ASYNC_LOAD_")) {
-    }
-};
-
 size_t
 SaturatingAdd(size_t left, size_t right) {
     if (right > std::numeric_limits<size_t>::max() - left) {
@@ -107,9 +94,7 @@ SaturatingAdd(size_t left, size_t right) {
 
 int8_t
 ExecutorPriority(milvus::proto::common::LoadPriority priority) {
-    return priority == milvus::proto::common::LoadPriority::LOW
-               ? folly::Executor::LO_PRI
-               : folly::Executor::HI_PRI;
+    return storage::LoadExecutorPriority(priority);
 }
 
 folly::Executor::KeepAlive<>
@@ -444,12 +429,6 @@ LoadCellsAsyncImpl(
 
 }  // namespace
 
-folly::Executor*
-GetAsyncLoadExecutor() {
-    static PriorityThreadPoolExecutor executor;
-    return &executor;
-}
-
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
                       int64_t read_window_bytes) {
@@ -544,7 +523,7 @@ LoadCellsAsync(milvus::OpContext* ctx,
                CellFinalizeFunc finalize_cell,
                AsyncLoadPipelineOptions options) {
     auto executor =
-        options.executor ? options.executor : GetAsyncLoadExecutor();
+        options.executor ? options.executor : storage::GetLoadExecutor();
     auto executor_keep_alive = folly::getKeepAliveToken(executor);
     auto finalization_executor_provider =
         std::move(options.finalization_executor_provider);

@@ -24,6 +24,7 @@
 
 #include <folly/ScopeGuard.h>
 #include "gtest/gtest.h"
+#include "storage/LoadExecutor.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -39,8 +40,9 @@ static_assert(std::same_as<storage::LoadFileOverheadController,
                                cachinglayer::LoadingOverheadDimension::kFile>>);
 
 template <typename T>
-concept SupportsBudgetUpdate =
-    requires(T& owner) { owner.UpdateBudgetBytes(size_t{0}); };
+concept SupportsBudgetUpdate = requires(T& owner) {
+    owner.UpdateBudgetBytes(size_t{0});
+};
 
 static_assert(SupportsBudgetUpdate<storage::LoadMemoryOverheadController>);
 static_assert(!SupportsBudgetUpdate<storage::LoadFileOverheadController>);
@@ -61,6 +63,29 @@ class ThreadPoolTest : public testing::Test {
         SetThreadPoolMaxThreadsSize(16);
     }
 };
+
+TEST_F(ThreadPoolTest, SharedLoadExecutorUsesOnePriorityPool) {
+    auto* executor = storage::GetLoadExecutor();
+
+    ASSERT_NE(executor, nullptr);
+    EXPECT_EQ(executor, storage::GetLoadExecutor());
+    EXPECT_EQ(executor->getNumPriorities(), 2);
+    EXPECT_GT(storage::GetLoadExecutorWorkerCount(), 0);
+}
+
+TEST_F(ThreadPoolTest, SharedLoadExecutorMapsLoadPriorityToQueuePriority) {
+    EXPECT_EQ(storage::LoadExecutorPriority(proto::common::LoadPriority::HIGH),
+              folly::Executor::HI_PRI);
+    EXPECT_EQ(storage::LoadExecutorPriority(proto::common::LoadPriority::LOW),
+              folly::Executor::LO_PRI);
+
+    auto high =
+        storage::GetLoadExecutorForPriority(proto::common::LoadPriority::HIGH);
+    auto low =
+        storage::GetLoadExecutorForPriority(proto::common::LoadPriority::LOW);
+    EXPECT_TRUE(static_cast<bool>(high));
+    EXPECT_TRUE(static_cast<bool>(low));
+}
 
 TEST_F(ThreadPoolTest, ResizeWithinBounds) {
     ThreadPool pool(1.0, "test_pool");

@@ -34,6 +34,7 @@
 #include "gtest/gtest.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/WritableMmapFile.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus;
@@ -75,6 +76,64 @@ class FileWriterTest : public testing::Test {
     std::filesystem::path test_dir_;
     const size_t kBufferSize = 4096;  // 4KB buffer size
 };
+
+TEST_F(FileWriterTest, WritableMmapCreatesAndPresizesFile) {
+    auto path = (test_dir_ / "writable_mmap_size.bin").string();
+    auto target = WritableMmapFile::Create(path, 8192);
+
+    ASSERT_TRUE(std::filesystem::exists(path));
+    EXPECT_EQ(std::filesystem::file_size(path), 8192);
+    EXPECT_EQ(target->Size(), 8192);
+}
+
+TEST_F(FileWriterTest, WritableMmapExposesBoundsCheckedRegion) {
+    auto path = (test_dir_ / "writable_mmap_bounds.bin").string();
+    auto target = WritableMmapFile::Create(path, 4096);
+
+    auto region = target->Region(128, 256);
+    ASSERT_EQ(region.size(), 256);
+    region.front() = 7;
+    region.back() = 9;
+    EXPECT_EQ(target->Region(128, 256).front(), 7);
+    EXPECT_EQ(target->Region(128, 256).back(), 9);
+    EXPECT_THROW(target->Region(4090, 16), milvus::SegcoreError);
+}
+
+TEST_F(FileWriterTest, WritableMmapKeepsUnwrittenPaddingZeroInitialized) {
+    auto path = (test_dir_ / "writable_mmap_padding.bin").string();
+    {
+        auto target = WritableMmapFile::Create(path, 4096);
+        auto prefix = target->Region(0, 4);
+        std::fill(prefix.begin(), prefix.end(), uint8_t{0xAB});
+        target->Commit();
+    }
+
+    auto bytes = ReadFile(path);
+    ASSERT_EQ(bytes.size(), 4096);
+    EXPECT_TRUE(std::all_of(bytes.begin(), bytes.begin() + 4, [](char value) {
+        return static_cast<uint8_t>(value) == 0xAB;
+    }));
+    EXPECT_TRUE(std::all_of(
+        bytes.begin() + 4, bytes.end(), [](char value) { return value == 0; }));
+}
+
+TEST_F(FileWriterTest, WritableMmapRemovesUncommittedFileOnDestruction) {
+    auto path = (test_dir_ / "writable_mmap_uncommitted.bin").string();
+    {
+        auto target = WritableMmapFile::Create(path, 4096);
+        ASSERT_TRUE(std::filesystem::exists(path));
+    }
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST_F(FileWriterTest, WritableMmapKeepsCommittedFile) {
+    auto path = (test_dir_ / "writable_mmap_committed.bin").string();
+    {
+        auto target = WritableMmapFile::Create(path, 4096);
+        target->Commit();
+    }
+    EXPECT_TRUE(std::filesystem::exists(path));
+}
 
 // Test basic file writing functionality with buffered IO
 TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {

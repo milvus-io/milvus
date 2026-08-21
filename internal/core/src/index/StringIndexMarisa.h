@@ -120,12 +120,6 @@ class StringIndexMarisa : public StringIndex {
         return true;
     }
 
- protected:
-    void
-    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
-                             const Config& config,
-                             ScalarIndexV3AsyncLoadContext& async_ctx) override;
-
  private:
     void
     fill_str_ids(size_t n, const std::string* values, const bool* valid_data);
@@ -162,6 +156,20 @@ class StringIndexMarisa : public StringIndex {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+ protected:
+    bool
+    SupportsDirectPlainLoad() const override {
+        return true;
+    }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override;
 
  private:
     Config config_;

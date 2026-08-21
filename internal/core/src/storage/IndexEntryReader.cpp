@@ -37,13 +37,14 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "folly/coro/BlockingWait.h"
+#include "folly/coro/Promise.h"
 #include "folly/futures/Future.h"
 #include "folly/futures/Promise.h"
 #include "milvus-storage/common/extend_status.h"
 #include "nlohmann/json.hpp"
-#include "segcore/async_load/AsyncLoadExecutor.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/LoadExecutor.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 
@@ -196,6 +197,23 @@ BridgeArrowReadFuture(arrow::Future<int64_t> arrow_future) {
     return future;
 }
 
+folly::coro::Future<int64_t>
+BridgeArrowReadCoroFuture(arrow::Future<int64_t> arrow_future) {
+    auto [promise, future] = folly::coro::makePromiseContract<int64_t>();
+    auto shared_promise =
+        std::make_shared<folly::coro::Promise<int64_t>>(std::move(promise));
+    arrow_future.AddCallback(
+        [shared_promise](const arrow::Result<int64_t>& result) mutable {
+            if (!result.ok()) {
+                shared_promise->setException(
+                    milvus_storage::ToSegcoreError(result.status()));
+                return;
+            }
+            shared_promise->setValue(*result);
+        });
+    return future;
+}
+
 folly::SemiFuture<size_t>
 SubmitReadAtAsync(std::shared_ptr<milvus::InputStream> input,
                   milvus::proto::common::LoadPriority priority,
@@ -209,10 +227,9 @@ SubmitReadAtAsync(std::shared_ptr<milvus::InputStream> input,
                                     data->data()));
     }
 
-    return milvus::segcore::async_load::SubmitPriorityLoadTask(
-        priority, [input, offset, len, data]() {
-            return input->ReadAt(data->data(), offset, len);
-        });
+    return SubmitLoadTask(priority, [input, offset, len, data]() {
+        return input->ReadAt(data->data(), offset, len);
+    });
 }
 
 void
@@ -606,6 +623,95 @@ DefaultEntryStreamSliceSize() {
     return DefaultStreamSliceSize();
 }
 
+const IndexEntryCatalogEntry&
+IndexEntryCatalog::At(std::string_view name) const {
+    auto it = std::find_if(
+        entries_.begin(), entries_.end(), [name](const auto& entry) {
+            return entry.name == name;
+        });
+    AssertInfo(it != entries_.end(), "Entry not found in catalog: {}", name);
+    return *it;
+}
+
+bool
+IndexEntryReader::SupportsNativePlainSliceRead() const noexcept {
+    auto remote = std::dynamic_pointer_cast<RemoteInputStream>(input_);
+    return remote != nullptr && remote->SupportsNativeAsyncReadInto();
+}
+
+folly::coro::Task<void>
+IndexEntryReader::ReadPlainSliceIntoAsync(
+    std::string_view name,
+    uint64_t entry_offset,
+    uint8_t* destination,
+    size_t destination_bytes,
+    folly::CancellationToken cancellation_token) {
+    auto effective_cancellation_token = folly::cancellation_token_merge(
+        cancellation_token, cancellation_token_);
+    ThrowIfCancelled(effective_cancellation_token,
+                     "IndexEntryReader::ReadPlainSliceIntoAsync");
+
+    const auto& entry = catalog_.At(name);
+    AssertInfo(std::holds_alternative<PlainEntrySource>(entry.source),
+               "Direct plaintext Slice read does not support encrypted Entry "
+               "'{}'",
+               name);
+    AssertInfo(destination != nullptr || destination_bytes == 0,
+               "Direct plaintext Slice target is null for Entry '{}'",
+               name);
+    AssertInfo(entry_offset <= entry.plaintext_size,
+               "Direct plaintext Slice offset {} exceeds Entry '{}' size {}",
+               entry_offset,
+               name,
+               entry.plaintext_size);
+    auto remaining = entry.plaintext_size - static_cast<size_t>(entry_offset);
+    AssertInfo(destination_bytes <= remaining,
+               "Direct plaintext Slice range [{}, {}) exceeds Entry '{}' size "
+               "{}",
+               entry_offset,
+               entry_offset + destination_bytes,
+               name,
+               entry.plaintext_size);
+
+    auto remote = std::dynamic_pointer_cast<RemoteInputStream>(input_);
+    AssertInfo(remote != nullptr && remote->SupportsNativeAsyncReadInto(),
+               "Native async read into caller-owned memory is required for "
+               "Entry '{}'",
+               name);
+    if (destination_bytes == 0) {
+        co_return;
+    }
+
+    const auto& source = std::get<PlainEntrySource>(entry.source);
+    AssertInfo(entry_offset <=
+                   std::numeric_limits<uint64_t>::max() - source.remote_offset,
+               "Direct plaintext Slice remote offset overflow for Entry '{}'",
+               name);
+    auto remote_offset = source.remote_offset + entry_offset;
+    AssertInfo(remote_offset <=
+                   static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+               "Direct plaintext Slice remote offset {} exceeds int64 range",
+               remote_offset);
+    AssertInfo(destination_bytes <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "Direct plaintext Slice size {} exceeds int64 range",
+               destination_bytes);
+
+    auto bytes_read = co_await BridgeArrowReadCoroFuture(
+        remote->ReadAtAsyncIntoNative(static_cast<int64_t>(remote_offset),
+                                      static_cast<int64_t>(destination_bytes),
+                                      destination));
+    ThrowIfCancelled(effective_cancellation_token,
+                     "IndexEntryReader::ReadPlainSliceIntoAsync");
+    AssertInfo(bytes_read == static_cast<int64_t>(destination_bytes),
+               "Direct plaintext Slice short read for Entry '{}': got {}, "
+               "expected {}",
+               name,
+               bytes_read,
+               destination_bytes);
+    co_return;
+}
+
 EntryStreamLoadInfo
 IndexEntryReader::InspectStreamLoadInfo(
     std::shared_ptr<milvus::InputStream> input,
@@ -657,6 +763,7 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                 false, "Failed to parse V3 index meta JSON: {}", e.what());
         }
     }
+    reader->catalog_.metadata_ = reader->meta_json_;
 
     return reader;
 }
@@ -775,6 +882,8 @@ IndexEntryReader::ReadFooterAndDirectory() {
             meta.enc.original_size = entry["original_size"].get<uint64_t>();
             meta.enc.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
             size_t output_offset = 0;
+            EncryptedEntrySource source{
+                static_cast<size_t>(meta.enc.original_size), {}};
             for (const auto& s : entry["slices"]) {
                 auto slice = SliceMeta{s["offset"].get<uint64_t>(),
                                        s["size"].get<uint64_t>()};
@@ -786,6 +895,11 @@ IndexEntryReader::ReadFooterAndDirectory() {
                 auto remaining =
                     static_cast<size_t>(meta.enc.original_size - output_offset);
                 auto plain_len = std::min(remaining, slice_size_);
+                source.slices.push_back(
+                    EncryptedSliceSource{MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                         static_cast<size_t>(slice.size),
+                                         output_offset,
+                                         plain_len});
                 auto task_transient_bytes = EncryptedStreamBudgetBytes(
                     static_cast<size_t>(slice.size), plain_len);
                 stream_load_info_.total_transient_bytes =
@@ -802,6 +916,11 @@ IndexEntryReader::ReadFooterAndDirectory() {
                        meta.enc.original_size);
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
+            catalog_.entries_.push_back(IndexEntryCatalogEntry{
+                name,
+                static_cast<size_t>(meta.enc.original_size),
+                meta.enc.crc32,
+                std::move(source)});
             entry_index_.emplace(std::move(name), std::move(meta));
         }
     } else {
@@ -815,6 +934,12 @@ IndexEntryReader::ReadFooterAndDirectory() {
             meta.plain.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
+            catalog_.entries_.push_back(IndexEntryCatalogEntry{
+                name,
+                static_cast<size_t>(meta.plain.size),
+                meta.plain.crc32,
+                PlainEntrySource{MILVUS_V3_MAGIC_SIZE + meta.plain.offset,
+                                 static_cast<size_t>(meta.plain.size)}});
             entry_index_.emplace(std::move(name), std::move(meta));
         }
     }
@@ -1567,27 +1692,10 @@ IndexEntryReader::ReadEntryToFileAsync(const std::string& name,
                                        EntryStreamAsyncOptions options,
                                        io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::ReadEntryToFileAsync");
-    if (options.localize_disk_executor == nullptr) {
-        options.localize_disk_executor =
-            milvus::segcore::async_load::AsyncLoadDiskExecutor();
-    }
-
     auto writer = FileWriter(local_path, write_priority);
-    auto* executor = options.localize_disk_executor;
     ReadEntryStreamAsync(
         name,
-        [&writer, executor](const uint8_t* data, size_t len) {
-            auto write_future =
-                milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<
-                    arrow::Status>(executor, [&writer, data, len]() {
-                    writer.Write(data, len);
-                    return arrow::Status::OK();
-                });
-            auto status = std::move(write_future).get();
-            if (!status.ok()) {
-                throw milvus_storage::ToSegcoreError(status);
-            }
-        },
+        [&writer](const uint8_t* data, size_t len) { writer.Write(data, len); },
         std::move(options));
     writer.Finish();
 }

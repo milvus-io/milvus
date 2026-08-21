@@ -21,12 +21,15 @@
 #include <memory>
 #include <string>
 
+#include "folly/CancellationToken.h"
+#include "folly/coro/Task.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
 #include "pb/common.pb.h"
+#include "storage/IndexLoadPlan.h"
 
 namespace milvus {
 class OpContext;
@@ -40,12 +43,6 @@ using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
 }  // namespace milvus::storage
 
 namespace milvus::index {
-
-struct ScalarIndexV3AsyncLoadContext {
-    milvus::OpContext* op_ctx;
-    milvus::proto::common::LoadPriority load_priority;
-    std::string trace_label;
-};
 
 enum class ScalarIndexType {
     NONE = 0,
@@ -269,9 +266,9 @@ class ScalarIndex : public IndexBase {
     IndexStatsPtr
     UploadUnified(const Config& config) override;
 
-    // Packed single-file streaming load — opens the file and calls
-    // LoadEntries() for subclass-specific loading. Currently handles the V3
-    // file format (see UploadUnified above for naming rationale).
+    // Packed single-file load. V3 plaintext entries with native caller-owned
+    // async reads use PlanLoad() -> common materialization -> FinalizeLoad();
+    // unsupported, encrypted, and non-native paths retain LoadEntries().
     void
     LoadUnified(const Config& config,
                 milvus::OpContext* op_ctx = nullptr) override;
@@ -286,14 +283,27 @@ class ScalarIndex : public IndexBase {
         ThrowInfo(Unsupported, "LoadEntries is not implemented");
     }
 
- protected:
-    virtual void
-    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
-                             const Config& config,
-                             ScalarIndexV3AsyncLoadContext& async_ctx) {
-        (void)async_ctx;
-        LoadEntries(reader, config);
+    virtual bool
+    SupportsDirectPlainLoad() const {
+        return false;
     }
+
+    virtual storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog, const Config& config) {
+        ThrowInfo(Unsupported, "PlanLoad is not implemented");
+    }
+
+    virtual void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact, const Config& config) {
+        ThrowInfo(Unsupported, "FinalizeLoad is not implemented");
+    }
+
+ protected:
+    folly::coro::Task<void>
+    LoadUnifiedAsync(storage::IndexEntryReader& reader,
+                     const Config& config,
+                     proto::common::LoadPriority load_priority,
+                     folly::CancellationToken cancellation_token);
 
     // Execute a LIKE-pattern query inside PatternMatch implementations.
     // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),

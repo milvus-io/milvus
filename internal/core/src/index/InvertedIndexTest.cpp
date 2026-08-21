@@ -16,6 +16,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/coro/BlockingWait.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -62,11 +63,13 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -130,6 +133,98 @@ struct FileSliceSizeGuard {
 
     int64_t old_slice_size_;
 };
+
+class ExposedInvertedIndexTantivy
+    : public index::InvertedIndexTantivy<std::string> {
+ public:
+    using InvertedIndexTantivy<std::string>::InvertedIndexTantivy;
+
+    void
+    LoadDirectForTest(storage::IndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            storage::MaterializeIndexAsync(reader, std::move(plan)));
+        FinalizeLoad(std::move(artifact), config);
+        artifact.CommitTargets();
+    }
+};
+
+struct TantivyAsyncLoadFixture {
+    explicit TantivyAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        boost::filesystem::remove_all(root_path);
+        auto storage_config = gen_local_storage_config(root_path);
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+        field_meta = milvus::segcore::gen_field_meta(
+            1, 2, 3, 101, DataType::VARCHAR, DataType::NONE, false);
+        index_meta = gen_index_meta(3, 101, 1000, 10000);
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~TantivyAsyncLoadFixture() {
+        boost::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
+
+void
+RunTantivyDirectLoad(bool enable_mmap) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    TantivyAsyncLoadFixture fixture(enable_mmap ? "tantivy_async_mmap"
+                                                : "tantivy_async_memory");
+    std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
+
+    ExposedInvertedIndexTantivy build_index(index::TANTIVY_INDEX_LATEST_VERSION,
+                                            fixture.ctx);
+    build_index.BuildWithRawDataForUT(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    fixture.ctx.set_for_loading_index(true);
+    ExposedInvertedIndexTantivy load_index(index::TANTIVY_INDEX_LATEST_VERSION,
+                                           fixture.ctx);
+    Config config;
+    config[index::ENABLE_MMAP] = enable_mmap;
+    load_index.LoadDirectForTest(
+        *reader, config, proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), data.size());
+    std::string needle = "charlie";
+    auto bitset = load_index.In(1, &needle);
+    ASSERT_EQ(bitset.size(), data.size());
+    EXPECT_FALSE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+    EXPECT_TRUE(bitset[2]);
+    EXPECT_FALSE(bitset[3]);
+}
+
+TEST(InvertedIndexTantivyV3AsyncLoadTest,
+     MemoryPathUsesNativeDirectEntryReads) {
+    RunTantivyDirectLoad(false);
+}
+
+TEST(InvertedIndexTantivyV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
+    RunTantivyDirectLoad(true);
+}
 }  // namespace milvus::test
 
 template <typename T,

@@ -16,15 +16,23 @@
 #include <arrow/result.h>
 #include <arrow/status.h>
 #include <arrow/util/future.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "milvus-storage/filesystem/async_random_access_file.h"
 #include "storage/FileManager.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryReader.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/RemoteInputStream.h"
 
 namespace milvus::test {
@@ -125,7 +133,13 @@ class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
         return async_read_calls_.load();
     }
 
- private:
+    void
+    ResetCounters() {
+        read_at_calls_.store(0);
+        async_read_calls_.store(0);
+    }
+
+ protected:
     arrow::Status
     ValidateRange(int64_t position, int64_t nbytes) const {
         if (position < 0 || nbytes < 0) {
@@ -161,11 +175,157 @@ class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
             content_.data() + static_cast<size_t>(position), nbytes);
     }
 
+    void
+    CorruptByte(size_t position) {
+        content_.at(position) ^= 0xff;
+    }
+
+ private:
     std::vector<uint8_t> content_;
     int64_t position_{0};
     std::atomic<size_t> read_at_calls_{0};
     std::atomic<size_t> async_read_calls_{0};
     bool closed_{false};
+};
+
+class ControlledDirectReadFile final
+    : public AsyncTrackingRandomAccessFile,
+      public milvus_storage::NonBlockingReadAtFile {
+ public:
+    struct DirectReadCall {
+        int64_t position;
+        int64_t nbytes;
+        uint8_t* destination;
+    };
+
+    explicit ControlledDirectReadFile(std::vector<uint8_t> content)
+        : AsyncTrackingRandomAccessFile(std::move(content)) {
+    }
+
+    arrow::Future<int64_t>
+    ReadAtAsyncInto(int64_t position,
+                    int64_t nbytes,
+                    uint8_t* destination) override {
+        auto future = arrow::Future<int64_t>::Make();
+        size_t call_index;
+        bool auto_complete;
+        Completion completion;
+        {
+            std::lock_guard lock(mutex_);
+            call_index = calls_.size();
+            calls_.push_back(
+                {DirectReadCall{position, nbytes, destination}, future, false});
+            ++active_reads_;
+            peak_inflight_ = std::max(peak_inflight_, active_reads_);
+            auto_complete = auto_complete_;
+            completion = next_completion_.value_or(Completion{});
+            next_completion_.reset();
+        }
+        calls_cv_.notify_all();
+        if (auto_complete) {
+            Complete(call_index,
+                     std::move(completion.status),
+                     completion.bytes_read);
+        }
+        return future;
+    }
+
+    void
+    SetAutoComplete(bool auto_complete) {
+        std::lock_guard lock(mutex_);
+        auto_complete_ = auto_complete;
+    }
+
+    void
+    SetNextCompletion(arrow::Status status, int64_t bytes_read = -1) {
+        std::lock_guard lock(mutex_);
+        next_completion_ = Completion{std::move(status), bytes_read};
+    }
+
+    void
+    CorruptRemoteByte(size_t position) {
+        CorruptByte(position);
+    }
+
+    void
+    Complete(size_t call_index,
+             arrow::Status status = arrow::Status::OK(),
+             int64_t bytes_read = -1) {
+        arrow::Future<int64_t> future;
+        DirectReadCall call;
+        {
+            std::lock_guard lock(mutex_);
+            auto& pending = calls_.at(call_index);
+            if (pending.completed) {
+                return;
+            }
+            pending.completed = true;
+            call = pending.call;
+            future = pending.future;
+            --active_reads_;
+        }
+
+        if (!status.ok()) {
+            future.MarkFinished(arrow::Result<int64_t>(std::move(status)));
+            return;
+        }
+        if (bytes_read < 0) {
+            bytes_read = call.nbytes;
+        }
+        auto copy_result = CopyRange(
+            call.position, bytes_read, static_cast<void*>(call.destination));
+        if (!copy_result.ok()) {
+            future.MarkFinished(arrow::Result<int64_t>(copy_result.status()));
+            return;
+        }
+        future.MarkFinished(bytes_read);
+    }
+
+    std::vector<DirectReadCall>
+    DirectReadCalls() const {
+        std::lock_guard lock(mutex_);
+        std::vector<DirectReadCall> result;
+        result.reserve(calls_.size());
+        for (const auto& call : calls_) {
+            result.push_back(call.call);
+        }
+        return result;
+    }
+
+    size_t
+    PeakInflight() const {
+        std::lock_guard lock(mutex_);
+        return peak_inflight_;
+    }
+
+    bool
+    WaitForCallCount(
+        size_t count,
+        std::chrono::milliseconds timeout = std::chrono::seconds(5)) const {
+        std::unique_lock lock(mutex_);
+        return calls_cv_.wait_for(
+            lock, timeout, [this, count]() { return calls_.size() >= count; });
+    }
+
+ private:
+    struct Completion {
+        arrow::Status status{arrow::Status::OK()};
+        int64_t bytes_read{-1};
+    };
+
+    struct PendingCall {
+        DirectReadCall call;
+        arrow::Future<int64_t> future;
+        bool completed;
+    };
+
+    mutable std::mutex mutex_;
+    mutable std::condition_variable calls_cv_;
+    std::vector<PendingCall> calls_;
+    std::optional<Completion> next_completion_;
+    bool auto_complete_{true};
+    size_t active_reads_{0};
+    size_t peak_inflight_{0};
 };
 
 inline std::vector<uint8_t>
@@ -188,6 +348,19 @@ OpenAsyncIndexEntryReader(std::vector<uint8_t> bytes,
     auto input =
         std::make_shared<storage::RemoteInputStream>(std::move(arrow_file));
     return storage::IndexEntryReader::Open(input, input->Size());
+}
+
+inline std::unique_ptr<storage::IndexEntryReader>
+OpenDirectIndexEntryReader(std::vector<uint8_t> bytes,
+                           ControlledDirectReadFile** remote_file,
+                           int64_t collection_id = 0) {
+    auto direct_file =
+        std::make_shared<ControlledDirectReadFile>(std::move(bytes));
+    *remote_file = direct_file.get();
+    std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = direct_file;
+    auto input =
+        std::make_shared<storage::RemoteInputStream>(std::move(arrow_file));
+    return storage::IndexEntryReader::Open(input, input->Size(), collection_id);
 }
 
 inline std::unique_ptr<bool[]>

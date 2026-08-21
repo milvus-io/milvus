@@ -56,8 +56,6 @@
 #include "marisa/keyset.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
-#include "segcore/async_load/AsyncLoadExecutor.h"
-#include "milvus-storage/common/extend_status.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/IndexEntryReader.h"
@@ -74,23 +72,22 @@ constexpr uint32_t MARISA_CSR_FORMAT_VERSION = 1;
 constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
     "marisa_csr_format_version";
 
-void
-WriteMarisaSliceAsync(arrow::internal::Executor* executor,
-                      storage::FileWriter& writer,
-                      const uint8_t* data,
-                      size_t len,
-                      const char* entry_name) {
-    auto write_future =
-        milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<arrow::Status>(
-            executor, [&writer, data, len]() {
-                writer.Write(data, len);
-                return arrow::Status::OK();
-            });
-    auto status = std::move(write_future).get();
-    if (!status.ok()) {
-        throw milvus_storage::ToSegcoreError(status);
-    }
-}
+struct MarisaLoadContext {
+    bool is_mmap{false};
+    bool has_csr{false};
+    std::string file_name;
+    size_t str_ids_bytes{0};
+    size_t csr_index_bytes{0};
+    size_t csr_offsets_bytes{0};
+    size_t csr_num_keys{0};
+
+    std::shared_ptr<std::vector<int64_t>> str_ids;
+    std::shared_ptr<std::vector<uint32_t>> csr_index;
+    std::shared_ptr<std::vector<uint32_t>> csr_offsets;
+    std::shared_ptr<storage::MmapFileTarget> trie_file;
+    std::shared_ptr<storage::MmapFileTarget> str_ids_file;
+    std::shared_ptr<storage::MmapFileTarget> csr_file;
+};
 
 }  // namespace
 
@@ -891,103 +888,34 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->PutMeta("csr_num_keys", csr_num_keys_);
 }
 
-void
-StringIndexMarisa::LoadEntriesWithAsyncRead(
-    storage::IndexEntryReader& reader,
-    const Config& config,
-    ScalarIndexV3AsyncLoadContext& async_ctx) {
+storage::IndexLoadPlan
+StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                            const Config& config) {
+    auto context = std::make_shared<MarisaLoadContext>();
+    context->is_mmap = config.contains(MMAP_FILE_PATH);
+
     auto local_cm =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::string tmp_dir =
-        local_cm ? local_cm->GetRootPath() : std::string("/tmp");
-    std::error_code ec;
-    std::filesystem::create_directories(tmp_dir, ec);
-    AssertInfo(!ec,
-               "failed to create string index temp directory: {}, error: {}",
-               tmp_dir,
-               ec.message());
-    auto uuid = boost::uuids::random_generator()();
-    auto uuid_string = boost::uuids::to_string(uuid);
-    auto file_name = tmp_dir + "/" + uuid_string;
+    auto tmp_dir = local_cm ? local_cm->GetRootPath() : std::string("/tmp");
+    context->file_name =
+        tmp_dir + "/" +
+        boost::uuids::to_string(boost::uuids::random_generator()());
 
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(async_ctx.load_priority);
-    auto write_priority =
-        storage::io::GetPriorityFromLoadPriority(load_priority);
+    auto trie_bytes = catalog.At(MARISA_TRIE_INDEX).plaintext_size;
+    context->trie_file =
+        std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+            context->file_name, trie_bytes, context->is_mmap, nullptr});
 
-    storage::EntryStreamAsyncOptions read_options;
-    read_options.priority = load_priority;
-    read_options.localize_disk_executor =
-        milvus::segcore::async_load::AsyncLoadDiskExecutor();
-    read_options.trace_label = async_ctx.trace_label;
-
-    reader.ReadEntryToFileAsync(
-        MARISA_TRIE_INDEX, file_name, read_options, write_priority);
-
-    if (config.contains(MMAP_FILE_PATH)) {
-        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
-        trie_.mmap(file_name.c_str());
-        mmap_file_raii_ = std::move(trie_file_raii);
-    } else {
-        auto file = File::Open(file_name, O_RDONLY);
-        trie_.read(file.Descriptor());
-        mmap_file_raii_ = nullptr;
-    }
-
-    if (!config.contains(MMAP_FILE_PATH)) {
-        unlink(file_name.c_str());
-    }
-
-    auto str_ids_bytes = reader.GetEntrySize(MARISA_STR_IDS);
+    context->str_ids_bytes = catalog.At(MARISA_STR_IDS).plaintext_size;
     ValidateMarisaEntryElementSize(
-        MARISA_STR_IDS, str_ids_bytes, sizeof(int64_t));
-    if (config.contains(MMAP_FILE_PATH)) {
-        auto str_ids_path = file_name + ".str_ids";
-        reader.ReadEntryToFileAsync(
-            MARISA_STR_IDS, str_ids_path, read_options, write_priority);
-        auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
-        auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
-        auto* mapped = mmap(NULL,
-                            str_ids_bytes,
-                            PROT_READ,
-                            MAP_PRIVATE,
-                            str_ids_file.Descriptor(),
-                            0);
-        if (mapped == MAP_FAILED) {
-            str_ids_file.Close();
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "failed to mmap str_ids: {}",
-                      strerror(errno));
-        }
-        str_ids_file.Close();
-        str_ids_mmap_data_ = static_cast<char*>(mapped);
-        str_ids_mmap_size_ = str_ids_bytes;
-        str_ids_mmap_raii_ = std::move(str_ids_file_raii);
-        str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
-        str_ids_size_ = str_ids_bytes / sizeof(int64_t);
-    } else {
-        auto str_ids_entry =
-            reader.ReadEntryToMemoryAsync(MARISA_STR_IDS, read_options);
-        AssertInfo(str_ids_entry.data.size() == str_ids_bytes,
-                   "str_ids async read size mismatch: got {}, expected {}",
-                   str_ids_entry.data.size(),
-                   str_ids_bytes);
-        str_ids_.resize(str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
-        milvus::fastmem::FastMemcpy(
-            str_ids_.data(), str_ids_entry.data.data(), str_ids_bytes);
-        str_ids_ptr_ = str_ids_.data();
-        str_ids_size_ = str_ids_.size();
-    }
+        MARISA_STR_IDS, context->str_ids_bytes, sizeof(int64_t));
 
-    auto has_csr_index = reader.HasEntry(MARISA_CSR_INDEX);
-    auto has_csr_offsets = reader.HasEntry(MARISA_CSR_OFFSETS);
-    auto has_csr_num_keys = reader.HasMeta("csr_num_keys");
-    auto has_csr_version = reader.HasMeta(MARISA_CSR_FORMAT_VERSION_META);
+    auto has_csr_index = catalog.HasEntry(MARISA_CSR_INDEX);
+    auto has_csr_offsets = catalog.HasEntry(MARISA_CSR_OFFSETS);
+    auto has_csr_num_keys = catalog.HasMeta("csr_num_keys");
+    auto has_csr_version = catalog.HasMeta(MARISA_CSR_FORMAT_VERSION_META);
     auto has_any_csr =
         has_csr_index || has_csr_offsets || has_csr_num_keys || has_csr_version;
-
     if (has_any_csr) {
         AssertInfo(has_csr_index && has_csr_offsets && has_csr_num_keys &&
                        has_csr_version,
@@ -998,112 +926,243 @@ StringIndexMarisa::LoadEntriesWithAsyncRead(
                    has_csr_num_keys,
                    has_csr_version);
         auto csr_format_version =
-            reader.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
+            catalog.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
         AssertInfo(csr_format_version == MARISA_CSR_FORMAT_VERSION,
                    "unsupported marisa CSR format version: expected {}, got {}",
                    MARISA_CSR_FORMAT_VERSION,
                    csr_format_version);
-
-        csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
-        AssertInfo(csr_num_keys_ == trie_.num_keys(),
-                   "invalid marisa CSR key count: expected {}, got {}",
-                   trie_.num_keys(),
-                   csr_num_keys_);
+        context->has_csr = true;
+        context->csr_num_keys = catalog.GetMeta<size_t>("csr_num_keys");
         AssertInfo(
-            csr_num_keys_ <=
+            context->csr_num_keys <=
                 std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1,
             "marisa CSR key count {} is too large",
-            csr_num_keys_);
-        AssertInfo(str_ids_size_ <= std::numeric_limits<uint32_t>::max(),
-                   "segment row count {} exceeds uint32_t capacity for CSR",
-                   str_ids_size_);
-
-        size_t idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
-        size_t off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
+            context->csr_num_keys);
+        context->csr_index_bytes = catalog.At(MARISA_CSR_INDEX).plaintext_size;
+        context->csr_offsets_bytes =
+            catalog.At(MARISA_CSR_OFFSETS).plaintext_size;
         ValidateMarisaEntryElementSize(
-            MARISA_CSR_INDEX, idx_bytes, sizeof(uint32_t));
+            MARISA_CSR_INDEX, context->csr_index_bytes, sizeof(uint32_t));
         ValidateMarisaEntryElementSize(
-            MARISA_CSR_OFFSETS, off_bytes, sizeof(uint32_t));
-        AssertInfo(idx_bytes == (csr_num_keys_ + 1) * sizeof(uint32_t),
+            MARISA_CSR_OFFSETS, context->csr_offsets_bytes, sizeof(uint32_t));
+        auto expected_index_bytes =
+            (context->csr_num_keys + 1) * sizeof(uint32_t);
+        AssertInfo(context->csr_index_bytes == expected_index_bytes,
                    "invalid marisa CSR index size: expected {}, got {}",
-                   (csr_num_keys_ + 1) * sizeof(uint32_t),
-                   idx_bytes);
+                   expected_index_bytes,
+                   context->csr_index_bytes);
+        AssertInfo(
+            context->csr_offsets_bytes <=
+                std::numeric_limits<size_t>::max() - context->csr_index_bytes,
+            "marisa CSR file size overflow");
+    }
 
-        if (config.contains(MMAP_FILE_PATH)) {
-            auto csr_path = file_name + ".csr";
-            {
-                auto fw = storage::FileWriter(csr_path, write_priority);
-                auto* executor = read_options.localize_disk_executor;
-                size_t written = 0;
-                reader.ReadEntryStreamAsync(
-                    MARISA_CSR_INDEX,
-                    [&](const uint8_t* d, size_t len) {
-                        WriteMarisaSliceAsync(
-                            executor, fw, d, len, MARISA_CSR_INDEX);
-                        written += len;
-                    },
-                    read_options);
-                reader.ReadEntryStreamAsync(
-                    MARISA_CSR_OFFSETS,
-                    [&](const uint8_t* d, size_t len) {
-                        WriteMarisaSliceAsync(
-                            executor, fw, d, len, MARISA_CSR_OFFSETS);
-                        written += len;
-                    },
-                    read_options);
-                AssertInfo(written == idx_bytes + off_bytes,
-                           "CSR async stream read size mismatch: got {}, "
-                           "expected {}",
-                           written,
-                           idx_bytes + off_bytes);
-                fw.Finish();
-            }
+    storage::IndexLoadPlan plan;
+    plan.finalize_context = context;
+    auto slice_size = storage::DefaultEntryStreamSliceSize();
+    plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+        catalog,
+        MARISA_TRIE_INDEX,
+        storage::MmapEntryTarget{context->trie_file, 0, trie_bytes},
+        slice_size));
 
-            auto csr_file_raii = std::make_unique<MmapFileRAII>(csr_path);
-            csr_mmap_size_ = idx_bytes + off_bytes;
-            auto csr_file = File::Open(csr_path, O_RDONLY);
-            auto* mapped = mmap(NULL,
-                                csr_mmap_size_,
-                                PROT_READ,
-                                MAP_PRIVATE,
-                                csr_file.Descriptor(),
-                                0);
-            if (mapped == MAP_FAILED) {
-                csr_file.Close();
-                ThrowInfo(ErrorCode::UnexpectedError,
-                          "failed to mmap CSR: {}",
-                          strerror(errno));
-            }
-            csr_file.Close();
-            csr_mmap_data_ = static_cast<char*>(mapped);
-            csr_mmap_raii_ = std::move(csr_file_raii);
+    if (context->is_mmap) {
+        context->str_ids_file = std::make_shared<storage::MmapFileTarget>(
+            storage::MmapFileTarget{context->file_name + ".str_ids",
+                                    context->str_ids_bytes,
+                                    true,
+                                    nullptr});
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            MARISA_STR_IDS,
+            storage::MmapEntryTarget{
+                context->str_ids_file, 0, context->str_ids_bytes},
+            slice_size));
+    } else {
+        context->str_ids = std::make_shared<std::vector<int64_t>>(
+            context->str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            MARISA_STR_IDS,
+            storage::MemoryEntryTarget{
+                context->str_ids,
+                reinterpret_cast<uint8_t*>(context->str_ids->data()),
+                context->str_ids_bytes},
+            slice_size));
+    }
 
-            csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
-            csr_offsets_ptr_ =
-                reinterpret_cast<const uint32_t*>(csr_mmap_data_ + idx_bytes);
+    if (!context->has_csr) {
+        return plan;
+    }
+    if (context->is_mmap) {
+        auto csr_file_size =
+            context->csr_index_bytes + context->csr_offsets_bytes;
+        context->csr_file =
+            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+                context->file_name + ".csr", csr_file_size, true, nullptr});
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            MARISA_CSR_INDEX,
+            storage::MmapEntryTarget{
+                context->csr_file, 0, context->csr_index_bytes},
+            slice_size));
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            MARISA_CSR_OFFSETS,
+            storage::MmapEntryTarget{context->csr_file,
+                                     context->csr_index_bytes,
+                                     context->csr_offsets_bytes},
+            slice_size));
+    } else {
+        context->csr_index = std::make_shared<std::vector<uint32_t>>(
+            context->csr_index_bytes / sizeof(uint32_t));
+        context->csr_offsets = std::make_shared<std::vector<uint32_t>>(
+            context->csr_offsets_bytes / sizeof(uint32_t));
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            MARISA_CSR_INDEX,
+            storage::MemoryEntryTarget{
+                context->csr_index,
+                reinterpret_cast<uint8_t*>(context->csr_index->data()),
+                context->csr_index_bytes},
+            slice_size));
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            MARISA_CSR_OFFSETS,
+            storage::MemoryEntryTarget{
+                context->csr_offsets,
+                reinterpret_cast<uint8_t*>(context->csr_offsets->data()),
+                context->csr_offsets_bytes},
+            slice_size));
+    }
+    return plan;
+}
+
+void
+StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                                const Config& config) {
+    auto context =
+        artifact.FinalizeContext<std::shared_ptr<MarisaLoadContext>>();
+    AssertInfo(context != nullptr,
+               "StringIndexMarisa FinalizeLoad context is null");
+
+    marisa::Trie new_trie;
+    std::unique_ptr<MmapFileRAII> new_trie_file_raii;
+    if (context->is_mmap) {
+        new_trie_file_raii =
+            std::make_unique<MmapFileRAII>(context->trie_file->path);
+        new_trie.mmap(context->trie_file->path.c_str());
+    } else {
+        auto trie_file = File::Open(context->trie_file->path, O_RDONLY);
+        new_trie.read(trie_file.Descriptor());
+        trie_file.Close();
+    }
+
+    char* new_str_ids_mmap_data = nullptr;
+    char* new_csr_mmap_data = nullptr;
+    auto str_ids_mmap_guard = folly::makeGuard([&]() {
+        if (new_str_ids_mmap_data != nullptr &&
+            new_str_ids_mmap_data != MAP_FAILED) {
+            munmap(new_str_ids_mmap_data, context->str_ids_bytes);
+        }
+    });
+    auto csr_mmap_guard = folly::makeGuard([&]() {
+        if (new_csr_mmap_data != nullptr && new_csr_mmap_data != MAP_FAILED) {
+            munmap(new_csr_mmap_data,
+                   context->csr_index_bytes + context->csr_offsets_bytes);
+        }
+    });
+    std::unique_ptr<MmapFileRAII> new_str_ids_file_raii;
+    std::unique_ptr<MmapFileRAII> new_csr_file_raii;
+    std::vector<int64_t> new_str_ids;
+    std::vector<uint32_t> new_csr_index;
+    std::vector<uint32_t> new_csr_offsets;
+
+    if (context->is_mmap) {
+        new_str_ids_file_raii =
+            std::make_unique<MmapFileRAII>(context->str_ids_file->path);
+        auto file = File::Open(context->str_ids_file->path, O_RDONLY);
+        new_str_ids_mmap_data = static_cast<char*>(mmap(nullptr,
+                                                        context->str_ids_bytes,
+                                                        PROT_READ,
+                                                        MAP_PRIVATE,
+                                                        file.Descriptor(),
+                                                        0));
+        file.Close();
+        AssertInfo(new_str_ids_mmap_data != MAP_FAILED,
+                   "failed to mmap marisa str_ids: {}",
+                   strerror(errno));
+    } else {
+        new_str_ids = std::move(*context->str_ids);
+    }
+    auto new_str_ids_size = context->str_ids_bytes / sizeof(int64_t);
+    AssertInfo(new_str_ids_size <= std::numeric_limits<uint32_t>::max(),
+               "segment row count {} exceeds uint32_t capacity for CSR",
+               new_str_ids_size);
+
+    if (context->has_csr) {
+        AssertInfo(context->csr_num_keys == new_trie.num_keys(),
+                   "invalid marisa CSR key count: expected {}, got {}",
+                   new_trie.num_keys(),
+                   context->csr_num_keys);
+        if (context->is_mmap) {
+            new_csr_file_raii =
+                std::make_unique<MmapFileRAII>(context->csr_file->path);
+            auto file = File::Open(context->csr_file->path, O_RDONLY);
+            auto csr_size =
+                context->csr_index_bytes + context->csr_offsets_bytes;
+            new_csr_mmap_data = static_cast<char*>(mmap(nullptr,
+                                                        csr_size,
+                                                        PROT_READ,
+                                                        MAP_PRIVATE,
+                                                        file.Descriptor(),
+                                                        0));
+            file.Close();
+            AssertInfo(new_csr_mmap_data != MAP_FAILED,
+                       "failed to mmap marisa CSR: {}",
+                       strerror(errno));
         } else {
-            auto csr_index_entry =
-                reader.ReadEntryToMemoryAsync(MARISA_CSR_INDEX, read_options);
-            AssertInfo(csr_index_entry.data.size() == idx_bytes,
-                       "CSR index async read size mismatch: got {}, expected "
-                       "{}",
-                       csr_index_entry.data.size(),
-                       idx_bytes);
-            csr_index_.resize(idx_bytes / sizeof(uint32_t));
-            milvus::fastmem::FastMemcpy(
-                csr_index_.data(), csr_index_entry.data.data(), idx_bytes);
+            new_csr_index = std::move(*context->csr_index);
+            new_csr_offsets = std::move(*context->csr_offsets);
+        }
+    }
 
-            auto csr_offsets_entry =
-                reader.ReadEntryToMemoryAsync(MARISA_CSR_OFFSETS, read_options);
-            AssertInfo(csr_offsets_entry.data.size() == off_bytes,
-                       "CSR offsets async read size mismatch: got {}, "
-                       "expected {}",
-                       csr_offsets_entry.data.size(),
-                       off_bytes);
-            csr_offsets_.resize(off_bytes / sizeof(uint32_t));
-            milvus::fastmem::FastMemcpy(
-                csr_offsets_.data(), csr_offsets_entry.data.data(), off_bytes);
+    config_ = config;
+    trie_.swap(new_trie);
+    mmap_file_raii_ = std::move(new_trie_file_raii);
+    str_ids_size_ = new_str_ids_size;
+    if (context->is_mmap) {
+        AssertInfo(context->str_ids_bytes <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "marisa str_ids mmap size exceeds int64 range");
+        str_ids_mmap_data_ = new_str_ids_mmap_data;
+        new_str_ids_mmap_data = nullptr;
+        str_ids_mmap_size_ = static_cast<int64_t>(context->str_ids_bytes);
+        str_ids_mmap_raii_ = std::move(new_str_ids_file_raii);
+        str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
+    } else {
+        str_ids_ = std::move(new_str_ids);
+        str_ids_ptr_ = str_ids_.data();
+    }
 
+    if (context->has_csr) {
+        csr_num_keys_ = context->csr_num_keys;
+        if (context->is_mmap) {
+            auto csr_size =
+                context->csr_index_bytes + context->csr_offsets_bytes;
+            AssertInfo(csr_size <= static_cast<size_t>(
+                                       std::numeric_limits<int64_t>::max()),
+                       "marisa CSR mmap size exceeds int64 range");
+            csr_mmap_data_ = new_csr_mmap_data;
+            new_csr_mmap_data = nullptr;
+            csr_mmap_size_ = static_cast<int64_t>(csr_size);
+            csr_mmap_raii_ = std::move(new_csr_file_raii);
+            csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
+            csr_offsets_ptr_ = reinterpret_cast<const uint32_t*>(
+                csr_mmap_data_ + context->csr_index_bytes);
+        } else {
+            csr_index_ = std::move(new_csr_index);
+            csr_offsets_ = std::move(new_csr_offsets);
             csr_index_ptr_ = csr_index_.data();
             csr_offsets_ptr_ = csr_offsets_.data();
         }
@@ -1114,8 +1173,7 @@ StringIndexMarisa::LoadEntriesWithAsyncRead(
     built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
-
-    LOG_INFO("LoadEntriesWithAsyncRead StringIndexMarisa done");
+    LOG_INFO("FinalizeLoad StringIndexMarisa done");
 }
 
 void

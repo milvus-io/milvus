@@ -203,25 +203,6 @@ class TestScalarIndexV3AsyncFallback
     int load_entries_calls_{0};
 };
 
-class TestScalarIndexV3AsyncOptIn : public TestScalarIndexV3AsyncFallback {
- public:
-    using TestScalarIndexV3AsyncFallback::TestScalarIndexV3AsyncFallback;
-
-    void
-    LoadEntriesWithAsyncRead(
-        milvus::storage::IndexEntryReader& reader,
-        const milvus::Config& config,
-        milvus::index::ScalarIndexV3AsyncLoadContext& async_ctx) override {
-        ASSERT_NE(async_ctx.op_ctx, nullptr);
-        EXPECT_EQ(async_ctx.load_priority,
-                  milvus::proto::common::LoadPriority::LOW);
-        async_load_entries_calls_++;
-        LoadEntries(reader, config);
-    }
-
-    int async_load_entries_calls_{0};
-};
-
 TEST(ScalarIndexV3AsyncLoadConfigTest,
      LoadUnifiedUsesSyncPathWhenSharedFlagDisabled) {
     auto old_enabled =
@@ -233,10 +214,10 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
     milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(false);
 
     auto ctx = GetTempFileManagerCtx(Int32);
-    TestScalarIndexV3AsyncOptIn build_index(ctx);
+    TestScalarIndexV3AsyncFallback build_index(ctx);
     auto stats = build_index.UploadUnified({});
 
-    TestScalarIndexV3AsyncOptIn load_index(ctx);
+    TestScalarIndexV3AsyncFallback load_index(ctx);
     milvus::Config load_config;
     load_config[milvus::index::INDEX_FILES] = stats->GetIndexFiles();
     load_config[milvus::LOAD_PRIORITY] =
@@ -245,37 +226,10 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
     load_index.LoadUnified(load_config, &op_ctx);
 
     EXPECT_EQ(load_index.load_entries_calls_, 1);
-    EXPECT_EQ(load_index.async_load_entries_calls_, 0);
 }
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
-     LoadUnifiedUsesAsyncHookWhenSharedFlagEnabled) {
-    auto old_enabled =
-        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    auto guard = folly::makeGuard([old_enabled]() {
-        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
-            old_enabled);
-    });
-    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
-
-    auto ctx = GetTempFileManagerCtx(Int32);
-    TestScalarIndexV3AsyncOptIn build_index(ctx);
-    auto stats = build_index.UploadUnified({});
-
-    TestScalarIndexV3AsyncOptIn load_index(ctx);
-    milvus::Config load_config;
-    load_config[milvus::index::INDEX_FILES] = stats->GetIndexFiles();
-    load_config[milvus::LOAD_PRIORITY] =
-        milvus::proto::common::LoadPriority::LOW;
-    milvus::OpContext op_ctx;
-    load_index.LoadUnified(load_config, &op_ctx);
-
-    EXPECT_EQ(load_index.load_entries_calls_, 1);
-    EXPECT_EQ(load_index.async_load_entries_calls_, 1);
-}
-
-TEST(ScalarIndexV3AsyncLoadConfigTest,
-     LoadUnifiedFallsBackToSyncPathWhenAsyncHookIsNotOverridden) {
+     LoadUnifiedFallsBackWhenDirectLoadIsUnsupported) {
     auto old_enabled =
         milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
     auto guard = folly::makeGuard([old_enabled]() {
@@ -291,7 +245,10 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
     TestScalarIndexV3AsyncFallback load_index(ctx);
     milvus::Config load_config;
     load_config[milvus::index::INDEX_FILES] = stats->GetIndexFiles();
-    load_index.LoadUnified(load_config);
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::LOW;
+    milvus::OpContext op_ctx;
+    load_index.LoadUnified(load_config, &op_ctx);
 
     EXPECT_EQ(load_index.load_entries_calls_, 1);
 }

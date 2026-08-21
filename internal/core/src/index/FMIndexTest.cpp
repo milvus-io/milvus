@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fmt/core.h>
+#include <folly/coro/BlockingWait.h>
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -41,12 +42,14 @@
 #include "segcore/Types.h"
 #include "segcore/load_index_c.h"
 #include "storage/FileManager.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -54,6 +57,53 @@
 using namespace milvus;
 
 namespace {
+
+class ExposedFMIndex : public index::FMIndex {
+ public:
+    using FMIndex::FMIndex;
+
+    void
+    LoadDirectForTest(storage::IndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            storage::MaterializeIndexAsync(reader, std::move(plan)));
+        FinalizeLoad(std::move(artifact), config);
+        artifact.CommitTargets();
+    }
+};
+
+struct FMIndexAsyncLoadFixture {
+    explicit FMIndexAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        std::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::VarChar);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 1000, 10000};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~FMIndexAsyncLoadFixture() {
+        std::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
 
 // Collect the set-bit positions of a bitmap into a sorted vector, for readable
 // equality assertions against an expected id list.
@@ -98,6 +148,64 @@ Inner(index::FMIndex* idx, const std::string& p) {
 }
 
 }  // namespace
+
+TEST(FMIndexV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    FMIndexAsyncLoadFixture fixture("fm_index_async_memory");
+    std::vector<std::string> data{"alpha", "alphabet", "beta", "gamma"};
+    index::FMIndexParams params{.sa_sample_rate = 8};
+
+    ExposedFMIndex build_index(fixture.ctx, params);
+    build_index.BuildWithRawDataForUT(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedFMIndex load_index(fixture.ctx, params);
+    Config config;
+    config[index::ENABLE_MMAP] = false;
+    load_index.LoadDirectForTest(
+        *reader, config, proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(Prefix(&load_index, "alph"), (std::vector<int64_t>{0, 1}));
+}
+
+TEST(FMIndexV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    FMIndexAsyncLoadFixture fixture("fm_index_async_mmap");
+    std::vector<std::string> data{"zero", "one", "two", "three"};
+    index::FMIndexParams params{.sa_sample_rate = 8};
+
+    ExposedFMIndex build_index(fixture.ctx, params);
+    build_index.BuildWithRawDataForUT(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedFMIndex load_index(fixture.ctx, params);
+    Config config;
+    config[index::ENABLE_MMAP] = true;
+    load_index.LoadDirectForTest(
+        *reader, config, proto::common::LoadPriority::LOW);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(Inner(&load_index, "hr"), (std::vector<int64_t>{3}));
+}
 
 // ---- query routing over raw data (no storage) ----
 

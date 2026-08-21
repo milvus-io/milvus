@@ -22,22 +22,21 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 #include "folly/CancellationToken.h"
+#include "folly/coro/Task.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryCatalog.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
-
-namespace arrow::internal {
-class Executor;
-}  // namespace arrow::internal
 
 namespace milvus::storage {
 
@@ -59,7 +58,6 @@ struct EntryStreamLoadInfo {
 struct EntryStreamAsyncOptions {
     milvus::proto::common::LoadPriority priority{
         milvus::proto::common::LoadPriority::HIGH};
-    arrow::internal::Executor* localize_disk_executor{nullptr};
     std::string trace_label;
     size_t slice_size = DefaultEntryStreamSliceSize();
 };
@@ -84,6 +82,25 @@ class IndexEntryReader {
     GetStreamLoadInfo() const {
         return stream_load_info_;
     }
+
+    const IndexEntryCatalog&
+    Catalog() const noexcept {
+        return catalog_;
+    }
+
+    bool
+    SupportsNativePlainSliceRead() const noexcept;
+
+    // Read one range of a plaintext Entry directly into caller-owned target
+    // memory. The range is relative to the Entry, and this method never falls
+    // back to an allocating Arrow Buffer read.
+    folly::coro::Task<void>
+    ReadPlainSliceIntoAsync(std::string_view name,
+                            uint64_t entry_offset,
+                            uint8_t* destination,
+                            size_t destination_bytes,
+                            folly::CancellationToken cancellation_token =
+                                folly::CancellationToken());
 
     std::vector<std::string>
     GetEntryNames() const;
@@ -316,6 +333,7 @@ class IndexEntryReader {
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
     std::unordered_map<std::string, EntryMeta> entry_index_;
+    IndexEntryCatalog catalog_;
     EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 

@@ -23,6 +23,7 @@
 
 #include "common/Types.h"
 #include "common/OpContext.h"
+#include "folly/coro/BlockingWait.h"
 #include "fmt/core.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
@@ -35,6 +36,8 @@
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
+#include "storage/IndexMaterializer.h"
+#include "storage/LoadExecutor.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -221,6 +224,21 @@ ScalarIndex<T>::UploadUnified(const Config& config) {
 }
 
 template <typename T>
+folly::coro::Task<void>
+ScalarIndex<T>::LoadUnifiedAsync(storage::IndexEntryReader& reader,
+                                 const Config& config,
+                                 proto::common::LoadPriority load_priority,
+                                 folly::CancellationToken cancellation_token) {
+    auto plan = PlanLoad(reader.Catalog(), config);
+    plan.priority = load_priority;
+    auto artifact = co_await storage::MaterializeIndexAsync(
+        reader, std::move(plan), cancellation_token);
+    FinalizeLoad(std::move(artifact), config);
+    artifact.CommitTargets();
+    co_return;
+}
+
+template <typename T>
 void
 ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
     AssertInfo(
@@ -266,12 +284,24 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
                                         cancellation_token);
     AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
 
-    if (milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
-        ScalarIndexV3AsyncLoadContext async_ctx{
-            op_ctx,
-            load_priority,
-            fmt::format("scalar_index_v3_{}", index_type_)};
-        LoadEntriesWithAsyncRead(*reader, config, async_ctx);
+    auto all_entries_plain = std::all_of(
+        reader->Catalog().Entries().begin(),
+        reader->Catalog().Entries().end(),
+        [](const auto& entry) {
+            return std::holds_alternative<storage::PlainEntrySource>(
+                entry.source);
+        });
+    auto async_load_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    if (async_load_enabled && SupportsDirectPlainLoad() &&
+        reader->SupportsNativePlainSliceRead() && all_entries_plain) {
+        auto executor = storage::GetLoadExecutorForPriority(load_priority);
+        AssertInfo(static_cast<bool>(executor),
+                   "Shared LoadExecutor is unavailable");
+        folly::coro::blockingWait(folly::coro::co_withExecutor(
+            std::move(executor),
+            LoadUnifiedAsync(
+                *reader, config, load_priority, cancellation_token)));
     } else {
         LoadEntries(*reader, config);
     }

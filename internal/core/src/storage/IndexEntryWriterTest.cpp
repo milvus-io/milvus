@@ -32,26 +32,32 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "folly/CancellationToken.h"
 #include "folly/ScopeGuard.h"
+#include "folly/coro/BlockingWait.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "milvus-storage/common/extend_status.h"
-#include "segcore/async_load/AsyncLoadExecutor.h"
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
+#include "storage/IndexMaterializer.h"
+#include "storage/IndexLoadPlan.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
 #include "storage/ThreadPools.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 
 using namespace milvus::storage;
 
@@ -837,6 +843,507 @@ TEST_F(IndexEntryWriterV3Test, GetEntryNames) {
     EXPECT_EQ(names[3], "__meta__");
 }
 
+TEST_F(IndexEntryWriterV3Test, CatalogExposesStablePlainEntrySources) {
+    const std::string file_path = kV3FilePath + "_plain_catalog";
+    auto alpha = GeneratePattern(64);
+    auto beta = GeneratePattern(128);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("alpha", alpha.data(), alpha.size());
+        writer.WriteEntry("beta", beta.data(), beta.size());
+        writer.PutMeta("catalog_value", 17);
+        writer.Finish();
+    }
+
+    auto recording =
+        std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
+    auto reader = IndexEntryReader::Open(recording, GetFileSize(file_path));
+    auto reads_after_open = recording->ReadRanges().size();
+
+    static_assert(
+        std::is_same_v<decltype(reader->Catalog()), const IndexEntryCatalog&>);
+    const auto& entries = reader->Catalog().Entries();
+    ASSERT_EQ(entries.size(), 3);
+
+    EXPECT_EQ(entries[0].name, "alpha");
+    EXPECT_EQ(entries[0].plaintext_size, alpha.size());
+    EXPECT_EQ(entries[0].expected_crc, Crc32cValue(alpha.data(), alpha.size()));
+    ASSERT_TRUE(std::holds_alternative<PlainEntrySource>(entries[0].source));
+    const auto& alpha_source = std::get<PlainEntrySource>(entries[0].source);
+    EXPECT_EQ(alpha_source.remote_offset, MILVUS_V3_MAGIC_SIZE);
+    EXPECT_EQ(alpha_source.remote_bytes, alpha.size());
+
+    EXPECT_EQ(entries[1].name, "beta");
+    EXPECT_EQ(entries[1].plaintext_size, beta.size());
+    const auto& beta_source = std::get<PlainEntrySource>(entries[1].source);
+    EXPECT_EQ(beta_source.remote_offset, MILVUS_V3_MAGIC_SIZE + alpha.size());
+    EXPECT_EQ(beta_source.remote_bytes, beta.size());
+
+    EXPECT_EQ(entries[2].name, MILVUS_V3_META_ENTRY_NAME);
+    EXPECT_TRUE(reader->Catalog().HasMeta("catalog_value"));
+    EXPECT_EQ(reader->Catalog().GetMeta<int>("catalog_value"), 17);
+    EXPECT_EQ(&reader->Catalog().At("alpha"), &entries[0]);
+    EXPECT_THROW(reader->Catalog().At("missing"), milvus::SegcoreError);
+
+    EXPECT_EQ(recording->ReadRanges().size(), reads_after_open);
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       DirectPlainSliceUsesExactlyOneNativeCallerOwnedRead) {
+    const std::string file_path = kV3FilePath + "_direct_plain_slice";
+    auto data = GeneratePattern(4 * kStreamSliceAlignment);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    ASSERT_NE(direct_file, nullptr);
+    ASSERT_TRUE(reader->SupportsNativePlainSliceRead());
+    direct_file->ResetCounters();
+
+    const size_t entry_offset = 97;
+    std::vector<uint8_t> target(kStreamSliceAlignment + 31);
+    folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
+        "data", entry_offset, target.data(), target.size()));
+
+    EXPECT_TRUE(
+        std::equal(target.begin(), target.end(), data.begin() + entry_offset));
+    auto calls = direct_file->DirectReadCalls();
+    ASSERT_EQ(calls.size(), 1);
+    const auto& source =
+        std::get<PlainEntrySource>(reader->Catalog().At("data").source);
+    EXPECT_EQ(calls[0].position, source.remote_offset + entry_offset);
+    EXPECT_EQ(calls[0].nbytes, target.size());
+    EXPECT_EQ(calls[0].destination, target.data());
+    EXPECT_EQ(direct_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(direct_file->PeakInflight(), 1);
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       DirectPlainSliceDoesNotFallbackToArrowBufferRead) {
+    const std::string file_path = kV3FilePath + "_direct_no_fallback";
+    auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::AsyncTrackingRandomAccessFile* fallback_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(std::move(packed),
+                                                          &fallback_file);
+    ASSERT_NE(fallback_file, nullptr);
+    ASSERT_FALSE(reader->SupportsNativePlainSliceRead());
+    fallback_file->ResetCounters();
+
+    std::vector<uint8_t> target(128);
+    EXPECT_THROW(folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
+                     "data", 0, target.data(), target.size())),
+                 milvus::SegcoreError);
+    EXPECT_EQ(fallback_file->AsyncReadCalls(), 0);
+}
+
+TEST_F(IndexEntryWriterV3Test, DirectPlainSliceRejectsShortRead) {
+    const std::string file_path = kV3FilePath + "_direct_short_read";
+    auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    direct_file->SetNextCompletion(arrow::Status::OK(), 127);
+
+    std::vector<uint8_t> target(128);
+    EXPECT_THROW(folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
+                     "data", 0, target.data(), target.size())),
+                 milvus::SegcoreError);
+}
+
+TEST_F(IndexEntryWriterV3Test, DirectPlainSlicePreservesStorageError) {
+    const std::string file_path = kV3FilePath + "_direct_storage_error";
+    auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    direct_file->SetNextCompletion(milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+        "throttled"));
+
+    std::vector<uint8_t> target(128);
+    try {
+        folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
+            "data", 0, target.data(), target.size()));
+        FAIL() << "expected transient storage error";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(),
+                  milvus::ErrorCode::StorageTransientError);
+    }
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerRoundRobinsEntriesAndAllowsOutOfOrderCompletion) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_round_robin";
+    const size_t slice_size = kStreamSliceAlignment;
+    auto data_a = GeneratePattern(2 * slice_size);
+    auto data_b = GeneratePattern(2 * slice_size);
+    std::reverse(data_b.begin(), data_b.end());
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("a", data_a.data(), data_a.size());
+        writer.WriteEntry("b", data_b.data(), data_b.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    direct_file->SetAutoComplete(false);
+
+    auto target_a = std::make_shared<std::vector<uint8_t>>(data_a.size());
+    auto target_b = std::make_shared<std::vector<uint8_t>>(data_b.size());
+    IndexLoadPlan plan;
+    plan.priority = milvus::proto::common::LoadPriority::HIGH;
+    plan.max_inflight_slices = 4;
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "a",
+        MemoryEntryTarget{target_a, target_a->data(), target_a->size()},
+        slice_size));
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "b",
+        MemoryEntryTarget{target_b, target_b->data(), target_b->size()},
+        slice_size));
+
+    auto materialize_future =
+        std::async(std::launch::async,
+                   [reader = reader.get(), plan = std::move(plan)]() mutable {
+                       return folly::coro::blockingWait(
+                           MaterializeIndexAsync(*reader, std::move(plan)));
+                   });
+
+    ASSERT_TRUE(direct_file->WaitForCallCount(4));
+    auto calls = direct_file->DirectReadCalls();
+    ASSERT_EQ(calls.size(), 4);
+    const auto& source_a =
+        std::get<PlainEntrySource>(reader->Catalog().At("a").source);
+    const auto& source_b =
+        std::get<PlainEntrySource>(reader->Catalog().At("b").source);
+    EXPECT_EQ(calls[0].position, source_a.remote_offset);
+    EXPECT_EQ(calls[1].position, source_b.remote_offset);
+    EXPECT_EQ(calls[2].position, source_a.remote_offset + slice_size);
+    EXPECT_EQ(calls[3].position, source_b.remote_offset + slice_size);
+
+    direct_file->Complete(3);
+    direct_file->Complete(1);
+    direct_file->Complete(2);
+    direct_file->Complete(0);
+
+    auto artifact = materialize_future.get();
+    EXPECT_EQ(*target_a, data_a);
+    EXPECT_EQ(*target_b, data_b);
+    EXPECT_TRUE(artifact.At("a").ready);
+    EXPECT_TRUE(artifact.At("b").ready);
+    EXPECT_EQ(direct_file->PeakInflight(), 4);
+}
+
+TEST_F(IndexEntryWriterV3Test, MaterializerHonorsMaxInflightSlices) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_inflight";
+    const size_t slice_size = kStreamSliceAlignment;
+    auto data = GeneratePattern(4 * slice_size);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    direct_file->SetAutoComplete(false);
+
+    auto target = std::make_shared<std::vector<uint8_t>>(data.size());
+    IndexLoadPlan plan;
+    plan.priority = milvus::proto::common::LoadPriority::LOW;
+    plan.max_inflight_slices = 2;
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "data",
+        MemoryEntryTarget{target, target->data(), target->size()},
+        slice_size));
+
+    auto materialize_future =
+        std::async(std::launch::async,
+                   [reader = reader.get(), plan = std::move(plan)]() mutable {
+                       return folly::coro::blockingWait(
+                           MaterializeIndexAsync(*reader, std::move(plan)));
+                   });
+
+    ASSERT_TRUE(direct_file->WaitForCallCount(2));
+    EXPECT_EQ(direct_file->DirectReadCalls().size(), 2);
+    direct_file->Complete(1);
+    ASSERT_TRUE(direct_file->WaitForCallCount(3));
+    EXPECT_EQ(direct_file->DirectReadCalls().size(), 3);
+    direct_file->Complete(0);
+    ASSERT_TRUE(direct_file->WaitForCallCount(4));
+    EXPECT_EQ(direct_file->DirectReadCalls().size(), 4);
+    direct_file->Complete(3);
+    direct_file->Complete(2);
+
+    auto artifact = materialize_future.get();
+    EXPECT_TRUE(artifact.At("data").ready);
+    EXPECT_EQ(*target, data);
+    EXPECT_LE(direct_file->PeakInflight(), 2);
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerRejectsOverlappingMemoryEntryTargetsBeforeRead) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_memory_overlap";
+    const size_t entry_size = kStreamSliceAlignment;
+    auto data_a = GeneratePattern(entry_size);
+    auto data_b = GeneratePattern(entry_size);
+    std::reverse(data_b.begin(), data_b.end());
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("a", data_a.data(), data_a.size());
+        writer.WriteEntry("b", data_b.data(), data_b.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+
+    auto target =
+        std::make_shared<std::vector<uint8_t>>(2 * entry_size, uint8_t{0});
+    IndexLoadPlan plan;
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "a",
+        MemoryEntryTarget{target, target->data(), entry_size},
+        entry_size));
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "b",
+        MemoryEntryTarget{target, target->data() + entry_size / 2, entry_size},
+        entry_size));
+
+    EXPECT_THROW(folly::coro::blockingWait(
+                     MaterializeIndexAsync(*reader, std::move(plan))),
+                 milvus::SegcoreError);
+    EXPECT_TRUE(direct_file->DirectReadCalls().empty());
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerRejectsOverlappingMmapEntryTargetsBeforePrepare) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_mmap_overlap";
+    const std::string staging_path =
+        GetRootPath() + "/materialize_mmap_overlap.mmap";
+    const size_t entry_size = kStreamSliceAlignment;
+    auto data_a = GeneratePattern(entry_size);
+    auto data_b = GeneratePattern(entry_size);
+    std::reverse(data_b.begin(), data_b.end());
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("a", data_a.data(), data_a.size());
+        writer.WriteEntry("b", data_b.data(), data_b.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+
+    auto staging = std::make_shared<MmapFileTarget>(
+        MmapFileTarget{staging_path, 2 * entry_size, false, nullptr});
+    IndexLoadPlan plan;
+    plan.entries.push_back(
+        MakePlainEntryLoadPlan(reader->Catalog(),
+                               "a",
+                               MmapEntryTarget{staging, 0, entry_size},
+                               entry_size));
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "b",
+        MmapEntryTarget{staging, entry_size / 2, entry_size},
+        entry_size));
+
+    EXPECT_THROW(folly::coro::blockingWait(
+                     MaterializeIndexAsync(*reader, std::move(plan))),
+                 milvus::SegcoreError);
+    EXPECT_TRUE(direct_file->DirectReadCalls().empty());
+    EXPECT_FALSE(std::filesystem::exists(staging_path));
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerFinishesWritableMmapBeforeIndexFinalize) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_mmap_finish";
+    const std::string staging_path =
+        GetRootPath() + "/materialize_mmap_finish.mmap";
+    auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    auto staging = std::make_shared<MmapFileTarget>(
+        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    IndexLoadPlan plan;
+    plan.entries.push_back(
+        MakePlainEntryLoadPlan(reader->Catalog(),
+                               "data",
+                               MmapEntryTarget{staging, 0, data.size()},
+                               kStreamSliceAlignment));
+
+    {
+        auto artifact = folly::coro::blockingWait(
+            MaterializeIndexAsync(*reader, std::move(plan)));
+        EXPECT_TRUE(artifact.At("data").ready);
+        ASSERT_NE(staging->file, nullptr);
+        EXPECT_THROW((void)staging->file->Region(0, 1), milvus::SegcoreError);
+        EXPECT_TRUE(std::filesystem::exists(staging_path));
+    }
+    EXPECT_FALSE(std::filesystem::exists(staging_path));
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerRejectsCombinedCrcAndRemovesStagingFile) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_crc";
+    const std::string staging_path = GetRootPath() + "/materialize_crc.mmap";
+    const size_t slice_size = kStreamSliceAlignment;
+    auto data = GeneratePattern(2 * slice_size);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    const auto& source =
+        std::get<PlainEntrySource>(reader->Catalog().At("data").source);
+    direct_file->CorruptRemoteByte(source.remote_offset + slice_size + 7);
+
+    IndexLoadPlan plan;
+    plan.max_inflight_slices = 2;
+    auto staging = std::make_shared<MmapFileTarget>(
+        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    plan.entries.push_back(
+        MakePlainEntryLoadPlan(reader->Catalog(),
+                               "data",
+                               MmapEntryTarget{staging, 0, data.size()},
+                               slice_size));
+
+    EXPECT_THROW(folly::coro::blockingWait(
+                     MaterializeIndexAsync(*reader, std::move(plan))),
+                 milvus::SegcoreError);
+    EXPECT_FALSE(std::filesystem::exists(staging_path));
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerCancelsPendingAdmissionAndDrainsIssuedReads) {
+    const size_t slice_size = kStreamSliceAlignment;
+    milvus::test::ScopedLoadTransientBudget budget(2 * slice_size);
+    const std::string file_path = kV3FilePath + "_materialize_failure_drain";
+    auto data = GeneratePattern(4 * slice_size);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
+                                                           &direct_file);
+    direct_file->SetAutoComplete(false);
+
+    auto target = std::make_shared<std::vector<uint8_t>>(data.size());
+    IndexLoadPlan plan;
+    plan.max_inflight_slices = 4;
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "data",
+        MemoryEntryTarget{target, target->data(), target->size()},
+        slice_size));
+
+    auto materialize_future =
+        std::async(std::launch::async,
+                   [reader = reader.get(), plan = std::move(plan)]() mutable {
+                       return folly::coro::blockingWait(
+                           MaterializeIndexAsync(*reader, std::move(plan)));
+                   });
+
+    ASSERT_TRUE(direct_file->WaitForCallCount(2));
+    direct_file->Complete(
+        0,
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+            "throttled"));
+
+    EXPECT_EQ(materialize_future.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    EXPECT_EQ(direct_file->DirectReadCalls().size(), 2);
+
+    direct_file->Complete(1);
+    try {
+        (void)materialize_future.get();
+        FAIL() << "expected transient storage error";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(),
+                  milvus::ErrorCode::StorageTransientError);
+    }
+    EXPECT_EQ(direct_file->DirectReadCalls().size(), 2);
+}
+
 TEST_F(IndexEntryWriterV3Test, EntryNotFound) {
     const std::string file_path = kV3FilePath + "_notfound";
     auto data = GeneratePattern(64);
@@ -1292,6 +1799,80 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), entry_size);
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       CatalogExposesPersistedEncryptedSliceSources) {
+    const std::string file_path = kV3FilePath + "_encrypted_catalog";
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 2 * slice_size + 100;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("encrypted", data.data(), data.size());
+        writer.Finish();
+    }
+
+    PluginLoader::GetInstance().addPluginForTest(mock_cipher_);
+    auto unload_plugin = folly::makeGuard(
+        []() { PluginLoader::GetInstance().unload("CipherPlugin"); });
+
+    auto input = CreateInputStream(file_path);
+    auto reader = IndexEntryReader::Open(
+        input, GetFileSize(file_path), /*collection_id=*/100);
+    const auto& entry = reader->Catalog().At("encrypted");
+
+    EXPECT_EQ(entry.plaintext_size, entry_size);
+    EXPECT_EQ(entry.expected_crc, Crc32cValue(data.data(), data.size()));
+    ASSERT_TRUE(std::holds_alternative<EncryptedEntrySource>(entry.source));
+    const auto& source = std::get<EncryptedEntrySource>(entry.source);
+    EXPECT_EQ(source.plaintext_size, entry_size);
+    ASSERT_EQ(source.slices.size(), 3);
+    EXPECT_EQ(source.slices[0].remote_offset, MILVUS_V3_MAGIC_SIZE);
+    EXPECT_EQ(source.slices[0].remote_bytes, slice_size + 1);
+    EXPECT_EQ(source.slices[0].target_offset, 0);
+    EXPECT_EQ(source.slices[0].target_bytes, slice_size);
+    EXPECT_EQ(source.slices[1].target_offset, slice_size);
+    EXPECT_EQ(source.slices[1].target_bytes, slice_size);
+    EXPECT_EQ(source.slices[2].target_offset, 2 * slice_size);
+    EXPECT_EQ(source.slices[2].target_bytes, 100);
+}
+
+TEST_F(IndexEntryEncryptedV3Test, DirectPlainSliceRejectsEncryptedEntry) {
+    const std::string file_path = kV3FilePath + "_direct_reject_encrypted";
+    auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              kStreamSliceAlignment);
+        writer.WriteEntry("encrypted", data.data(), data.size());
+        writer.Finish();
+    }
+
+    PluginLoader::GetInstance().addPluginForTest(mock_cipher_);
+    auto unload_plugin = folly::makeGuard(
+        []() { PluginLoader::GetInstance().unload("CipherPlugin"); });
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        std::move(packed), &direct_file, /*collection_id=*/100);
+
+    std::vector<uint8_t> target(128);
+    EXPECT_THROW(folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
+                     "encrypted", 0, target.data(), target.size())),
+                 milvus::SegcoreError);
+    EXPECT_TRUE(direct_file->DirectReadCalls().empty());
 }
 
 TEST_F(IndexEntryEncryptedV3Test,
@@ -1897,8 +2478,6 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryToFileAsyncWritesEntry) {
         kMinStreamSliceSize);
     EntryStreamAsyncOptions options;
     options.priority = milvus::proto::common::LoadPriority::HIGH;
-    options.localize_disk_executor =
-        milvus::segcore::async_load::AsyncLoadDiskExecutor();
     options.slice_size = kMinStreamSliceSize;
 
     auto local_file = GetRootPath() + "/stream_async_entry_output.bin";

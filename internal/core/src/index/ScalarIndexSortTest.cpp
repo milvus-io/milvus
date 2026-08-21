@@ -12,6 +12,7 @@
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
+#include "folly/coro/BlockingWait.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
@@ -19,6 +20,7 @@
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -37,10 +39,15 @@ class ExposedScalarIndexSort : public ScalarIndexSort<int64_t> {
     using ScalarIndexSort<int64_t>::ScalarIndexSort;
 
     void
-    LoadEntriesWithAsyncReadForTest(storage::IndexEntryReader& reader,
-                                    const Config& config,
-                                    ScalarIndexV3AsyncLoadContext& async_ctx) {
-        LoadEntriesWithAsyncRead(reader, config, async_ctx);
+    LoadDirectForTest(storage::IndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            storage::MaterializeIndexAsync(reader, std::move(plan)));
+        FinalizeLoad(std::move(artifact), config);
+        artifact.CommitTargets();
     }
 };
 
@@ -90,7 +97,7 @@ CreateScalarSortTestFileManagerContext() {
     return ctx;
 }
 
-TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     ScalarSortAsyncLoadFixture fixture("scalar_sort_async_memory");
     std::vector<int64_t> data{50, 10, 30, 20, 40};
@@ -99,8 +106,8 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     build_index.Build(data.size(), data.data());
     auto stats = build_index.UploadUnified({});
 
-    milvus::test::AsyncTrackingRandomAccessFile* remote_file = nullptr;
-    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
         milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
         &remote_file);
     auto read_at_calls_after_open = remote_file->ReadAtCalls();
@@ -109,14 +116,11 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::index::ENABLE_MMAP] = false;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
-        nullptr,
-        milvus::proto::common::LoadPriority::HIGH,
-        "scalar_sort_async_memory"};
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
 
-    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
-
-    EXPECT_GE(remote_file->AsyncReadCalls(), 3);
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 3);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
     EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
     ASSERT_EQ(load_index.Count(), data.size());
     auto bitset = load_index.Range(
@@ -129,7 +133,7 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     EXPECT_EQ(load_index.Reverse_Lookup(0), data[0]);
 }
 
-TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     ScalarSortAsyncLoadFixture fixture("scalar_sort_async_mmap");
     std::vector<int64_t> data{5, 4, 3, 2, 1, 0};
@@ -138,8 +142,8 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     build_index.Build(data.size(), data.data());
     auto stats = build_index.UploadUnified({});
 
-    milvus::test::AsyncTrackingRandomAccessFile* remote_file = nullptr;
-    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
         milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
         &remote_file);
     auto read_at_calls_after_open = remote_file->ReadAtCalls();
@@ -148,14 +152,11 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::index::ENABLE_MMAP] = true;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
-        nullptr,
-        milvus::proto::common::LoadPriority::HIGH,
-        "scalar_sort_async_mmap"};
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
 
-    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
-
-    EXPECT_GE(remote_file->AsyncReadCalls(), 3);
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 3);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
     EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
     ASSERT_EQ(load_index.Count(), data.size());
     std::vector<int64_t> values{0, 5};

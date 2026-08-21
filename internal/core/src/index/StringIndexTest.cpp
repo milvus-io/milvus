@@ -25,6 +25,7 @@
 #include "bitset/bitset.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "folly/coro/BlockingWait.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
@@ -38,6 +39,7 @@
 #include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -94,10 +96,15 @@ class ExposedStringIndexMarisa : public StringIndexMarisa {
     using StringIndexMarisa::StringIndexMarisa;
 
     void
-    LoadEntriesWithAsyncReadForTest(storage::IndexEntryReader& reader,
-                                    const Config& config,
-                                    ScalarIndexV3AsyncLoadContext& async_ctx) {
-        LoadEntriesWithAsyncRead(reader, config, async_ctx);
+    LoadDirectForTest(storage::IndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            storage::MaterializeIndexAsync(reader, std::move(plan)));
+        FinalizeLoad(std::move(artifact), config);
+        artifact.CommitTargets();
     }
 };
 
@@ -118,7 +125,7 @@ struct MarisaAsyncLoadFixture {
 
 }  // namespace
 
-TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     MarisaAsyncLoadFixture fixture("marisa_async_memory");
     std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
@@ -127,8 +134,8 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     build_index.Build(data.size(), data.data());
     auto stats = build_index.UploadUnified({});
 
-    milvus::test::AsyncTrackingRandomAccessFile* remote_file = nullptr;
-    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
         milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
         &remote_file);
     auto read_at_calls_after_open = remote_file->ReadAtCalls();
@@ -136,14 +143,11 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     ExposedStringIndexMarisa load_index(fixture.ctx);
     Config config;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
-        nullptr,
-        milvus::proto::common::LoadPriority::HIGH,
-        "marisa_async_memory"};
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
 
-    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
-
-    EXPECT_GE(remote_file->AsyncReadCalls(), 4);
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 4);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
     EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
     ASSERT_EQ(load_index.Count(), data.size());
     std::vector<std::string> values{"alpha", "delta"};
@@ -160,7 +164,7 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     EXPECT_EQ(load_index.Reverse_Lookup(2), data[2]);
 }
 
-TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     MarisaAsyncLoadFixture fixture("marisa_async_mmap");
     std::vector<std::string> data{"zero", "one", "two", "three", "four"};
@@ -169,8 +173,8 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     build_index.Build(data.size(), data.data());
     auto stats = build_index.UploadUnified({});
 
-    milvus::test::AsyncTrackingRandomAccessFile* remote_file = nullptr;
-    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
         milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
         &remote_file);
     auto read_at_calls_after_open = remote_file->ReadAtCalls();
@@ -179,14 +183,11 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/marisa";
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
-        nullptr,
-        milvus::proto::common::LoadPriority::HIGH,
-        "marisa_async_mmap"};
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
 
-    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
-
-    EXPECT_GE(remote_file->AsyncReadCalls(), 4);
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 4);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
     EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
     ASSERT_EQ(load_index.Count(), data.size());
     auto bitset = load_index.PrefixMatch("t");

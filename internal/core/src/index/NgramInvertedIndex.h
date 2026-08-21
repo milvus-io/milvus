@@ -117,6 +117,11 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    bool
+    SupportsDirectPlainLoad() const override {
+        return false;
+    }
+
  private:
     void
     ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,

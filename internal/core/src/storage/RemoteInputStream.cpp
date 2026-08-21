@@ -185,6 +185,29 @@ RemoteInputStream::ReadAtAsyncInto(int64_t position,
         });
 }
 
+bool
+RemoteInputStream::SupportsNativeAsyncReadInto() const noexcept {
+    return async_read_at_file_ != nullptr;
+}
+
+arrow::Future<int64_t>
+RemoteInputStream::ReadAtAsyncIntoNative(int64_t position,
+                                         int64_t nbytes,
+                                         uint8_t* out) {
+    if (async_read_at_file_ == nullptr) {
+        return arrow::Future<int64_t>::MakeFinished(
+            arrow::Status::NotImplemented(
+                "Native async read into caller-owned memory is not "
+                "supported by this remote file"));
+    }
+    if (out == nullptr && nbytes != 0) {
+        return arrow::Future<int64_t>::MakeFinished(arrow::Status::Invalid(
+            "Native async read destination is null for a non-empty "
+            "range"));
+    }
+    return async_read_at_file_->ReadAtAsyncInto(position, nbytes, out);
+}
+
 size_t
 RemoteInputStream::Read(int fd, size_t size) {
     size_t read_batch_size =

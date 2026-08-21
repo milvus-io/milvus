@@ -193,6 +193,11 @@ class JsonScalarIndexWrapper : public BaseIndex {
         BuildExistsBitset(this->Count());
     }
 
+    bool
+    SupportsDirectPlainLoad() const override {
+        return false;
+    }
+
     // v2 format: override Load() to defer the eager exists bitmap build
     // until after the base Load finishes. LoadIndexMetas (called from within
     // base Load) runs before the tantivy reader is initialized, so we can

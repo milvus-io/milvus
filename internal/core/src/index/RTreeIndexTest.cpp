@@ -13,6 +13,7 @@
 #include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
+#include <folly/coro/BlockingWait.h>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <stddef.h>
@@ -65,12 +66,14 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/PayloadReader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/TmpPath.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -223,6 +226,54 @@ class RTreeIndexTest : public ::testing::Test {
     milvus::test::TmpPath temp_path_;
     milvus_storage::ArrowFileSystemPtr fs_;
 };
+
+class ExposedRTreeIndex : public milvus::index::RTreeIndex<std::string> {
+ public:
+    using RTreeIndex<std::string>::RTreeIndex;
+
+    void
+    LoadDirectForTest(milvus::storage::IndexEntryReader& reader,
+                      const milvus::Config& config,
+                      milvus::proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            milvus::storage::MaterializeIndexAsync(reader, std::move(plan)));
+        FinalizeLoad(std::move(artifact), config);
+        artifact.CommitTargets();
+    }
+};
+
+TEST_F(RTreeIndexTest, V3AsyncLoadUsesNativeDirectStagingFiles) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    ExposedRTreeIndex build_index(ctx_build);
+    std::vector<std::string> wkbs = {CreatePointWKB(1.0, 1.0),
+                                     CreatePointWKB(2.0, 2.0),
+                                     CreatePointWKB(3.0, 3.0)};
+    build_index.BuildWithRawDataForUT(wkbs.size(), wkbs.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(ctx_build, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    milvus::storage::FileManagerContext ctx_load(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    ctx_load.set_for_loading_index(true);
+    ExposedRTreeIndex load_index(ctx_load);
+    milvus::Config config;
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), wkbs.size());
+}
 
 TEST_F(RTreeIndexTest, Build_Upload_Load) {
     // ---------- Build via BuildWithRawDataForUT ----------

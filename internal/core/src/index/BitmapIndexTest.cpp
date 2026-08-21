@@ -178,11 +178,9 @@ class ExposedBitmapIndex : public BitmapIndex<int32_t> {
     using BitmapIndex<int32_t>::BitmapIndex;
 
     void
-    LoadEntriesWithAsyncReadForTest(
-        milvus::storage::IndexEntryReader& reader,
-        const milvus::Config& config,
-        milvus::index::ScalarIndexV3AsyncLoadContext& async_ctx) {
-        LoadEntriesWithAsyncRead(reader, config, async_ctx);
+    LoadEntriesForTest(milvus::storage::IndexEntryReader& reader,
+                       const milvus::Config& config) {
+        LoadEntries(reader, config);
     }
 };
 
@@ -269,7 +267,7 @@ GenerateData<std::string>(const size_t size, const size_t cardinality) {
     return result;
 }
 
-TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesSynchronousFallback) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     BitmapAsyncLoadFixture fixture("bitmap_async_memory");
 
@@ -290,15 +288,10 @@ TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     config[milvus::index::ENABLE_OFFSET_CACHE] = true;
-    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
-        nullptr,
-        milvus::proto::common::LoadPriority::HIGH,
-        "bitmap_async_memory"};
+    load_index.LoadEntriesForTest(*reader, config);
 
-    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
-
-    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
-    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_GT(remote_file->ReadAtCalls(), read_at_calls_after_open);
     ASSERT_EQ(load_index.Count(), data.size());
     EXPECT_EQ(load_index.Reverse_Lookup(1), std::nullopt);
     auto value = int32_t{1};
@@ -312,7 +305,7 @@ TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     EXPECT_TRUE(hits[6]);
 }
 
-TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesSynchronousFallback) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     BitmapAsyncLoadFixture fixture("bitmap_async_mmap");
     fixture.field_schema.set_nullable(false);
@@ -338,15 +331,10 @@ TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
-    milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
-        nullptr,
-        milvus::proto::common::LoadPriority::HIGH,
-        "bitmap_async_mmap"};
+    load_index.LoadEntriesForTest(*reader, config);
 
-    load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
-
-    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
-    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_GT(remote_file->ReadAtCalls(), read_at_calls_after_open);
     EXPECT_TRUE(load_index.is_mmap_);
     ASSERT_EQ(load_index.Count(), data.size());
     auto value = int32_t{17};
