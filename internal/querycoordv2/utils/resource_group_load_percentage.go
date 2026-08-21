@@ -43,14 +43,36 @@ import (
 // ShowLoadCollections and ShowLoadPartitions to turn a negative percentage
 // into an actionable error for the caller.
 //
-// The percentage is computed the same way CollectionObserver computes a
-// partition's load percentage -- by walking the collection's segment and
-// channel targets, finding the delegators that carry each one, and checking
-// which replica those delegators belong to -- except the aggregation step is
-// restricted to the selected replica(s) instead of summing across every
-// replica of the collection. That summing-across-replicas step is precisely
-// what made the old, collection-wide figure wrong for this use case; removing
-// it, rather than the walk itself, is the entire fix.
+// The percentage is a LIVE target-coverage figure: the fraction of the
+// collection's current work set -- its channel targets plus sealed-segment
+// targets, pooled across partitions -- that the selected replica carries
+// right now. The walk is the same one CollectionObserver performs (find the
+// delegators that carry each target, check replica membership), but the
+// aggregation is restricted to the selected replica(s) instead of summing
+// across every replica; that summing step is what made the collection-wide
+// figure wrong for this use case.
+//
+// The figure agrees with the collection-wide ShowLoadCollections number at
+// the endpoints -- -1 when nothing is here, and both reach 100 exactly when
+// every target is carried -- but is NOT the same number in between, in two
+// deliberate ways:
+//
+//   - Intermediate values weight differently. The observer computes each
+//     partition separately (its own segments plus the channel targets) and
+//     CalculateLoadPercentage averages the partitions, so a small partition
+//     counts as much as a large one; this figure pools every target, so each
+//     target counts once. On a multi-partition collection mid-load the two
+//     can differ widely while both agree at 0 and at 100.
+//   - This figure can drop back below 100 in steady state. The observer's
+//     number is persisted per partition and never regresses once it reaches
+//     100, while this one is recomputed against the live target set: when a
+//     freshly flushed segment or compaction output lands in the next target,
+//     the figure reports the not-yet-loaded remainder until the replica picks
+//     it up. That is the point -- it answers "is this resource group carrying
+//     everything currently asked of it", which is what a caller gating a
+//     switchover on == 100 actually needs -- but a caller must expect the
+//     gate to re-arm whenever new work lands, where ShowLoadCollections
+//     would keep saying 100.
 //
 // When more than one replica is selected -- either because Spawn put several
 // replicas of the collection in rgName, or because rgName is empty and every
