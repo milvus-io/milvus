@@ -18,8 +18,6 @@
 
 #include <atomic>
 #include <iostream>
-#include <utility>
-#include <variant>
 #include "common/Consts.h"
 #include "storage/ThreadPool.h"
 
@@ -71,16 +69,5 @@ SetEnableLatestDeleteSnapshotOptimization(bool val);
 
 void
 SetLogLevel(const char* level);
-
-struct BufferView {
-    struct Element {
-        const char* data_;
-        uint32_t* offsets_;
-        int start_;
-        int end_;
-    };
-
-    std::variant<std::vector<Element>, std::pair<char*, size_t>> data_;
-};
 
 }  // namespace milvus

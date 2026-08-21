@@ -51,11 +51,6 @@ class Aggregate {
  public:
     virtual ~Aggregate() = default;
 
-    DataType
-    resultType() const {
-        return result_type_;
-    }
-
     static std::unique_ptr<Aggregate>
     create(const std::string& name,
            const std::vector<DataType>& argTypes,

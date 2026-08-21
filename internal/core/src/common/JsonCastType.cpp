@@ -56,20 +56,6 @@ JsonCastType::element_type() const {
     return element_type_;
 }
 
-TantivyDataType
-JsonCastType::ToTantivyType() const {
-    switch (element_type()) {
-        case JsonCastType::DataType::BOOL:
-            return TantivyDataType::Bool;
-        case JsonCastType::DataType::DOUBLE:
-            return TantivyDataType::F64;
-        case JsonCastType::DataType::VARCHAR:
-            return TantivyDataType::Keyword;
-        default:
-            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
-    }
-}
-
 MilvusDataType
 JsonCastType::ToMilvusDataType() const {
     switch (element_type()) {

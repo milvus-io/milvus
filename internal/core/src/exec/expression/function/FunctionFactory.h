@@ -88,15 +88,6 @@ class FunctionFactory {
         return filter_function_map_.size();
     }
 
-    std::vector<FilterFunctionRegisterKey>
-    ListAllFilterFunctions() const {
-        std::vector<FilterFunctionRegisterKey> result;
-        for (const auto& [key, value] : filter_function_map_) {
-            result.push_back(key);
-        }
-        return result;
-    }
-
  private:
     void
     RegisterAllFunctions();

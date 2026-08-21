@@ -24,7 +24,6 @@
 #include <functional>
 #include <initializer_list>
 #include <istream>
-#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -513,39 +512,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsBoolean(const std::string& str) {
         return str == "true" || str == "false";
-    }
-
-    bool
-    IsInt8(const std::string& str) {
-        std::istringstream iss(str);
-        int8_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int8_t>::min() &&
-               num <= std::numeric_limits<int8_t>::max();
-    }
-
-    bool
-    IsInt16(const std::string& str) {
-        std::istringstream iss(str);
-        int16_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int16_t>::min() &&
-               num <= std::numeric_limits<int16_t>::max();
-    }
-
-    bool
-    IsInt32(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int32_t>::min() &&
-               num <= std::numeric_limits<int32_t>::max();
     }
 
     bool

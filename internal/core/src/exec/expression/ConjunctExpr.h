@@ -196,19 +196,9 @@ class PhyConjunctFilterExpr : public Expr {
         return is_and_;
     }
 
-    bool
-    IsOr() {
-        return !is_and_;
-    }
-
     void
     SetLikeIndices(std::vector<size_t>&& indices) {
         like_indices_ = std::move(indices);
-    }
-
-    const std::vector<size_t>&
-    GetLikeIndices() const {
-        return like_indices_;
     }
 
  private:

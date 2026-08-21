@@ -132,29 +132,6 @@ TEST_F(JsonStatsMetaTest, LayoutTypeMapTest) {
     }
 }
 
-TEST_F(JsonStatsMetaTest, BuildKeyFieldMapTest) {
-    JsonStatsMeta meta;
-
-    std::map<JsonKey, JsonKeyLayoutType> layout_map = {
-        {JsonKey("/a/b", JSONType::INT64), JsonKeyLayoutType::TYPED},
-        {JsonKey("/a/b", JSONType::STRING), JsonKeyLayoutType::DYNAMIC},
-        {JsonKey("/x/y", JSONType::DOUBLE), JsonKeyLayoutType::SHARED}};
-
-    meta.SetLayoutTypeMap(layout_map);
-
-    auto key_field_map = meta.BuildKeyFieldMap();
-
-    // SHARED keys should be skipped
-    EXPECT_EQ(key_field_map.size(), 1);  // Only /a/b
-    EXPECT_TRUE(key_field_map.find("/a/b") != key_field_map.end());
-    EXPECT_EQ(key_field_map["/a/b"].size(), 2);  // INT64 and STRING columns
-    EXPECT_TRUE(key_field_map["/a/b"].count("/a/b_INT64") > 0);
-    EXPECT_TRUE(key_field_map["/a/b"].count("/a/b_STRING") > 0);
-
-    // SHARED key should not be in the map
-    EXPECT_TRUE(key_field_map.find("/x/y") == key_field_map.end());
-}
-
 TEST_F(JsonStatsMetaTest, SerializeDeserializeTest) {
     JsonStatsMeta meta;
 

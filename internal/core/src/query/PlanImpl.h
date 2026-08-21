@@ -64,8 +64,6 @@ struct Plan {
     // collections this drives manifest-column checks, not data readiness.
     std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
-    void
-    check_identical(Plan& other);
 
  public:
     std::optional<ExtractedPlanInfo> extra_info_opt_;

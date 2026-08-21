@@ -72,11 +72,6 @@ struct TextLobRef {
         return ref;
     }
 
-    // Check if a string looks like a TextLobRef (for debugging)
-    static bool
-    IsValidEncoding(std::string_view s) {
-        return s.size() == kEncodedSize;
-    }
 };
 
 /**
@@ -203,16 +198,6 @@ class TextLobSpillover {
     const std::string&
     GetPath() const {
         return path_;
-    }
-
-    FieldId
-    GetFieldId() const {
-        return field_id_;
-    }
-
-    int
-    GetFd() const {
-        return fd_;
     }
 
     /**
