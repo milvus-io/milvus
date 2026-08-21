@@ -49,11 +49,9 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
-    bool is_nested_array = false;
-    if (data_type == DataType::ARRAY) {
-        const auto schema = segment_->get_schema_snapshot();
-        is_nested_array = (*schema)[field_id_].is_nested_array();
-    }
+    const bool is_nested_array =
+        data_type == DataType::ARRAY &&
+        expr_->column_.element_type_ == DataType::ARRAY;
     if (expr_->column_.element_level_ && !is_nested_array) {
         data_type = expr_->column_.element_type_;
     }
