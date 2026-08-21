@@ -1382,18 +1382,26 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
 			meta, job, _ := stage(t)
-			checker := newRefreshChecker(ctx, meta, make(chan struct{}), refreshCheckerHooks{unindexedSegments: func(int64, []int64) []int64 { return []int64{556} }})
+			asks := 0
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), refreshCheckerHooks{unindexedSegments: func(int64, []int64) []int64 { asks++; return []int64{556} }})
 
 			checker.aggregateJobState(job) // enter the gate and hold
 			require.True(t, gateClockRunning(checker))
+			asksWhileHeld := asks
 
-			// Age the gate clock past the whole budget.
+			// Age the gate clock past the whole budget, preserving the rest
+			// of the gate state - replacing the whole entry would drop the
+			// segment snapshot and skip the expiry branch entirely.
 			checker.indexGateMu.Lock()
-			checker.indexGates[int64(1)] = indexGateState{enteredAt: time.Now().Add(-1000 * time.Hour)}
+			aged := checker.indexGates[int64(1)]
+			aged.enteredAt = time.Now().Add(-1000 * time.Hour)
+			checker.indexGates[int64(1)] = aged
 			checker.indexGateMu.Unlock()
 
 			checker.aggregateJobState(meta.GetJob(1))
 
+			assert.Greater(t, asks, asksWhileHeld,
+				"the expiring pass must still consult the index debt - if it did not, the finish came from the fall-through, not the expiry branch")
 			expired := meta.GetJob(1)
 			assert.Equal(t, indexpb.JobState_JobStateFinished, expired.GetState(),
 				"an expired gate finishes the job; its data is committed and being served")
@@ -1492,7 +1500,16 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			})
 
 			checker.aggregateJobState(job) // apply fails; the error is recorded
-			checker.tryTimeoutJob(job)     // the ingest clock is the terminal bound here
+
+			// The retry loop runs on its own clock from the first attempt
+			// (restart-safe); model that budget being exhausted too.
+			checker.indexGateMu.Lock()
+			tried := checker.indexGates[int64(1)]
+			tried.applyTriedAt = time.Now().Add(-1000 * time.Hour)
+			checker.indexGates[int64(1)] = tried
+			checker.indexGateMu.Unlock()
+
+			checker.tryTimeoutJob(job)
 
 			failed := meta.GetJob(1)
 			require.Equal(t, indexpb.JobState_JobStateFailed, failed.GetState())
@@ -1571,6 +1588,95 @@ func TestExternalCollectionRefreshChecker_IndexGate(t *testing.T) {
 			checker.aggregateJobState(job)
 
 			assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
+		})
+	})
+
+	t.Run("a failing apply is not judged on the stale ingest clock", func(t *testing.T) {
+		// After a DataCoord restart the persisted StartTime is typically
+		// already past the job timeout, and the first post-restart apply can
+		// fail transiently while object storage / etcd warm up. The retry
+		// budget must start at this process's first attempt - judging it on
+		// the pre-restart StartTime would insta-fail a committed refresh.
+		mockey.PatchConvey("restart clock", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job, _ := stage(t)
+			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), refreshCheckerHooks{
+				applyJobInfo: func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					return errors.New("object storage warming up")
+				},
+			})
+
+			checker.aggregateJobState(job) // first attempt fails; retry clock starts NOW
+			checker.tryTimeoutJob(job)
+
+			assert.NotEqual(t, indexpb.JobState_JobStateFailed, meta.GetJob(1).GetState(),
+				"the apply retry budget starts at this process's first attempt, not the exhausted ingest clock")
+		})
+	})
+
+	t.Run("the entry apply runs exactly once across racing paths", func(t *testing.T) {
+		// Before the gate, the apply-once invariant came from
+		// UpdateJobStateWithPreApply's job lock. The gate's entry pass runs
+		// outside that lock, so it carries its own dedup (entryInFlight +
+		// appliedAt): the eager and periodic paths racing through entry must
+		// still produce exactly one apply.
+		mockey.PatchConvey("apply once", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, job, _ := stage(t)
+			var applied atomic.Int64
+			checker := newRefreshChecker(ctx, meta, make(chan struct{}), refreshCheckerHooks{
+				applyJobInfo: func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					applied.Add(1)
+					return nil
+				},
+				unindexedSegments: func(int64, []int64) []int64 { return []int64{556} },
+			})
+
+			var wg sync.WaitGroup
+			for range 4 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for range 50 {
+						checker.aggregateJobState(job)
+					}
+				}()
+			}
+			wg.Wait()
+
+			assert.Equal(t, int64(1), applied.Load(),
+				"the gate must land the apply exactly once, no matter how the eager and periodic paths interleave")
+		})
+	})
+
+	t.Run("a late held-progress write cannot land on a finished job", func(t *testing.T) {
+		// The eager path can persist Finished (Progress=100) while a
+		// periodic tick still computes held progress from an older debt
+		// snapshot. Without a terminal guard in UpdateJobProgress that write
+		// would pin a Finished job at 95/99 forever - and completion pollers
+		// waiting for 100 would never observe it.
+		mockey.PatchConvey("terminal progress", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			meta, _, _ := stage(t)
+			applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateFinished, "")
+			require.NoError(t, err)
+			require.True(t, applied)
+			require.Equal(t, int64(100), meta.GetJob(1).GetProgress())
+
+			require.NoError(t, meta.UpdateJobProgress(1, 95))
+
+			assert.Equal(t, int64(100), meta.GetJob(1).GetProgress(),
+				"a finished job owns Progress=100; a racing held-progress write must be skipped")
 		})
 	})
 
