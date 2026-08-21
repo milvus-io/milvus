@@ -81,8 +81,15 @@ func LoadPercentageByResourceGroup(
 	// replicas first would turn that state into a bare (-1, nil) and swallow
 	// the recorded failure.
 	if !m.Exist(ctx, collectionID) {
-		if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
-			return -1, err
+		// The nil check is part of the partially-wired tolerance:
+		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires --
+		// after initMeta has wired the three stores -- and Get dereferences
+		// a nil receiver. In that window the collection simply reads as not
+		// loaded, without the recorded-failure detail.
+		if meta.GlobalFailedLoadCache != nil {
+			if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
+				return -1, err
+			}
 		}
 		return -1, nil
 	}

@@ -96,8 +96,16 @@ func ShardLeaderReadinessByResourceGroup(
 	// return would swallow the recorded failure into "nothing is loading
 	// here".
 	if !m.Exist(ctx, collectionID) {
-		return ShardLeaderReadiness{Reason: ShardLeadersReasonCollectionNotLoaded},
-			meta.GlobalFailedLoadCache.Get(collectionID)
+		// The nil check is part of the partially-wired tolerance:
+		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires --
+		// after initMeta has wired the stores -- and Get dereferences a nil
+		// receiver. In that window the collection simply reads as not
+		// loaded, without the recorded-failure detail.
+		var failedLoadErr error
+		if meta.GlobalFailedLoadCache != nil {
+			failedLoadErr = meta.GlobalFailedLoadCache.Get(collectionID)
+		}
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonCollectionNotLoaded}, failedLoadErr
 	}
 
 	inRG := 0

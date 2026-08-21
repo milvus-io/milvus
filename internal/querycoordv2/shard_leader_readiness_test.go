@@ -469,6 +469,24 @@ func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T)
 	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
 }
 
+// TestShardLeaderReadinessByRG_NilFailedLoadCache asserts the same init
+// window TestGetLoadPercentageByResourceGroup_NilFailedLoadCache pins:
+// GlobalFailedLoadCache is the last dependency initQueryCoord wires, after
+// the stores this function's guard checks, and Get on the nil global panics.
+// In that window an unregistered collection simply reads as not loaded,
+// without the recorded-failure detail the cache would have added.
+func TestShardLeaderReadinessByRG_NilFailedLoadCache(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	nilFailedLoadCache(t)
+
+	assert.NotPanics(t, func() {
+		got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1500, "rg-a")
+		assert.NoError(t, err)
+		assert.False(t, got.Ready)
+		assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
+	})
+}
+
 // TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount asserts that
 // readiness agrees with the routing surface about which replicas exist for
 // queries. Both the native and the resource-group-scoped GetShardLeaders
