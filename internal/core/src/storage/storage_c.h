@@ -61,6 +61,9 @@ GetLoonReaderThreadPoolSize();
 CStatus
 InitIndexBuildReadWindow(int64_t window_bytes);
 
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate);
+
 // Plugin related APIs
 CStatus
 InitPluginLoader(const char* plugin_path);
