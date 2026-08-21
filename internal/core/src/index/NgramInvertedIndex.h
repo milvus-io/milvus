@@ -28,11 +28,6 @@ namespace milvus::index {
 std::vector<std::string>
 extract_literals_from_regex(const std::string& pattern);
 
-// Maximal literal runs between unescaped LIKE wildcards (`%` and `_`).
-// Shared with FMINDEX general Match candidate generation.
-std::vector<std::string>
-split_by_wildcard(const std::string& literal);
-
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for string/varchar type

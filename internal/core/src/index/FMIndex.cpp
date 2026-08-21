@@ -29,10 +29,10 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/RegexQuery.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
 #include "index/Meta.h"
-#include "index/NgramInvertedIndex.h"
 #include "index/Utils.h"
 #include "knowhere/binaryset.h"
 #include "log/Log.h"

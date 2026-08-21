@@ -296,8 +296,8 @@ result.
 Tokenize the pattern with the same escape model as
 `planparserv2.scanLikePattern` / `translate_pattern_match_to_regex`
 (`\` escapes the next byte; unescaped `%`/`_` are wildcards) — the codebase
-already ships this as `split_by_wildcard` (used by
-`NgramInvertedIndex::CanHandleLiteral`); FMINDEX reuses it. The maximal runs
+already ships this as `split_by_wildcard` in `common/RegexQuery`
+(used by `NgramInvertedIndex::CanHandleLiteral`); FMINDEX reuses it. The maximal runs
 of literal bytes between wildcards are the **factors**. Anchoring: no leading
 wildcard → first factor is prefix-anchored; no trailing wildcard → last factor
 suffix-anchored; `_` counts as a wildcard for factor-splitting (its
@@ -538,8 +538,8 @@ All integration points verified against master (branch state of 2026-07-14).
   wavelet words, sampled bitmaps, sampled-SA values AND doc boundaries are all
   viewed in place (the samples through a narrow/wide-aware accessor, so the
   compact 4-byte on-disk form is served directly); the ISA table (Extract's
-  anchor) stays lazy. Match does not Extract, so load does not
-  `MaterializeIsaSample`. The library still builds ISA if Extract runs.
+  anchor) stays lazy. Match does not Extract, so load does not call
+  `ensureIsaSample`. The library still builds ISA if Extract runs.
   What a load DOES rebuild in RAM is the rank directories, whose size is
   controlled by `fm_block_bytes` (at the default 64-byte block, roughly 1/8 of
   the packed wavelet words), plus small derived metadata.

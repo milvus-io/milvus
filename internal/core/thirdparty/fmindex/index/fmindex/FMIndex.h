@@ -151,14 +151,6 @@ class FMIndex {
     std::string
     Extract(uint64_t doc_id, uint64_t offset, size_t len) const;
 
-    // Build isa_sample_ if it is still empty. The scalar wrapper does not
-    // call this at load; Match rechecks sealed VARCHAR. Thread-safe; a no-op
-    // after the first call.
-    void
-    MaterializeIsaSample() const {
-        ensureIsaSample();
-    }
-
     // The longest substring of `query` that occurs in the corpus (fuzzy / partial
     // contamination: "how long a span of this benchmark item appears in training",
     // which catches paraphrased or truncated overlaps that an exact n-gram misses).
