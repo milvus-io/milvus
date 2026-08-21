@@ -1242,12 +1242,34 @@ func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{JobID: 4242}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
 		WithIdempotencyKey("run-1").
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
-	jobID, err := jobIDFromDuplicatedBroadcast(msg)
+	jobID, err := jobIDFromDuplicatedBroadcast(msg, 100)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(4242), jobID)
+}
+
+// The dedup scope is built from resource keys that name a collection rather than
+// identify it, so drop db1.c1 -> recreate db1.c1 keeps the same scope and a reused key
+// still hits the index. Without this guard the caller would be handed the dropped
+// incarnation's jobID, and nothing downstream would catch it: checkCollection leaves a
+// Completed job alone when its collection vanishes, and GetImportProgress reports that
+// state without checking the collection still exists -- so the client would read
+// Completed for data that was never imported.
+func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey("run-1").
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	// 101 is the recreated same-named collection: same scope, different identity.
+	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "use a fresh key")
 }

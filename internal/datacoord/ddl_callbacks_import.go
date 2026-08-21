@@ -181,13 +181,24 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 // message the broadcaster returned on an idempotency hit. The broadcaster does not
 // know about import-specific structures, so the decode happens here.
 //
-// The request payload is deliberately NOT compared against the original: the key is
-// a trusted client-supplied identifier, and keeping it unique per logical request is
-// the client's contract. Enforcing that server-side would mean inventing an equality
-// predicate over file lists, and a false mismatch would reject a legitimate retry —
-// pushing the caller to mint a new key and import the data twice, the very outcome
-// this feature exists to prevent.
-func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage) (int64, error) {
+// The collectionID IS compared, because the dedup scope cannot distinguish incarnations
+// of a collection: it is derived from resource keys that name a collection rather than
+// identify it, so dropping db1.c1 and recreating a same-named db1.c1 leaves the scope
+// unchanged. A key reused across that recreation would otherwise resolve to the dropped
+// incarnation's job, and nothing downstream would notice -- importChecker.checkCollection
+// filters Completed jobs out before failing the ones whose collection vanished, and
+// GetImportProgress reports a job's state without checking that its collection still
+// exists, so the client would be told Completed for data that was never imported.
+//
+// The request payload beyond the collectionID is deliberately NOT compared: keeping the
+// key unique per logical request is the client's contract, and enforcing it server-side
+// would mean inventing an equality predicate over file lists whose false mismatches
+// would reject legitimate retries -- pushing the caller to mint a new key and import the
+// data twice, the very outcome this feature exists to prevent. The collectionID is not
+// such a predicate. It is an exact int64 with no false-mismatch mode: a retry into the
+// same collection carries the same ID and resolves normally, and only a genuinely
+// different target is rejected.
+func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
 	importMsg, err := message.AsBroadcastImportMessageV1(msg)
 	if err != nil {
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
@@ -195,6 +206,11 @@ func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage) (int64, e
 	body, err := importMsg.Body()
 	if err != nil {
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
+	}
+	if body.GetCollectionID() != collectionID {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"idempotency key already identifies an import into collection %d, not %d; use a fresh key",
+			body.GetCollectionID(), collectionID)
 	}
 	return body.GetJobID(), nil
 }
@@ -261,10 +277,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// only eat into the length budget the broadcaster validates against.
 		//
 		// Those resource keys name the collection, they do not identify it: dropping a
-		// collection and recreating one with the same name keeps the same scope, so a
-		// key reused across the recreation resolves to the dropped incarnation's job for
-		// as long as its tombstone lives. Keys are expected to be unique per logical
-		// request, which a re-import into a rebuilt collection is.
+		// collection and recreating one with the same name keeps the same scope, so a key
+		// reused across the recreation still hits the index. jobIDFromDuplicatedBroadcast
+		// catches that by comparing the collectionID the original broadcast carried.
 		WithIdempotencyKey(idempotencyKey).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
@@ -279,7 +294,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
 	// new job was created; recover what that broadcast carried.
-	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated)
+	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated, collectionID)
 	if err != nil {
 		return 0, false, err
 	}
