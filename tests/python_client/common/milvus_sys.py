@@ -1,7 +1,7 @@
 import json
 
 import ujson
-from common.index_version import get_resolved_scalar_index_version
+from common.index_version import get_resolved_scalar_index_version, get_segment_max_size
 from pymilvus import connections
 from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 
@@ -12,9 +12,9 @@ sys_logs_req = ujson.dumps({"metric_type": "system_logs"})
 
 
 class MilvusSys:
-    def __init__(self, alias="default"):
+    def __init__(self, alias="default", client=None):
         self.alias = alias
-        self.handler = connections._fetch_handler(alias=self.alias)
+        self.handler = client._get_connection() if client is not None else connections._fetch_handler(alias=self.alias)
         if self.handler is None:
             raise Exception(f"Connection {alias} is disconnected or nonexistent")
 
@@ -71,6 +71,11 @@ class MilvusSys:
     def resolved_scalar_index_version(self):
         """Get DataCoord's effective scalar index engine version."""
         return get_resolved_scalar_index_version(self.nodes)
+
+    @property
+    def segment_max_size(self):
+        """Get DataCoord's configured segment max size in MiB."""
+        return get_segment_max_size(self.nodes)
 
     @property
     def query_nodes(self):

@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -41,13 +42,18 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -82,6 +88,35 @@ func init() {
 	streaming.SetupNoopWALForTest()
 }
 
+type httpServerLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*httpServerLogBuffer) Sync() error {
+	return nil
+}
+
+func captureHTTPServerLogs(t *testing.T) *httpServerLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &httpServerLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
 func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
 	t.Run(testName, func(t *testing.T) {
 		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))
@@ -99,7 +134,7 @@ func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method str
 }
 
 func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
-	externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 	testCases := []struct {
 		name string
 		req  any
@@ -131,12 +166,155 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 			request := fmt.Sprint(field.Interface)
 			assert.NotContains(t, request, "AKIAEXAMPLE")
 			assert.NotContains(t, request, "SUPERSECRET")
+			assert.NotContains(t, request, "FUTURE_SECRET_SENTINEL")
 			assert.Contains(t, request, "***")
+			assert.Contains(t, request, "parquet")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTExternalCollectionCredentials(t *testing.T) {
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIA_EXTERNAL_SENTINEL","access_key_value":"SECRET_EXTERNAL_SENTINEL","future_password":"FUTURE_SPEC_REST_SENTINEL","region":"us-east-1"}}`
+	externalSource := "s3://SOURCE_ACCESS_REST_SENTINEL:SOURCE_SECRET_REST_SENTINEL@bucket/path"
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "create external collection",
+			req: &CollectionReq{
+				CollectionName: "external_collection",
+				Schema: CollectionSchema{
+					ExternalSource: externalSource,
+					ExternalSpec:   externalSpec,
+				},
+				TopLevelExternalSource: externalSource,
+				TopLevelExternalSpec:   externalSpec,
+			},
+		},
+		{
+			name: "refresh external collection",
+			req: &RefreshExternalCollectionReq{
+				CollectionName: "external_collection",
+				ExternalSource: externalSource,
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "SOURCE_ACCESS_REST_SENTINEL")
+			assert.NotContains(t, request, "SOURCE_SECRET_REST_SENTINEL")
+			assert.NotContains(t, request, "AKIA_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "SECRET_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "FUTURE_SPEC_REST_SENTINEL")
+			assert.Contains(t, request, "<redacted>")
+		})
+	}
+}
+
+func TestCreateExternalCollectionValidationDoesNotLogExternalSpec(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.TraceLogMode.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(proxy.Params.CommonCfg.TraceLogMode.Key))
+	})
+
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "top-level config rejected",
+			body: `{
+				"collectionName": "external_books",
+				"externalSource": "s3://bucket/books",
+				"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}",
+				"schema": {"fields": []}
+			}`,
+		},
+		{
+			name: "quick create rejected",
+			body: `{
+				"collectionName": "external_books",
+				"dimension": 2,
+				"schema": {
+					"externalSource": "s3://bucket/books",
+					"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}"
+				}
+			}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			logs := captureHTTPServerLogs(t)
+			testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(testCase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			output := logs.String()
+			assert.NotContains(t, output, "AKIA_LOG_SENTINEL")
+			assert.NotContains(t, output, "SECRET_LOG_SENTINEL")
+			assert.NotContains(t, output, "FUTURE_LOG_SECRET_SENTINEL")
+			assert.Contains(t, output, "***")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTPasswords(t *testing.T) {
+	description := "account description"
+	testCases := []struct {
+		name    string
+		req     any
+		secrets []string
+	}{
+		{
+			name: "create user",
+			req: &PasswordReq{
+				UserName:    "alice",
+				Password:    "CREATE_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{"CREATE_PASSWORD_SENTINEL_DO_NOT_LOG"},
+		},
+		{
+			name: "update password",
+			req: &NewPasswordReq{
+				UserName:    "alice",
+				Password:    "OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				NewPassword: "NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{
+				"OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				"NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.Contains(t, request, "alice")
+			for _, secret := range testCase.secrets {
+				assert.NotContains(t, request, secret)
+			}
 		})
 	}
 }
 
 func TestHTTPWrapper(t *testing.T) {
+	h := &HandlersV2{metaCache: func() proxy.Cache { return nil }}
 	postTestCases := []requestBodyTestCase{}
 	postTestCasesTrace := []requestBodyTestCase{}
 	ginHandler := gin.Default()
@@ -193,7 +371,7 @@ func TestHTTPWrapper(t *testing.T) {
 	})
 	path = "/wrapper/post/trace/call"
 	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		return wrapperProxy(ctx, c, req, false, false, "", func(reqctx context.Context, req any) (any, error) {
+		return h.wrapperProxy(ctx, c, req, false, false, "", func(reqctx context.Context, req any) (any, error) {
 			return nil, nil
 		})
 	})))
@@ -241,6 +419,7 @@ func TestHTTPWrapper(t *testing.T) {
 }
 
 func TestGrpcWrapper(t *testing.T) {
+	h := &HandlersV2{metaCache: func() proxy.Cache { return nil }}
 	getTestCases := []rawTestCase{}
 	getTestCasesNeedAuth := []rawTestCase{}
 	needAuthPrefix := "/auth"
@@ -253,12 +432,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -272,12 +451,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -294,12 +473,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -318,12 +497,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -370,11 +549,11 @@ func TestGrpcWrapper(t *testing.T) {
 
 	path = "/wrapper/grpc/auth"
 	app.GET(path, func(c *gin.Context) {
-		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "test", DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, "", handle)
 	})
 	t.Run("check authorization", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -648,6 +827,40 @@ func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
 	assert.Equal(t, "request timeout", value)
 }
 
+func TestAccessLogConsistencyLevelAfterTimeout(t *testing.T) {
+	// enable access log with a formatter that reads $consistency_level so the
+	// write path formats the resolved consistency level
+	paramtable.Get().Save(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key, "10")
+	paramtable.Get().Save("proxy.accessLog.enable", "true")
+	paramtable.Get().Save("proxy.accessLog.formatters.base.format", "$consistency_level")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key)
+		paramtable.Get().Reset("proxy.accessLog.enable")
+		paramtable.Get().Reset("proxy.accessLog.formatters.base.format")
+	})
+	accesslog.InitAccessLogger(paramtable.Get())
+
+	ginHandler := gin.New()
+	path := "/middleware/accesslog-timeout"
+	ginHandler.Use(accesslog.AccessLogMiddleware)
+	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		// late task PreExecute: keep resolving the consistency level after the
+		// client has already seen the timeout response. The access log is
+		// written concurrently by AccessLogMiddleware, so actualConsistencyLevel
+		// must be read/written in a race-free way.
+		<-c.Request.Context().Done()
+		for i := 0; i < 50; i++ {
+			accesslog.SetActualConsistencyLevel(c.Request.Context(), commonpb.ConsistencyLevel_Bounded)
+		}
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestTimeout, w.Code)
+}
+
 func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
 	ginHandler := gin.New()
 	app := ginHandler.Group("")
@@ -895,6 +1108,112 @@ func TestDocInDocOutInsert(t *testing.T) {
 	}
 
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestTextFieldDMLV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+
+	assertTextFieldData := func(fieldsData []*schemapb.FieldData) {
+		textFieldData := getFieldDataByName(fieldsData, FieldText)
+		require.NotNil(t, textFieldData)
+		assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
+		assert.Equal(t, []string{"rest text value"}, textFieldData.GetScalars().GetStringData().GetData())
+	}
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			InsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			UpsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	requestBody := []byte(`{
+		"collectionName": "book",
+		"data": [{
+			"book_id": 1,
+			"word_count": 10,
+			"book_intro": [0.1, 0.2],
+			"text_field": "rest text value"
+		}]
+	}`)
+	for _, action := range []string{InsertAction, UpsertAction} {
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, action),
+			requestBody: requestBody,
+		}
+		sendReqAndVerify(t, testEngine, action, http.MethodPost, testcase)
+	}
+}
+
+func TestTextFieldQueryV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
+		Status:       commonSuccessStatus,
+		OutputFields: []string{FieldText},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Text,
+				FieldName: FieldText,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"rest query text"}},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, QueryAction), bytes.NewReader([]byte(`{
+		"collectionName": "book",
+		"filter": "book_id > 0",
+		"outputFields": ["text_field"],
+		"limit": 10
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	resp := map[string]interface{}{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, float64(0), resp[HTTPReturnCode])
+	data := resp[HTTPReturnData].([]interface{})
+	require.Len(t, data, 1)
+	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
 }
 
 func TestDocInDocOutInsertInvalid(t *testing.T) {
@@ -2383,6 +2702,7 @@ type externalCollectionRESTProxy struct {
 	progressReq                *milvuspb.GetRefreshExternalCollectionProgressRequest
 	restoreReq                 *milvuspb.RestoreExternalSnapshotRequest
 	exportReq                  *milvuspb.ExportSnapshotRequest
+	getExportSnapshotStateReq  *milvuspb.GetExportSnapshotStateRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
 }
@@ -2473,8 +2793,27 @@ func (m *externalCollectionRESTProxy) RestoreExternalSnapshot(ctx context.Contex
 func (m *externalCollectionRESTProxy) ExportSnapshot(ctx context.Context, request *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
 	m.exportReq = request
 	return &milvuspb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: request.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+		Status: merr.Success(),
+		JobId:  3001,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) GetExportSnapshotState(ctx context.Context, request *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	m.getExportSnapshotStateReq = request
+	return &milvuspb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &milvuspb.ExportSnapshotInfo{
+			JobId:               request.GetJobId(),
+			SnapshotName:        "snapshot_1",
+			DbName:              "default",
+			CollectionName:      "source_books",
+			State:               milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+			Progress:            100,
+			TotalFiles:          10,
+			CopiedFiles:         10,
+			TotalBytes:          4096,
+			SnapshotMetadataUri: "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+		},
 	}, nil
 }
 
@@ -2750,6 +3089,25 @@ func TestExportSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "snapshot_1", proxy.exportReq.GetName())
 	assert.Equal(t, "s3://foreign-bucket/export-root", proxy.exportReq.GetTargetS3Path())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.exportReq.GetExternalSpec())
+	assert.Contains(t, w.Body.String(), `"jobId":3001`)
+}
+
+func TestGetExportSnapshotStateRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, DescribeExportAction), bytes.NewReader([]byte(`{"jobId":"3001"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(3001), proxy.getExportSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"state":"ExportSnapshotCompleted"`)
+	assert.Contains(t, w.Body.String(), `"progress":100`)
+	assert.Contains(t, w.Body.String(), `"totalBytes":4096`)
 	assert.Contains(t, w.Body.String(), `"snapshotMetadataURI":"s3://foreign-bucket/export-root/snapshots/100/metadata/1.json"`)
 }
 
@@ -3558,6 +3916,138 @@ func TestCreateImportJobPreservesRBACRoleContext(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), returnBody)
 	assert.NoError(t, err)
 	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
+// newRESTV2ServerForRBACTest builds a v2 REST server whose auth middleware sets
+// the parsed username directly, without re-initializing the proxy privilege
+// cache (genAuthMiddleWare resets it, which would wipe test grants).
+func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Engine {
+	t.Helper()
+	h := NewHandlersV2(pxy)
+	ginHandler := gin.Default()
+	appV2 := ginHandler.Group("/v2/vectordb", func(c *gin.Context) {
+		username, _, ok := ParseUsernamePassword(c)
+		if !ok || username == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			return
+		}
+		c.Set(ContextUsername, username)
+	})
+	h.RegisterRoutesToV2(appV2)
+	return ginHandler
+}
+
+// TestRESTV2AliasRBAC guards the alias-resolution wiring of the REST v2
+// authorization path: the handlers must authorize through the injected
+// MetaCache (PrivilegeInterceptorWithMetaCache), not a nil one, so a role
+// granted on the real collection is honored when the request addresses the
+// collection through an alias.
+func TestRESTV2AliasRBAC(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), realCol, commonpb.ObjectPrivilege_PrivilegeLoad.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	testEngine := newRESTV2ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	loadPath := versionalV2(CollectionCategory, LoadAction)
+	for _, tc := range []struct {
+		name string
+		coll string
+	}{
+		{"real collection name", realCol},
+		{"alias resolves to the granted collection", alias},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := bytes.NewReader([]byte(`{"collectionName": "` + tc.coll + `"}`))
+			req := httptest.NewRequest(http.MethodPost, loadPath, body)
+			req.SetBasicAuth(username, "pwd")
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(nil), returnBody.Code, w.Body.String())
+		})
+	}
+}
+
+// TestRESTV2AliasRBAC_GrantOnAliasStringDenied verifies the inverse: a grant
+// scoped to the alias string must NOT authorize access through the alias, since
+// the alias is resolved to the real collection before enforcement.
+func TestRESTV2AliasRBAC_GrantOnAliasStringDenied(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), alias, commonpb.ObjectPrivilege_PrivilegeLoad.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := newRESTV2ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	body := bytes.NewReader([]byte(`{"collectionName": "` + alias + `"}`))
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, LoadAction), body)
+	req.SetBasicAuth(username, "pwd")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	mp.AssertNotCalled(t, "LoadCollection", mock.Anything, mock.Anything)
 }
 
 func validateTestCases(t *testing.T, testEngine *gin.Engine, queryTestCases []requestBodyTestCase, allowInt64 bool) {

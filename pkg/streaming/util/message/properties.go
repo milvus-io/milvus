@@ -18,6 +18,7 @@ const (
 	messagePChannelLevel                    = "_pcl" // mark the message as pchannel level message.
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
 	messageUnreplicable                     = "_ur"  // mark the message as unsafe to replicate.
+	messagePartialUpdateCAS                 = "_puc" // partial update CAS transaction marker.
 )
 
 var (

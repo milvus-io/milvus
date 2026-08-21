@@ -1609,6 +1609,79 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 	s.Equal([]string{"<em>highlighted</em> text 3"}, highlightResult.Datas[2].Fragments)
 }
 
+func (s *SearchPipelineSuite) TestSemanticHighlightOpNullableStringAlignsRows() {
+	ctx := context.Background()
+
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			s.Equal([]int64{3}, topks)
+			s.Equal([]string{"text 1", "", "text 3"}, texts)
+			return [][]string{
+					{"highlighted text 1"},
+					{},
+					{"highlighted text 3"},
+				}, [][]float32{
+					{0.9},
+					{},
+					{0.7},
+				}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).Return(testVarCharField).Build()
+	defer mockGetFieldName.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					ValidData: []bool{true, false, true},
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"text 1", "text 3"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Require().Len(result.GetResults().GetHighlightResults(), 1)
+	highlightResult := result.GetResults().GetHighlightResults()[0]
+	// The fix under test is the row alignment feeding Process: the NULL row
+	// materializes as "" at its own index, asserted on `texts` inside the mock
+	// above. Here we only verify the per-row results survive alignment 1:1 —
+	// the row-1 payload is whatever the mock returned, not a NULL-semantics
+	// guarantee, so we assert positional pass-through across all three rows.
+	s.Require().Len(highlightResult.GetDatas(), 3)
+	s.Equal([]string{"highlighted text 1"}, highlightResult.GetDatas()[0].GetFragments())
+	s.Equal([]string{}, highlightResult.GetDatas()[1].GetFragments())
+	s.Equal([]string{"highlighted text 3"}, highlightResult.GetDatas()[2].GetFragments())
+}
+
 func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
 	ctx := context.Background()
 
@@ -2037,6 +2110,72 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMixedFields() {
 	s.Equal([]string{"<em>dynamic</em> text"}, result.Results.HighlightResults[1].Datas[0].Fragments)
 }
 
+// Process slices documents by topks without checking that they sum to
+// len(documents), so a $meta payload shorter than the hit count would go out of
+// range there. The dynamic-field branch must reject it up front, the same way
+// the schema branch does.
+func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicFieldRowCountMismatch() {
+	ctx := context.Background()
+
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			s.Fail("Process must not be called with a row-count mismatch")
+			return nil, nil, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockHasDynamicFields := mockey.Mock((*highlight.SemanticHighlight).HasDynamicFields).Return(true).Build()
+	defer mockHasDynamicFields.UnPatch()
+
+	mockDynamicFieldNames := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldNames).Return([]string{"dyn_content"}).Build()
+	defer mockDynamicFieldNames.UnPatch()
+
+	mockDynamicFieldID := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldID).Return(int64(102)).Build()
+	defer mockDynamicFieldID.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Topks says 3 hits, $meta carries only 2 rows.
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			Scores:     []float32{0.9, 0.8, 0.7},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   102,
+					FieldName: "$meta",
+					Type:      schemapb.DataType_JSON,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_JsonData{
+								JsonData: &schemapb.JSONArray{
+									Data: [][]byte{
+										[]byte(`{"dyn_content": "dynamic content 1"}`),
+										[]byte(`{"dyn_content": "dynamic content 2"}`),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.Error(err)
+	s.Nil(results)
+	s.Contains(err.Error(), "dynamic field dyn_content has 2 rows, expected 3")
+}
+
 func (s *SearchPipelineSuite) TestExtractMultipleDynamicFieldTexts() {
 	// Test normal extraction with multiple fields
 	jsonData := [][]byte{
@@ -2123,7 +2262,7 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2180,7 +2319,7 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2261,7 +2400,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2334,7 +2473,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2759,7 +2898,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		mixCoord: nil,
 		tr:       timerecord.NewTimeRecorder("test-search"),
@@ -6438,7 +6577,7 @@ func (s *SearchPipelineSuite) TestNewSearchPipelineWithOrderBy() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -6472,7 +6611,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlightDynamicFields(
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	// Mock highlighter with dynamic field names
@@ -6523,7 +6662,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperatorIncludesOrderByOutputFieldNa
 				{FieldID: 103, Name: "price", DataType: schemapb.DataType_Int64},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -6557,7 +6696,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithoutHighlighter() {
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	task := &searchTask{
@@ -6600,7 +6739,7 @@ func (s *SearchPipelineSuite) TestNewBuiltInPipelineWithAggCtx() {
 		aggCtx:        aggCtx,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
-			pkField:          pkField,
+			PkField:          pkField,
 		},
 		queryInfos: []*planpb.QueryInfo{{}},
 	}
@@ -6620,7 +6759,7 @@ func (s *SearchPipelineSuite) TestNewSearchPipelineWithAggCtxSkipsEndNode() {
 		aggCtx:        aggCtx,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
-			pkField:          pkField,
+			PkField:          pkField,
 		},
 		queryInfos:  []*planpb.QueryInfo{{}},
 		highlighter: nil,
@@ -6689,7 +6828,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlighterNoDynamicFie
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	// Mock highlighter with empty dynamic field names

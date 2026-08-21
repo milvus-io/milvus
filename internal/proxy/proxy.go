@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -80,10 +81,13 @@ type Proxy struct {
 
 	address  string
 	mixCoord types.MixCoordClient
+	factory  dependency.Factory
 
 	simpleLimiter *SimpleLimiter
 
-	chMgr channelsMgr
+	metaCacheMu sync.RWMutex
+	metaCache   Cache
+	chMgr       channelsMgr
 
 	sched *taskScheduler
 
@@ -117,7 +121,7 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
@@ -127,6 +131,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 		cancel:         cancel,
 		searchResultCh: make(chan *internalpb.SearchResults, n),
 		// shardMgr:        mgr,
+		factory:       factory,
 		simpleLimiter: NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
@@ -147,6 +152,25 @@ func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
 
 func (node *Proxy) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(node.stateCode.Load())
+}
+
+func (node *Proxy) getMetaCache() Cache {
+	node.metaCacheMu.RLock()
+	defer node.metaCacheMu.RUnlock()
+	return node.metaCache
+}
+
+// setMetaCache publishes the meta cache. It is called once during Proxy.Init()
+// after the cache is fully initialized, so request-serving goroutines observe it
+// atomically instead of racing with the assignment.
+func (node *Proxy) setMetaCache(cache Cache) {
+	node.metaCacheMu.Lock()
+	defer node.metaCacheMu.Unlock()
+	node.metaCache = cache
+}
+
+func (node *Proxy) GetMetaCache() Cache {
+	return node.getMetaCache()
 }
 
 // Register registers proxy at etcd
@@ -194,6 +218,21 @@ func (node *Proxy) Init() error {
 	}
 	mlog.Info(node.ctx, "init session for Proxy done")
 
+	fileMode := fileresource.GetLocalMode()
+	if fileMode == fileresource.SyncMode {
+		if node.factory == nil {
+			return merr.WrapErrServiceInternalMsg("proxy dependency factory is nil")
+		}
+		node.factory.Init(paramtable.Get())
+		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
+		if err != nil {
+			return merr.Wrap(err, "initialize Proxy file resource storage")
+		}
+		fileresource.InitManager(chunkManager, fileMode)
+	} else {
+		fileresource.InitManager(nil, fileMode)
+	}
+
 	err := node.initRateCollector()
 	if err != nil {
 		return err
@@ -236,10 +275,12 @@ func (node *Proxy) Init() error {
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
 
-	if err := InitMetaCache(node.ctx, node.mixCoord); err != nil {
+	metaCache, err := initMetaCache(node.ctx, node.mixCoord)
+	if err != nil {
 		mlog.Warn(node.ctx, "failed to init meta cache", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
 		return err
 	}
+	node.setMetaCache(metaCache)
 	mlog.Debug(node.ctx, "init meta cache done", mlog.String("role", typeutil.ProxyRole))
 
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
@@ -328,8 +369,8 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
-	if globalMetaCache != nil {
-		globalMetaCache.Close()
+	if metaCache := node.getMetaCache(); metaCache != nil {
+		metaCache.Close()
 	}
 
 	node.cancel()

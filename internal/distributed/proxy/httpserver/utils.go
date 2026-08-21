@@ -527,6 +527,16 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 				}
 
+				if fieldType == schemapb.DataType_Text {
+					if !fieldValue.Exists() {
+						continue
+					}
+					if fieldValue.Type != gjson.String {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
+							gjson.String, fieldValue.Type, "fieldName: "+fieldName)
+					}
+				}
+
 				dataString := fieldValue.String()
 				// if has pass pk than just to try to set it
 				if field.IsPrimaryKey && field.AutoID && len(dataString) == 0 {
@@ -775,9 +785,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					reallyData[fieldName] = result
 				case schemapb.DataType_Timestamptz:
 					reallyData[fieldName] = dataString
-				case schemapb.DataType_VarChar:
-					reallyData[fieldName] = dataString
-				case schemapb.DataType_String:
+				case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 					reallyData[fieldName] = dataString
 				default:
 					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName)
@@ -1855,9 +1863,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]float64, 0, rowsLen)
 		case schemapb.DataType_Timestamptz:
 			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_String:
-			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			data = make([]string, 0, rowsLen)
 		case schemapb.DataType_Array:
 			data = make([]*schemapb.ScalarField, 0, rowsLen)
@@ -1958,9 +1964,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Double:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float64), candi.v.Interface().(float64))
-			case schemapb.DataType_String:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
-			case schemapb.DataType_VarChar:
+			case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Array:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]*schemapb.ScalarField), candi.v.Interface().(*schemapb.ScalarField))
@@ -2135,17 +2139,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
-		case schemapb.DataType_String:
-			colData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: column.([]string),
-						},
-					},
-				},
-			}
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			colData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
@@ -2527,7 +2521,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 			return int64(len(fieldData.GetScalars().GetTimestamptzData().GetData())), nil
 		}
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_Array:
 		return int64(len(fieldData.GetScalars().GetArrayData().GetData())), nil
@@ -2761,9 +2755,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					} else {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 					}
-				case schemapb.DataType_String:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
-				case schemapb.DataType_VarChar:
+				case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
@@ -3088,7 +3080,8 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 	}
 
-	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, request)
+	metaCache := getProxyMetaCache(pxy)
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
 		return nil, err
 	}

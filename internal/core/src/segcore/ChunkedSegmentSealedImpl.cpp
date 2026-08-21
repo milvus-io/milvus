@@ -97,7 +97,6 @@
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_static.h"
 #include "knowhere/sparse_utils.h"
-#include "knowhere/version.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
@@ -2120,6 +2119,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     milvus::OpContext* op_ctx,
+    bool is_replace,
     StagedStateCommitter& committer) {
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
@@ -2273,6 +2273,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                    size_estimate =
                                        std::move(task.size_estimate),
                                    op_ctx,
+                                   is_replace,
                                    &committer]() mutable {
             CheckCancellation(op_ctx,
                               id_,
@@ -2286,7 +2287,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                             schema_snapshot,
                             eager_load,
                             op_ctx,
-                            /*is_replace=*/false,
+                            is_replace,
                             committer,
                             std::move(size_estimate));
         });
@@ -3756,8 +3757,13 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromIndex(
                "nullable vector index does not contain valid data");
 
     result.valid_data = std::make_unique<bool[]>(count);
-    vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
-        seg_offsets, count, result.valid_data.get(), result.valid_offsets);
+    result.valid_offsets.reserve(count);
+    for (int64_t i = 0; i < count; ++i) {
+        result.valid_data[i] = vec_index->IsRowValid(seg_offsets[i]);
+        if (result.valid_data[i]) {
+            result.valid_offsets.push_back(seg_offsets[i]);
+        }
+    }
     result.valid_count = result.valid_offsets.size();
     return result;
 }
@@ -3914,9 +3920,8 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
         return data_array;
     }
 
-    // Build el_ids dataset from valid_offsets. For nullable VECTOR_ARRAY, the
-    // index offset mapping maps logical row offsets to compact physical
-    // embedding-list ids.
+    // Knowhere IdMap maps nullable list ids internally, so ids stay logical at
+    // the Milvus/VectorIndex boundary.
     auto ids_ds = GenIdsDataset(valid_count, valid_offsets);
 
     auto [raw_data, offsets] = vec_index->GetEmbListByIds(ids_ds, metric_type);
@@ -6413,20 +6418,8 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     if (vec_index == nullptr) {
         return false;
     }
-    // Callers pass logical offsets (already translated from physical by
-    // SearchOnIndex). When the index carries an offset_mapping (nullable
-    // vector), the underlying knowhere index operates on physical offsets,
-    // so translate logical -> physical before the call.
-    const auto& offset_mapping = vec_index->GetOffsetMapping();
-    std::vector<int64_t> physical_offsets;
-    const int64_t* labels = seg_offsets;
-    if (offset_mapping.IsEnabled()) {
-        physical_offsets.assign(seg_offsets, seg_offsets + count);
-        offset_mapping.TransformLogicalOffsets(physical_offsets);
-        labels = physical_offsets.data();
-    }
     auto res = vec_index->CalcDistByIDs(
-        query_dataset, BitsetView(), labels, count, is_cosine, op_ctx);
+        query_dataset, BitsetView(), seg_offsets, count, is_cosine, op_ctx);
     if (!res.has_value()) {
         return false;
     }
@@ -6853,6 +6846,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(
         auto index_metric = field_binlog_config->GetMetricType();
 
         if (enable_binlog_index()) {
+            const auto index_version =
+                segcore_config_.get_interim_index_version();
             std::unique_ptr<
                 milvus::cachinglayer::Translator<milvus::index::IndexBase>>
                 translator =
@@ -6863,6 +6858,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                         field_id.get(),
                         interim_index_type,
                         index_metric,
+                        index_version,
                         build_config,
                         dim,
                         is_sparse,
@@ -6871,8 +6867,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
                     std::move(translator));
-            auto index_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
             bool has_raw_data = false;
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -7259,7 +7253,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (diff.load_external_manifest) {
-        LoadColumnGroups(segment_load_info, schema_snapshot, op_ctx, committer);
+        LoadColumnGroups(segment_load_info,
+                         schema_snapshot,
+                         op_ctx,
+                         /*is_replace=*/diff.manifest_updated,
+                         committer);
     } else {
         bool has_cg_changes = !diff.column_groups_to_load.empty() ||
                               !diff.column_groups_to_replace.empty() ||
@@ -8161,13 +8159,15 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_group_futures;
-    for (const auto& [cg_index, field_ids] : cg_field_ids) {
+    for (const auto& cg_field_id : cg_field_ids) {
+        const auto cg_index = cg_field_id.first;
+        const auto& field_ids_ref = cg_field_id.second;
         auto size_estimate = size_estimates.at(cg_index);
         auto future = pool.Submit([this,
                                    column_groups,
                                    properties,
                                    cg_index,
-                                   field_ids,
+                                   field_ids = field_ids_ref,
                                    size_estimate = std::move(size_estimate),
                                    &segment_load_info,
                                    schema_snapshot,
@@ -9467,6 +9467,17 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     if (size == 0 || !snapshot->use_take_for_output) {
         return false;
     }
+    auto result_count_limit = SegcoreConfig::default_config()
+                                  .get_take_for_output_result_count_limit();
+    if (result_count_limit > 0 && size > result_count_limit) {
+        LOG_DEBUG(
+            "[TakeAPI] retrieve skipped take() for segment {} because "
+            "result count {} exceeds limit {}",
+            id_,
+            size,
+            result_count_limit);
+        return false;
+    }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
 
@@ -9757,6 +9768,20 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     if (size == 0 || !snapshot->use_take_for_output) {
         return false;
     }
+    auto result_count_limit = SegcoreConfig::default_config()
+                                  .get_take_for_output_result_count_limit();
+    if (plan->plan_node_ != nullptr) {
+        auto topk = plan->plan_node_->search_info_.topk_;
+        if (result_count_limit > 0 && topk > result_count_limit) {
+            LOG_DEBUG(
+                "[TakeAPI] search skipped take() for segment {} because "
+                "topk {} exceeds limit {}",
+                id_,
+                topk,
+                result_count_limit);
+            return false;
+        }
+    }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
 
@@ -9787,6 +9812,16 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
 
     auto ctx = BuildTakeContext(seg_offsets, size);
+    if (result_count_limit > 0 &&
+        ctx.unique_offsets.size() > static_cast<size_t>(result_count_limit)) {
+        LOG_DEBUG(
+            "[TakeAPI] search skipped take() for segment {} because "
+            "unique offset count {} exceeds limit {}",
+            id_,
+            ctx.unique_offsets.size(),
+            result_count_limit);
+        return false;
+    }
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
         has_vector_output) {
         LogTakeFallback("search",

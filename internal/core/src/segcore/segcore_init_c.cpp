@@ -51,6 +51,30 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     config.set_enable_interim_segment_index(value);
 }
 
+extern "C" CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version) {
+    try {
+        const int64_t current_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        if (target_version != -1 &&
+            !knowhere::Version::VersionSupport(
+                knowhere::Version(static_cast<int32_t>(target_version)))) {
+            ThrowInfo(ConfigInvalid,
+                      "interim index target version {} is not supported by "
+                      "Knowhere (current {}, maximum {})",
+                      target_version,
+                      current_version,
+                      knowhere::Version::GetMaximumVersion().VersionNumber());
+        }
+
+        SegcoreConfig::default_config().set_interim_index_target_version(
+            static_cast<int32_t>(target_version));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 extern "C" void
 SegcoreSetStorageV3Enabled(const bool value) {
     milvus::segcore::SegcoreConfig& config =
@@ -81,9 +105,11 @@ SegcoreSetEnableGISSplitFusion(const bool value) {
 
 extern "C" void
 SegcoreSetVisibilityFilterEnabled(const bool value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    config.set_visibility_filter_enabled(value);
+    // Deprecated compatibility shim: row visibility filtering is always
+    // enforced and this value is ignored. The symbol survives so callers
+    // built against the v3.0.0 interface keep linking; the Go side rejects
+    // `false` at querynode startup before this could ever matter.
+    (void)value;
 }
 
 extern "C" void
@@ -91,6 +117,20 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_prefer_field_data_when_index_has_raw_data(value);
+}
+
+extern "C" void
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_take_for_output_result_count_limit(value);
+}
+
+extern "C" int64_t
+SegcoreGetTakeForOutputResultCountLimit() {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    return config.get_take_for_output_result_count_limit();
 }
 
 extern "C" void

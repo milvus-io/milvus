@@ -40,7 +40,7 @@ func (b *builderImpl) getProducerConfig() kafka.ConfigMap {
 	config := &paramtable.Get().KafkaCfg
 	producerConfig := getBasicConfig(config)
 
-	producerConfig.SetKey("message.max.bytes", 10485760)
+	producerConfig.SetKey("message.max.bytes", config.ProducerMessageMaxBytes.GetAsInt())
 	producerConfig.SetKey("compression.codec", "zstd")
 	// we want to ensure tt send out as soon as possible
 	producerConfig.SetKey("linger.ms", 5)

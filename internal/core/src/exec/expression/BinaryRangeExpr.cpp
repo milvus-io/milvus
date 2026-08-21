@@ -358,20 +358,26 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
         [this](OffsetVector* input) -> ColumnVectorPtr {
-        int64_t batch_size;
-        if (input != nullptr) {
-            batch_size = input->size();
+        TargetBitmap valid_res;
+        if (expr_->column_.element_level_) {
+            // Element batches are derived from the row cursor so
+            // MoveCursor()-based short-circuiting stays aligned.
+            // Individual elements cannot be null; their containing row's
+            // validity is applied by the element consumer.
+            auto batch_size =
+                GetNextRealBatchSize(input, /*element_level=*/true);
+            valid_res = TargetBitmap(batch_size, true);
+            if (input == nullptr) {
+                MoveCursor();
+            }
+        } else if (input != nullptr) {
+            valid_res =
+                ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input);
         } else {
-            batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                             ? active_count_ - overflow_check_pos_
-                             : batch_size_;
-            overflow_check_pos_ += batch_size;
+            valid_res = ProcessChunksForValid<T>(UseIndexCursor());
         }
-        auto valid_res =
-            (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
-                : ProcessChunksForValid<T>(UseIndexCursor());
 
+        auto batch_size = valid_res.size();
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
         return res_vec;

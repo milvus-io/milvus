@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <numeric>
 #include <thread>
 #include <vector>
 
@@ -158,6 +159,25 @@ TEST(GrowingConcurrentReopenTest,
 
         if (!exceptions.empty()) {
             break;
+        }
+
+        // Reopen publishes the evolved schema only after both storage maps
+        // contain the new nullable field and its existing rows are backfilled.
+        // Verify that contract through both the InsertRecord state and the
+        // public query path.
+        auto evolved_fid = evolutions.back()->get_field_id(
+            FieldName("evo_field_" + std::to_string(kExtraFields)));
+        const auto& insert_record = seg_impl->get_insert_record();
+        ASSERT_TRUE(insert_record.is_data_exist(evolved_fid));
+        ASSERT_TRUE(insert_record.is_valid_data_exist(evolved_fid));
+        std::vector<int64_t> offsets(N);
+        std::iota(offsets.begin(), offsets.end(), 0);
+        auto evolved = seg_impl->bulk_subscript(
+            nullptr, evolved_fid, offsets.data(), offsets.size());
+        ASSERT_NE(evolved, nullptr);
+        ASSERT_EQ(evolved->valid_data_size(), N);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_FALSE(evolved->valid_data(i));
         }
     }
 

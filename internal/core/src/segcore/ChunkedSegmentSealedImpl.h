@@ -448,6 +448,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     const Schema&
     get_schema() const override;
 
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return CaptureSchemaSnapshot();
+    }
+
     void
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
@@ -1998,6 +2003,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
                      const SchemaPtr& schema_snapshot,
                      milvus::OpContext* op_ctx,
+                     bool is_replace,
                      StagedStateCommitter& committer);
 
     void

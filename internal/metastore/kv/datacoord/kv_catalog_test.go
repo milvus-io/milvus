@@ -23,13 +23,16 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -40,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	basekv "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -47,6 +51,66 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type snapshotExportJobMetaKV struct {
+	basekv.MetaKv
+
+	mu        sync.Mutex
+	values    map[string]string
+	saveErr   error
+	walkErr   error
+	removeErr error
+}
+
+func newSnapshotExportJobMetaKV() *snapshotExportJobMetaKV {
+	return &snapshotExportJobMetaKV{values: make(map[string]string)}
+}
+
+func (m *snapshotExportJobMetaKV) Save(_ context.Context, key, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.values[key] = value
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) WalkWithPrefix(
+	_ context.Context,
+	prefix string,
+	_ int,
+	fn func([]byte, []byte) error,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.walkErr != nil {
+		return m.walkErr
+	}
+	keys := make([]string, 0, len(m.values))
+	for key := range m.values {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := fn([]byte(key), []byte(m.values[key])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) Remove(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	delete(m.values, key)
+	return nil
+}
 
 var (
 	logID        = int64(99)
@@ -473,6 +537,57 @@ func Test_AlterSegments(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(savedKvs))
+	})
+
+	// V3 segments persist paths via the LOON manifest. AlterSegments must
+	// emit ONLY the segment KV — no per-FieldBinlog binlog/deltalog/statslog
+	// KVs. The V2 "save successfully" subtest above writes 4 KVs (1 seg + 3
+	// binlog) for the same fixture; this V3 variant must write exactly 1.
+	t.Run("v3 segment skips per-FieldBinlog KVs", func(t *testing.T) {
+		var savedKvs map[string]string
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
+			savedKvs = m
+			return nil
+		})
+
+		v3Segment := proto.Clone(segment1).(*datapb.SegmentInfo)
+		v3Segment.ManifestPath = "test://manifest/path@1"
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{v3Segment}, metastore.BinlogsIncrement{
+			Segment: v3Segment,
+		})
+		assert.NoError(t, err)
+
+		// Exactly the segment KV — no per-FieldBinlog persistence for V3.
+		assert.Equal(t, 1, len(savedKvs))
+		segKey := buildSegmentPath(v3Segment.CollectionID, v3Segment.PartitionID, v3Segment.ID)
+		_, ok := savedKvs[segKey]
+		assert.True(t, ok, "segment KV must still be written")
+
+		for k := range savedKvs {
+			assert.NotContains(t, k, SegmentBinlogPathPrefix, "no insert binlog KV for V3")
+			assert.NotContains(t, k, SegmentDeltalogPathPrefix, "no delta binlog KV for V3")
+			assert.NotContains(t, k, SegmentStatslogPathPrefix, "no stats binlog KV for V3")
+		}
+
+		// Verify by re-parsing the persisted segment KV:
+		// 1. NumOfRows is unchanged: V3 skips ReCalcRowCount
+		//    (binlogs[0].Binlogs has 5 entries but the segment reports
+		//    100; the V2 path would correct down to 5).
+		// 2. Binlogs/Statslogs/Deltalogs/Bm25Statslogs are empty on the
+		//    persisted proto — resetBinlogFields runs before serialization
+		//    for every segment, and the V3 path emits no per-FieldBinlog
+		//    KVs to compensate, so on reload these arrays will be nil.
+		//    SegmentInfo.Stats is the only source of aggregate metrics.
+		persisted := &datapb.SegmentInfo{}
+		require.NoError(t, proto.Unmarshal([]byte(savedKvs[segKey]), persisted))
+		assert.EqualValues(t, 100, persisted.GetNumOfRows(), "V3 must skip array-based row-count reconciliation")
+		assert.Empty(t, persisted.GetBinlogs(), "V3 persisted SegmentInfo must have empty Binlogs")
+		assert.Empty(t, persisted.GetStatslogs(), "V3 persisted SegmentInfo must have empty Statslogs")
+		assert.Empty(t, persisted.GetDeltalogs(), "V3 persisted SegmentInfo must have empty Deltalogs")
+		assert.Empty(t, persisted.GetBm25Statslogs(), "V3 persisted SegmentInfo must have empty Bm25Statslogs")
 	})
 
 	t.Run("save large ops successfully", func(t *testing.T) {
@@ -1954,6 +2069,72 @@ func TestCatalog_CopySegmentJob(t *testing.T) {
 
 		err = kc.DropCopySegmentJob(context.Background(), job.GetJobId())
 		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_ExportSnapshotJob(t *testing.T) {
+	ctx := context.Background()
+	metaKV := newSnapshotExportJobMetaKV()
+	catalog := &Catalog{MetaKv: metaKV, paginationSize: 16}
+	job := &datapb.ExportSnapshotJob{
+		JobId:          9001,
+		SnapshotName:   "snapshot-1",
+		CollectionId:   100,
+		CollectionName: "collection-1",
+		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
+	}
+
+	t.Run("empty catalog", func(t *testing.T) {
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, jobs)
+	})
+
+	t.Run("save overwrite list and drop", func(t *testing.T) {
+		require.NoError(t, catalog.SaveExportSnapshotJob(ctx, job))
+		updated := proto.Clone(job).(*datapb.ExportSnapshotJob)
+		updated.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
+		updated.Progress = 35
+		require.NoError(t, catalog.SaveExportSnapshotJob(ctx, updated))
+
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		require.Len(t, jobs, 1)
+		assert.True(t, proto.Equal(updated, jobs[0]))
+
+		require.NoError(t, catalog.DropExportSnapshotJob(ctx, job.GetJobId()))
+		jobs, err = catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, jobs)
+	})
+
+	t.Run("malformed record", func(t *testing.T) {
+		metaKV.mu.Lock()
+		metaKV.values[buildExportSnapshotJobKey(9002)] = "not-a-protobuf"
+		metaKV.mu.Unlock()
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.Error(t, err)
+		assert.Nil(t, jobs)
+		metaKV.mu.Lock()
+		delete(metaKV.values, buildExportSnapshotJobKey(9002))
+		metaKV.mu.Unlock()
+	})
+
+	t.Run("storage errors", func(t *testing.T) {
+		storageErr := errors.New("storage unavailable")
+		metaKV.saveErr = storageErr
+		require.ErrorIs(t, catalog.SaveExportSnapshotJob(ctx, job), storageErr)
+		metaKV.saveErr = nil
+
+		metaKV.walkErr = storageErr
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.ErrorIs(t, err, storageErr)
+		assert.Nil(t, jobs)
+		metaKV.walkErr = nil
+
+		metaKV.removeErr = storageErr
+		require.ErrorIs(t, catalog.DropExportSnapshotJob(ctx, job.GetJobId()), storageErr)
+		metaKV.removeErr = nil
 	})
 }
 

@@ -208,14 +208,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
-    std::shared_mutex&
-    get_chunk_mutex() const {
-        return chunk_mutex_;
-    }
-
     const Schema&
     get_schema() const override {
-        return *schema_;
+        // Compatibility path for the legacy reference API; readers should keep
+        // a SchemaPtr from get_schema_snapshot() when they need lifetime safety.
+        thread_local SchemaPtr schema_snapshot;
+        schema_snapshot = get_schema_snapshot();
+        return *schema_snapshot;
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return std::atomic_load_explicit(&schema_, std::memory_order_acquire);
     }
 
     FieldId
@@ -272,7 +276,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    try_remove_chunks(FieldId fieldId);
+    try_remove_chunks(FieldId fieldId, const Schema& schema);
 
     void
     search_batch_pks(
@@ -523,10 +527,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasIndex(FieldId field_id) const override {
-        if (!is_field_exist(field_id)) {
+        auto schema = get_schema_snapshot();
+        if (!schema->has_field(field_id)) {
             return false;
         }
-        auto& field_meta = schema_->operator[](field_id);
+        auto& field_meta = schema->operator[](field_id);
         if ((IsVectorDataType(field_meta.get_data_type()) ||
              IsGeometryType(field_meta.get_data_type())) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
@@ -540,11 +545,17 @@ class SegmentGrowingImpl : public SegmentGrowing {
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
              bool include_ngram = false) const override {
-        if (!HasIndex(field_id)) {
+        auto schema = get_schema_snapshot();
+        if (!schema->has_field(field_id)) {
             return {};
         }
 
-        auto& field_meta = schema_->operator[](field_id);
+        auto& field_meta = schema->operator[](field_id);
+        if (!(IsVectorDataType(field_meta.get_data_type()) ||
+              IsGeometryType(field_meta.get_data_type())) ||
+            !indexing_record_.SyncDataWithIndex(field_id)) {
+            return {};
+        }
 
         // For geometry fields, return segment-level index (RTree doesn't use chunks)
         if (IsGeometryType(field_meta.get_data_type())) {
@@ -634,8 +645,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     is_field_exist(FieldId field_id) const override {
-        return schema_->get_fields().find(field_id) !=
-               schema_->get_fields().end();
+        auto schema = get_schema_snapshot();
+        return schema->get_fields().find(field_id) !=
+               schema->get_fields().end();
     }
 
     /**
@@ -696,6 +708,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     ResourceUsage
     EstimateSegmentResourceUsage() const;
+
+    ResourceUsage
+    EstimateSegmentResourceUsage(const Schema& schema) const;
 
     void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
@@ -773,6 +788,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
                                      int64_t row_count);
 
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count,
+                                     const Schema& schema);
+
     /**
      * @brief Update resource tracking by refunding old estimate and charging new
      *
@@ -786,6 +806,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     void
     UpdateResourceTracking();
+
+    void
+    UpdateResourceTracking(const Schema& schema);
 
  private:
     void
@@ -870,7 +893,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;
 
-    mutable std::shared_mutex chunk_mutex_;
+    // No chunk lock. Readers pin the generation they walk via
+    // VectorBase::acquire_chunks(); try_remove_chunks swaps the container's
+    // collection out and lets the last pin holder free it. Reclamation and
+    // reads no longer exclude each other in either direction.
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;

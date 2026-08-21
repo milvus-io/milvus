@@ -147,6 +147,29 @@ func (st *statsTask) IsVectorIndex() bool {
 	return false
 }
 
+func redactStorageCredentialsForLog(accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON *string) {
+	for _, secret := range []*string{accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON} {
+		if *secret != "" {
+			*secret = "<redacted>"
+		}
+	}
+}
+
+func redactStorageConfigForLog(config *indexpb.StorageConfig) *indexpb.StorageConfig {
+	if config == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(config).(*indexpb.StorageConfig)
+	redactStorageCredentialsForLog(
+		&redacted.AccessKeyID,
+		&redacted.SecretAccessKey,
+		&redacted.SslCACert,
+		&redacted.GcpCredentialJSON,
+	)
+	return redacted
+}
+
 func (st *statsTask) PreExecute(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-PreExecute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()
@@ -186,7 +209,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		mlog.FieldSegmentID(st.req.GetSegmentID()),
 		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
 		mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-		mlog.Any("storageConfig", st.req.StorageConfig),
+		mlog.Any("storageConfig", redactStorageConfigForLog(st.req.GetStorageConfig())),
 	)
 	return nil
 }
@@ -366,7 +389,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	if len(insertLogs) == 0 {
+	if len(insertLogs) == 0 && st.manifestPath == "" {
 		mlog.Info(ctx,
 			"there is no insertBinlogs, skip creating text index")
 		return nil
@@ -535,7 +558,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	var analyzerExtraInfo string
-	if len(st.req.GetFileResources()) > 0 {
+	if len(st.req.GetFileResources()) > 0 && fileresource.GlobalFileManager.Mode() == fileresource.RefMode {
 		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
 		if err != nil {
 			return err

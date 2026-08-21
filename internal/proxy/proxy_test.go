@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
@@ -1201,7 +1202,7 @@ func TestProxy(t *testing.T) {
 			CollectionName: "alias",
 		})
 
-		_, err = globalMetaCache.GetCollectionID(ctx, dbName, "alias")
+		_, err = proxy.getMetaCache().GetCollectionID(ctx, dbName, "alias")
 		assert.Error(t, err)
 	})
 
@@ -1229,7 +1230,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
@@ -1413,7 +1414,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -1981,7 +1982,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("get replicas", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
@@ -2230,7 +2231,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("release collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
@@ -2258,7 +2259,7 @@ func TestProxy(t *testing.T) {
 
 	pLoaded := true
 	t.Run("load partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
@@ -2308,7 +2309,7 @@ func TestProxy(t *testing.T) {
 	assert.True(t, pLoaded)
 
 	t.Run("show in-memory partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2555,7 +2556,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show in-memory partitions after release partition", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2605,7 +2606,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		_, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
+		_, err = proxy.getMetaCache().GetPartitionID(ctx, dbName, collectionName, partitionName)
 		assert.Error(t, err)
 
 		// drop non-exist partition -> fail
@@ -2644,7 +2645,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show partitions after drop partition", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2685,7 +2686,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("truncate collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
@@ -2708,7 +2709,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
@@ -2730,7 +2731,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		_, err = globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err = proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.Error(t, err)
 
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
@@ -2742,7 +2743,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		hasDatabase := globalMetaCache.HasDatabase(ctx, dbName)
+		hasDatabase := proxy.getMetaCache().HasDatabase(ctx, dbName)
 		assert.False(t, hasDatabase)
 	})
 
@@ -4416,20 +4417,15 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 
 func Test_GetFlushState(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
-		originCache := globalMetaCache
 		m := NewMockCache(t)
 		m.On("GetCollectionID",
 			mock.Anything,
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(1), nil)
-		globalMetaCache = m
-		defer func() {
-			globalMetaCache = originCache
-		}()
 
 		mixCoord := &MixCoordMock{}
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
 			CollectionName: "coll",
@@ -4447,6 +4443,28 @@ func Test_GetFlushState(t *testing.T) {
 	})
 }
 
+func TestProxy_SyncFileResource(t *testing.T) {
+	oldManager := fileresource.GlobalFileManager
+	defer func() { fileresource.GlobalFileManager = oldManager }()
+
+	t.Run("unhealthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(status))
+	})
+}
+
 func TestProxy_GetComponentStates(t *testing.T) {
 	n := &Proxy{}
 	n.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -4461,9 +4479,6 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {
@@ -4488,9 +4503,9 @@ func TestProxy_Import(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
-		globalMetaCache = mc
+		proxy.metaCache = mc
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
@@ -4582,18 +4597,12 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 	}
 	ctx := GetContext(context.Background(), "root:123456")
 
-	// OperatePrivilege resolves the collection alias before granting (default
-	// ResolveAliasForPrivilege on); pin globalMetaCache to a mock that resolves
-	// "col1" as-is, so the test does not depend on leftover global cache state.
-	originCache := globalMetaCache
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().ResolveCollectionAlias(mock.Anything, mock.Anything, "col1").Return("col1", nil).Maybe()
-	globalMetaCache = metaCache
-	defer func() { globalMetaCache = originCache }()
 
 	t.Run("related privilege grpc error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mixCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
@@ -4611,7 +4620,7 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 
 	t.Run("related privilege status error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mixCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
@@ -4633,7 +4642,6 @@ func TestProxy_GetStatistics(t *testing.T) {
 }
 
 func TestProxy_GetLoadState(t *testing.T) {
-	originCache := globalMetaCache
 	m := NewMockCache(t)
 	m.On("GetCollectionID",
 		mock.Anything, // context.Context
@@ -4646,11 +4654,6 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(UniqueID(2), nil)
-	globalMetaCache = m
-	defer func() {
-		globalMetaCache = originCache
-	}()
-
 	{
 		mixCoord := getMixCoordClient()
 		mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -4658,7 +4661,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4673,7 +4676,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixCoord := getMixCoordClient()
 		mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotLoaded("foo"))
 		mixCoord.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrPartitionNotLoaded("p1"))
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4714,7 +4717,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{100},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo", Base: &commonpb.MsgBase{}})
@@ -4749,7 +4752,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{50},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4783,7 +4786,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status: merr.Status(mockErr),
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})

@@ -1008,8 +1008,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
              expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
-            auto schema = segment->get_schema();
-            auto field_meta = schema[field_id];
+            auto schema = segment->get_schema_snapshot();
+            auto field_meta = (*schema)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =
@@ -1171,7 +1171,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};

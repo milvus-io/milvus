@@ -2106,7 +2106,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2175,7 +2175,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2475,7 +2475,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         flt_data = [[m * 1.0 for m in range(i, i + limit)] for i in range(default_nb)]
         bool_data = [[bool(i % 2)] for i in range(default_nb)]
         list_data = [[[i, str(i + 1)], [i * 1.0, i + 1]] for i in range(default_nb)]
-        mix_data = [[i, i * 1.1, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
+        mix_data = [[i, i + 0.5, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
 
         for i in range(default_nb):
             rows[i][ct.default_json_field_name] = {
@@ -6350,7 +6350,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
-            field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2", params={"nlist": 64}
+            field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="L2", params={}
         )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)

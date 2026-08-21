@@ -117,13 +117,16 @@ func NewMetaCache(
 
 func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, pkFactory PkStatsFactory, bmFactor BM25StatsFactory) {
 	for _, seg := range vchannel.FlushedSegments {
-		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg)))
+		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg), NewSegmentStatsFromStats(seg.GetStats(), seg.GetNumOfRows())))
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
 		// segment state could be sealed for growing segment if flush request processed before datanode watch
 		seg.State = commonpb.SegmentState_Growing
-		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg)))
+		// Restore the cumulative stats collector from the persisted Stats so a
+		// recovered growing segment keeps accumulating instead of undercounting
+		// from empty after restart.
+		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg), NewSegmentStatsFromStats(seg.GetStats(), seg.GetNumOfRows())))
 	}
 }
 
@@ -134,7 +137,7 @@ func (c *metaCacheImpl) Collection() int64 {
 
 // AddSegment adds a segment from segment info.
 func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction) {
-	segment := NewSegmentInfo(segInfo, pkFactory(segInfo), bmFactory(segInfo))
+	segment := NewSegmentInfo(segInfo, pkFactory(segInfo), bmFactory(segInfo), NewEmptySegmentStats())
 
 	for _, action := range actions {
 		action(segment)
@@ -299,6 +302,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 				flushedRows:      info.GetNumOfRows(),
 				startPosRecorded: true,
 				bfs:              newSegmentsBF[i],
+				stats:            NewEmptySegmentStats(),
 			}
 			c.segmentInfos[info.GetSegmentId()] = segInfo
 			c.stateSegments[info.GetState()][info.GetSegmentId()] = segInfo

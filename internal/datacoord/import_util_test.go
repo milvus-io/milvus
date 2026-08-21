@@ -29,7 +29,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -559,8 +558,10 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	assert.NoError(t, err)
 
 	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 100, State: commonpb.SegmentState_Flushed},
-		size:        *atomic.NewInt64(3000 * 1024 * 1024),
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 5, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			Stats: &datapb.Statistics{InsertBinlogSize: 3000 * 1024 * 1024},
+		},
 	}
 	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)

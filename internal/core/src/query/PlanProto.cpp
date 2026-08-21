@@ -479,8 +479,8 @@ BuildProjectAndAggregationNodes(
 // Helper function to build ProjectNode for ORDER BY queries.
 // Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
 // deferred_field_ids is empty for single-project mode (all columns materialized
-// in the first project), or non-empty for two-project mode (variable-width
-// non-sort output columns deferred until after TopK).
+// in the first project), or non-empty for two-project mode (variable-width or
+// vector non-sort output columns deferred until after TopK).
 // pipeline_field_ids mirrors project_ids so FillOrderByResult can stamp
 // the correct field_id on each DataArray produced by the pipeline.
 std::tuple<plan::PlanNodePtr, std::vector<FieldId>, std::vector<FieldId>>
@@ -518,11 +518,13 @@ BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
         }
     }
 
-    // Collect non-sort output fields and check for variable-width types.
+    // Collect non-sort output fields and check whether any must be late
+    // materialized. ProjectNode only materializes scalar columns, so vector
+    // outputs must be deferred just like variable-width outputs.
     // Skip system fields (RowFieldID, TimestampFieldID) — they are handled
     // separately in FillTargetEntry and must not enter the pipeline.
     std::vector<FieldId> non_sort_output_fields;
-    bool has_variable_width = false;
+    bool requires_late_materialization = false;
     for (auto fid_raw : plan_node_proto.output_field_ids()) {
         if (seen_field_ids.count(fid_raw) == 0) {
             auto fid = FieldId(fid_raw);
@@ -530,14 +532,16 @@ BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
                 continue;
             }
             non_sort_output_fields.push_back(fid);
-            if (IsVariableDataType(schema->GetFieldType(fid))) {
-                has_variable_width = true;
+            auto field_type = schema->GetFieldType(fid);
+            if (IsVariableDataType(field_type) ||
+                IsVectorDataType(field_type)) {
+                requires_late_materialization = true;
             }
         }
     }
 
     std::vector<FieldId> deferred_field_ids;
-    if (has_variable_width) {
+    if (requires_late_materialization) {
         // Two-project mode: defer ALL non-sort output fields until after TopK.
         deferred_field_ids = non_sort_output_fields;
     } else {

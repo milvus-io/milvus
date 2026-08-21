@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -59,6 +60,16 @@ func InitQueryNode(ctx context.Context) error {
 func doInitQueryNodeOnce(ctx context.Context) error {
 	nodeID := paramtable.GetNodeID()
 
+	// Deprecated compatibility shim for common.visibilityFilterEnabled. The
+	// bypass it used to gate returned deleted rows to readers and was removed;
+	// row visibility filtering is now always enforced. The key stays
+	// recognized so an operator who set it to false gets this explicit
+	// failure instead of a silent behavior change on upgrade.
+	if !paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.visibilityFilterEnabled=false is no longer supported: row visibility filtering (timestamp, delete, and TTL) is always enforced; remove the setting to start this querynode")
+	}
+
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
@@ -75,15 +86,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 
-	visibilityEnabled := paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool()
-	bloomEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
-	C.SegcoreSetVisibilityFilterEnabled(C.bool(visibilityEnabled))
-	if !visibilityEnabled && bloomEnabled {
-		mlog.Warn(ctx, "visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
-	}
-
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
+	SyncTakeForOutputResultCountLimit(paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -255,4 +260,16 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	if v {
 		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
+}
+
+// SyncTakeForOutputResultCountLimit pushes the maximum search topK or retrieve
+// result row count allowed to use take() for output fields into segcore. A
+// value of 0 disables the limit.
+func SyncTakeForOutputResultCountLimit(params *paramtable.ComponentParam) {
+	limit := params.QueryNodeCfg.TakeForOutputResultCountLimit.GetAsInt64()
+	C.SegcoreSetTakeForOutputResultCountLimit(C.int64_t(limit))
+}
+
+func getTakeForOutputResultCountLimit() int64 {
+	return int64(C.SegcoreGetTakeForOutputResultCountLimit())
 }

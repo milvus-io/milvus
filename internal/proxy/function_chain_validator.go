@@ -204,11 +204,11 @@ func validateL2RerankSystemOutput(name string) error {
 }
 
 func getFunctionChainInputField(schema *schemaInfo, name string) (*schemapb.FieldSchema, int64, error) {
-	if schema == nil || schema.schemaHelper == nil {
+	if schema == nil || schema.SchemaHelper == nil {
 		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", name)
 	}
 
-	field, err := schema.schemaHelper.GetFieldFromName(name)
+	field, err := schema.SchemaHelper.GetFieldFromName(name)
 	if err != nil {
 		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", name)
 	}

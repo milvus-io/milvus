@@ -29,6 +29,9 @@ SegcoreSetChunkRows(const int64_t);
 void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
+CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
+
 void
 SegcoreSetStorageV3Enabled(const bool);
 
@@ -97,11 +100,19 @@ void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size);
 
+// Deprecated: row visibility filtering is always enforced; the value is
+// ignored. Kept so callers built against the v3.0.0 interface keep linking.
 void
 SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
+
+void
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value);
+
+int64_t
+SegcoreGetTakeForOutputResultCountLimit();
 
 void
 SegcoreCloseGlog();

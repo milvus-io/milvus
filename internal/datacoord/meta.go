@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -183,15 +183,7 @@ func segmentMetricFormatLabel(segment *SegmentInfo) string {
 	if segment == nil {
 		return segmentMetricFormatUnknown
 	}
-
-	formats := make(map[string]struct{})
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		format := strings.TrimSpace(fieldBinlog.GetFormat())
-		if format == "" {
-			continue
-		}
-		formats[format] = struct{}{}
-	}
+	formats := segment.EnsureStats().GetFormats()
 	if len(formats) == 0 {
 		if segment.GetStorageVersion() < storage.StorageV2 {
 			return segmentMetricFormatLegacy
@@ -201,10 +193,7 @@ func segmentMetricFormatLabel(segment *SegmentInfo) string {
 	if len(formats) > 1 {
 		return segmentMetricFormatMixed
 	}
-	for format := range formats {
-		return format
-	}
-	return segmentMetricFormatUnknown
+	return formats[0]
 }
 
 func segmentMetricLabelValues(segment *SegmentInfo) []string {
@@ -401,11 +390,8 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 			if segment.State == commonpb.SegmentState_Flushed {
 				numStoredRows += segment.NumOfRows
 
-				insertFileNum := 0
-				for _, fieldBinlog := range segment.GetBinlogs() {
-					insertFileNum += len(fieldBinlog.GetBinlogs())
-				}
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
+				stats := segment.GetStats()
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
 
 				statFileNum := 0
 				for _, fieldBinlog := range segment.GetStatslogs() {
@@ -413,11 +399,7 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 				}
 				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
 
-				deleteFileNum := 0
-				for _, filedBinlog := range segment.GetDeltalogs() {
-					deleteFileNum += len(filedBinlog.GetBinlogs())
-				}
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 			}
 		}
 	}
@@ -576,18 +558,13 @@ func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
-	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
-		cnt := 0
-		for _, fbs := range fieldBinlogs {
-			cnt += len(fbs.Binlogs)
-		}
-		return cnt
+	stats := s.GetStats()
+	cnt := int(stats.GetInsertBinlogCount() + stats.GetDeltaBinlogCount())
+	// Statistics has no stat-file count; V3's empty statslogs array = 0
+	// matches the manifest-driven layout, so the array path is correct.
+	for _, fbs := range s.GetStatslogs() {
+		cnt += len(fbs.Binlogs)
 	}
-
-	cnt := 0
-	cnt += statsFieldFn(s.GetBinlogs())
-	cnt += statsFieldFn(s.GetStatslogs())
-	cnt += statsFieldFn(s.GetDeltalogs())
 	return cnt
 }
 
@@ -1184,11 +1161,15 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
 		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-		if len(deltalogs) > 0 {
-			segment.deltaRowcount.Store(-1)
-		}
-
 		segment.Bm25Statslogs = mergeFieldBinlogs(segment.GetBm25Statslogs(), bm25logs)
+		// Stats is array-derived and the arrays just changed. SaveBinlogPaths
+		// always chains UpdateSegmentStats next to repopulate Stats from the
+		// new arrays under the same write lock — this nil-out marks the
+		// transient invalidated state. Any caller that bypasses that chain
+		// leaves Stats nil on the persisted record; EnsureStats falls back
+		// to a transient array-derived value for reads, but the persisted
+		// proto stays nil until a future write reaches UpdateSegmentStats.
+		segment.Stats = nil
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 			UpdateMask: metastore.BinlogsUpdateMask{
@@ -1207,8 +1188,47 @@ func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment 
 		return false
 	}
 
+	// Drop deltalogs already present on the segment before merging or
+	// accumulating. The same L0 compaction output can reach here twice — a retry
+	// after the meta_saved task-state write failed and saveSegmentMeta re-ran, or
+	// a restart between the etcd write and the task-state transition. The
+	// committedV3Manifests cache only makes the manifest re-commit idempotent; the
+	// delta Stats accumulation below is now durable for V3 (its per-field deltalog
+	// KVs are skipped), so a blind re-add would permanently over-count deletes and
+	// inflate hasTooManyDeletions / GetResidualSegmentSize. Dedup by (fieldID,
+	// logID) keeps both the Deltalogs array and the delta Stats idempotent.
+	deltalogs = filterDuplicateFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+	if len(deltalogs) == 0 {
+		return false
+	}
+
 	segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-	segment.deltaRowcount.Store(-1)
+	// Accumulate the incoming deltalogs onto the existing delta Stats instead
+	// of recomputing from segment.GetDeltalogs(). For V3 segments AlterSegments
+	// skips persisting per-FieldBinlog KVs, so after a DataCoord restart the
+	// in-memory Deltalogs array is empty and the cumulative deltas live only in
+	// the persisted Stats. A full recompute over the (post-restart empty array
+	// + new batch) would overwrite e.g. DeleteNumRows=1000 with just the new
+	// batch and permanently undercount deletes — feeding hasTooManyDeletions,
+	// GetResidualSegmentSize, view counts and getSegmentSize. Incremental
+	// addition is correct both within a process lifetime and across restart;
+	// the L0 compaction commit applies each batch exactly once.
+	if segment.Stats == nil {
+		segment.Stats = &datapb.Statistics{}
+	}
+	for _, fb := range deltalogs {
+		for _, l := range fb.GetBinlogs() {
+			segment.Stats.DeltaBinlogSize += l.GetMemorySize()
+			segment.Stats.DeleteNumRows += l.GetEntriesNum()
+			segment.Stats.DeltaBinlogCount++
+			if from := l.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
+				segment.Stats.DeltaTimestampFrom = from
+			}
+			if to := l.GetTimestampTo(); to > segment.Stats.DeltaTimestampTo {
+				segment.Stats.DeltaTimestampTo = to
+			}
+		}
+	}
 	modPack.increments[segmentID] = metastore.BinlogsIncrement{
 		Segment: segment.SegmentInfo,
 		UpdateMask: metastore.BinlogsUpdateMask{
@@ -1414,8 +1434,38 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
 		segment.Bm25Statslogs = bm25logs
+		// Refresh Stats so callers (import / copy-segment / sort) don't have
+		// to remember to chain UpdateSegmentStats. Stats-fields-from-arrays
+		// is the right semantic for these paths: they don't carry a
+		// writer-reported V3 stats override, and the segment is being
+		// (re)initialized with the supplied arrays.
+		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
+		}
+		return true
+	}
+}
+
+// UpdateSegmentStats stores the complete cumulative Statistics shipped by
+// the datanode's StatisticsCollector onto SegmentInfo.Stats wholesale —
+// one object, no per-field recompute.
+//
+// When requestStats is nil (storage V1 / pre-Statistics datanodes during
+// rolling upgrade), it falls back to deriving Statistics from the
+// cumulative binlog arrays via storage.BuildStatsFromFieldBinlogs.
+func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(context.TODO(), "meta update: update segment stats failed - segment not found",
+				mlog.Int64("segmentID", segmentID))
+			return false
+		}
+		if requestStats != nil {
+			segment.Stats = requestStats
+		} else {
+			segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs())
 		}
 		return true
 	}
@@ -1434,15 +1484,63 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 		segment.Binlogs = mergeFieldBinlogs(nil, binlogs)
 		segment.Statslogs = mergeFieldBinlogs(nil, statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(nil, deltalogs)
-		if len(deltalogs) > 0 {
-			segment.deltaRowcount.Store(-1)
-		}
 		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
+		// Stats invalidated; UpdateSegmentStats is chained next under the
+		// same write lock to repopulate from the replaced arrays.
+		segment.Stats = nil
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
 		return true
 	}
+}
+
+// mergeSegmentColumnGroups upserts incoming column groups into an existing
+// FieldBinlog array: a group whose top-level FieldID already exists is replaced,
+// a new one is appended, and every child field claimed by an incoming group is
+// stripped from whichever other group used to hold it, so that each field lives
+// in exactly one column group. A pre-existing group left with no child fields is
+// dropped and its FieldID returned in droppedFieldIDs, so the caller can have the
+// catalog delete the orphan etcd KV -- otherwise listBinlogs' prefix scan will
+// resurrect the zombie on restart.
+//
+// The result is sorted by FieldID, which makes the merge idempotent down to the
+// serialized bytes: re-applying the same groups yields an identical array, never
+// a reordered or duplicated one.
+//
+// Elements of existing are mutated in place (ChildFields filtering) and the
+// incoming group pointers are stored as-is, so callers must pass an array they
+// own.
+func mergeSegmentColumnGroups(existing []*datapb.FieldBinlog, groups map[int64]*datapb.FieldBinlog) ([]*datapb.FieldBinlog, []int64) {
+	incomingChildFields := typeutil.NewSet[int64]()
+	for _, g := range groups {
+		incomingChildFields.Insert(g.GetChildFields()...)
+	}
+
+	var droppedFieldIDs []int64
+	merged := make([]*datapb.FieldBinlog, 0, len(existing)+len(groups))
+	for _, fb := range existing {
+		if _, replaced := groups[fb.GetFieldID()]; replaced {
+			continue
+		}
+		if len(fb.GetChildFields()) > 0 {
+			fb.ChildFields = lo.Filter(fb.GetChildFields(), func(fid int64, _ int) bool {
+				return !incomingChildFields.Contain(fid)
+			})
+			if len(fb.ChildFields) == 0 {
+				droppedFieldIDs = append(droppedFieldIDs, fb.GetFieldID())
+				continue
+			}
+		}
+		merged = append(merged, fb)
+	}
+	for _, g := range groups {
+		merged = append(merged, g)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].GetFieldID() < merged[j].GetFieldID()
+	})
+	return merged, droppedFieldIDs
 }
 
 // UpdateSegmentColumnGroupsOperator upserts storage-v2 column groups on a
@@ -1463,38 +1561,8 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 			return false
 		}
 
-		incomingChildFields := typeutil.NewSet[int64]()
-		for _, g := range groups {
-			incomingChildFields.Insert(g.GetChildFields()...)
-		}
-
-		// Strip incoming child fields from any other existing group, then drop
-		// in-place groups that the request is replacing. Also drop groups that
-		// become empty (all ChildFields claimed by incoming groups) and record
-		// their FieldIDs so the catalog removes the orphan etcd KV -- otherwise
-		// listBinlogs' prefix scan will resurrect the zombie on restart.
-		var droppedFieldIDs []int64
-		kept := segment.Binlogs[:0]
-		for _, existing := range segment.Binlogs {
-			if _, replaced := groups[existing.GetFieldID()]; replaced {
-				continue
-			}
-			if len(existing.GetChildFields()) > 0 {
-				existing.ChildFields = lo.Filter(existing.GetChildFields(), func(fid int64, _ int) bool {
-					return !incomingChildFields.Contain(fid)
-				})
-				if len(existing.ChildFields) == 0 {
-					droppedFieldIDs = append(droppedFieldIDs, existing.GetFieldID())
-					continue
-				}
-			}
-			kept = append(kept, existing)
-		}
-		segment.Binlogs = kept
-
-		for _, g := range groups {
-			segment.Binlogs = append(segment.Binlogs, g)
-		}
+		merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs, groups)
+		segment.Binlogs = merged
 
 		// Bump DataVersion so querynodes with the segment already loaded will Reopen;
 		// ManifestPath is intentionally not moved here (see segment_checker.isSegmentUpdate).
@@ -1719,6 +1787,27 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// maxBinlogTimestampTo returns the highest TimestampTo across a segment's insert
+// binlogs, or 0 when the arrays are absent.
+//
+// Absent is not the same as "no rows": a V3 (manifest-backed) segment never
+// persists these arrays -- buildAlterSegmentsKvs skips the per-FieldBinlog KVs
+// for it (kv_catalog.go:357) and the SegmentInfo is written without them -- so a
+// V3 segment reloaded after a DataCoord restart reports 0 here regardless of the
+// row timestamps it actually holds. Callers therefore get a bound that is safe
+// to compare against but that does not fire for reloaded V3 segments.
+func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
+	var maxTsTo uint64
+	for _, fb := range fieldBinlogs {
+		for _, l := range fb.GetBinlogs() {
+			if l.GetTimestampTo() > maxTsTo {
+				maxTsTo = l.GetTimestampTo()
+			}
+		}
+	}
+	return maxTsTo
+}
+
 // UpdateCommitTimestamp sets the commit_timestamp on an import/CDC segment.
 // Non-zero marks it as committed at that transaction time, overriding
 // start_position.Timestamp for all temporal decisions.
@@ -1739,20 +1828,29 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			return false
 		}
 		if ts != 0 {
-			var maxTsTo uint64
-			for _, fieldBinlogs := range segment.GetBinlogs() {
-				for _, l := range fieldBinlogs.GetBinlogs() {
-					if l.GetTimestampTo() > maxTsTo {
-						maxTsTo = l.GetTimestampTo()
-					}
-				}
-			}
+			maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
 			if ts < maxTsTo {
 				mlog.Error(context.TODO(), "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
 					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
-				return false
+				// Fail-stop. Unreachable for a normal import: its rows carry the
+				// Import message's timetick and the commit fence is a later
+				// timetick on the same WAL. Keep the error retriable so the
+				// flusher blocks on the fence instead of failing the job — a
+				// blocked pchannel surfaces as WAL lag, whereas a replica that
+				// commits what the source rejected can no longer be rolled back.
+				//
+				// Recovery from here is out of band. The job is already
+				// Committing by the time this runs -- commitImportV2AckCallback
+				// persists that state on the broadcast FastAck, independent of
+				// this fence -- and Committing is terminal for AbortImport while
+				// tryTimeoutJob never reaches it (TimeoutTs defaults to
+				// math.MaxUint64). Validating earlier does not change that: the
+				// ack path flips the state regardless of what this check says.
+				return modPack.fail(merr.WrapErrImportSysFailedMsg(
+					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
+					ts, maxTsTo, segmentID))
 			}
 		}
 		segment.CommitTimestamp = ts
@@ -2260,8 +2358,9 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 // Falls back to the provided fallback positions if binlog timestamps are unavailable
 // (e.g., legacy segments without TimestampFrom/TimestampTo populated).
 func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, fallbackStart, fallbackDml *msgpb.MsgPosition) (startPos, dmlPos *msgpb.MsgPosition) {
-	minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-	if minTs > 0 && minTs != math.MaxUint64 && maxTs > 0 {
+	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	minTs, maxTs := stats.GetTimestampFrom(), stats.GetTimestampTo()
+	if minTs > 0 && maxTs > 0 {
 		return &msgpb.MsgPosition{
 				ChannelName: channel,
 				Timestamp:   minTs,
@@ -2376,6 +2475,11 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			SchemaVersion:   t.GetSchema().GetVersion(),
 			CommitTimestamp: 0, // Normalized: row timestamps already rewritten
 		}
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment. V3 outputs whose stats live in the manifest
+		// are populated correctly there (the compactor sees the stats
+		// blob size); the receiver does not recompute.
+		segmentInfo.Stats = seg.GetStats()
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
@@ -2453,35 +2557,39 @@ func (m *meta) completeMixCompactionMutation(
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
-		compactToSegmentInfo := NewSegmentInfo(
-			&datapb.SegmentInfo{
-				ID:            compactToSegment.GetSegmentID(),
-				CollectionID:  compactFromSegInfos[0].CollectionID,
-				PartitionID:   compactFromSegInfos[0].PartitionID,
-				InsertChannel: t.GetChannel(),
-				NumOfRows:     compactToSegment.NumOfRows,
-				State:         commonpb.SegmentState_Flushed,
-				MaxRowNum:     compactFromSegInfos[0].MaxRowNum,
-				Binlogs:       compactToSegment.GetInsertLogs(),
-				Statslogs:     compactToSegment.GetField2StatslogPaths(),
-				Deltalogs:     compactToSegment.GetDeltalogs(),
-				Bm25Statslogs: compactToSegment.GetBm25Logs(),
-				TextStatsLogs: compactToSegment.GetTextStatsLogs(),
+		compactToProto := &datapb.SegmentInfo{
+			ID:            compactToSegment.GetSegmentID(),
+			CollectionID:  compactFromSegInfos[0].CollectionID,
+			PartitionID:   compactFromSegInfos[0].PartitionID,
+			InsertChannel: t.GetChannel(),
+			NumOfRows:     compactToSegment.NumOfRows,
+			State:         commonpb.SegmentState_Flushed,
+			MaxRowNum:     compactFromSegInfos[0].MaxRowNum,
+			Binlogs:       compactToSegment.GetInsertLogs(),
+			Statslogs:     compactToSegment.GetField2StatslogPaths(),
+			Deltalogs:     compactToSegment.GetDeltalogs(),
+			Bm25Statslogs: compactToSegment.GetBm25Logs(),
+			TextStatsLogs: compactToSegment.GetTextStatsLogs(),
 
-				CreatedByCompaction: true,
-				CompactionFrom:      compactFromSegIDs,
-				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
-				Level:               datapb.SegmentLevel_L1,
-				StorageVersion:      compactToSegment.GetStorageVersion(),
-				StartPosition:       startPos,
-				DmlPosition:         dmlPos,
-				IsSorted:            compactToSegment.GetIsSorted(),
-				ManifestPath:        compactToSegment.GetManifest(),
-				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
-				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
-				SchemaVersion:       outputSchemaVersion,
-				CommitTimestamp:     0, // Normalized: row timestamps already rewritten
-			})
+			CreatedByCompaction: true,
+			CompactionFrom:      compactFromSegIDs,
+			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
+			Level:               datapb.SegmentLevel_L1,
+			StorageVersion:      compactToSegment.GetStorageVersion(),
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
+			IsSorted:            compactToSegment.GetIsSorted(),
+			ManifestPath:        compactToSegment.GetManifest(),
+			IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
+			ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
+			SchemaVersion:       outputSchemaVersion,
+			CommitTimestamp:     0, // Normalized: row timestamps already rewritten
+		}
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment. V3 outputs whose stats live in the manifest
+		// are populated correctly there; the receiver does not recompute.
+		compactToProto.Stats = compactToSegment.GetStats()
+		compactToSegmentInfo := NewSegmentInfo(compactToProto)
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
 			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
@@ -3198,6 +3306,10 @@ func (m *meta) completeSortCompactionMutation(
 		SchemaVersion:             outputSchemaVersion,
 		CommitTimestamp:           0, // Normalized: row timestamps already rewritten
 	}
+	// Statistics is computed at the compactor and shipped on the
+	// CompactionSegment. V3 outputs whose stats live in the manifest are
+	// populated correctly there; the receiver does not recompute.
+	segmentInfo.Stats = resultSegment.GetStats()
 
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() > 0 {
@@ -3321,7 +3433,27 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Clone the segment for update
 	cloned := oldSegment.Clone()
 
-	cloned.Binlogs = resultSegment.GetInsertLogs()
+	// SegmentInfo.Binlogs is where a field's data becomes visible: this array's
+	// ChildFields carry the real field IDs of a StorageV2/V3 column group, and a
+	// function-output field with no data here has nothing to index.
+	// Materialization exists precisely to make such a field indexable, and
+	// compaction_task_bump_schema_version enqueues the segment for index
+	// building right after this mutation — so the column groups this run wrote
+	// must land here, or the index on the materialized field is never built.
+	//
+	// This is an upsert, not an assignment: the compactor ships only the groups
+	// it just wrote, so overwriting would drop the segment's other groups. Same
+	// semantics as the backfill path's UpdateSegmentColumnGroupsOperator, shared
+	// through mergeSegmentColumnGroups. The merge is idempotent (groups are
+	// upserted by FieldID and the result is FieldID-sorted), so unlike the
+	// additive Stats increment below it needs no manifest gate: re-applying a
+	// replayed result cannot double-count.
+	var droppedBinlogFieldIDs []int64
+	if newGroups := resultSegment.GetInsertLogs(); len(newGroups) > 0 {
+		cloned.Binlogs, droppedBinlogFieldIDs = mergeSegmentColumnGroups(cloned.GetBinlogs(),
+			lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
+	}
+
 	if newSchemaVersion > cloned.GetSchemaVersion() {
 		cloned.SchemaVersion = newSchemaVersion
 		mlog.Info(m.ctx, "meta update: update schema version for schema bump compaction",
@@ -3332,13 +3464,41 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
 	cloned.ManifestPath = resultManifest
+	// Statistics semantics depend on the adoption path: this branch updates an
+	// existing SegmentInfo, so a non-nil result Stats is an INCREMENT to add
+	// onto the segment's current value. See CompactionSegment.stats.
+	//
+	// The gate is the exactly-once token. resultManifest != currentManifest is
+	// the forward-commit branch of the CAS above; result == current is a replay
+	// of an adoption that already persisted, and its increment is already in
+	// Stats. Loosening the CAS silently double-counts.
+	//
+	// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
+	if resultManifest != currentManifest {
+		if delta := resultSegment.GetStats(); delta != nil {
+			cloned.Stats = addStatsDelta(m.ctx, segmentID, cloned.GetStats(), delta)
+			mlog.Info(m.ctx, "meta update: applied schema bump stats increment",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("baseManifest", baseManifest),
+				mlog.String("resultManifest", resultManifest),
+				mlog.Int64("deltaInsertBinlogSize", delta.GetInsertBinlogSize()),
+				mlog.Int64("deltaInsertBinlogCount", delta.GetInsertBinlogCount()),
+				mlog.Int64("deltaStatsBinlogSize", delta.GetStatsBinlogSize()),
+				mlog.Int64("insertBinlogSize", cloned.GetStats().GetInsertBinlogSize()),
+				mlog.Int64("insertBinlogCount", cloned.GetStats().GetInsertBinlogCount()),
+				mlog.Int64("statsBinlogSize", cloned.GetStats().GetStatsBinlogSize()))
+		}
+	}
 	if !proto.Equal(oldSegment.SegmentInfo, cloned.SegmentInfo) {
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1
 	}
 
-	// Prepare binlogs increment for catalog update
+	// Prepare binlogs increment for catalog update. droppedBinlogFieldIDs is
+	// empty unless the merge above emptied a pre-existing group; when it is not,
+	// the catalog must delete that group's KV or listBinlogs resurrects it.
 	binlogsIncrement := metastore.BinlogsIncrement{
-		Segment: cloned.SegmentInfo,
+		Segment:               cloned.SegmentInfo,
+		DroppedBinlogFieldIDs: droppedBinlogFieldIDs,
 	}
 
 	mlog.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
@@ -3404,6 +3564,9 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       oldSegment.GetIsSortedByNamespace(),
 		SchemaVersion:             schemaVersion,
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment; the receiver copies it verbatim.
+		Stats: resultSegment.GetStats(),
 	})
 	if newSegment.GetNumOfRows() > 0 {
 		metricMutation.addNewSeg(newSegment.GetState(), newSegment.GetLevel(), newSegment.GetIsSorted(), newSegment.GetStorageVersion(), segmentMetricFormatLabel(newSegment), newSegment.GetNumOfRows())
@@ -3440,7 +3603,7 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 				Channel:      s.InsertChannel,
 				NumOfRows:    s.NumOfRows,
 				State:        s.State.String(),
-				MemSize:      s.size.Load(),
+				MemSize:      s.getSegmentSize(),
 				Level:        s.Level.String(),
 				IsImporting:  s.IsImporting,
 				Compacted:    s.Compacted,

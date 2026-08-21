@@ -99,7 +99,7 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 	} else if len(droppedFieldIDs) > 0 {
 		result, err = t.runFullSchemaRewrite(existingFields)
 	} else {
-		result, err = t.runMissingFunctionMaterialization(ctx, missingFunctions, existingFields)
+		result, err = t.runMissingFunctionMaterialization(ctx, missingFunctions, droppedFieldIDs, existingFields)
 	}
 	if err != nil {
 		log.Warn(ctx, "schema bump compact failed", mlog.Err(err), mlog.Duration("compact cost", time.Since(compactStart)))
@@ -183,13 +183,13 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunc
 func additionalFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
-		return bm25AdditionalInputFields(schema, inputField)
+		return bm25AdditionalInputFields(schema, functionSchema, inputField)
 	default:
 		return nil, nil
 	}
 }
 
-func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
+func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
 	params, ok := typeutil.CreateFieldSchemaHelper(inputField).GetMultiAnalyzerParams()
 	if !ok {
 		return nil, nil
@@ -197,15 +197,25 @@ func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *sc
 	var multiAnalyzerParams struct {
 		ByField string `json:"by_field"`
 	}
+	// The params were validated at DDL time; failing to parse or resolve them
+	// here means the persisted schema itself is inconsistent, not that the
+	// compaction request is malformed.
 	if err := json.Unmarshal([]byte(params), &multiAnalyzerParams); err != nil {
-		return nil, err
+		return nil, merr.WrapErrDataIntegrity(err, "failed to parse multi_analyzer_params for function %s", functionSchema.GetName())
 	}
 	if multiAnalyzerParams.ByField == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("multi_analyzer_params missing required 'by_field' key")
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s is missing required 'by_field' key", functionSchema.GetName())
 	}
 	byField := typeutil.GetFieldByName(schema, multiAnalyzerParams.ByField)
 	if byField == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s references missing input field %s", functionSchema.GetName(), multiAnalyzerParams.ByField)
+	}
+	// DDL only admits a VarChar by_field selector (validateMultiAnalyzerParams).
+	// A resolved selector of any other type is the same class of persisted-schema
+	// corruption as the branches above, so classify it identically instead of
+	// letting it degrade into an ErrParameterInvalid downstream.
+	if byField.GetDataType() != schemapb.DataType_VarChar {
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s references by_field %s of type %s, but only VarChar is allowed", functionSchema.GetName(), multiAnalyzerParams.ByField, byField.GetDataType())
 	}
 	return []*schemapb.FieldSchema{byField}, nil
 }
@@ -412,6 +422,12 @@ func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.Com
 				Manifest:            segment.GetManifest(),
 				BaseManifest:        segment.GetManifest(),
 				ExpirQuantiles:      segment.GetExpirQuantiles(),
+				// Schema-version-bump-only path doesn't rewrite data —
+				// the receiver Clones oldSegment and only updates
+				// SchemaVersion/Binlogs/StorageVersion/ManifestPath, so
+				// the existing oldSegment.Stats is preserved. Leaving
+				// Stats nil here documents that the receiver does not
+				// read it for this path.
 			},
 		},
 		Type: t.plan.GetType(),
@@ -594,6 +610,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		ExpirQuantiles:      expirQuantiles,
 		IsSorted:            segment.GetIsSorted(),
 		IsSortedByNamespace: segment.GetIsSortedByNamespace(),
+		// Stats: insert aggregates from the freshly emitted insert logs,
+		// stats footprint from the writer's tracked counter. V3 writers
+		// leave statsLog/bm25StatsLogs nil because stats live in the
+		// manifest — the counter is the only correct source.
+		Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
 	}
 
 	// Merge the source segment's TEXT LOB file references into the output manifest
@@ -744,6 +765,10 @@ type bumpSchemaVersionWriterResult struct {
 	basePath       string
 	baseVersion    int64
 	v3Stats        []packed.StatEntry
+	// statsBlobSize tracks the cumulative bloom-filter + BM25 blob memory
+	// committed via addV3Stats. Reported to DataCoord on
+	// CompactionSegment.Stats.StatsBinlogSize.
+	statsBlobSize int64
 }
 
 func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.FieldSchema, segment *datapb.CompactionSegmentBinlogs, collectionID int64) (*bumpSchemaVersionWriterResult, error) {
@@ -834,18 +859,30 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 			MemorySize: memorySize,
 		}},
 	}))
+	writerResult.statsBlobSize += memorySize
 	return nil
 }
 
-func (t *bumpSchemaVersionCompactionTask) buildMergedLogsV3(segment *datapb.CompactionSegmentBinlogs, writerResult *bumpSchemaVersionWriterResult, sparseFieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {
+// buildNewInsertLogsV3 returns FieldBinlogs for the column groups this run
+// wrote, and nothing else. It deliberately does not merge the input segment's
+// FieldBinlogs: those come from the compaction plan, which copies them off
+// SegmentInfo, and for a StorageV3 segment recovered after a DataCoord restart
+// they are empty (#50410 stopped persisting per-field binlog KVs for V3).
+// The receiver (completeBumpSchemaVersionCompactionMutation in
+// internal/datacoord/meta.go) merges this array onto SegmentInfo.Binlogs,
+// which is where the materialized field's data becomes visible to the rest of
+// DataCoord — including index building.
+// This result is therefore load-bearing: dropping it silently makes the
+// materialized field permanently un-indexable.
+func (t *bumpSchemaVersionCompactionTask) buildNewInsertLogsV3(writerResult *bumpSchemaVersionWriterResult, sparseFieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {
 	logIDStart, _, err := t.logIDAlloc.Alloc(uint32(len(writerResult.columnGroups)))
 	if err != nil {
 		return nil, err
 	}
-	newInsertLogs := make(map[int64]*datapb.FieldBinlog)
+	newInsertLogs := make(map[int64]*datapb.FieldBinlog, len(writerResult.columnGroups))
 	for i, columnGroup := range writerResult.columnGroups {
 		fieldID := columnGroup.GroupID
-		fieldBinlog := &datapb.FieldBinlog{
+		newInsertLogs[fieldID] = &datapb.FieldBinlog{
 			FieldID:     fieldID,
 			ChildFields: columnGroup.Fields,
 			Format:      columnGroup.Format,
@@ -857,10 +894,9 @@ func (t *bumpSchemaVersionCompactionTask) buildMergedLogsV3(segment *datapb.Comp
 				},
 			},
 		}
-		newInsertLogs[fieldID] = fieldBinlog
 	}
 
-	return t.finalizeMergedLogs(segment, newInsertLogs)
+	return storage.SortFieldBinlogs(newInsertLogs), nil
 }
 
 func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.CompactionSegmentBinlogs, manifestPath string) (string, error) {
@@ -905,29 +941,18 @@ func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.Co
 	return newManifest, nil
 }
 
-func (t *bumpSchemaVersionCompactionTask) finalizeMergedLogs(segment *datapb.CompactionSegmentBinlogs, newInsertLogs map[int64]*datapb.FieldBinlog) ([]*datapb.FieldBinlog, error) {
-	newFieldIDs := make(map[int64]struct{}, len(newInsertLogs)*2)
-	for _, fb := range newInsertLogs {
-		newFieldIDs[fb.GetFieldID()] = struct{}{}
-		for _, childID := range fb.GetChildFields() {
-			newFieldIDs[childID] = struct{}{}
-		}
-	}
-	mergedInsertLogs := make(map[int64]*datapb.FieldBinlog, len(segment.GetFieldBinlogs())+len(newInsertLogs))
-	for _, fb := range segment.GetFieldBinlogs() {
-		if compactionFieldBinlogReadable(fb, newFieldIDs) {
-			continue
-		}
-		mergedInsertLogs[fb.GetFieldID()] = fb
-	}
-	for fieldID, fb := range newInsertLogs {
-		mergedInsertLogs[fieldID] = fb
+func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx context.Context, missingFunctions []*schemapb.FunctionSchema, droppedFieldIDs []int64, existingFields map[int64]struct{}) (*datapb.CompactionPlanResult, error) {
+	// Materialization reports a Statistics INCREMENT, which is only valid
+	// because this path adds columns and never removes them. Dropped fields
+	// must go to runFullSchemaRewrite, which ships an absolute Stats. The
+	// dispatch in Compact already guarantees this; assert it so a future edit
+	// cannot silently produce an over-estimating increment.
+	if len(droppedFieldIDs) > 0 {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"schema bump materialization cannot run with dropped fields, planID = %d, droppedFieldIDs = %v",
+			t.GetPlanID(), droppedFieldIDs)
 	}
 
-	return storage.SortFieldBinlogs(mergedInsertLogs), nil
-}
-
-func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx context.Context, missingFunctions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*datapb.CompactionPlanResult, error) {
 	segment := t.plan.GetSegmentBinlogs()[0]
 	collectionID := segment.GetCollectionID()
 	partitionID := segment.GetPartitionID()
@@ -974,6 +999,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "BumpSchemaVersionCompact.batchProcess")
 	statsByField := make(map[int64]*storage.BM25Stats)
 	fieldMemorySizeByField := make(map[int64]int, len(outputFieldIDs))
+	fieldNullCountByField := make(map[int64]int64, len(outputFieldIDs))
 	for _, outputFieldID := range outputFieldIDs {
 		if isBM25MaterializedOutputField(t.plan.GetSchema(), outputFieldID) {
 			statsByField[outputFieldID] = storage.NewBM25Stats()
@@ -1030,6 +1056,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 				batchMemSize = bm25MemSize
 			}
 			fieldMemorySizeByField[outputFieldID] += batchMemSize
+			fieldNullCountByField[outputFieldID] += int64(outputCol.NullN())
 		}
 
 		writeStart := time.Now()
@@ -1068,7 +1095,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		mlog.Int("v3StatsCount", len(writerResult.v3Stats)),
 	)
 
-	mergedInsertLogs, err := t.buildMergedLogsV3(segment, writerResult, fieldMemorySizeByField, totalRows)
+	newInsertLogs, err := t.buildNewInsertLogsV3(writerResult, fieldMemorySizeByField, totalRows)
 	if err != nil {
 		return nil, err
 	}
@@ -1096,7 +1123,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	log.Info(ctx, "[schema-bump-partial-writer] writer output and bm25 stats committed",
 		mlog.String("manifestPath", manifestPath),
 		mlog.Int64("totalRows", totalRows),
-		mlog.Int("mergedInsertLogsCount", len(mergedInsertLogs)),
+		mlog.Int("newInsertLogsCount", len(newInsertLogs)),
 		mlog.Int("v3StatsCount", len(writerResult.v3Stats)),
 	)
 
@@ -1105,22 +1132,32 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		State:  datapb.CompactionTaskState_completed,
 		Segments: []*datapb.CompactionSegment{
 			{
-				SegmentID:           segmentID,
-				NumOfRows:           totalRows,
-				InsertLogs:          mergedInsertLogs,
-				Field2StatslogPaths: segment.GetField2StatslogPaths(),
-				Deltalogs:           segment.GetDeltalogs(),
-				Channel:             segment.GetInsertChannel(),
-				StorageVersion:      writerResult.storageVersion,
-				Manifest:            manifestPath,
-				BaseManifest:        segment.GetManifest(),
+				SegmentID:      segmentID,
+				NumOfRows:      totalRows,
+				InsertLogs:     newInsertLogs,
+				Channel:        segment.GetInsertChannel(),
+				StorageVersion: writerResult.storageVersion,
+				Manifest:       manifestPath,
+				BaseManifest:   segment.GetManifest(),
+				// In-place materialization ships an INCREMENT, not an absolute
+				// footprint: DataCoord adds it onto the segment's existing
+				// Stats. Field2StatslogPaths and Deltalogs are deliberately
+				// absent — they were echoes of the plan that the in-place
+				// receiver never reads, and the plan's arrays are empty for a
+				// recovered StorageV3 segment anyway.
+				Stats: buildMaterializationStatsDelta(
+					writerResult.columnGroups,
+					fieldMemorySizeByField,
+					fieldNullCountByField,
+					writerResult.statsBlobSize,
+				),
 			},
 		},
 		Type: t.plan.GetType(),
 	}
 	log.Info(ctx, "[schema-bump-partial-writer] compaction completed",
 		mlog.Int64("numOfRows", totalRows),
-		mlog.Int("mergedInsertLogsCount", len(mergedInsertLogs)),
+		mlog.Int("newInsertLogsCount", len(newInsertLogs)),
 		mlog.String("manifestPath", manifestPath),
 		mlog.Int64("effectiveStorageVersion", writerResult.storageVersion),
 		mlog.Int32("collectionSchemaVersion", t.plan.GetSchema().GetVersion()),

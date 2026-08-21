@@ -102,8 +102,8 @@ PhyIterativeElementFilterNode::GetOutput() {
     }
 
     auto segment = query_context_->get_segment();
-    auto& field_meta =
-        segment->get_schema().GetFirstArrayFieldInStruct(struct_name_);
+    auto schema = segment->get_schema_snapshot();
+    auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
     auto array_offsets = segment->GetArrayOffsets(field_id);
     if (array_offsets == nullptr) {

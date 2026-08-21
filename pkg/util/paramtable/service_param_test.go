@@ -355,6 +355,8 @@ func TestServiceParam(t *testing.T) {
 			assert.Empty(t, kc.KafkaTLSCert.GetValue())
 			assert.Empty(t, kc.KafkaTLSKey.GetValue())
 			assert.Empty(t, kc.KafkaTLSKeyPassword.GetValue())
+			assert.Equal(t, 10*1024*1024, kc.ProducerMessageMaxBytes.GetAsInt())
+			assert.True(t, base.mgr.IsImmutable(kc.ProducerMessageMaxBytes.Key))
 		}
 	})
 
@@ -371,6 +373,8 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, Params.SecretAccessKey.GetValue(), "minioadmin")
 
 		assert.Equal(t, Params.UseSSL.GetAsBool(), false)
+
+		assert.False(t, Params.DisableAWSChunkedEncoding.GetAsBool())
 
 		assert.Empty(t, Params.SslCACert.GetValue())
 

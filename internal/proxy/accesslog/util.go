@@ -18,6 +18,7 @@ package accesslog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -53,6 +54,15 @@ func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *
 func AccessLogMiddleware(ctx *gin.Context) {
 	accessInfo := info.NewRestfulInfo(ctx)
 	ctx.Set(ContextLogKey, accessInfo)
+	// Bridge the access info into the standard request context. The gRPC
+	// interceptor injects the same AccessKey value for grpc traffic; without
+	// this, REST handlers reach the Proxy through the hook interceptor with a
+	// context lacking AccessKey, so task PreExecute (SetActualConsistencyLevel)
+	// and slow logs fall back to the raw request consistency level.
+	if ctx.Request != nil {
+		reqCtx := context.WithValue(ctx.Request.Context(), AccessKey{}, accessInfo)
+		ctx.Request = ctx.Request.WithContext(reqCtx)
+	}
 	ctx.Next()
 	accessInfo.InitReq()
 	_globalL.Write(accessInfo)
@@ -99,4 +109,35 @@ func SetActualConsistencyLevel(ctx context.Context, acl commonpb.ConsistencyLeve
 			info.SetActualConsistencyLevel(acl)
 		}
 	}
+}
+
+type ConsistencyLevelCarrier interface {
+	GetConsistencyLevel() commonpb.ConsistencyLevel
+}
+
+type ConsistencyLevelHelper struct {
+	accessInfo  info.AccessInfo
+	clvlCarrier ConsistencyLevelCarrier
+}
+
+func (clHelper *ConsistencyLevelHelper) String() string {
+	if clHelper.accessInfo != nil {
+		return fmt.Sprintf("ACT-%s", clHelper.accessInfo.ConsistencyLevel())
+	}
+	if clHelper.clvlCarrier == nil {
+		return info.Unknown
+	}
+	return fmt.Sprintf("REQ-%s", clHelper.clvlCarrier.GetConsistencyLevel().String())
+}
+
+func NewConsistencyLevelHelper(ctx context.Context, clvlCarrier ConsistencyLevelCarrier) *ConsistencyLevelHelper {
+	cc := &ConsistencyLevelHelper{clvlCarrier: clvlCarrier}
+	if ctx != nil {
+		v := ctx.Value(AccessKey{})
+		info, ok := v.(info.AccessInfo)
+		if ok && info != nil {
+			cc.accessInfo = info
+		}
+	}
+	return cc
 }

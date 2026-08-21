@@ -21,6 +21,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa: F403
+from common.milvus_sys import MilvusSys
 from pymilvus import DataType
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
@@ -44,7 +45,6 @@ default_string_field_name = ct.default_string_field_name
 # ForceMerge specific constants
 max_int64 = (1 << 63) - 1
 auto_target_size_mb = max_int64 // (1024 * 1024) + 1  # Triggers server auto target-size mode.
-default_max_size_mb = 1024  # Default segment max size in MB
 
 
 class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
@@ -79,18 +79,31 @@ class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("target_size", [100, 512, 1000])
-    def test_force_merge_target_size_less_than_max_size(self, target_size):
+    @pytest.mark.parametrize(
+        "target_size_ratio",
+        [
+            pytest.param(0.1, id="low"),
+            pytest.param(0.5, id="half"),
+            pytest.param(0.99, id="near-max"),
+        ],
+    )
+    def test_force_merge_target_size_less_than_max_size(self, target_size_ratio):
         """
         target: test ForceMerge with target_size less than config maxSize
-        method: create collection, call compact with target_size < 1024 MB
+        method: read the server maxSize and call compact with a strictly smaller target_size
         expected: Raise exception
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        # 2. compact with target_size less than maxSize
+        # 2. compact with target_size less than the active server maxSize
+        segment_max_size_mb = MilvusSys(client=client).segment_max_size
+        assert segment_max_size_mb is not None and segment_max_size_mb > 1
+        target_size = max(
+            1,
+            min(segment_max_size_mb - 1, int(segment_max_size_mb * target_size_ratio)),
+        )
         error = {ct.err_code: 1100, ct.err_msg: "targetSize"}
         self.compact(
             client,

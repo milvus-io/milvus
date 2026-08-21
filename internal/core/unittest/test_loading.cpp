@@ -358,10 +358,10 @@ TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
 }
 
 #ifdef BUILD_DISK_ANN
-TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
+TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;
-    constexpr uint64_t kOffsetMappingMmapBytes =
+    constexpr uint64_t kIdMapMmapBytes =
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t);
 
     auto make_load_info = [] {
@@ -398,20 +398,16 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     auto i2o_info = make_load_info();
     i2o_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     auto i2o = EstimateLoadIndexResource(&i2o_info);
-    ASSERT_EQ(i2o.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(i2o.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(i2o.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(i2o.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(i2o.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(i2o.max_memory_cost, baseline.max_memory_cost);
 
     auto o2i_info = make_load_info();
     o2i_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
     auto o2i = EstimateLoadIndexResource(&o2i_info);
-    ASSERT_EQ(o2i.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(o2i.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(o2i.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(o2i.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(o2i.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(o2i.max_memory_cost, baseline.max_memory_cost);
 
@@ -419,14 +415,45 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     both_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     both_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
     auto both = EstimateLoadIndexResource(&both_info);
-    ASSERT_EQ(both.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(both.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(both.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(both.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(both.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(both.max_memory_cost, baseline.max_memory_cost);
 }
 #endif
+
+TEST(IndexLoadTest, SegmentAdmissionEstimateDoesNotOpenScalarV3File) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024;
+
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    loadIndexInfo.collection_id = 1;
+    loadIndexInfo.partition_id = 2;
+    loadIndexInfo.segment_id = 3;
+    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_type = milvus::DataType::INT64;
+    loadIndexInfo.element_type = milvus::DataType::NONE;
+    loadIndexInfo.enable_mmap = false;
+    loadIndexInfo.index_id = 5;
+    loadIndexInfo.index_build_id = 6;
+    loadIndexInfo.index_version = 1;
+    loadIndexInfo.index_params = {
+        {"index_type", milvus::index::BITMAP_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    loadIndexInfo.index_files = {"/path/that/must/not/be-opened"};
+    loadIndexInfo.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    loadIndexInfo.index_size = kIndexSize;
+    loadIndexInfo.num_rows = 1024;
+    loadIndexInfo.schema.set_fieldid(loadIndexInfo.field_id);
+    loadIndexInfo.schema.set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+
+    EXPECT_EQ(request.final_memory_cost, kIndexSize);
+    EXPECT_EQ(request.final_disk_cost, 0);
+    EXPECT_TRUE(request.max_memory_cost >= request.final_memory_cost);
+}
 
 TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
@@ -460,8 +487,10 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
-    auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
+        kIndexSize,
+        milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
@@ -503,8 +532,10 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
-    auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
+        kIndexSize,
+        milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kIndexSize + kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, 0);
@@ -547,8 +578,10 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
-    auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
+        kIndexSize,
+        milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kLegacyCsrResidentBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
