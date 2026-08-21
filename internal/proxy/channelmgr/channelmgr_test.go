@@ -14,25 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package channelmgr
 
 import (
-	"context"
+	"os"
+	"testing"
 
-	"google.golang.org/grpc"
-
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// use interface tsoAllocator to keep other components testable
-// include: baseTaskQueue, taskScheduler
-type tsoAllocator interface {
-	AllocOne(ctx context.Context) (Timestamp, error)
-}
-
-// use timestampAllocatorInterface to keep other components testable
-//
-//go:generate mockery --name=timestampAllocatorInterface --filename=mock_tso_test.go --outpkg=proxy --output=. --inpackage --structname=mockTimestampAllocator --with-expecter
-type timestampAllocatorInterface interface {
-	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error)
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
 }
