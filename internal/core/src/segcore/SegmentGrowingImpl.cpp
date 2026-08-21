@@ -1140,7 +1140,7 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
     }
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1150,7 +1150,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1160,7 +1160,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,

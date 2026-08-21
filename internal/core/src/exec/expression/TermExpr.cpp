@@ -284,7 +284,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -311,7 +311,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -385,7 +385,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -408,7 +408,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -491,7 +491,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -527,7 +527,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -622,12 +622,12 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
                 auto shredding_executor = [this](const ColType* src,
-                                                 const bool* valid,
+                                                 ValidityView valid,
                                                  size_t size,
                                                  TargetBitmapView res,
                                                  TargetBitmapView valid_res) {
                     for (size_t i = 0; i < size; ++i) {
-                        if (valid != nullptr && !valid[i]) {
+                        if (valid && !valid[i]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
@@ -770,7 +770,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -817,7 +817,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -1049,7 +1049,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         [&processed_cursor, &bitmap_input, &simd_filter_fn,
          str_set_elem ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -1065,14 +1065,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         if constexpr (filter_type == FilterType::sequential) {
             if (simd_filter_fn) {
                 simd_filter_fn(data, size, res);
-                // Apply validity mask
-                if (valid_data != nullptr) {
-                    for (int i = 0; i < size; ++i) {
-                        if (!valid_data[i]) {
-                            res[i] = valid_res[i] = false;
-                        }
-                    }
-                }
+                ApplyValidMask(valid_data, res, valid_res, size);
                 // Apply bitmap mask
                 if (has_bitmap_input) {
                     for (int i = 0; i < size; ++i) {
@@ -1093,7 +1086,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }

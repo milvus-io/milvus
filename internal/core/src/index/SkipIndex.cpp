@@ -65,7 +65,7 @@ FieldChunkMetricsTranslator::get_cells(
             auto span = chunk->Span();
 
             const void* chunk_data = span.data();
-            const bool* valid_data = span.valid_data();
+            const auto validity = span.validity();
             int64_t count = span.row_count();
 
             auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
@@ -76,7 +76,7 @@ FieldChunkMetricsTranslator::get_cells(
                         const int8_t* typedData =
                             static_cast<const int8_t*>(chunk_data);
                         auto info = ProcessFieldMetrics<int8_t>(
-                            typedData, valid_data, count);
+                            typedData, validity, count);
                         chunk_metrics->min_ = Metrics(info.min_);
                         chunk_metrics->max_ = Metrics(info.max_);
                         chunk_metrics->null_count_ = info.null_count_;
@@ -86,7 +86,7 @@ FieldChunkMetricsTranslator::get_cells(
                         const int16_t* typedData =
                             static_cast<const int16_t*>(chunk_data);
                         auto info = ProcessFieldMetrics<int16_t>(
-                            typedData, valid_data, count);
+                            typedData, validity, count);
                         chunk_metrics->min_ = Metrics(info.min_);
                         chunk_metrics->max_ = Metrics(info.max_);
                         chunk_metrics->null_count_ = info.null_count_;
@@ -96,7 +96,7 @@ FieldChunkMetricsTranslator::get_cells(
                         const int32_t* typedData =
                             static_cast<const int32_t*>(chunk_data);
                         auto info = ProcessFieldMetrics<int32_t>(
-                            typedData, valid_data, count);
+                            typedData, validity, count);
                         chunk_metrics->min_ = Metrics(info.min_);
                         chunk_metrics->max_ = Metrics(info.max_);
                         chunk_metrics->null_count_ = info.null_count_;
@@ -106,7 +106,7 @@ FieldChunkMetricsTranslator::get_cells(
                         const int64_t* typedData =
                             static_cast<const int64_t*>(chunk_data);
                         auto info = ProcessFieldMetrics<int64_t>(
-                            typedData, valid_data, count);
+                            typedData, validity, count);
                         chunk_metrics->min_ = Metrics(info.min_);
                         chunk_metrics->max_ = Metrics(info.max_);
                         chunk_metrics->null_count_ = info.null_count_;
@@ -116,7 +116,7 @@ FieldChunkMetricsTranslator::get_cells(
                         const float* typedData =
                             static_cast<const float*>(chunk_data);
                         auto info = ProcessFieldMetrics<float>(
-                            typedData, valid_data, count);
+                            typedData, validity, count);
                         chunk_metrics->min_ = Metrics(info.min_);
                         chunk_metrics->max_ = Metrics(info.max_);
                         chunk_metrics->null_count_ = info.null_count_;
@@ -126,7 +126,7 @@ FieldChunkMetricsTranslator::get_cells(
                         const double* typedData =
                             static_cast<const double*>(chunk_data);
                         auto info = ProcessFieldMetrics<double>(
-                            typedData, valid_data, count);
+                            typedData, validity, count);
                         chunk_metrics->min_ = Metrics(info.min_);
                         chunk_metrics->max_ = Metrics(info.max_);
                         chunk_metrics->null_count_ = info.null_count_;
