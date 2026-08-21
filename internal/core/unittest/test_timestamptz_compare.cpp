@@ -22,12 +22,14 @@
 
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
+#include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -98,6 +100,23 @@ class TimestamptzCompareCorrectnessTest : public ::testing::Test {
                          dataset_->timestamps_.data(),
                          dataset_->raw_);
         sealed_ = CreateSealedWithFieldDataLoaded(schema_, *dataset_);
+    }
+
+    void
+    LoadTimestamptzIndex(FieldId fid,
+                         const int64_t* values,
+                         const bool* valid) {
+        auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
+        scalar_index->Build(N, values, valid);
+
+        LoadIndexInfo load_index_info;
+        load_index_info.field_id = fid.get();
+        load_index_info.field_type = DataType::TIMESTAMPTZ;
+        load_index_info.index_params = GenIndexParams(scalar_index.get());
+        load_index_info.cache_index = milvus::CreateTestCacheIndex(
+            "timestamptz", std::move(scalar_index));
+        sealed_->LoadIndex(load_index_info);
+        ASSERT_TRUE(sealed_->HasIndex(fid));
     }
 
     void
@@ -186,5 +205,16 @@ TEST_F(TimestamptzCompareCorrectnessTest, SealedNullSemantics) {
 }
 
 TEST_F(TimestamptzCompareCorrectnessTest, SealedOffsetInputNullSemantics) {
+    AssertOffsetInputGreaterThan(sealed_.get());
+}
+
+TEST_F(TimestamptzCompareCorrectnessTest, SealedScalarIndexOnLeftGreaterThan) {
+    LoadTimestamptzIndex(ts_a_fid_, ts_a_.data(), ts_a_valid_.data());
+    AssertGreaterThan(sealed_.get());
+}
+
+TEST_F(TimestamptzCompareCorrectnessTest,
+       SealedOffsetInputScalarIndexOnLeftGreaterThan) {
+    LoadTimestamptzIndex(ts_a_fid_, ts_a_.data(), ts_a_valid_.data());
     AssertOffsetInputGreaterThan(sealed_.get());
 }
