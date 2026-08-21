@@ -26,6 +26,7 @@
 #include "boost/filesystem/operations.hpp"
 #include "boost/filesystem/path.hpp"
 #include "folly/SharedMutex.h"
+#include "common/Consts.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "index/JsonIndexBuilder.h"
@@ -60,6 +61,11 @@ JsonInvertedIndex<T>::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     LOG_INFO("Start to build json inverted index for field: {}", nested_path_);
 
+    int64_t total_rows = 0;
+    for (const auto& data : field_datas) {
+        total_rows += data->get_num_rows();
+    }
+
     ProcessJsonFieldData<T>(
         field_datas,
         this->schema_,
@@ -89,28 +95,27 @@ JsonInvertedIndex<T>::build_index_for_json(
     this->OptimizeNullOffsets();
     this->non_exist_offsets_.runOptimize();
     this->non_exist_offsets_.shrinkToFit();
+    BuildExistsBitset(total_rows);
 
     error_recorder_.PrintErrStats();
 }
 
 template <typename T>
+void
+JsonInvertedIndex<T>::Load(milvus::tracer::TraceContext ctx,
+                           const Config& config) {
+    InvertedIndexTantivy<T>::Load(ctx, config);
+    const auto row_count =
+        GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
+            .value_or(this->Count());
+    BuildExistsBitset(row_count);
+    ComputeByteSize();
+}
+
+template <typename T>
 TargetBitmap
 JsonInvertedIndex<T>::Exists() {
-    int64_t count = this->Count();
-    TargetBitmap bitset(count, true);
-
-    auto fill_bitset = [this, &bitset]() {
-        ClearRoaringRows(non_exist_offsets_, bitset);
-    };
-
-    if (this->is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(this->mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
-    }
-
-    return bitset;
+    return exists_bitset_.clone();
 }
 
 template <typename T>
@@ -286,6 +291,11 @@ JsonInvertedIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     }
     LOG_INFO("LoadEntries JsonInvertedIndex done, has_non_exist: {}",
              has_non_exist);
+    const auto row_count =
+        GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
+            .value_or(this->Count());
+    BuildExistsBitset(row_count);
+    ComputeByteSize();
 }
 
 template class JsonInvertedIndex<bool>;

@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <roaring/roaring.hh>
 #include <string>
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -75,42 +76,71 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
+RoaringRowMaskResidentBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+
+    // Roaring32 partitions values by their high 16 bits, so one low container
+    // covers exactly 2^16 consecutive row offsets.
+    constexpr uint64_t kRowsPerContainer = uint64_t{1} << 16;
+    // After runOptimize(), every container payload is at most 8 KiB: an array
+    // holds at most 4096 uint16_t values, a bitmap holds exactly 2^16 bits,
+    // and a run container is retained only when it is no larger than those
+    // alternatives.
+    constexpr uint64_t kMaxContainerPayloadBytes = 8 * 1024;
+    // RoaringMemoryBytes() also includes the portable-format header. For C
+    // containers it is 8 + 8*C bytes without runs and no more than
+    // 4 + ceil(C/8) + 8*C bytes with runs. Thus 16*C bounds either layout for
+    // every C >= 1.
+    constexpr uint64_t kMaxPortableMetadataBytesPerContainer = 16;
+    const auto rows = static_cast<uint64_t>(num_rows);
+    const auto container_count =
+        rows / kRowsPerContainer + (rows % kRowsPerContainer != 0);
+
+    const auto sparse_container_bound =
+        SaturatingAdd(static_cast<uint64_t>(sizeof(roaring::Roaring)),
+                      SaturatingMul(container_count,
+                                    kMaxContainerPayloadBytes +
+                                        kMaxPortableMetadataBytesPerContainer));
+    const auto dense_container_bound = SaturatingMul(BitsetBytes(num_rows), 2);
+    return std::max(sparse_container_bound, dense_container_bound);
+}
+
+uint64_t
 ScalarRowMaskResidentBytes(
     DataType field_type,
     const std::string& index_type,
     const std::map<std::string, std::string>& index_params,
-    int64_t num_rows) {
-    uint64_t mask_count = 0;
-    uint64_t dense_bitmap_count = 0;
-    if (index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE) {
-        // Tantivy does not retain null rows, so the C++ wrapper keeps one
-        // CRoaring row set beside the mmap'd index.
-        mask_count = 1;
-    }
-
+    int64_t num_rows,
+    std::optional<bool> field_nullable) {
     const auto is_json_path =
         field_type == DataType::JSON &&
         index_params.find(JSON_PATH) != index_params.end();
-    if (is_json_path && index_type != NGRAM_INDEX_TYPE) {
-        // Typed JSON path indexes additionally keep the non-existing rows for
-        // EXISTS semantics. An unresolved HYBRID may select INVERTED, so use
-        // two masks there as a conservative bound.
-        auto cast_type_it = index_params.find(JSON_CAST_TYPE);
-        auto is_flat_json = cast_type_it == index_params.end() ||
-                            cast_type_it->second == "JSON";
-        if (!is_flat_json) {
-            mask_count += 1;
-            dense_bitmap_count = 1;
-            if (index_type == HYBRID_INDEX_TYPE) {
-                mask_count += 1;
-            }
-        }
-    }
+    auto cast_type_it = index_params.find(JSON_CAST_TYPE);
+    const bool is_flat_json =
+        cast_type_it == index_params.end() || cast_type_it->second == "JSON";
+    // Typed JSON path indexes additionally keep the non-existing rows for
+    // EXISTS semantics (plus one dense exists bitmap). NGRAM never applies.
+    const bool typed_json_path =
+        is_json_path && !is_flat_json && index_type != NGRAM_INDEX_TYPE;
 
-    // A CRoaring container is at most roughly one dense bitset plus container
-    // metadata. Reserve 2x the dense bytes per row set to cover that overhead.
+    // Tantivy does not retain null rows, so the wrapper keeps a CRoaring null
+    // offset set beside the mmap'd index. JSON path extraction can produce
+    // null rows even when the source field is non-nullable. An unresolved
+    // HYBRID may select INVERTED, so reserve its null mask conservatively.
+    const bool keeps_null_mask =
+        ((index_type == INVERTED_INDEX_TYPE ||
+          index_type == NGRAM_INDEX_TYPE) &&
+         (is_json_path || field_nullable.value_or(true))) ||
+        (typed_json_path && index_type == HYBRID_INDEX_TYPE);
+
+    const uint64_t mask_count =
+        (keeps_null_mask ? 1 : 0) + (typed_json_path ? 1 : 0);
+    const uint64_t dense_bitmap_count = typed_json_path ? 1 : 0;
+
     auto roaring_bytes =
-        SaturatingMul(SaturatingMul(BitsetBytes(num_rows), 2), mask_count);
+        SaturatingMul(RoaringRowMaskResidentBytes(num_rows), mask_count);
     auto dense_bitmap_bytes =
         SaturatingMul(BitsetBytes(num_rows), dense_bitmap_count);
     return SaturatingAdd(roaring_bytes, dense_bitmap_bytes);
@@ -192,7 +222,8 @@ IndexFactory::IndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    int64_t dim) {
+    int64_t dim,
+    std::optional<bool> field_nullable) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
@@ -203,12 +234,13 @@ IndexFactory::IndexLoadResource(
                                     num_rows,
                                     dim);
     } else {
-        return ScalarIndexLoadResource(field_type,
-                                       index_version,
-                                       index_size_in_bytes,
-                                       index_params,
-                                       mmap_enable,
-                                       num_rows);
+        return ScalarIndexLoadResourceImpl(field_type,
+                                           index_version,
+                                           index_size_in_bytes,
+                                           index_params,
+                                           mmap_enable,
+                                           num_rows,
+                                           field_nullable);
     }
 }
 
@@ -404,6 +436,42 @@ IndexFactory::ScalarIndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows) {
+    return ScalarIndexLoadResourceImpl(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows,
+                                       std::nullopt);
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    bool field_nullable) {
+    return ScalarIndexLoadResourceImpl(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows,
+                                       field_nullable);
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResourceImpl(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    std::optional<bool> field_nullable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -471,7 +539,7 @@ IndexFactory::ScalarIndexLoadResource(
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
     auto row_mask_resident_bytes = ScalarRowMaskResidentBytes(
-        field_type, index_type, index_params, num_rows);
+        field_type, index_type, index_params, num_rows, field_nullable);
     request.final_memory_cost =
         SaturatingAdd(request.final_memory_cost, row_mask_resident_bytes);
     request.max_memory_cost =

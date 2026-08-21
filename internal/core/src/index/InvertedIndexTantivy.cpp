@@ -333,7 +333,7 @@ InvertedIndexTantivy<T>::IsNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count);
+    TargetBitmap bitset;
 
     auto fill_bitset = [this, count, &bitset]() {
         bitset = RoaringToBitset(null_offsets_, count);

@@ -114,6 +114,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
                              field_datas) override;
 
     void
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
+
+    void
     finish() {
         this->wrapper_->finish();
     }
@@ -153,7 +156,8 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
                null_offsets.data(),
                index_valid_data_length);
 
-        auto non_exist_offsets = RoaringToLegacyOffsets(this->non_exist_offsets_);
+        auto non_exist_offsets =
+            RoaringToLegacyOffsets(this->non_exist_offsets_);
         auto non_exist_data_length = non_exist_offsets.size() * sizeof(size_t);
         std::shared_ptr<uint8_t[]> non_exist_data(
             new uint8_t[non_exist_data_length]);
@@ -181,6 +185,13 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     Exists();
 
     void
+    ComputeByteSize() override {
+        InvertedIndexTantivy<T>::ComputeByteSize();
+        this->cached_byte_size_ += RoaringMemoryBytes(non_exist_offsets_);
+        this->cached_byte_size_ += exists_bitset_.size_in_bytes();
+    }
+
+    void
     WriteEntries(storage::IndexEntryWriter* writer) override;
 
     void
@@ -200,6 +211,12 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     TargetBitmap
     ComparableValueBitset();
 
+    void
+    BuildExistsBitset(size_t count) {
+        exists_bitset_ =
+            RoaringToBitset(non_exist_offsets_, count, /*inverted=*/true);
+    }
+
     std::string nested_path_;
     JsonInvertedIndexParseErrorRecorder error_recorder_;
     JsonCastType cast_type_;
@@ -212,6 +229,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     // For example, if the JSON path is "/a", this bitmap will store rows like
     // null, {}, {"a": null}, etc.
     roaring::Roaring non_exist_offsets_;
+    TargetBitmap exists_bitset_;
 };
 
 }  // namespace milvus::index

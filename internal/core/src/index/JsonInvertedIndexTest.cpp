@@ -91,6 +91,7 @@ struct ExprBatchSizeGuard {
 
 struct LoadedJsonOffsetStats {
     int64_t count;
+    int64_t exists_size;
     int64_t exists_count;
     int64_t null_count;
 };
@@ -175,6 +176,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 
     Config load_config;
     load_config[index::INDEX_FILES] = index_files;
+    load_config[INDEX_NUM_ROWS_KEY] = json_raw_data.size();
     load_config[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
 
@@ -182,6 +184,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
     auto exists = loaded_json_index->Exists();
     auto nulls = loaded_json_index->IsNull();
     return {loaded_json_index->Count(),
+            static_cast<int64_t>(exists.size()),
             static_cast<int64_t>(exists.count()),
             static_cast<int64_t>(nulls.count())};
 }
@@ -615,16 +618,16 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
     FileSliceSizeGuard slice_size_guard(64);
 
     std::vector<std::string> json_raw_data;
-    for (int i = 0; i < 20; ++i) {
-        json_raw_data.emplace_back(R"({"b": 1})");
-    }
     for (int i = 0; i < 10; ++i) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
+    }
+    for (int i = 0; i < 20; ++i) {
+        json_raw_data.emplace_back(R"({"b": 1})");
     }
 
     auto stats =
         BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data);
-    EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_size, json_raw_data.size());
     EXPECT_EQ(stats.exists_count, 10);
 }
 
@@ -646,5 +649,6 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
     auto stats = BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data,
                                                                   &valid_data);
     EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_size, json_raw_data.size());
     EXPECT_EQ(stats.null_count, 20);
 }

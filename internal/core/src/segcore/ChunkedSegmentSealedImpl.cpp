@@ -266,7 +266,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             info.index_size,
             info.index_params,
             info.enable_mmap,
-            info.num_rows);
+            info.num_rows,
+            field_meta.is_nullable());
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
