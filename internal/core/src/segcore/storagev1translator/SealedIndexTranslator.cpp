@@ -103,10 +103,26 @@ SealedIndexTranslator::estimated_loading_usage(
             index_load_info_.dim,
             index_load_info_.field_nullable);
     // this is an estimation, error could be up to 20%.
-    return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
-                                                request.final_disk_cost),
-            milvus::cachinglayer::ResourceUsage(request.max_memory_cost,
-                                                request.max_disk_cost * 2)};
+    const auto final_usage = milvus::cachinglayer::ResourceUsage(
+        request.final_memory_cost, request.final_disk_cost);
+    const auto peak_usage = milvus::cachinglayer::ResourceUsage(
+        request.max_memory_cost, request.max_disk_cost * 2);
+    LOG_INFO(
+        "estimated index loading usage: index_id={}, segment_id={}, "
+        "field_id={}, index_type={}, index_size={}, mmap={}, "
+        "final_memory_bytes={}, final_disk_bytes={}, "
+        "peak_memory_bytes={}, peak_disk_bytes={}",
+        index_load_info_.index_id,
+        index_load_info_.segment_id,
+        index_load_info_.field_id,
+        index_info_.index_type,
+        index_load_info_.index_size,
+        index_load_info_.enable_mmap,
+        final_usage.memory_bytes,
+        final_usage.file_bytes,
+        peak_usage.memory_bytes,
+        peak_usage.file_bytes);
+    return {final_usage, peak_usage};
 }
 
 const std::string&
