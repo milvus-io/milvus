@@ -441,9 +441,8 @@ class FMIndex {
         id_to_byte_;  // dense id -> byte (inverse of byte_to_id_)
     // isa_sample_[k] = row whose SA value = k*rate. Only Extract needs it, and
     // building it walks ALL m rows (an O(m) pass + m/rate x 8 B of heap). The
-    // library still builds it lazily on first Extract. The scalar wrapper calls
-    // MaterializeIsaSample at load/build so cache accounting sees that heap
-    // before any query.
+    // library builds it lazily on first Extract. The scalar wrapper does not
+    // materialize ISA at load; Match rechecks sealed VARCHAR instead.
     mutable std::vector<uint64_t> isa_sample_;
     mutable std::unique_ptr<std::once_flag> isa_once_ =
         std::make_unique<std::once_flag>();

@@ -4,8 +4,8 @@
 - **Updated:** 2026-07-14 (v2 — scope expanded from `InnerMatch`-only to prefix /
   suffix / equality / general `LIKE` / regex; grounded in the completed core
   implementation and its benchmarks)
-- **Updated:** 2026-08-20 (v5 — Match cost guard prices Extract; ISA is
-  materialized at load/build so cache cell size includes it.)
+- **Updated:** 2026-08-21 (v6 — Match phase 2 rechecks sealed VARCHAR via
+  `ProcessDataByOffsets`. ISA is not materialized at load. Guard is locate-only.)
 - **Author(s):** @xiaofanluan
 - **Status:** Draft
 - **Component:** C++ Core (index, exec/expression), QueryNode, Go index-param-check,
@@ -182,7 +182,7 @@ sample rate are tracked follow-ups.
 - Cost-guarded execution: the index declines patterns where a scan is cheaper,
   using its own O(|P|) count (`queryNode.fmindexCostRatio`, default 0.001).
 - General `Match` (`LIKE` with interior `%`/`_`): rarest literal fragment
-  produces candidates; `LikePatternMatcher` rechecks those rows.
+  produces candidates; `ExecFMMatch` rechecks those rows on sealed VARCHAR.
 - Standard scalar-index lifecycle: per-sealed-segment build, V3 single-file
   serialization, mmap (zero-copy view), caching-layer pinning.
 - Growing segments and any op the index declines fall back to the existing
@@ -268,7 +268,7 @@ proto, or planner changes**:
 | `PostfixMatch` | `LocateSuffixDocs(P)` | **yes** | exact | none |
 | `InnerMatch` | `MatchingDocs(P)` | **yes** | exact | none |
 | `Equal` / `In` / `NotIn` | *(library can do `LocatePrefixDocs(P)` ∩ length filter, but…)* | **no** — `ShouldUseOp` declines the equality family; routed to scan / `INVERTED` | exact via fallback | n/a |
-| `Match` | rarest literal fragment `VisitMatchingDocs` then `LikePatternMatcher` recheck | **yes** | exact after recheck | yes |
+| `Match` | rarest literal fragment `VisitMatchingDocs`; VARCHAR `LikePatternMatcher` recheck | **yes** | exact after recheck | yes, sealed VARCHAR |
 | `RegexMatch` | `extract_literals_from_regex` → per-literal `MatchingDocs`, AND | **no** (follow-up) — brute-force path | — | — |
 | `Range` (lexicographic) | — | **no** — `ShouldUseOp` = false → existing paths | — | n/a |
 
@@ -308,19 +308,15 @@ handles UTF-8 character-vs-byte width).
 LIKE 'req-2026%GET%_500'
   factors:  "req-2026"   "GET"   "500"
   phase 1:  Count each factor; VisitMatchingDocs on the rarest one
-  phase 2:  LikePatternMatcher on those candidate rows only (via Extract)
+  phase 2:  LikePatternMatcher on those candidate rows only (sealed VARCHAR)
 ```
 
 `ShouldUseOp` uses a count-first guard on the rarest factor
-(`MatchGuardAccepts`). Locate cost is `occ × sa_sample_rate`. Recheck also
-walks each candidate with `Extract` (`occ × avg_row_bytes`), so the bound is
-`occ × (sa_sample_rate + avg_row_bytes) < ratio × tokens`. A pattern with no
-usable factor (`LIKE '%'`, `LIKE '%_%'`) declines to the scan. The ISA table
-that `Extract` needs (about one extra heap byte per text byte at
-`sa_sample_rate=8`) is built on the load/build path so cache cell size includes
-it before any query. NGRAM-style recheck against sealed VARCHAR bytes, AND of
-every factor, and prefix/suffix anchoring of the first/last factor are
-follow-ups.
+(`MatchGuardAccepts`). Locate cost is `occ × sa_sample_rate`. Phase 2 streams
+those candidate VARCHAR rows sequentially, so the bound stays
+`occ × sa_sample_rate < ratio × tokens`, the same locate-only ratio as the
+anchored ops. A pattern with no usable factor (`LIKE '%'`, `LIKE '%_%'`)
+declines to the scan. ISA is not built at load; Match does not call `Extract`.
 
 *Deferred enhancement (measure first):* for `%`-only patterns (no `_`) the
 factor **order** constraint can be verified inside the index from
@@ -486,7 +482,7 @@ All integration points verified against master (branch state of 2026-07-14).
   - `ShouldUseOp(op, pattern)`: `true` for the three anchored pattern ops
     (`PrefixMatch`/`PostfixMatch`/`InnerMatch`) and for general `Match`, gated
     by the count-first cost guard when a literal is supplied (`Match` uses
-    `MatchGuardAccepts` on the rarest factor, including Extract cost); `false` (fall back to the scan /
+    `MatchGuardAccepts` on the rarest factor, locate-only); `false` (fall back to the scan /
     another index) for **everything else, including the `Equal`/`NotEqual`/`IN`/`NOT IN`
     equality family**, `RegexMatch`, and `Range`. The default is `false`
     so any unhandled op safely downgrades rather than routing into a method that
@@ -499,9 +495,9 @@ All integration points verified against master (branch state of 2026-07-14).
     is **no** separate `CanAccelerate` method; a future two-phase executor
     (PR 3) would consult it the way NGRAM consults `CanHandleLiteral`.
   - `HasRawData() = false`; `Reverse_Lookup` unsupported. General `Match`
-    rechecks candidates with `LikePatternMatcher` over `fm_.Extract`. ISA is
-    materialized at load/build so the cache cell includes that heap. Recheck
-    from sealed VARCHAR bytes the way NGRAM Phase2 does is a follow-up.
+    returns candidates from `PatternMatch`. `ExecFMMatch` rechecks them with
+    `ProcessDataByOffsets<std::string_view>` and `LikePatternMatcher` on the
+    sealed VARCHAR column. ISA is not materialized at load/build.
   - RegexMatch two-phase entry points mirroring
     `NgramInvertedIndex::ExecutePhase1/2` are still not wired; regex stays on
     the scan.
@@ -517,12 +513,10 @@ All integration points verified against master (branch state of 2026-07-14).
 
 - Exact ops: **zero changes** — `SupportPatternMatch()`/`PatternMatch()`
   routing is already in place for any `ScalarIndex`.
-- `Match`/`RegexMatch` two-phase: generalize the NGRAM-specific plumbing
-  (`PhyLikeConjunctExpr`, `ExecuteNgramPhase1/2` hooks in `UnaryExpr.h:1089-1099`,
-  the `PinWrapper<NgramInvertedIndex*>` pin at `UnaryExpr.h:1177`) to a
-  candidate-generating-index interface both NGRAM and FMINDEX implement. The
-  phase-1-cached / phase-2-per-batch structure and its conjunction
-  optimization (`LikeConjunctExpr.cpp:61-101`) are reused as-is.
+- `Match` two-phase: `ExecFMMatch` mirrors `ExecNgramMatch`. Phase 1 caches
+  `PatternMatch` candidates. Phase 2 groups sorted candidate offsets by chunk
+  via `ProcessDataByOffsets` and runs `LikePatternMatcher` on the views.
+- `RegexMatch` two-phase remains a follow-up. Regex stays on the scan.
 
 ### Go layer (`internal/util/indexparamcheck/`)
 
@@ -544,12 +538,13 @@ All integration points verified against master (branch state of 2026-07-14).
   wavelet words, sampled bitmaps, sampled-SA values AND doc boundaries are all
   viewed in place (the samples through a narrow/wide-aware accessor, so the
   compact 4-byte on-disk form is served directly); the ISA table (Extract's
-  anchor) is built at load/build (`MaterializeIsaSample`) so cache cell size
-  includes it. The library still builds ISA lazily if Extract runs first.
+  anchor) stays lazy. Match does not Extract, so load does not
+  `MaterializeIsaSample`. The library still builds ISA if Extract runs.
   What a load DOES rebuild in RAM is the rank directories, whose size is
   controlled by `fm_block_bytes` (at the default 64-byte block, roughly 1/8 of
-  the packed wavelet words), plus small derived metadata and the ISA table.
-  mmap-resident memory therefore includes Extract storage at load. The
+  the packed wavelet words), plus small derived metadata.
+  mmap-resident memory therefore excludes Extract storage until something
+  actually calls Extract. The
   load-resource estimator keeps the
   full blob as a conservative pre-load admission/peak bound; after `LoadView`
   succeeds the cache cell replaces `memory_bytes` with the measured resident

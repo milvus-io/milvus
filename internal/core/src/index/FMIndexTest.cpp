@@ -103,6 +103,35 @@ Match(index::FMIndex* idx, const std::string& p) {
     return SetBits(bm);
 }
 
+// PatternMatch(Match) returns rarest-fragment candidates. Exactness is the
+// intersection with LikePatternMatcher on the original strings, the same
+// recheck ExecFMMatch performs on sealed VARCHAR.
+std::vector<int64_t>
+RecheckedMatch(index::FMIndex* idx,
+               const std::vector<std::string>& data,
+               const std::string& p) {
+    LikePatternMatcher matcher(p);
+    auto candidates = Match(idx, p);
+    std::vector<int64_t> got;
+    got.reserve(candidates.size());
+    size_t ci = 0;
+    for (size_t i = 0; i < data.size(); ++i) {
+        const bool hit = matcher(data[i]);
+        const bool cand =
+            ci < candidates.size() && candidates[ci] == static_cast<int64_t>(i);
+        if (cand) {
+            ++ci;
+            if (hit) {
+                got.push_back(static_cast<int64_t>(i));
+            }
+        } else {
+            EXPECT_FALSE(hit)
+                << "candidate miss pattern=[" << p << "] row " << i;
+        }
+    }
+    return got;
+}
+
 }  // namespace
 
 // ---- query routing over raw data (no storage) ----
@@ -173,7 +202,8 @@ TEST(FMIndex, ShouldUseOpDeclinesRangeAndRegex) {
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::RegexMatch));
 
     EXPECT_THROW(idx->Range("m", OpType::GreaterThan), SegcoreError);
-    EXPECT_EQ(Match(idx.get(), "a%e"), (std::vector<int64_t>{0}));
+    EXPECT_EQ(RecheckedMatch(idx.get(), {"apple", "banana"}, "a%e"),
+              (std::vector<int64_t>{0}));
 }
 
 // Count-first guard, folded into ShouldUseOp(op, pattern): for the anchored
@@ -208,11 +238,11 @@ TEST(FMIndex, CountFirstGuardDeclinesHighHitPatterns) {
     // Empty literal (LIKE '%', or a caller without literal information):
     // always accelerate. Answered by an O(rows) bitmap clone.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::PrefixMatch, ""));
-    // General LIKE: occ 0 still accelerates. A hit also pays full-row Extract
-    // per candidate, so %RARE% (5 hits x ~500 B rows) declines even though
-    // InnerMatch on the same fragment accepts. No literal fragment declines.
+    // General LIKE: occ 0 still accelerates. Locate-only: %RARE% (5 hits x
+    // sa_sample_rate 32 = 160 < 0.001 x ~500k tokens) accepts. High-hit
+    // fragments and patterns with no literal fragment decline.
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%QQQQ%"));
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%COMMON%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%x%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%"));
@@ -271,12 +301,12 @@ TEST(FMIndex, CountFirstGuardAcceleratesLowHitAndMatchesAreExact) {
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, "QUOKKA"));
     EXPECT_TRUE(Inner(idx.get(), "QUOKKA").empty());
 
-    // Extract recheck makes Match decline here (4 x ~500 B rows). PatternMatch
-    // is still exact when the executor falls back to the scan.
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%ZEBRA%"));
-    EXPECT_EQ(Match(idx.get(), "%ZEBRA%"), zebra);
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "QOP%ZEBRA"));
-    EXPECT_TRUE(Match(idx.get(), "QOP%ZEBRA").empty());
+    // Locate-only Match accepts the same rare markers. PatternMatch returns
+    // candidates; RecheckedMatch is the VARCHAR recheck.
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%ZEBRA%"));
+    EXPECT_EQ(RecheckedMatch(idx.get(), data, "%ZEBRA%"), zebra);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "QOP%ZEBRA"));
+    EXPECT_TRUE(RecheckedMatch(idx.get(), data, "QOP%ZEBRA").empty());
 }
 
 // Degenerate corpus: every non-null row is the empty string, so
@@ -312,7 +342,7 @@ TEST(FMIndex, CountFirstGuardAcceleratesZeroHitOnZeroTokenSegment) {
     // model for the three anchored ops and for Match when a fragment has occ 0.
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Equal, "abc"));
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "abc"));
-    EXPECT_TRUE(Match(idx.get(), "abc").empty());
+    EXPECT_TRUE(RecheckedMatch(idx.get(), data, "abc").empty());
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%_%"));
 }
 
@@ -790,7 +820,7 @@ RunRoundTrip(bool enable_mmap) {
         EXPECT_EQ(idx->CellByteSize().file_bytes, kEstimatedFile);
         const auto bytes_after_load = idx->ByteSize();
         EXPECT_GT(bytes_after_load, 0);
-        // ISA is materialized at load. A later Extract must not grow the cell.
+        // Match does not Extract, so ISA stays lazy and ByteSize is stable.
         (void)Match(idx.get(), "%app%");
         EXPECT_EQ(idx->ByteSize(), bytes_after_load);
         EXPECT_EQ(idx->CellByteSize().memory_bytes, bytes_after_load);
@@ -1133,8 +1163,162 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
         "PrefixMatch empty");
 }
 
-// Index Match results must equal LikePatternMatcher brute force for every
-// pattern, including those ShouldUseOp declines. Recheck is the answer.
+// Large enough corpus that Match is accepted. Phase 2 must recheck VARCHAR
+// so a candidate superset (QOP%ZEBRA) is exact after ExecFMMatch.
+TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
+    int64_t collection_id = 11, partition_id = 12, segment_id = 13;
+    int64_t index_build_id = 6101, index_version = 6101, index_id = 7101;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("fm_match", DataType::VARCHAR);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, field_id.get(), index_build_id, index_version);
+    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    std::vector<std::string> data;
+    std::string filler(500, 'y');
+    data.reserve(1000);
+    for (int i = 0; i < 1000; i++) {
+        std::string row = filler;
+        if (i % 250 == 0) {
+            row += "ZEBRA";
+        }
+        if (i >= 100 && (i - 100) % 250 == 0) {
+            row = "QOP" + row;
+        }
+        data.push_back(std::move(row));
+    }
+    const size_t nb = data.size();
+
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto segment = milvus::segcore::CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          field_id.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                field_id.get(),
+                                1);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    std::vector<std::string> index_files;
+    int64_t index_size = 0;
+    {
+        Config config;
+        config[milvus::index::INDEX_TYPE] = milvus::index::FMINDEX_INDEX_TYPE;
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        index::FMIndexParams params{.sa_sample_rate = 8};
+        auto built = std::make_shared<index::FMIndex>(ctx, params);
+        built->Build(config);
+        auto stats = built->UploadUnified({});
+        index_size = stats->GetSerializedSize();
+        index_files = stats->GetIndexFiles();
+        EXPECT_TRUE(built->ShouldUseOp(proto::plan::OpType::Match, "%ZEBRA%"));
+        EXPECT_TRUE(
+            built->ShouldUseOp(proto::plan::OpType::Match, "QOP%ZEBRA"));
+    }
+
+    std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::FMINDEX_INDEX_TYPE},
+        {milvus::index::FM_SA_SAMPLE_RATE, "8"},
+        {milvus::LOAD_PRIORITY, "HIGH"},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    milvus::segcore::LoadIndexInfo load_index_info{};
+    load_index_info.collection_id = collection_id;
+    load_index_info.partition_id = partition_id;
+    load_index_info.segment_id = segment_id;
+    load_index_info.field_id = field_id.get();
+    load_index_info.field_type = DataType::VARCHAR;
+    load_index_info.enable_mmap = true;
+    load_index_info.mmap_dir_path = TestLocalPath + "mmap";
+    load_index_info.index_id = index_id;
+    load_index_info.index_build_id = index_build_id;
+    load_index_info.index_version = index_version;
+    load_index_info.index_params = index_params;
+    load_index_info.index_files = index_files;
+    load_index_info.schema = field_meta.field_schema;
+    load_index_info.index_size = index_size;
+    uint8_t trace_id[16] = {3};
+    uint8_t span_id[8] = {4};
+    CTraceContext trace{};
+    trace.traceID = trace_id;
+    trace.spanID = span_id;
+    trace.traceFlags = 0;
+    AppendIndexV2(trace, static_cast<CLoadIndexInfo>(&load_index_info));
+    segment->LoadIndex(load_index_info);
+
+    auto run = [&](const std::string& value) {
+        auto* unary =
+            test::GenUnaryRangeExpr(proto::plan::OpType::Match, value);
+        unary->set_allocated_column_info(test::GenColumnInfo(
+            field_id.get(), proto::schema::DataType::VarChar, false, false));
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary);
+        auto parser = milvus::query::ProtoParser(schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto node = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           typed_expr);
+        return milvus::query::ExecuteQueryExpr(
+            node, segment.get(), nb, MAX_TIMESTAMP);
+    };
+    auto expect_rows =
+        [&](const BitsetType& got,
+            const std::function<bool(const std::string&)>& oracle,
+            const char* what) {
+            for (size_t i = 0; i < nb; i++) {
+                EXPECT_EQ(got[i], oracle(data[i]))
+                    << what << " row " << i << " (" << data[i] << ")";
+            }
+        };
+
+    expect_rows(
+        run("%ZEBRA%"),
+        [](const std::string& s) {
+            return s.find("ZEBRA") != std::string::npos;
+        },
+        "Match %ZEBRA%");
+    expect_rows(
+        run("QOP%ZEBRA"),
+        [](const std::string& s) {
+            return s.rfind("QOP", 0) == 0 &&
+                   s.find("ZEBRA") != std::string::npos;
+        },
+        "Match QOP%ZEBRA");
+}
+
+// PatternMatch returns candidates. RecheckedMatch on the fixture strings must
+// equal LikePatternMatcher brute force for every pattern, including those
+// ShouldUseOp declines.
 TEST(FMIndex, MatchOracleEqualsBruteForce) {
     std::vector<std::string> data{
         "apple",
@@ -1175,7 +1359,7 @@ TEST(FMIndex, MatchOracleEqualsBruteForce) {
                 expected.push_back(static_cast<int64_t>(i));
             }
         }
-        EXPECT_EQ(Match(idx.get(), pattern), expected)
+        EXPECT_EQ(RecheckedMatch(idx.get(), data, pattern), expected)
             << "pattern=[" << pattern << "]";
     }
 }
@@ -1194,8 +1378,8 @@ TEST(FMIndex, MatchGuardDeclinesUnselectiveAndStillExact) {
     auto idx = MakeRawDataIndex(data);
 
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%x%"));
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%x%"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%x%"));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%_%"));
 
     LikePatternMatcher rare("%RARE%");
@@ -1205,7 +1389,7 @@ TEST(FMIndex, MatchGuardDeclinesUnselectiveAndStillExact) {
             expected.push_back(static_cast<int64_t>(i));
         }
     }
-    EXPECT_EQ(Match(idx.get(), "%RARE%"), expected);
+    EXPECT_EQ(RecheckedMatch(idx.get(), data, "%RARE%"), expected);
     LikePatternMatcher every("%x%");
     std::vector<int64_t> every_expected;
     for (size_t i = 0; i < data.size(); ++i) {
@@ -1213,12 +1397,12 @@ TEST(FMIndex, MatchGuardDeclinesUnselectiveAndStillExact) {
             every_expected.push_back(static_cast<int64_t>(i));
         }
     }
-    EXPECT_EQ(Match(idx.get(), "%x%"), every_expected);
+    EXPECT_EQ(RecheckedMatch(idx.get(), data, "%x%"), every_expected);
 }
 
-// Locate-only would accept a single rare hit (occ x sr < ratio x tokens). Match
-// also pays Extract of each candidate row, so the same fragment declines.
-TEST(FMIndex, MatchGuardDeclinesWhenExtractDominates) {
+// Locate-only accepts a single rare hit on long rows (occ x sr < ratio x
+// tokens). Phase 2 is a sequential VARCHAR read of that one row.
+TEST(FMIndex, MatchGuardAcceptsRareHitOnLongRows) {
     std::vector<std::string> data;
     std::string filler(2000, 'y');
     data.reserve(100);
@@ -1231,11 +1415,12 @@ TEST(FMIndex, MatchGuardDeclinesWhenExtractDominates) {
     }
     auto idx = MakeRawDataIndex(data);
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::InnerMatch, "RARE"));
-    EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
-    EXPECT_EQ(Match(idx.get(), "%RARE%"), (std::vector<int64_t>{0}));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
+    EXPECT_EQ(RecheckedMatch(idx.get(), data, "%RARE%"),
+              (std::vector<int64_t>{0}));
 }
 
-// Short rows, one rare hit: Extract is cheap enough that Match still accelerates.
+// Short rows, one rare hit: locate is cheap, Match accelerates.
 TEST(FMIndex, MatchGuardAcceptsRareFragmentOnShortRows) {
     std::vector<std::string> data;
     std::string filler(200, 'y');
@@ -1249,5 +1434,6 @@ TEST(FMIndex, MatchGuardAcceptsRareFragmentOnShortRows) {
     }
     auto idx = MakeRawDataIndex(data);
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
-    EXPECT_EQ(Match(idx.get(), "%RARE%"), (std::vector<int64_t>{0}));
+    EXPECT_EQ(RecheckedMatch(idx.get(), data, "%RARE%"),
+              (std::vector<int64_t>{0}));
 }

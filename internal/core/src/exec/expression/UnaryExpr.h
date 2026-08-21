@@ -1154,6 +1154,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 
+    bool
+    CanUseFMMatch();
+
+    std::optional<VectorPtr>
+    ExecFMMatch(EvalCtx& context);
+
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 

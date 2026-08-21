@@ -29,7 +29,6 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
-#include "common/RegexQuery.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
 #include "index/Meta.h"
@@ -250,7 +249,6 @@ FMIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     // this single-threaded build path, so the concurrent const query path never
     // races on a lazy write.
     ComputeTotalTokens();
-    fm_.MaterializeIsaSample();
     RefreshResidentSize();
 
     LOG_INFO("FM index build done, field id: {}, total rows: {}",
@@ -280,7 +278,6 @@ FMIndex::BuildWithRawDataForUT(size_t n,
 
     // total_tokens is derived from the built blob, so compute after Build.
     ComputeTotalTokens();
-    fm_.MaterializeIsaSample();
     RefreshResidentSize();
 }
 
@@ -288,8 +285,8 @@ void
 FMIndex::ComputeByteSize() {
     // Mmap-backed serialized arrays are accounted as file bytes by the cache,
     // not heap memory. fm_ reports only allocations it owns; the wrapper adds
-    // its row-sized null bitmap. ISA storage is included because load/build
-    // call MaterializeIsaSample before this.
+    // its row-sized null bitmap. Match does not Extract, so ISA is not
+    // materialized here.
     const size_t bytes =
         fm_.resident_heap_bytes() + null_bitmap_.size_in_bytes();
     cached_byte_size_ =
@@ -351,14 +348,9 @@ FMIndex::MatchGuardAccepts(const std::string& pattern) const {
         segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
     const double tokens = static_cast<double>(TotalTokens());
     const double sr = static_cast<double>(fm_.sa_sample_rate());
-    int64_t non_null = total_rows_ - static_cast<int64_t>(null_bitmap_.count());
-    if (non_null < 1) {
-        non_null = 1;
-    }
-    const double avg_row = tokens / static_cast<double>(non_null);
-    // Locate is occ x sr LF steps. Recheck then Extract-walks each candidate
-    // row (occ x avg_row LF steps). The anchored-op ratio only priced locate.
-    return static_cast<double>(occ) * (sr + avg_row) < ratio * tokens;
+    // Locate is occ x sr LF steps. Phase 2 then streams those candidate
+    // VARCHAR rows; that sequential read is not priced as random LF.
+    return static_cast<double>(occ) * sr < ratio * tokens;
 }
 
 const TargetBitmap
@@ -405,28 +397,17 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
             return bitset;
         }
         case proto::plan::OpType::Match: {
-            // Candidates from the rarest literal fragment, then the existing
-            // LikePatternMatcher over those rows only. The matcher is the
-            // brute-force semantics; the index only prunes.
-            LikePatternMatcher matcher(pattern);
-            auto recheck = [&](uint64_t d) -> bool {
-                if (d >= static_cast<uint64_t>(total_rows_) ||
-                    null_bitmap_[d]) {
-                    return false;
-                }
-                auto raw =
-                    fm_.Extract(d, 0, std::numeric_limits<size_t>::max());
-                return matcher(raw);
-            };
+            // Phase 1 only: rarest literal fragment to candidate rows.
+            // ExecFMMatch rechecks those offsets on sealed VARCHAR.
+            TargetBitmap candidates(total_rows_);
             auto parts = split_by_wildcard(pattern);
             if (parts.empty()) {
-                TargetBitmap bitset(total_rows_);
                 for (int64_t i = 0; i < total_rows_; ++i) {
-                    if (recheck(static_cast<uint64_t>(i))) {
-                        bitset.set(i);
+                    if (!null_bitmap_[i]) {
+                        candidates.set(i);
                     }
                 }
-                return bitset;
+                return candidates;
             }
             const std::string* rarest = &parts[0];
             size_t rarest_occ = fm_.Count(bytes(*rarest), rarest->size());
@@ -437,20 +418,14 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
                     rarest = &parts[i];
                 }
             }
-            TargetBitmap candidates(total_rows_);
             fm_.VisitMatchingDocs(
                 bytes(*rarest), rarest->size(), [&](uint64_t d) {
-                    if (d < static_cast<uint64_t>(total_rows_)) {
+                    if (d < static_cast<uint64_t>(total_rows_) &&
+                        !null_bitmap_[d]) {
                         candidates.set(d);
                     }
                 });
-            TargetBitmap bitset(total_rows_);
-            for (int64_t i = 0; i < total_rows_; ++i) {
-                if (candidates[i] && recheck(static_cast<uint64_t>(i))) {
-                    bitset.set(i);
-                }
-            }
-            return bitset;
+            return candidates;
         }
         default:
             // `op` is selected by the executor's index-routing logic, not read
@@ -797,11 +772,9 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         }
     }
 
-    // Guard token total, derived from the loaded blob (bwt_size); needs fm_ valid
-    // (asserted above), so compute it here at the end of the load path. ISA is
-    // built here so cache cell size includes Extract storage before any query.
+    // Guard token total, derived from the loaded blob (bwt_size); needs fm_
+    // valid (asserted above), so compute it here at the end of the load path.
     ComputeTotalTokens();
-    fm_.MaterializeIsaSample();
     RefreshResidentSize();
 
     LOG_INFO("LoadEntries FM index done, field id: {}, total rows: {}",

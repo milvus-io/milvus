@@ -43,9 +43,9 @@ constexpr const char* FMINDEX_META_NULLABLE = "nullable";
 
 // Scalar-index wrapper around the self-contained byte-exact FM-index library
 // (milvus::index::fmindex::FMIndex). It accelerates LIKE prefix/infix/suffix on
-// VARCHAR exactly (no recheck). General LIKE (Match) uses rarest-fragment
-// candidates plus LikePatternMatcher recheck. Regex / range / equality fall
-// back to the raw-data scan (see ShouldUseOp).
+// VARCHAR exactly (no recheck). General LIKE (Match) returns rarest-fragment
+// candidates; ExecFMMatch rechecks those rows on the sealed VARCHAR column.
+// Regex / range / equality fall back to the raw-data scan (see ShouldUseOp).
 class FMIndex : public ScalarIndex<std::string> {
  public:
     using MemFileManager = storage::MemFileManagerImpl;
@@ -200,9 +200,8 @@ class FMIndex : public ScalarIndex<std::string> {
     //    An empty pattern means EITHER `LIKE '%'` (answered by an O(rows)
     //    bitmap clone, always accelerate) OR a caller without literal
     //    information — both accelerate, so no flag is needed to tell them
-    //    apart. Match is not covered by that locate-only calibration: recheck
-    //    also pays one full-row Extract per candidate, so MatchGuardAccepts
-    //    adds occ x avg_row_bytes to the left-hand side.
+    //    apart. Match uses the same locate-only bound: phase 2 rechecks
+    //    candidates on sealed VARCHAR bytes, not Extract.
     bool
     ShouldUseOp(proto::plan::OpType op,
                 const std::string& pattern = "") const override {
@@ -282,10 +281,8 @@ class FMIndex : public ScalarIndex<std::string> {
     // Count-first guard for general LIKE (Match). Empty pattern (caller has no
     // literal yet) stays on the allowlist. A pattern with no literal fragment
     // (`%`, `%_%`) declines. Otherwise the rarest fragment is scored as
-    // occ x (sa_sample_rate + avg_row_bytes) < ratio x tokens: locate plus one
-    // full-row Extract per candidate. The anchored-op ratio was not calibrated
-    // for Extract; the extra term is what keeps Match from beating the scan
-    // on locate count alone while losing on recheck.
+    // occ x sa_sample_rate < ratio x tokens, the same locate-only bound as
+    // the anchored ops. Phase 2 reads candidate VARCHAR rows sequentially.
     bool
     MatchGuardAccepts(const std::string& pattern) const;
 
