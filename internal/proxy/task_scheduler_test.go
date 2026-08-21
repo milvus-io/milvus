@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -577,8 +578,8 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 
 	run := func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		it := &insertTask{
 			baseTask: baseTask{metaCache: cache},
 			ctx:      context.Background(),
@@ -594,7 +595,7 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		assert.NoError(t, err)
 		task := scheduler.scheduleDmTask()
 		scheduler.dmQueue.AddActiveTask(task)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(nil, errors.New("mock err"))
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(nil, errors.New("mock err"))
 		scheduler.dmQueue.PopActiveTask(task.ID()) // assert no panic
 	}
 
