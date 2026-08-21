@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <roaring/roaring.hh>
 #include <simdjson.h>
 
 #include <algorithm>
@@ -205,6 +206,34 @@ TEST(JsonPathIndexTest, LoadResourceSkipsRowMaskForNonNullableScalarField) {
 
     EXPECT_EQ(non_nullable.final_memory_cost, 0);
     EXPECT_EQ(nullable.final_memory_cost, kOneMaskBudget);
+}
+
+TEST(JsonPathIndexTest, LoadResourceCoversSparseRoaringRowMask) {
+    constexpr int64_t kRowCount = 8192;
+
+    roaring::Roaring sparse_offsets;
+    for (uint32_t row = 0; row < kRowCount; row += 2) {
+        sparse_offsets.add(row);
+    }
+    sparse_offsets.runOptimize();
+    sparse_offsets.shrinkToFit();
+
+    std::map<std::string, std::string> params{
+        {INDEX_TYPE, INVERTED_INDEX_TYPE},
+        {SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    auto request = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64,
+        0,
+        0,
+        params,
+        true,
+        kRowCount,
+        /*field_nullable=*/true);
+    const auto actual_mask_bytes = RoaringMemoryBytes(sparse_offsets);
+
+    EXPECT_GE(request.final_memory_cost, actual_mask_bytes);
+    EXPECT_GE(request.max_memory_cost, actual_mask_bytes);
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_PathNotExist) {
