@@ -103,8 +103,8 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 	// evicted the key by TTL and a client legally re-issued it.
 	if msg.ReplicateHeader() != nil {
 		msgID, err := append(ctx, msg)
-		if err == nil && msg.MessageType() == message.MessageTypeDropCollection {
-			// A replicated drop reclaims the vchannel just like a native one.
+		if err == nil && recovery.InvalidatesIdempotencyWindow(msg.MessageType()) {
+			// A replicated drop or truncate reclaims the vchannel just like a native one.
 			impl.removeWindow(msg.VChannel())
 		}
 		return msgID, err
@@ -114,7 +114,7 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 		return append(ctx, msg)
 	}
 
-	if msg.MessageType() == message.MessageTypeDropCollection {
+	if recovery.InvalidatesIdempotencyWindow(msg.MessageType()) {
 		msgID, err := append(ctx, msg)
 		if err == nil {
 			impl.removeWindow(msg.VChannel())

@@ -173,6 +173,17 @@ func (s *vchannelSummary) applySummaryRecord(record *SummaryRecord, stage bool) 
 	s.advanceApplied(record.SourceTimeTick)
 }
 
+// discardForInvalidatedVChannel forgets everything this vchannel remembers,
+// because a DDL removed the rows the records describe. The applied position
+// still moves so replay stays idempotent.
+func (s *vchannelSummary) discardForInvalidatedVChannel(timetick uint64) {
+	s.records = make(map[string]*SummaryRecord)
+	s.commitOrder = s.commitOrder[:0]
+	s.recordBytes = 0
+	s.pendingRecords = s.pendingRecords[:0]
+	s.advanceApplied(timetick)
+}
+
 func (s *vchannelSummary) dropRecord(key string) {
 	record, ok := s.records[key]
 	if !ok {

@@ -138,7 +138,13 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 	assert.Equal(t, []uint32{0, 1, 2}, collectIdempotentRepackOffsets(t, msgs, "ch", "key-split"))
 }
 
-func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessage(t *testing.T) {
+// An idempotent insert whose envelope crosses the transport limit must be SPLIT,
+// not rejected. Rejecting made every insert large enough to be packed to the
+// threshold fail the moment idempotency was enabled, while the identical batch
+// succeeded with it off -- the packer budgets only column bytes, so a full pack
+// has less than one row of headroom for an envelope whose overhead grows with
+// the row count.
+func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *testing.T) {
 	mockMetaCache := NewMockCache(t)
 	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	paramtable.Init()
@@ -204,6 +210,8 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 	require.Len(t, withoutIdempotency, 1)
 	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
 
+	// A single row cannot be split further, so this one still fails -- but with an
+	// error that names the real constraint.
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
 		mockMetaCache,
@@ -215,8 +223,48 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 		nil,
 		it.idempotentInsertDecoration(),
 	)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	require.Contains(t, err.Error(), "after adding streaming headers")
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.Contains(t, err.Error(), "does not fit in one WAL message")
+}
+
+// The same batch with more than one row is split until every message fits,
+// instead of failing the whole insert.
+func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing.T) {
+	mockMetaCache := NewMockCache(t)
+	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
+	paramtable.Init()
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil).Maybe()
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
+
+	insertMsg, result := newIdempotentRepackInsertMsg(8)
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "104857600"))
+	whole, err := repackInsertDataForStreamingService(
+		context.Background(), mockMetaCache, []string{"ch"},
+		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Len(t, whole, 1)
+
+	// Force the built envelope over the limit; the rows must be redistributed
+	// across several messages rather than the insert failing.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(whole[0].EstimateSize()/2)))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	split, err := repackInsertDataForStreamingService(
+		context.Background(), mockMetaCache, []string{"ch"},
+		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(split), 1)
+	for _, msg := range split {
+		require.LessOrEqual(t, msg.EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+	}
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempotentHeaders(t *testing.T) {
@@ -718,7 +766,8 @@ func TestInsertTask(t *testing.T) {
 		collectionName := "col-0"
 		channels := []pChan{"mock-chan-0", "mock-chan-1"}
 		cache := NewMockCache(t)
-		cache.On("GetCollectionID",
+		cache.On(
+			"GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
@@ -832,19 +881,22 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
-	cache.On("GetCollectionID",
+	cache.On(
+		"GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
+	cache.On(
+		"GetCollectionSchema",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(info, nil)
 
-	cache.On("GetCollectionInfo",
+	cache.On(
+		"GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
@@ -967,19 +1019,22 @@ func TestInsertTask_Function(t *testing.T) {
 	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
-	cache.On("GetCollectionID",
+	cache.On(
+		"GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
+	cache.On(
+		"GetCollectionSchema",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(info, nil)
 
-	cache.On("GetPartitionInfo",
+	cache.On(
+		"GetPartitionInfo",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
@@ -990,7 +1045,8 @@ func TestInsertTask_Function(t *testing.T) {
 		CreatedTimestamp:    10001,
 		CreatedUtcTimestamp: 10002,
 	}, nil)
-	cache.On("GetCollectionInfo",
+	cache.On(
+		"GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
@@ -1036,7 +1092,8 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 func TestInsertTask_Namespace(t *testing.T) {
 	paramtable.Init()
 	cache := NewMockCache(t)
-	cache.On("GetDatabaseInfo",
+	cache.On(
+		"GetDatabaseInfo",
 		mock.Anything,
 		mock.Anything,
 	).Return(&databaseInfo{Properties: []*commonpb.KeyValuePair{}}, nil).Maybe()

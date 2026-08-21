@@ -195,6 +195,16 @@ func (m *summaryManager) observeMessage(msg message.ImmutableMessage) {
 	if msg.VChannel() == "" || msg.IsPChannelLevel() {
 		return
 	}
+	if InvalidatesIdempotencyWindow(msg.MessageType()) {
+		// The interceptor drops its live window for these; the staged records must
+		// go with it, or the next chunk would carry keys for rows that no longer
+		// exist and a restart would serve them again as duplicates. Replay reaches
+		// this the same way, so a recovered summary never rebuilds them either.
+		if summary, ok := summaries[msg.VChannel()]; ok {
+			summary.discardForInvalidatedVChannel(msg.TimeTick())
+		}
+		return
+	}
 	if summary, ok := summaries[msg.VChannel()]; ok {
 		summary.observeMessage(msg)
 	}

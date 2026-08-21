@@ -179,3 +179,33 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 	}
 	return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
 }
+
+// InvalidatesIdempotencyWindow reports whether a DDL makes every retained entry
+// of a vchannel meaningless, so the window must be dropped rather than kept.
+//
+// The danger is not a stale entry lingering; it is a stale entry being SERVED.
+// An auto-derived key is a hash of the destination and the payload, with no
+// collection generation and no partition id in it, so re-inserting the same rows
+// after the data underneath them is gone hashes to the same key and is answered
+// as a duplicate: nothing reaches the WAL and the client is told the write
+// succeeded, with the original primary keys, into an empty collection.
+//
+//   - DropCollection reclaims the vchannel outright.
+//   - TruncateCollection is IN PLACE: the collection id and the vchannel names
+//     survive it (see rootcoord's truncate callback), so the WAL and the window
+//     both survive with it, holding keys for rows that no longer exist.
+//   - DropPartition removes rows a later partition of the same NAME would be
+//     re-inserted into, and the auto key cannot tell the two apart. Dropping the
+//     whole vchannel's window is broader than the partition, and deliberately so:
+//     losing a dedup opportunity degrades to the behaviour without this feature,
+//     whereas serving a false duplicate silently discards a write.
+func InvalidatesIdempotencyWindow(t message.MessageType) bool {
+	switch t {
+	case message.MessageTypeDropCollection,
+		message.MessageTypeTruncateCollection,
+		message.MessageTypeDropPartition:
+		return true
+	default:
+		return false
+	}
+}

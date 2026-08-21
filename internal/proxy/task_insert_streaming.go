@@ -113,7 +113,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 			// request is the client's contract; see the WithIdempotencyKey docs.
 			mlog.Warn(ctx, "idempotent duplicate insert result does not match this request", mlog.Err(err))
 			it.result.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
-				"idempotency key was reused with a different payload; the server kept the original insert result"))
+				"idempotency key was reused with a different payload; the server kept the original insert result",
+			))
 		}
 	}
 	return nil
@@ -350,20 +351,32 @@ func repackInsertDataByPartitionForStreamingService(
 			return nil, err
 		}
 
-		// Entity-size packing does not include the streaming header or CAS
-		// metadata. Validate the fully built message and split the original row
-		// offsets again when that final envelope crosses the transport limit.
-		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
-			if idempotency.enabled() {
-				if err := validateStreamingInsertMessageSize(msg); err != nil {
-					return nil, err
-				}
-			}
+		// Entity-size packing counts only column bytes, so the built envelope is
+		// always larger than the budget the packer spent: row ids, timestamps and
+		// proto framing are never counted. That gap is deliberate and harmless for
+		// a plain insert -- pulsar.maxMessageSize is set below the broker's own
+		// limit precisely so the envelope fits in the headroom -- which is why an
+		// oversized plain message is accepted here rather than re-split.
+		//
+		// CAS metadata and the idempotency result are different: both are attached
+		// after packing and neither is bounded by the row budget. The idempotency
+		// result carries every primary key the write unit produced, so it grows
+		// with the row count and can exhaust the headroom outright. When a message
+		// carrying one of them crosses the limit, split the row offsets and rebuild.
+		//
+		// Rejecting instead would make any insert large enough to be split fail
+		// deterministically the moment idempotency is enabled, while the identical
+		// batch succeeds with it off.
+		carriesUnbudgetedMetadata := partialUpdateCAS != nil || idempotency.enabled()
+		if maxMessageSize <= 0 || !carriesUnbudgetedMetadata || msg.EstimateSize() <= maxMessageSize {
 			messages = append(messages, msg)
 			continue
 		}
 		if len(pack.rowOffsets) == 1 {
-			return nil, merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
+			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"a single insert row does not fit in one WAL message: size=%d bytes, limit=%d bytes",
+				msg.EstimateSize(), maxMessageSize,
+			))
 		}
 
 		middle := len(pack.rowOffsets) / 2
@@ -414,23 +427,4 @@ func buildInsertMessageForStreamingService(
 	return builder.
 		WithCipher(ez).
 		BuildMutable()
-}
-
-func validateStreamingInsertMessageSize(msg message.MutableMessage) error {
-	if msg == nil {
-		return nil
-	}
-	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	if maxSize <= 0 {
-		return nil
-	}
-	messageSize := msg.EstimateSize()
-	if messageSize <= maxSize {
-		return nil
-	}
-	return merr.WrapErrParameterInvalidMsg(
-		"insert message size %d exceeds max message size %d after adding streaming headers; reduce insert batch size",
-		messageSize,
-		maxSize,
-	)
 }

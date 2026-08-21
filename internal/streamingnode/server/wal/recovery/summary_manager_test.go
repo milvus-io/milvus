@@ -115,3 +115,46 @@ func TestSummaryManagerRemoveSummaryDropsReclaimedVChannel(t *testing.T) {
 	manager.removeSummary("v1")
 	require.Empty(t, manager.summaries())
 }
+
+// A DDL that removes the rows a record describes must clear the vchannel's
+// summary, not just the interceptor's live window.
+//
+// The auto-derived idempotency key is a hash of the destination and the payload
+// with no collection generation and no partition id in it, so re-inserting the
+// same rows after a truncate hashes to the same key. If the record survives, the
+// re-insert is answered as a duplicate: nothing reaches the WAL and the client is
+// told the write succeeded, with the original primary keys, into an empty
+// collection. Leaving it staged would be worse still -- the next chunk would make
+// it durable and a restart would serve it again.
+func TestSummaryManagerDiscardsRecordsOnInvalidatingDDL(t *testing.T) {
+	for _, msgType := range []message.MessageType{
+		message.MessageTypeDropCollection,
+		message.MessageTypeTruncateCollection,
+		message.MessageTypeDropPartition,
+	} {
+		t.Run(msgType.String(), func(t *testing.T) {
+			require.True(t, InvalidatesIdempotencyWindow(msgType))
+		})
+	}
+	// An ordinary DML type must not clear anything.
+	require.False(t, InvalidatesIdempotencyWindow(message.MessageTypeInsert))
+	require.False(t, InvalidatesIdempotencyWindow(message.MessageTypeCreatePartition))
+
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
+	for _, record := range newTestSummaryRecords("key", 100, 3) {
+		state.applySummaryRecord(record, true)
+	}
+	require.Len(t, state.records, 3)
+	require.True(t, state.hasPendingSummaryRecords())
+
+	state.discardForInvalidatedVChannel(500)
+
+	require.Empty(t, state.records)
+	require.Empty(t, state.commitOrder)
+	require.Equal(t, 0, state.recordBytes)
+	// Nothing staged either: a chunk written after this must not carry keys for
+	// rows that no longer exist.
+	require.False(t, state.hasPendingSummaryRecords())
+	// Replay stays idempotent.
+	require.Equal(t, uint64(500), state.appliedTimetick)
+}
