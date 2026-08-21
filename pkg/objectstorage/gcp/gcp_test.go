@@ -99,4 +99,20 @@ func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
 		_, err = ts.RoundTrip(req)
 		assert.Error(t, err)
 	})
+
+	t.Run("x-amz headers translated to x-goog", func(t *testing.T) {
+		ts.backend = &mockTransport{}
+		req, err := http.NewRequest("PUT", "http://example.com/dst", nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-Amz-Copy-Source", "bucket/src")
+		req.Header.Set("X-Amz-Metadata-Directive", "COPY")
+		req.Header.Set("X-Other-Header", "untouched")
+		_, err = ts.RoundTrip(req)
+		assert.NoError(t, err)
+		assert.Equal(t, "bucket/src", req.Header.Get("X-Goog-Copy-Source"))
+		assert.Equal(t, "COPY", req.Header.Get("X-Goog-Metadata-Directive"))
+		assert.Empty(t, req.Header.Get("X-Amz-Copy-Source"))
+		assert.Empty(t, req.Header.Get("X-Amz-Metadata-Directive"))
+		assert.Equal(t, "untouched", req.Header.Get("X-Other-Header"))
+	})
 }
