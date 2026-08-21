@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -235,8 +236,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
-		// no need to handle error, since this Proxy may not create dml stream for the collection.
-		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
@@ -6604,6 +6603,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.TelemetryClientsPath+"/:clientId", telemetryAuth, getTelemetryClientMetrics(node))
 	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, getTelemetryClientConfig(node))
 	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, getTelemetryClientHistory(node))
+	router.GET(http.TelemetryCommandsPath, telemetryAuth, listTelemetryCommands(node))
 	router.POST(http.TelemetryCommandsPath, telemetryAuth, postTelemetryCommand(node))
 	router.GET(http.TelemetryCommandReplyPath, telemetryAuth, getTelemetryCommandReply(node))
 	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, deleteTelemetryCommand(node))
@@ -7347,6 +7347,15 @@ func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClie
 
 	// Forward to rootcoord
 	return node.mixCoord.PushClientCommand(ctx, req)
+}
+
+// ListClientCommands lists the commands rootcoord is currently holding for clients.
+func (node *Proxy) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{Status: merr.Status(err)}, nil
+	}
+
+	return node.mixCoord.ListClientCommands(ctx, req)
 }
 
 // DeleteClientCommand deletes a client command at rootcoord.

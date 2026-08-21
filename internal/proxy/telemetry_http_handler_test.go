@@ -27,10 +27,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -414,6 +416,94 @@ func TestGetTelemetryClientMetricsHandler(t *testing.T) {
 		handler(c)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestListTelemetryCommandsHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("nil node returns error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/", nil)
+
+		listTelemetryCommands(nil)(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		var resp map[string]string
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, "proxy node not initialized", resp["error"])
+	})
+
+	t.Run("outstanding commands are returned", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ListClientCommands(mock.Anything, mock.Anything).Return(
+			&rootcoordpb.ListClientCommandsResponse{
+				Status: merr.Success(),
+				Commands: []*commonpb.ClientCommand{
+					{CommandId: "cmd-1", CommandType: "push_config", TargetScope: "global", CreateTime: 42, Persistent: true, Payload: []byte(`{"sampling_rate":0.5}`)},
+					{CommandId: "cmd-2", CommandType: "show_errors", TargetScope: "client:worker-1", CreateTime: 43},
+				},
+			}, nil)
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/", nil)
+
+		listTelemetryCommands(proxy)(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp struct {
+			Commands []CommandResponse `json:"commands"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Commands, 2)
+		assert.Equal(t, "cmd-1", resp.Commands[0].CommandID)
+		assert.Equal(t, "push_config", resp.Commands[0].CommandType)
+		assert.Equal(t, "global", resp.Commands[0].TargetScope)
+		assert.True(t, resp.Commands[0].Persistent)
+		// The payload itself is not sent, only its size, so a large persistent config does
+		// not have to travel to render the list.
+		assert.Equal(t, len(`{"sampling_rate":0.5}`), resp.Commands[0].PayloadSize)
+		assert.False(t, resp.Commands[1].Persistent)
+	})
+
+	// The page branches on the array's length, so an empty result has to be an empty array
+	// rather than null -- null reads as a broken response.
+	t.Run("no commands returns an empty array", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ListClientCommands(mock.Anything, mock.Anything).Return(
+			&rootcoordpb.ListClientCommandsResponse{Status: merr.Success()}, nil)
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/", nil)
+
+		listTelemetryCommands(proxy)(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"commands":[]}`, w.Body.String())
+	})
+
+	t.Run("coordinator failure surfaces as an error", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ListClientCommands(mock.Anything, mock.Anything).Return(
+			&rootcoordpb.ListClientCommandsResponse{Status: merr.Status(merr.WrapErrServiceInternalMsg("boom"))}, nil)
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("GET", "/", nil)
+
+		listTelemetryCommands(proxy)(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "boom")
 	})
 }
 

@@ -49,6 +49,7 @@ import (
 	grpcstreamingnode "github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -4507,8 +4508,8 @@ func TestProxy_Import(t *testing.T) {
 		}, nil)
 		proxy.metaCache = mc
 
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"foo"}, nil)
 		proxy.chMgr = chMgr
 
 		mixCoord := mocks.NewMockMixCoordClient(t)

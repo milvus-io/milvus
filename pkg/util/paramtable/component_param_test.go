@@ -301,6 +301,20 @@ func TestComponentParam(t *testing.T) {
 		params.Save("rootCoord.defaultDBProperties", "{\"key\":\"value\"}")
 		assert.Equal(t, "{\"key\":\"value\"}", Params.DefaultDBProperties.GetValue())
 
+		// Client telemetry. The defaults are the contract the telemetry manager was written
+		// against, so they are asserted exactly rather than for mere presence.
+		assert.Equal(t, 2, Params.ClientTelemetryRetainedWindows.GetAsInt())
+		assert.Equal(t, time.Minute, Params.ClientTelemetryCleanupInterval.GetAsDuration(time.Second))
+		assert.Equal(t, 10*time.Minute, Params.ClientTelemetryInactiveClientThreshold.GetAsDuration(time.Second))
+		assert.Equal(t, time.Minute, Params.ClientTelemetryClientStatusThreshold.GetAsDuration(time.Second))
+		assert.Equal(t, 10*time.Second, Params.ClientTelemetryCommandCleanupTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, 1024*1024, Params.ClientTelemetryMaxMetricsPerClient.GetAsInt())
+		assert.Equal(t, 100, Params.ClientTelemetryMaxOperationTypesPerClient.GetAsInt())
+		assert.Equal(t, 100000, Params.ClientTelemetryMaxClientsInMemory.GetAsInt())
+
+		params.Save("rootCoord.clientTelemetry.retainedWindows", "3")
+		assert.Equal(t, 3, Params.ClientTelemetryRetainedWindows.GetAsInt())
+
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())
 	})

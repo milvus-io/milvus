@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -361,8 +362,8 @@ func TestInsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		it := insertTask{
 			baseTask: baseTask{metaCache: cache},
 			ctx:      context.Background(),
