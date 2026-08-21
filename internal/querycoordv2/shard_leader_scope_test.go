@@ -158,3 +158,86 @@ func TestGetShardLeadersStrictScopeRefusesAnUnheldResourceGroupByName(t *testing
 	assert.NotContains(t, reason, "replica=100",
 		"the collection id must not masquerade as a replica id in the message")
 }
+
+// TestGetShardLeadersScopedSeesThroughSiblingResourceGroupLag pins the strict
+// scoped form to the state this feature exists for: one resource group at
+// 100%, a sibling at 0%, so the collection-wide load percentage sits at 50 and
+// the collection's status is still Loading -- yet the current target is
+// already promoted, because shouldUpdateCurrentTarget pools ready delegators
+// across replicas. In that state the three surfaces must tell one story:
+//
+//   - the native, unscoped strict answer keeps refusing with
+//     ErrCollectionNotFullyLoaded (collection-wide semantics, unchanged);
+//   - readiness for the leading group says Ready;
+//   - the strict scoped answer for the leading group must AGREE with
+//     readiness and serve its leader -- gating it on the collection-wide
+//     percentage would refuse rg-a until rg-b finishes, which inverts the
+//     purpose of the scope;
+//   - the strict scoped answer for the lagging group is the per-channel,
+//     retriable ErrChannelNotAvailable: the group holds a replica, so
+//     waiting helps, and neither the name-refusal (ReplicaNotFound) nor the
+//     collection-wide NotFullyLoaded is the right shape.
+func TestGetShardLeadersScopedSeesThroughSiblingResourceGroupLag(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadingCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putReplica(t, 100, "rg-b", 11)
+	f.putLeader(100, 10, "100-dmc0", true)
+	f.registerNode(11) // rg-b's node is up; it just carries nothing yet
+
+	require.EqualValues(t, 50, f.meta.CalculateLoadPercentage(ctx, 100),
+		"the fixture must reproduce the state in which the collection-wide full-load gate fails")
+
+	server := scopedServer(f)
+
+	unscoped, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{CollectionID: 100})
+	require.NoError(t, err)
+	require.NotEqual(t, int32(0), unscoped.GetStatus().GetCode(),
+		"the unscoped strict answer keeps its collection-wide gate")
+	assert.ErrorIs(t, merr.Error(unscoped.GetStatus()), merr.ErrCollectionNotFullyLoaded)
+
+	require.True(t, f.readiness(t, 100, "rg-a").Ready,
+		"the readiness surface must call the fully-loaded group ready")
+
+	scopedToA, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-a",
+	})
+	require.NoError(t, err)
+	require.Equal(t, int32(0), scopedToA.GetStatus().GetCode(),
+		"the strict scoped answer must agree with readiness: rg-a can serve, a lagging sibling group must not veto it")
+	assert.Equal(t, []int64{10}, leaderNodeIDs(t, scopedToA, "100-dmc0"))
+
+	scopedToB, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-b",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, int32(0), scopedToB.GetStatus().GetCode())
+	assert.ErrorIs(t, merr.Error(scopedToB.GetStatus()), merr.ErrChannelNotAvailable,
+		"the lagging group is refused per channel - retriable, and loading is exactly what a retry waits for")
+}
+
+// TestGetShardLeadersStrictScopeUnloadedCollectionKeepsErrorFamily pins the
+// error family for a collection that is not loaded at all: the scoped strict
+// shape must answer ErrCollectionNotLoaded exactly like the unscoped shape,
+// not ErrReplicaNotFound. The proxy's retry policy branches on
+// errors.Is(err, merr.ErrCollectionNotLoaded) (lb_policy.go), so a scoped
+// request answering a different family for the same state would send a future
+// caller into the wrong retry bucket.
+func TestGetShardLeadersStrictScopeUnloadedCollectionKeepsErrorFamily(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	// Nothing registered: the collection is not loaded and has no replicas.
+
+	resp, err := scopedServer(f).GetShardLeaders(context.Background(), &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-a",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded,
+		"an unloaded collection must answer not-loaded for the scoped shape exactly as for the unscoped one")
+	assert.NotErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrReplicaNotFound,
+		"the name-refusal is for a loaded collection missing from this group, not for an unloaded collection")
+}
