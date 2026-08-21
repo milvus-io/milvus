@@ -5707,7 +5707,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 func TestAlterCollectionEvictable(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	createCollection := func(t *testing.T, name string) int64 {
@@ -5736,6 +5736,7 @@ func TestAlterCollectionEvictable(t *testing.T) {
 
 	runAlter := func(name string, props []*commonpb.KeyValuePair, deleteKeys []string) error {
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: name,
