@@ -91,9 +91,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                                          cast_type_,
                                                          cast_function_);
             non_exist_offsets_ = std::move(result.non_exist_offsets);
-            non_exist_row_count_ = result.field_data->get_num_rows();
+            const auto row_count = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
-            BuildExistsBitset(non_exist_row_count_);
+            BuildExistsBitset(row_count);
             ComputeByteSize();
         }
     }
@@ -113,9 +113,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                                          cast_function_);
 
             non_exist_offsets_ = std::move(result.non_exist_offsets);
-            non_exist_row_count_ = result.field_data->get_num_rows();
+            const auto row_count = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
-            BuildExistsBitset(non_exist_row_count_);
+            BuildExistsBitset(row_count);
             ComputeByteSize();
         }
     }
@@ -192,10 +192,10 @@ class JsonScalarIndexWrapper : public BaseIndex {
         }
         LOG_INFO("LoadEntries JsonScalarIndexWrapper done, has_non_exist: {}",
                  has_non_exist);
-        non_exist_row_count_ =
+        const auto row_count =
             GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
                 .value_or(this->Count());
-        BuildExistsBitset(non_exist_row_count_);
+        BuildExistsBitset(row_count);
         ComputeByteSize();
     }
 
@@ -204,10 +204,10 @@ class JsonScalarIndexWrapper : public BaseIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override {
         BaseIndex::Load(ctx, config);
-        non_exist_row_count_ =
+        const auto row_count =
             GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
                 .value_or(this->Count());
-        BuildExistsBitset(non_exist_row_count_);
+        BuildExistsBitset(row_count);
         ComputeByteSize();
     }
 
@@ -350,9 +350,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                                          cast_type_,
                                                          cast_function_);
             non_exist_offsets_ = std::move(result.non_exist_offsets);
-            non_exist_row_count_ = result.field_data->get_num_rows();
+            const auto row_count = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
-            BuildExistsBitset(non_exist_row_count_);
+            BuildExistsBitset(row_count);
             return;
         }
 
@@ -391,8 +391,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
         this->OptimizeNullOffsets();
         non_exist_offsets_.runOptimize();
         non_exist_offsets_.shrinkToFit();
-        non_exist_row_count_ = total_rows;
-        BuildExistsBitset(non_exist_row_count_);
+        BuildExistsBitset(total_rows);
     }
 
     void
@@ -402,7 +401,6 @@ class JsonScalarIndexWrapper : public BaseIndex {
     }
 
     roaring::Roaring non_exist_offsets_;
-    size_t non_exist_row_count_{0};
     TargetBitmap exists_bitset_;
 
  private:

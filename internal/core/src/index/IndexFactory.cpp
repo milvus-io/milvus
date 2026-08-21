@@ -23,6 +23,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <roaring/roaring.hh>
 #include <string>
 #include <vector>
 
@@ -184,6 +185,38 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
+RoaringRowMaskResidentBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+
+    // Roaring32 partitions values by their high 16 bits, so one low container
+    // covers exactly 2^16 consecutive row offsets.
+    constexpr uint64_t kRowsPerContainer = uint64_t{1} << 16;
+    // After runOptimize(), every container payload is at most 8 KiB: an array
+    // holds at most 4096 uint16_t values, a bitmap holds exactly 2^16 bits,
+    // and a run container is retained only when it is no larger than those
+    // alternatives.
+    constexpr uint64_t kMaxContainerPayloadBytes = 8 * 1024;
+    // RoaringMemoryBytes() also includes the portable-format header. For C
+    // containers it is 8 + 8*C bytes without runs and no more than
+    // 4 + ceil(C/8) + 8*C bytes with runs. Thus 16*C bounds either layout for
+    // every C >= 1.
+    constexpr uint64_t kMaxPortableMetadataBytesPerContainer = 16;
+    const auto rows = static_cast<uint64_t>(num_rows);
+    const auto container_count =
+        rows / kRowsPerContainer + (rows % kRowsPerContainer != 0);
+
+    const auto sparse_container_bound =
+        SaturatingAdd(static_cast<uint64_t>(sizeof(roaring::Roaring)),
+                      SaturatingMul(container_count,
+                                    kMaxContainerPayloadBytes +
+                                        kMaxPortableMetadataBytesPerContainer));
+    const auto dense_container_bound = SaturatingMul(BitsetBytes(num_rows), 2);
+    return std::max(sparse_container_bound, dense_container_bound);
+}
+
+uint64_t
 ScalarRowMaskResidentBytes(
     DataType field_type,
     const std::string& index_type,
@@ -215,10 +248,8 @@ ScalarRowMaskResidentBytes(
         (keeps_null_mask ? 1 : 0) + (typed_json_path ? 1 : 0);
     const uint64_t dense_bitmap_count = typed_json_path ? 1 : 0;
 
-    // A CRoaring container is at most roughly one dense bitset plus container
-    // metadata. Reserve 2x the dense bytes per row set to cover that overhead.
     auto roaring_bytes =
-        SaturatingMul(SaturatingMul(BitsetBytes(num_rows), 2), mask_count);
+        SaturatingMul(RoaringRowMaskResidentBytes(num_rows), mask_count);
     auto dense_bitmap_bytes =
         SaturatingMul(BitsetBytes(num_rows), dense_bitmap_count);
     return SaturatingAdd(roaring_bytes, dense_bitmap_bytes);
@@ -447,7 +478,8 @@ IndexFactory::IndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    int64_t dim) {
+    int64_t dim,
+    std::optional<bool> field_nullable) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
@@ -458,12 +490,14 @@ IndexFactory::IndexLoadResource(
                                     num_rows,
                                     dim);
     } else {
-        return ScalarIndexLoadResource(field_type,
-                                       index_version,
-                                       index_size_in_bytes,
-                                       index_params,
-                                       mmap_enable,
-                                       num_rows);
+        return ScalarIndexLoadResourceImpl(field_type,
+                                           index_version,
+                                           index_size_in_bytes,
+                                           index_params,
+                                           mmap_enable,
+                                           num_rows,
+                                           std::nullopt,
+                                           field_nullable);
     }
 }
 
