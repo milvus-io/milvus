@@ -424,11 +424,14 @@ func TestLoadPercentageByResourceGroup_EmptyRGCoversEveryResourceGroup(t *testin
 }
 
 // TestLoadPercentageByResourceGroup_EmptyRGMatchesCollectionWideFigure is the
-// equivalence assertion the resource-group concept has to earn: on the shape
-// every upstream caller has -- one replica of the collection, so replicaNum is
-// 1 -- an empty rgName must reproduce the collection-wide percentage
-// CollectionObserver.observePartitionLoadStatus computes, which is
-// loadedCount * 100 / (targetNum * replicaNum).
+// equivalence assertion the resource-group concept has to earn, on the ONE
+// shape where the two figures coincide exactly: a single-partition collection
+// with one replica (replicaNum 1). There an empty rgName must reproduce the
+// collection-wide percentage CollectionObserver.observePartitionLoadStatus
+// computes, which is loadedCount * 100 / (targetNum * replicaNum). With more
+// partitions the two weight intermediate progress differently (see
+// TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions) while
+// still agreeing at -1 and at 100.
 //
 // Here targetNum is 4 (one channel plus three segments), the single replica
 // carries the channel and one of the three segments so loadedCount is 2, and
@@ -478,6 +481,101 @@ func TestLoadPercentageByResourceGroup_EmptyRGStillReportsNoReplica(t *testing.T
 
 	assert.NoError(t, err)
 	assert.EqualValues(t, -1, percentage, "no replica anywhere must stay distinguishable from a replica at zero progress")
+}
+
+// putTargetTwoPartitions registers collectionID as loaded with TWO partitions
+// and gives it a next target with one channel, segsA on partition A and segsB
+// on partition B, all on that channel.
+func (f *rgLoadPercentageFixture) putTargetTwoPartitions(t *testing.T, collectionID, partitionA, partitionB int64, channelName string, segsA, segsB []int64) {
+	ctx := context.Background()
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID},
+	}))
+	for _, partitionID := range []int64{partitionA, partitionB} {
+		require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: collectionID, PartitionID: partitionID},
+		}))
+	}
+
+	segmentInfos := make([]*datapb.SegmentInfo, 0, len(segsA)+len(segsB))
+	for _, segID := range segsA {
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID: segID, CollectionID: collectionID, PartitionID: partitionA, InsertChannel: channelName,
+		})
+	}
+	for _, segID := range segsB {
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID: segID, CollectionID: collectionID, PartitionID: partitionB, InsertChannel: channelName,
+		})
+	}
+	vChannel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
+
+	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return([]*datapb.VchannelInfo{vChannel}, segmentInfos, nil).Once()
+	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+}
+
+// TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions pins the
+// deliberate divergence from the collection-wide figure on multi-partition
+// collections: this figure pools every target (each target counts once),
+// while the observer computes each partition separately -- its own segments
+// plus the channel targets -- and CalculateLoadPercentage averages the
+// partitions, weighting a 1-segment partition as much as a 3-segment one.
+//
+// Here the work set is 1 channel + 1 segment on partition A + 3 segments on
+// partition B, and the replica carries the channel and A's segment:
+//   - pooled (this function): 2 of 5 targets = 40;
+//   - observer-style: partition A = 2/2 = 100, partition B = 1/4 = 25,
+//     average = 62.
+// Both agree at 0 and at 100; only the intermediate weighting differs. If
+// this test starts failing at 62, the function has silently switched to
+// per-partition averaging and its doc comment is now wrong.
+func TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTargetTwoPartitions(t, 1400, 14000, 14001, "1400-dmc0", []int64{1}, []int64{2, 3, 4})
+	f.putReplica(t, 1400, 140, "rg-target")
+	f.putDelegator(1400, 140, "1400-dmc0", 1) // channel + partition A's segment
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 1400, "rg-target")
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 40, percentage,
+		"the figure pools targets across partitions; the observer's per-partition average would say 62 here")
+}
+
+// TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure pins the
+// second deliberate divergence: this is a live coverage figure with no
+// persistence, so when new work lands in the target -- a freshly flushed
+// segment, a compaction output -- it drops back below 100 until the replica
+// picks the new segment up. The observer's persisted number never regresses
+// from 100 in the same state, so ShowLoadCollections would keep saying 100.
+// A caller gating a switchover on == 100 gets exactly what it needs ("is this
+// group carrying everything currently asked of it"), and must expect the gate
+// to re-arm whenever new work lands.
+func TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 1500, 15000, "1500-dmc0", 1)
+	f.putReplica(t, 1500, 150, "rg-target")
+	f.putDelegator(1500, 150, "1500-dmc0", 1)
+
+	before, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1500, "rg-target")
+	require.NoError(t, err)
+	require.EqualValues(t, 100, before, "the fixture must start fully loaded")
+
+	// A new segment lands in the next target, as after a flush or compaction.
+	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1500)).Return(
+		[]*datapb.VchannelInfo{{CollectionID: 1500, ChannelName: "1500-dmc0"}},
+		[]*datapb.SegmentInfo{
+			{ID: 1, CollectionID: 1500, PartitionID: 15000, InsertChannel: "1500-dmc0"},
+			{ID: 2, CollectionID: 1500, PartitionID: 15000, InsertChannel: "1500-dmc0"},
+		}, nil).Once()
+	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, 1500))
+
+	after, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1500, "rg-target")
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 66, after,
+		"new work in the target must re-arm the figure below 100 (2 of 3 targets carried) until it is picked up")
 }
 
 // TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion asserts the
