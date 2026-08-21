@@ -277,6 +277,36 @@ func seedFailedLoadCache(t *testing.T, collectionID int64, err error) {
 	t.Cleanup(func() { meta.GlobalFailedLoadCache = prev })
 }
 
+// nilFailedLoadCache sets the package-global GlobalFailedLoadCache to nil for
+// the duration of the test, restoring the previous cache on cleanup. This is
+// the state initQueryCoord leaves the global in AFTER wiring meta/dist/
+// targetMgr and BEFORE assigning the cache, so a "partially wired Server"
+// tolerance that covers the stores but not the cache misses exactly this
+// window.
+func nilFailedLoadCache(t *testing.T) {
+	t.Helper()
+	prev := meta.GlobalFailedLoadCache
+	meta.GlobalFailedLoadCache = nil
+	t.Cleanup(func() { meta.GlobalFailedLoadCache = prev })
+}
+
+// TestGetLoadPercentageByResourceGroup_NilFailedLoadCache asserts the
+// partially-wired-Server tolerance covers the one dependency that is wired
+// LAST during init: GlobalFailedLoadCache is assigned in initQueryCoord after
+// initMeta has already wired meta, dist and targetMgr, and FailedLoadCache.Get
+// dereferences a nil receiver. Reading the cache without a nil check panics in
+// that window on any collection that is not registered.
+func TestGetLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	nilFailedLoadCache(t)
+
+	assert.NotPanics(t, func() {
+		percentage, err := f.freeFn(context.Background(), 1300, "rg-target")
+		assert.NoError(t, err)
+		assert.EqualValues(t, -1, percentage)
+	})
+}
+
 // TestGetLoadPercentageByResourceGroup_FailedLoad asserts that when the
 // collection has a replica in the requested resource group but the
 // collection itself is not currently registered as loaded, a recorded
