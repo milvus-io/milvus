@@ -125,6 +125,24 @@ type indexGateState struct {
 	// until an apply landed, or the job timeout would lose its terminal-bound
 	// role over a never-applying job).
 	enteredAt time.Time
+	// appliedAt is when the pre-gate segment apply landed. Non-zero means
+	// the refreshed segments are the collection's committed contents: the
+	// terminal transition must not replay the apply (a transient replay
+	// failure would persist this committed refresh as Failed, and a replay
+	// re-patch erases text/JSON-key stats rebuilt during the hold), and the
+	// job is exempt from the ingest-clock timeout.
+	appliedAt time.Time
+	// applyTriedAt is when THIS process first attempted the pre-gate apply.
+	// A failing apply retries on this clock, not the persisted StartTime:
+	// after a DataCoord restart the StartTime is typically already past the
+	// job timeout, and judging the first post-restart attempt on it would
+	// fail a committed refresh while object storage / etcd are still
+	// warming up.
+	applyTriedAt time.Time
+	// entryInFlight dedups the entry pass across the eager and periodic
+	// paths: without it both goroutines can observe an empty gate and each
+	// run a full apply (duplicate object-storage reads and meta writes).
+	entryInFlight bool
 	// segmentIDs is the one-time snapshot of the segments the refresh
 	// produced, taken from the result store at gate entry. The results are
 	// immutable once committed, so held ticks reuse this instead of
@@ -271,14 +289,59 @@ func (c *externalCollectionRefreshChecker) loadIndexGate(jobID int64) (indexGate
 	return gs, ok
 }
 
-// recordGateApplyErr remembers the most recent pre-gate apply failure so the
-// job timeout can surface the actual cause instead of a bare "timeout".
-func (c *externalCollectionRefreshChecker) recordGateApplyErr(jobID int64, err error) {
+// ensureGateApplied runs the gate's entry pass at most once per process: it
+// lands the segment apply and snapshots the produced segment ids into the
+// gate state. Returns the gate snapshot and whether the caller may proceed to
+// judge index debt - false while the apply is failing (retried next tick,
+// with the error recorded for the timeout fail reason) or while another
+// goroutine (eager vs periodic) is mid-entry.
+func (c *externalCollectionRefreshChecker) ensureGateApplied(job *datapb.ExternalCollectionRefreshJob) (indexGateState, bool) {
+	jobID := job.GetJobId()
 	c.indexGateMu.Lock()
 	gs := c.indexGates[jobID]
-	gs.lastApplyErr = err.Error()
+	if !gs.appliedAt.IsZero() {
+		c.indexGateMu.Unlock()
+		return gs, true
+	}
+	if gs.entryInFlight {
+		c.indexGateMu.Unlock()
+		return gs, false
+	}
+	gs.entryInFlight = true
+	if gs.applyTriedAt.IsZero() {
+		gs.applyTriedAt = time.Now()
+	}
 	c.indexGates[jobID] = gs
 	c.indexGateMu.Unlock()
+
+	if c.applyJobInfo != nil {
+		if err := c.applyJobInfo(c.ctx, job); err != nil {
+			// Possibly transient (a catalog write): retry next tick, bounded
+			// by the job-timeout param on the applyTriedAt clock - and the
+			// recorded error rides along so a permanent failure that
+			// exhausts that budget reports its actual cause.
+			mlog.Warn(c.ctx, "failed to apply refresh segments ahead of the index gate; retrying next tick",
+				mlog.FieldJobID(jobID), mlog.Err(err))
+			c.indexGateMu.Lock()
+			gs = c.indexGates[jobID]
+			gs.entryInFlight = false
+			gs.lastApplyErr = err.Error()
+			c.indexGates[jobID] = gs
+			c.indexGateMu.Unlock()
+			return gs, false
+		}
+	}
+	segIDs := c.refreshedSegmentIDs(job)
+
+	c.indexGateMu.Lock()
+	gs = c.indexGates[jobID]
+	gs.entryInFlight = false
+	gs.lastApplyErr = ""
+	gs.appliedAt = time.Now()
+	gs.segmentIDs = segIDs
+	c.indexGates[jobID] = gs
+	c.indexGateMu.Unlock()
+	return gs, true
 }
 
 // aggregateJobState updates job state based on its tasks.
@@ -335,28 +398,14 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	// debt cleared - or the gate's own budget expired - and lets the
 	// Finished transition run, whose own apply replay is a no-op by then.
 	if state == indexpb.JobState_JobStateFinished && Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool() {
-		gs, ok := c.loadIndexGate(job.GetJobId())
-		if !ok || gs.enteredAt.IsZero() {
-			// Entry pass: land the apply, then snapshot the produced segment
-			// ids from the result store ONCE. The results are immutable once
-			// committed, so held ticks below reuse the snapshot - replaying
-			// the apply and re-reading the results (object-storage I/O per
-			// task) on every tick of a potentially hours-long hold is waste.
-			if c.applyJobInfo != nil {
-				if err := c.applyJobInfo(c.ctx, job); err != nil {
-					// Possibly transient (a catalog write): retry next tick.
-					// The job's own timeout stays the terminal bound, because
-					// the gate's wait clock below only starts once an apply
-					// landed - and the recorded error rides along so a
-					// permanent failure that exhausts the timeout reports its
-					// actual cause.
-					mlog.Warn(c.ctx, "failed to apply refresh segments ahead of the index gate; retrying next tick",
-						mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
-					c.recordGateApplyErr(job.GetJobId(), err)
-					return
-				}
-			}
-			gs.segmentIDs = c.refreshedSegmentIDs(job)
+		// Entry pass at most once per process: land the apply and snapshot
+		// the produced segment ids. The results are immutable once
+		// committed, so held ticks reuse the snapshot - replaying the apply
+		// and re-reading the results (object-storage I/O per task) on every
+		// tick of a potentially hours-long hold is waste.
+		gs, proceed := c.ensureGateApplied(job)
+		if !proceed {
+			return
 		}
 		var unindexed []int64
 		if len(gs.segmentIDs) > 0 && c.unindexedSegments != nil {
@@ -369,8 +418,6 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			if cur.enteredAt.IsZero() {
 				cur.enteredAt = time.Now()
 			}
-			cur.segmentIDs = gs.segmentIDs
-			cur.lastApplyErr = "" // the apply landed
 			c.indexGates[job.GetJobId()] = cur
 			entered := cur.enteredAt
 			c.indexGateMu.Unlock()
@@ -454,13 +501,24 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		}
 
 		if state == indexpb.JobState_JobStateFinished && c.applyJobInfo != nil {
+			// When the index gate already landed the apply at entry, do NOT
+			// replay it as a pre-apply: UpdateJobStateWithPreApply persists a
+			// pre-apply failure as terminal Failed, so a transient
+			// result-store or catalog error on the release tick would fail a
+			// committed refresh (segments applied and served, schema
+			// broadcast permanently skipped) - and a replay re-patch erases
+			// text/JSON-key stats rebuilt during the hold.
+			preApply := func(latestJob *datapb.ExternalCollectionRefreshJob) error {
+				return c.applyJobInfo(c.ctx, latestJob)
+			}
+			if gs, ok := c.loadIndexGate(job.GetJobId()); ok && !gs.appliedAt.IsZero() {
+				preApply = nil
+			}
 			applied, err := c.refreshMeta.UpdateJobStateWithPreApply(
 				job.GetJobId(),
 				state,
 				failReason,
-				func(latestJob *datapb.ExternalCollectionRefreshJob) error {
-					return c.applyJobInfo(c.ctx, latestJob)
-				})
+				preApply)
 			if err != nil {
 				mlog.Warn(c.ctx, "failed to apply external collection refresh result",
 					mlog.FieldJobID(job.GetJobId()),
@@ -594,25 +652,31 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 		return
 	}
 
-	// A job whose index gate is waiting is exempt from the ingest timeout:
-	// its ingest COMPLETED and its segments are applied, so failing it here
-	// would only throw committed work away. The gate enforces its own budget
-	// (same param, the gate's clock) inside aggregateJobState and always
-	// terminates the job - the debt clears, the read fails open, or the gate
-	// expires into Finished. A gate entry withOUT a started clock is the
-	// opposite case: the pre-gate apply keeps failing, the job stays on the
-	// ingest clock, and its recorded apply error must surface in the fail
-	// reason below.
+	// A job whose gate apply has landed is exempt from the ingest timeout:
+	// its ingest COMPLETED and its segments are the collection's committed
+	// contents, so failing it here would misreport committed work. The gate
+	// enforces its own budget (same param, the gate's clock) inside
+	// aggregateJobState and always terminates the job - the debt clears,
+	// the read fails open, or the gate expires into Finished.
 	gs, _ := c.loadIndexGate(job.GetJobId())
-	if !gs.enteredAt.IsZero() {
+	if !gs.appliedAt.IsZero() {
 		return
 	}
 
 	// Get timeout configuration
 	timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
 
-	// Calculate job age
+	// Calculate job age. A job whose pre-gate apply is still failing runs on
+	// the applyTriedAt clock - when THIS process first attempted the apply -
+	// not the persisted StartTime: after a DataCoord restart the StartTime
+	// is typically already past the timeout, and judging the first
+	// post-restart attempt on it would fail a committed refresh while object
+	// storage / etcd are still warming up. The recorded apply error
+	// surfaces in the fail reason below when the retry budget runs out.
 	startTime := time.UnixMilli(job.GetStartTime())
+	if !gs.applyTriedAt.IsZero() {
+		startTime = gs.applyTriedAt
+	}
 	age := time.Since(startTime)
 
 	if age > timeout {
