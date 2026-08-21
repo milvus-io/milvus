@@ -63,7 +63,6 @@ SealedIndexTranslator::SealedIndexTranslator(
                         load_index_info->dim,
                         load_index_info->index_files,
                         load_index_info->warmup_policy,
-                        load_index_info->support_eviction,
                         load_index_info->load_resource_request}),
       meta_(
           load_index_info->enable_mmap
