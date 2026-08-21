@@ -474,9 +474,18 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	return true, nil
 }
 
-// UpdateJobProgress updates job progress
+// UpdateJobProgress updates job progress. Terminal jobs are skipped: a
+// terminal state owns its progress (Finished pins 100), and a late in-flight
+// progress write racing the terminal transition - the index gate's held-
+// progress write and the eager path's Finished persist run on different
+// goroutines - must not land, or a Finished job would report 95/99 forever
+// and completion pollers waiting for 100 would never observe it.
 func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress int64) error {
 	_, err := m.mutateJob(jobID, "update job progress", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
+		if job.GetState() == indexpb.JobState_JobStateFinished ||
+			job.GetState() == indexpb.JobState_JobStateFailed {
+			return true, nil
+		}
 		job.Progress = progress
 		return false, nil
 	})
