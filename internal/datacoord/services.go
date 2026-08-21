@@ -1961,7 +1961,17 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		// answer. Whether that job is still queryable is not checked here: the client
 		// takes the jobID to GetImportProgress, which reports a missing job on its own.
 		resp.JobID = fmt.Sprint(duplicatedJobID)
-		mlog.Info(ctx, "import request resolved to an existing job", mlog.String("jobID", resp.JobID))
+		// Log the original job's state, not just its ID. A key whose original ended
+		// Failed resolves to that same job for the rest of the window, so a client
+		// retrying it never makes progress; without the state here that looks
+		// indistinguishable from a key stuck on a healthy job.
+		originalState := "gone"
+		if job := s.importMeta.GetJob(ctx, duplicatedJobID); job != nil {
+			originalState = job.GetState().String()
+		}
+		mlog.Info(ctx, "import request resolved to an existing job",
+			mlog.String("jobID", resp.JobID),
+			mlog.String("originalState", originalState))
 		return resp, nil
 	}
 

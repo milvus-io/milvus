@@ -18,6 +18,7 @@ package interceptor
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestIdempotencyKeyFromContext(t *testing.T) {
@@ -86,4 +89,66 @@ func TestIdempotencyKeyPropagationUnaryClientInterceptor(t *testing.T) {
 		assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
 		assert.Equal(t, []string{"value"}, md.Get("existing"))
 	})
+}
+
+// TestValidateIdempotencyKey covers the door the adversarial review on milvus#52544
+// found open: Go accepts header bytes >= 0x80, gRPC rejects everything outside
+// printable ASCII as codes.Internal, and ClientBase answers that code by resetting
+// the connection every caller on the proxy shares.
+func TestValidateIdempotencyKey(t *testing.T) {
+	paramtable.Init()
+	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+
+	t.Run("absent key is valid", func(t *testing.T) {
+		assert.NoError(t, ValidateIdempotencyKey(""))
+	})
+
+	t.Run("printable ASCII is valid", func(t *testing.T) {
+		assert.NoError(t, ValidateIdempotencyKey("run-1/batch_2.a~b c"))
+		// The range is inclusive at both ends.
+		assert.NoError(t, ValidateIdempotencyKey("\x20\x7e"))
+	})
+
+	t.Run("non-ASCII is rejected", func(t *testing.T) {
+		// The exact value grpc-go would fail the stream on.
+		err := ValidateIdempotencyKey("批次-1")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "printable ASCII")
+	})
+
+	t.Run("control bytes are rejected", func(t *testing.T) {
+		// HTAB passes net/textproto but not grpc-go.
+		assert.ErrorIs(t, ValidateIdempotencyKey("run\t1"), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, ValidateIdempotencyKey("run\n1"), merr.ErrParameterInvalid)
+	})
+
+	t.Run("oversized key is rejected at the door", func(t *testing.T) {
+		assert.NoError(t, ValidateIdempotencyKey(strings.Repeat("a", limit)))
+		err := ValidateIdempotencyKey(strings.Repeat("a", limit+1))
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "exceeds limit")
+	})
+}
+
+// TestIdempotencyKeyPropagationRejectsInvalidKey pins the gRPC ingress door: a key
+// that did not come through the REST middleware must fail the call here rather than
+// be forwarded, since forwarding is what produces the transport-level failure.
+func TestIdempotencyKeyPropagationRejectsInvalidKey(t *testing.T) {
+	paramtable.Init()
+
+	invoked := false
+	invoker := func(ctx context.Context, method string, req, reply interface{},
+		cc *grpc.ClientConn, opts ...grpc.CallOption,
+	) error {
+		invoked = true
+		return nil
+	}
+
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs(util.HeaderIdempotencyKey, "批次-1"))
+	err := IdempotencyKeyPropagationUnaryClientInterceptor()(
+		ctx, "/milvus.proto.data.DataCoord/ImportV2", nil, nil, nil, invoker)
+
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.False(t, invoked, "the call must not reach the transport")
 }
