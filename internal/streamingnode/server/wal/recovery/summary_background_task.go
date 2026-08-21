@@ -72,9 +72,16 @@ func (m *summaryManager) persistSummaryForCheckpoint(ctx context.Context, logger
 	}
 	m.mu.Lock()
 	records, epochs := m.peekPendingSummaryRecordsUnsafe()
+	hasInvalidations := len(m.pendingInvalidations) > 0
 	m.mu.Unlock()
 	if len(records) == 0 {
-		return nil
+		if !hasInvalidations {
+			return nil
+		}
+		// No chunk to write, but a DDL tombstone still has to reach a manifest
+		// before the checkpoint moves past the DDL. Publishing without a chunk is
+		// exactly what refreshPChannelSummaryManifest's nil case is for.
+		return m.refreshPChannelSummaryManifest(ctx, logger, nil)
 	}
 	if _, err := m.persistPChannelSummary(ctx, logger, records); err != nil {
 		m.metrics.ObserveIdempotencyPersist(false)

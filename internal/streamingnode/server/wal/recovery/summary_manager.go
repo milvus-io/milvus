@@ -64,9 +64,13 @@ type summaryManager struct {
 	latestCoveredTT uint64
 	// pendingInvalidations holds vchannel -> DDL timetick observed since the last
 	// manifest write. They are folded into the next manifest, which is what makes
-	// them survive a restart; until then the in-memory discard already covers this
-	// process, and a crash leaves the consume checkpoint behind the DDL so replay
-	// re-observes it.
+	// them survive a restart.
+	//
+	// A pending entry forces that manifest write by itself (see
+	// hasDirtySummaryUnsafe). It has to: the DDL wipes the staging of the vchannel
+	// it invalidates, so there is frequently nothing else left to persist, and a
+	// tombstone that waits for unrelated traffic would be lost to a restart while
+	// the consume checkpoint moved past the DDL.
 	pendingInvalidations map[string]uint64
 	// completedGC records the chunks the GC worker finished deleting. They are
 	// dropped from the manifest at the next write, so a crash before that only
@@ -222,6 +226,13 @@ func (m *summaryManager) observeMessage(msg message.ImmutableMessage) {
 }
 
 func (m *summaryManager) hasDirtySummaryUnsafe() bool {
+	// A pending invalidation is dirty on its own. It has no records behind it --
+	// the DDL wiped that vchannel's staging -- so without this the persist is
+	// never scheduled, the tombstone never reaches a manifest, and a restart
+	// resurrects the keys it was meant to bury.
+	if len(m.pendingInvalidations) > 0 {
+		return true
+	}
 	for _, summary := range m.summaries() {
 		if summary.hasPendingSummaryRecords() {
 			return true

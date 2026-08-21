@@ -304,3 +304,47 @@ func TestInvalidatedVChannelEntryIsPrunedOnceUnreachable(t *testing.T) {
 	pruneInvalidatedVChannels(manifest)
 	require.Empty(t, manifest.GetInvalidatedVchannels())
 }
+
+// The tombstone must survive a restart even when the DDL leaves NOTHING to
+// persist.
+//
+// This is the path the previous regression missed: it set pendingInvalidations by
+// hand and called persistPChannelSummary directly, which always writes a
+// manifest. The real path goes through persistSummaryForCheckpoint, which used to
+// return early whenever the staging buffer was empty -- and the DDL itself wipes
+// the staging of the vchannel it invalidates, so that early return was the normal
+// case, not a rare one. The tombstone stayed in memory, the consume checkpoint
+// advanced past the DDL, and the restart resurrected the key.
+func TestSummaryStoreTombstoneSurvivesRestartWithEmptyStaging(t *testing.T) {
+	ctx := context.Background()
+	newTestSummaryStore(t)
+
+	writer := recoverTestSummaryManager(t, ctx, 1, 5, "v1")
+	writer.setNormalMode()
+
+	// A keyed write, made durable in a chunk.
+	writer.summaries()["v1"].applySummaryRecord(newTestSummaryRecord("before-truncate", 20, 100), true)
+	require.NoError(t, writer.persistSummaryForCheckpoint(ctx, writer.Logger()))
+	require.False(t, writer.hasDirtySummary())
+
+	// The DDL lands. It clears the staging of the vchannel it invalidates, so
+	// after it there is no chunk left to write for this pchannel.
+	writer.observeMessage(newTestDropCollectionMessage(t, "v1", 500))
+	peeked, _ := writer.peekPendingSummaryRecordsUnsafe()
+	require.Empty(t, peeked, "the DDL leaves nothing staged, which is the whole point")
+
+	// The tombstone alone must be reason enough to persist.
+	require.True(t, writer.hasDirtySummary(), "a pending tombstone is dirty state")
+	require.NoError(t, writer.persistSummaryForCheckpoint(ctx, writer.Logger()))
+	require.False(t, writer.hasDirtySummary())
+
+	// It is durable now, not just in memory.
+	manifest, found, err := readPChannelSummaryManifest(ctx, "p1", 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(500), manifest.GetInvalidatedVchannels()["v1"])
+
+	// A restart must not bring the key back.
+	reader := recoverTestSummaryManager(t, ctx, 2, 5, "v1")
+	require.NotContains(t, reader.summaries()["v1"].records, "before-truncate")
+}

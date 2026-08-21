@@ -5113,11 +5113,16 @@ type PChannelSummaryManifest struct {
 	// hash to the same key and be answered as a duplicate, against an empty
 	// collection.
 	//
-	// Durability rides on the existing order: this map is written in the same
-	// manifest PUT that precedes saving the consume checkpoint, so a crash before
-	// it lands also leaves the checkpoint behind the DDL, and replay re-observes
-	// the DDL and re-records it. An entry is dropped once no retained chunk
-	// reaches below it.
+	// Durability does NOT come for free from the write ordering. The persist that
+	// carries this map runs before the consume checkpoint is saved, but it only
+	// runs at all when there is something to persist -- and the DDL wipes the
+	// staging of the vchannel it invalidates, so there is frequently no chunk to
+	// write. A pending entry therefore marks the summary dirty by itself, which is
+	// what schedules the manifest PUT; without that the checkpoint would advance
+	// past the DDL while the tombstone was still only in memory, and a restart
+	// would resurrect exactly the keys it was meant to bury.
+	//
+	// An entry is dropped once no retained chunk reaches below it.
 	InvalidatedVchannels map[string]uint64 `protobuf:"bytes,3,rep,name=invalidated_vchannels,json=invalidatedVchannels,proto3" json:"invalidated_vchannels,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"varint,2,opt,name=value,proto3"`
 }
 

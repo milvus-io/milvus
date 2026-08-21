@@ -169,16 +169,7 @@ func TestSummaryManagerRecordsInvalidationForTheNextManifest(t *testing.T) {
 	manager.setNormalMode()
 	require.True(t, state.hasPendingSummaryRecords())
 
-	drop := message.NewDropCollectionMessageBuilderV1().
-		WithVChannel("v1").
-		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
-		WithBody(&msgpb.DropCollectionRequest{}).
-		MustBuildMutable().
-		WithTimeTick(500).
-		WithLastConfirmed(rmq.NewRmqID(499)).
-		IntoImmutableMessage(rmq.NewRmqID(500))
-
-	manager.observeMessage(drop)
+	manager.observeMessage(newTestDropCollectionMessage(t, "v1", 500))
 
 	require.Empty(t, state.records)
 	require.False(t, state.hasPendingSummaryRecords())
@@ -186,4 +177,16 @@ func TestSummaryManagerRecordsInvalidationForTheNextManifest(t *testing.T) {
 	// The staging epoch moved, which is what stops an in-flight persist from
 	// releasing records staged after this point.
 	require.NotZero(t, state.stagingEpoch)
+}
+
+func newTestDropCollectionMessage(t *testing.T, vchannel string, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	return message.NewDropCollectionMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick) - 1)).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick)))
 }
