@@ -44,6 +44,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                         std::to_string(load_index_info->field_id),
                         load_index_info->num_rows,
                         load_index_info->dim,
+                        load_index_info->index_files,
                         load_index_info->schema.nullable(),
                         load_index_info->warmup_policy}),
       meta_(
@@ -72,6 +73,23 @@ SealedIndexTranslator::SealedIndexTranslator(
           !(IsVectorDataType(load_index_info->field_type) &&
             knowhere::IndexFactory::Instance().FeatureCheck(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD))) {
+    load_resource_request_ = EstimateLoadResource();
+}
+
+LoadResourceRequest
+SealedIndexTranslator::EstimateLoadResource() const {
+    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        index_load_info_.field_type,
+        index_load_info_.element_type,
+        index_load_info_.index_engine_version,
+        index_load_info_.index_size,
+        index_load_info_.index_params,
+        index_load_info_.enable_mmap,
+        index_load_info_.num_rows,
+        index_load_info_.dim,
+        index_load_info_.index_files,
+        file_manager_context_,
+        index_load_info_.field_nullable);
 }
 
 size_t
@@ -91,22 +109,13 @@ SealedIndexTranslator::estimated_loading_usage(
     if (cids.empty()) {
         return {};
     }
-    LoadResourceRequest request =
-        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-            index_load_info_.field_type,
-            index_load_info_.element_type,
-            index_load_info_.index_engine_version,
-            index_load_info_.index_size,
-            index_load_info_.index_params,
-            index_load_info_.enable_mmap,
-            index_load_info_.num_rows,
-            index_load_info_.dim,
-            index_load_info_.field_nullable);
     // this is an estimation, error could be up to 20%.
     const auto final_usage = milvus::cachinglayer::ResourceUsage(
-        request.final_memory_cost, request.final_disk_cost);
+        load_resource_request_.final_memory_cost,
+        load_resource_request_.final_disk_cost);
     const auto peak_usage = milvus::cachinglayer::ResourceUsage(
-        request.max_memory_cost, request.max_disk_cost * 2);
+        load_resource_request_.max_memory_cost,
+        load_resource_request_.max_disk_cost * 2);
     LOG_INFO(
         "estimated index loading usage: index_id={}, segment_id={}, "
         "field_id={}, index_type={}, index_size={}, mmap={}, "
@@ -139,19 +148,9 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     std::unique_ptr<milvus::index::IndexBase> index =
         milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info_, file_manager_context_);
-    LoadResourceRequest request =
-        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-            index_load_info_.field_type,
-            index_load_info_.element_type,
-            index_load_info_.index_engine_version,
-            index_load_info_.index_size,
-            index_load_info_.index_params,
-            index_load_info_.enable_mmap,
-            index_load_info_.num_rows,
-            index_load_info_.dim,
-            index_load_info_.field_nullable);
     index->SetCellSize(milvus::cachinglayer::ResourceUsage(
-        request.final_memory_cost, request.final_disk_cost));
+        load_resource_request_.final_memory_cost,
+        load_resource_request_.final_disk_cost));
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
         AssertInfo(!index_load_info_.mmap_dir_path.empty(),
                    "mmap directory path is empty");

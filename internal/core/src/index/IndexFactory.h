@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 #include <mutex>
 #include <shared_mutex>
 
@@ -70,6 +71,19 @@ class IndexFactory {
                       std::optional<bool> field_nullable = std::nullopt);
 
     LoadResourceRequest
+    IndexLoadResource(DataType field_type,
+                      DataType element_type,
+                      IndexVersion index_version,
+                      uint64_t index_size_in_bytes,
+                      const std::map<std::string, std::string>& index_params,
+                      bool mmap_enable,
+                      int64_t num_rows,
+                      int64_t dim,
+                      const std::vector<std::string>& index_files,
+                      const storage::FileManagerContext& file_manager_context,
+                      std::optional<bool> field_nullable = std::nullopt);
+
+    LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
                          DataType element_type,
                          IndexVersion index_version,
@@ -87,6 +101,18 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows = 0,
+        std::optional<bool> field_nullable = std::nullopt);
+
+    LoadResourceRequest
+    ScalarIndexLoadResource(
+        DataType field_type,
+        IndexVersion index_version,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& file_manager_context,
         std::optional<bool> field_nullable = std::nullopt);
 
     IndexBasePtr

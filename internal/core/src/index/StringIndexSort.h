@@ -155,10 +155,17 @@ class StringIndexSort : public StringIndex {
     size_t total_num_rows_{0};
     TargetBitmap valid_bitset_;
     std::vector<int32_t> idx_to_offsets_;
+    const int32_t* idx_to_offsets_ptr_ = nullptr;
+    size_t idx_to_offsets_size_ = 0;
     std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
 
     int64_t total_size_{0};
     std::unique_ptr<StringIndexSortImpl> impl_;
+
+    // mmap backing for the persisted idx_to_offsets V3 side entry.
+    char* mmap_meta_data_ = nullptr;
+    int64_t mmap_meta_size_ = 0;
+    std::string mmap_meta_filepath_;
 };
 
 // Abstract interface for implementations
@@ -228,7 +235,8 @@ class StringIndexSortImpl {
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
                    const TargetBitmap& valid_bitset,
-                   const std::vector<int32_t>& idx_to_offsets) const = 0;
+                   const int32_t* idx_to_offsets,
+                   size_t idx_to_offsets_size) const = 0;
 
     virtual int64_t
     Size() = 0;
@@ -317,7 +325,8 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
                    const TargetBitmap& valid_bitset,
-                   const std::vector<int32_t>& idx_to_offsets) const override;
+                   const int32_t* idx_to_offsets,
+                   size_t idx_to_offsets_size) const override;
 
     int64_t
     Size() override;
@@ -415,6 +424,20 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                  std::vector<int32_t>& idx_to_offsets) override;
 
     void
+    LoadFromFile(size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets,
+                 bool skip_idx_to_offsets = false);
+
+    void
+    LoadFromBuffer(std::vector<uint8_t>&& buffer,
+                   size_t total_num_rows,
+                   TargetBitmap& valid_bitset,
+                   std::vector<int32_t>& idx_to_offsets,
+                   bool skip_idx_to_offsets = false);
+
+    void
     SetMmapFilePath(const std::string& filepath) {
         mmap_filepath_ = filepath;
     }
@@ -456,7 +479,8 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
                    const TargetBitmap& valid_bitset,
-                   const std::vector<int32_t>& idx_to_offsets) const override;
+                   const int32_t* idx_to_offsets,
+                   size_t idx_to_offsets_size) const override;
 
     int64_t
     Size() override;
@@ -465,6 +489,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
+    void
+    MmapAndParse(size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets,
+                 bool skip_idx_to_offsets = false);
+
     // Binary search for a value
     size_t
     FindValueIndex(const std::string& value) const;
@@ -499,6 +530,7 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     size_t mmap_size_ = 0;
     size_t data_size_ = 0;  // Actual data size without padding
     std::string mmap_filepath_;
+    std::vector<uint8_t> owned_data_;
     size_t unique_count_ = 0;
 
     // Pointers to different sections in mmap'd data
