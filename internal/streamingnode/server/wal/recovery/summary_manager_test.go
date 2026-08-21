@@ -47,7 +47,7 @@ func TestEvictPersistedRecordsInNormalMode(t *testing.T) {
 
 	// In normal mode the staging buffer is released once its contents are in a
 	// chunk: the interceptor window, not this summary, answers live dedup.
-	manager.evictPersistedRecords()
+	manager.evictPersistedRecordsUnsafe()
 
 	require.Empty(t, state.records)
 }
@@ -57,7 +57,7 @@ func TestEvictPersistedRecordsNoOpInRecoveryMode(t *testing.T) {
 
 	// During recovery the records ARE the set being rebuilt for the consumer, so
 	// nothing may be released until the handover is done.
-	manager.evictPersistedRecords()
+	manager.evictPersistedRecordsUnsafe()
 
 	require.Len(t, state.records, 3)
 }
@@ -66,7 +66,12 @@ func TestSummaryManagerTracksDirtyStaging(t *testing.T) {
 	manager, state := newTestSummaryManagerWithRecords(t, "v1", 2)
 	require.True(t, manager.hasDirtySummary())
 
-	require.Len(t, state.consumePendingSummaryRecords(), 2)
+	// Peeking must NOT clear dirtiness: nothing is durable yet, so a persist that
+	// fails here has to leave the records for the next attempt to find.
+	require.Len(t, state.peekPendingSummaryRecords(), 2)
+	require.True(t, manager.hasDirtySummary())
+
+	state.dropPersistedSummaryRecords(2)
 	require.False(t, manager.hasDirtySummary())
 }
 
@@ -76,14 +81,14 @@ func TestSummaryManagerConsumesPendingRecordsPerVChannel(t *testing.T) {
 	second.applySummaryRecord(newTestSummaryRecord("other", 500, 5), true)
 	manager.setSummary("v2", second)
 
-	records := manager.consumePendingSummaryRecordsUnsafe()
+	records := manager.peekPendingSummaryRecordsUnsafe()
 	require.Len(t, records, 2)
 	require.Len(t, records["v1"], 2)
 	require.Len(t, records["v2"], 1)
 
-	// Draining is exhaustive: a second call before anything new is observed has
-	// nothing to write, so no empty chunk is produced.
-	require.Empty(t, manager.consumePendingSummaryRecordsUnsafe())
+	// Dropping is what releases them, and only what the chunk carried.
+	manager.dropPersistedSummaryRecordsUnsafe(records)
+	require.Empty(t, manager.peekPendingSummaryRecordsUnsafe())
 }
 
 func TestSummaryManagerObserveOnlyTouchesTargetVChannel(t *testing.T) {

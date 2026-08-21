@@ -62,12 +62,16 @@ func (m *summaryManager) drainPendingGCWhenClosing() {
 // the replayable WAL, and nothing downstream could detect it. Blocking on an
 // unavailable object store is the correct outcome, not a degradation to work
 // around.
+//
+// Records are dropped from the staging buffer only AFTER the chunk holding them
+// is durable. On any failure they stay staged, so a later attempt -- including
+// the one the close path makes -- still sees them.
 func (m *summaryManager) persistSummaryForCheckpoint(ctx context.Context, logger *mlog.Logger) error {
 	if m == nil || !m.cfg.idempotencyEnabled {
 		return nil
 	}
 	m.mu.Lock()
-	records := m.consumePendingSummaryRecordsUnsafe()
+	records := m.peekPendingSummaryRecordsUnsafe()
 	m.mu.Unlock()
 	if len(records) == 0 {
 		return nil
@@ -77,19 +81,36 @@ func (m *summaryManager) persistSummaryForCheckpoint(ctx context.Context, logger
 		return err
 	}
 	m.metrics.ObserveIdempotencyPersist(true)
-	m.evictPersistedRecords()
+
+	m.mu.Lock()
+	m.dropPersistedSummaryRecordsUnsafe(records)
+	m.evictPersistedRecordsUnsafe()
+	m.mu.Unlock()
 	return nil
 }
 
-func (m *summaryManager) consumePendingSummaryRecordsUnsafe() map[string][]*SummaryRecord {
-	if len(m.summaries()) == 0 || !m.hasDirtySummaryUnsafe() {
+// peekPendingSummaryRecordsUnsafe collects what the next chunk should carry
+// without removing anything. Caller must hold m.mu.
+func (m *summaryManager) peekPendingSummaryRecordsUnsafe() map[string][]*SummaryRecord {
+	if len(m.summaries()) == 0 {
 		return nil
 	}
 	recordsByVChannel := make(map[string][]*SummaryRecord)
 	for _, summary := range m.summaries() {
-		if records := summary.consumePendingSummaryRecords(); len(records) > 0 {
+		if records := summary.peekPendingSummaryRecords(); len(records) > 0 {
 			recordsByVChannel[summary.vchannel] = records
 		}
 	}
 	return recordsByVChannel
+}
+
+// dropPersistedSummaryRecordsUnsafe releases exactly what the written chunk
+// carried, per vchannel. Records observed while the chunk was being written are
+// appended after them and stay staged for the next one. Caller must hold m.mu.
+func (m *summaryManager) dropPersistedSummaryRecordsUnsafe(persisted map[string][]*SummaryRecord) {
+	for vchannel, records := range persisted {
+		if summary, ok := m.summaries()[vchannel]; ok {
+			summary.dropPersistedSummaryRecords(len(records))
+		}
+	}
 }

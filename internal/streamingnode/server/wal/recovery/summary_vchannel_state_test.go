@@ -16,7 +16,7 @@ func TestVChannelSummaryMaterializesByKey(t *testing.T) {
 
 	require.Len(t, state.records, 3)
 	require.Len(t, state.pendingRecords, 3)
-	require.True(t, state.dirty)
+	require.True(t, state.hasPendingSummaryRecords())
 	require.Equal(t, uint64(102), state.appliedTimetick)
 	require.Greater(t, state.recordBytes, 0)
 }
@@ -45,28 +45,52 @@ func TestVChannelSummaryDoesNotStageKeylessRecord(t *testing.T) {
 	// idempotent.
 	require.Empty(t, state.records)
 	require.Empty(t, state.pendingRecords)
-	require.False(t, state.dirty)
+	require.False(t, state.hasPendingSummaryRecords())
 	require.Equal(t, uint64(50), state.appliedTimetick)
 }
 
-func TestVChannelSummaryConsumesPendingRecords(t *testing.T) {
+func TestVChannelSummaryPeekDoesNotRelease(t *testing.T) {
 	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
-	require.Nil(t, state.consumePendingSummaryRecords())
+	require.Nil(t, state.peekPendingSummaryRecords())
 
 	for _, record := range newTestSummaryRecords("key", 100, 3) {
 		state.applySummaryRecord(record, true)
 	}
-	drained := state.consumePendingSummaryRecords()
-	require.Len(t, drained, 3)
+	peeked := state.peekPendingSummaryRecords()
+	require.Len(t, peeked, 3)
 	// Chunk order is by timetick, so a chunk's span is its first and last record.
-	require.Equal(t, uint64(100), drained[0].SourceTimeTick)
-	require.Equal(t, uint64(102), drained[2].SourceTimeTick)
+	require.Equal(t, uint64(100), peeked[0].SourceTimeTick)
+	require.Equal(t, uint64(102), peeked[2].SourceTimeTick)
 
-	require.False(t, state.dirty)
-	require.Nil(t, state.consumePendingSummaryRecords())
-	// Draining the staging buffer does not drop what the consumer may still be
+	// Nothing leaves the buffer on a peek: a persist that fails after this point
+	// must still find the records here.
+	require.True(t, state.hasPendingSummaryRecords())
+	require.Len(t, state.peekPendingSummaryRecords(), 3)
+
+	state.dropPersistedSummaryRecords(3)
+	require.False(t, state.hasPendingSummaryRecords())
+	// Releasing the staging buffer does not drop what the consumer may still be
 	// served from.
 	require.Len(t, state.records, 3)
+}
+
+// A chunk covers what was staged when it was built. Anything observed while it
+// was being written must survive into the next one.
+func TestVChannelSummaryDropReleasesOnlyWhatWasPersisted(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
+	for _, record := range newTestSummaryRecords("key", 100, 2) {
+		state.applySummaryRecord(record, true)
+	}
+	persisted := state.peekPendingSummaryRecords()
+	require.Len(t, persisted, 2)
+
+	// Observed during the write.
+	state.applySummaryRecord(newTestSummaryRecord("late", 200, 9), true)
+
+	state.dropPersistedSummaryRecords(len(persisted))
+	remaining := state.peekPendingSummaryRecords()
+	require.Len(t, remaining, 1)
+	require.Equal(t, "late", remaining[0].IdempotencyKey)
 }
 
 func TestVChannelSummarySkipsMessagesAtOrBelowAppliedTimetick(t *testing.T) {
@@ -89,7 +113,7 @@ func TestVChannelSummaryReplayDoesNotStage(t *testing.T) {
 	// would rewrite them into a new chunk.
 	require.Len(t, state.records, 2)
 	require.Empty(t, state.pendingRecords)
-	require.False(t, state.dirty)
+	require.False(t, state.hasPendingSummaryRecords())
 }
 
 func TestVChannelSummaryCapRecoveryBytesDropsOldestFirst(t *testing.T) {

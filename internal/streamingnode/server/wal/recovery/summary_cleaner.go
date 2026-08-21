@@ -16,10 +16,10 @@ import (
 // losing the dedup state of the disabled period, which is inherent to disabling
 // the feature.
 //
-// Deletion order is chosen for crash safety: the manifest first, so recovery
-// immediately stops depending on the chunks; then the chunk objects; then the
-// meta. A crash anywhere only leaks objects, and the next disabled open repeats
-// the sweep.
+// Deletion order is chosen for crash safety: every object first -- manifests and
+// chunks together, under one prefix -- and only then the meta. A crash anywhere
+// leaves at most a meta pointing at nothing, which the next disabled open
+// sweeps again.
 //
 // Best-effort throughout: recovery with idempotency disabled must never block on
 // summary-store IO.
@@ -32,9 +32,6 @@ func (m *summaryManager) dropSummaryStoreForDisabledIdempotency(ctx context.Cont
 		return
 	}
 	meta := pchannelSummaryStoreMetaFromCatalog(metaPB)
-	if meta == nil {
-		return
-	}
 
 	// Prefix removal rather than a walk over the recorded generations: a chunk is
 	// written before the manifest records it, so a crash in between leaves an
@@ -43,8 +40,16 @@ func (m *summaryManager) dropSummaryStoreForDisabledIdempotency(ctx context.Cont
 	// This is the one place prefix deletion is used -- GC on the normal path
 	// addresses objects exactly, because listing semantics differ across
 	// object-storage backends.
-	if err := removeAllPChannelSummaryChunks(ctx, pchannel); err != nil {
-		logger.Warn(ctx, "failed to delete stale pchannel summary chunks; unreferenced objects leak", mlog.Err(err))
+	// The sweep runs whether or not a meta exists. The meta is written after the
+	// first manifest, so a crash in between leaves objects with no meta to point
+	// at them, and keying the sweep off the meta would strand them forever. The
+	// cost of the extra prefix removal is one listing per WAL open while the
+	// feature is off.
+	if err := removeAllPChannelSummaryObjects(ctx, pchannel); err != nil {
+		logger.Warn(ctx, "failed to delete the stale pchannel summary store; unreferenced objects leak", mlog.Err(err))
+		return
+	}
+	if meta == nil {
 		return
 	}
 	if err := catalog.RemovePChannelSummaryMeta(ctx, pchannel); err != nil {
@@ -74,17 +79,30 @@ func (m *summaryManager) dropSummaryStoreForDisabledIdempotency(ctx context.Cont
 //     cross-storage coordination, no locks. Completion rides along on a manifest
 //     write the owner was going to do anyway.
 func (m *summaryManager) runPendingGC(ctx context.Context, logger *mlog.Logger) error {
+	// The queue is snapshotted under the lock and the deletes run without it:
+	// object storage is slow, and the persist path must stay free to publish a
+	// new manifest while this works. Everything read here is already durable --
+	// the persist path installs m.manifest only after its PUT lands -- so a chunk
+	// named by this snapshot is one no reader depends on any more.
+	m.mu.Lock()
 	pending := m.manifest.GetPendingGc()
-	if len(pending) == 0 {
-		return nil
-	}
-	cm := resource.Resource().ChunkManager()
-	deleted := 0
+	todo := make([]pchannelSummaryGCRef, 0, len(pending))
 	for _, entry := range pending {
 		ref := pchannelSummaryGCRef{term: entry.GetTerm(), generation: entry.GetGeneration()}
 		if _, done := m.completedGC[ref]; done {
 			continue
 		}
+		todo = append(todo, ref)
+	}
+	m.mu.Unlock()
+	if len(todo) == 0 {
+		m.observePendingGC()
+		return nil
+	}
+
+	cm := resource.Resource().ChunkManager()
+	deleted := 0
+	for _, ref := range todo {
 		chunkKey := buildPChannelSummaryChunkKey(cm, m.pchannel, ref.generation, ref.term)
 		if err := cm.Remove(ctx, chunkKey); err != nil {
 			// Leave the entry pending; the next cycle retries it. Nothing is lost by
@@ -94,7 +112,9 @@ func (m *summaryManager) runPendingGC(ctx context.Context, logger *mlog.Logger) 
 			m.observePendingGC()
 			return err
 		}
+		m.mu.Lock()
 		m.completedGC[ref] = struct{}{}
+		m.mu.Unlock()
 		deleted++
 	}
 	if deleted > 0 {
@@ -110,5 +130,8 @@ func (m *summaryManager) observePendingGC() {
 	if m.metrics == nil {
 		return
 	}
-	m.metrics.ObserveIdempotencyPendingGC(len(m.manifest.GetPendingGc()) - len(m.completedGC))
+	m.mu.Lock()
+	outstanding := len(m.manifest.GetPendingGc()) - len(m.completedGC)
+	m.mu.Unlock()
+	m.metrics.ObserveIdempotencyPendingGC(outstanding)
 }

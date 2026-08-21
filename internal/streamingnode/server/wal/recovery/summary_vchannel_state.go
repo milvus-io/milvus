@@ -29,9 +29,11 @@ type vchannelSummary struct {
 	commitOrder []string
 	recordBytes int
 
-	// pendingRecords is what the next chunk will carry.
+	// pendingRecords is what the next chunk will carry. It is the ONLY record of
+	// dirtiness: a separate flag could disagree with it, and the way it used to
+	// disagree was to report "clean" for records a failed persist had drained but
+	// never made durable.
 	pendingRecords []*SummaryRecord
-	dirty          bool
 }
 
 func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoint) *vchannelSummary {
@@ -77,15 +79,38 @@ func (s *vchannelSummary) advanceAppliedTo(checkpoint *WALCheckpoint) {
 	}
 }
 
-// consumePendingSummaryRecords drains what the next chunk should carry.
-func (s *vchannelSummary) consumePendingSummaryRecords() []*SummaryRecord {
-	if !s.dirty {
+// peekPendingSummaryRecords returns what the next chunk should carry WITHOUT
+// removing it.
+//
+// Nothing leaves the staging buffer until it is durable. Draining first and
+// putting the records back on failure looks equivalent and is not: the persist
+// can fail in ways that never reach a restore -- a cancelled context on close,
+// a terminal fenced/corrupted error -- and the records would be gone while the
+// consume checkpoint advanced past them, losing those keys with no error
+// anywhere.
+func (s *vchannelSummary) peekPendingSummaryRecords() []*SummaryRecord {
+	if len(s.pendingRecords) == 0 {
 		return nil
 	}
-	records := sortedSummaryRecords(s.pendingRecords)
-	s.dirty = false
-	s.pendingRecords = s.pendingRecords[:0]
-	return records
+	return sortedSummaryRecords(s.pendingRecords)
+}
+
+// dropPersistedSummaryRecords removes the first count records, which are the
+// ones a completed chunk carried. Anything observed while that chunk was being
+// written sits after them and stays staged.
+func (s *vchannelSummary) dropPersistedSummaryRecords(count int) {
+	if count <= 0 {
+		return
+	}
+	if count >= len(s.pendingRecords) {
+		s.pendingRecords = s.pendingRecords[:0]
+		return
+	}
+	s.pendingRecords = append(s.pendingRecords[:0], s.pendingRecords[count:]...)
+}
+
+func (s *vchannelSummary) hasPendingSummaryRecords() bool {
+	return len(s.pendingRecords) > 0
 }
 
 // VChannelSummarySnapshot is what recovery hands a consumer once it has replayed
@@ -119,7 +144,6 @@ func (s *vchannelSummary) applySummaryRecordsAtGeneration(records []*SummaryReco
 	for _, record := range sortedSummaryRecords(records) {
 		s.applySummaryRecord(record, false)
 	}
-	s.dirty = false
 	s.pendingRecords = s.pendingRecords[:0]
 }
 
@@ -136,7 +160,6 @@ func (s *vchannelSummary) applySummaryRecord(record *SummaryRecord, stage bool) 
 	}
 	if stage {
 		s.pendingRecords = append(s.pendingRecords, record)
-		s.dirty = true
 	}
 	if _, ok := s.records[record.IdempotencyKey]; ok {
 		// Already materialized. The chunk still records the repeat, but the record

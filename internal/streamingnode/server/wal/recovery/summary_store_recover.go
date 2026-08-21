@@ -154,6 +154,16 @@ func (m *summaryManager) recoverFromSummaryStore(
 		return checkpoint, errors.Wrap(err, "failed to publish the manifest for this term; refusing to write chunks without it")
 	}
 
+	// Claim the store for this term, AFTER the manifest exists. The order is not
+	// interchangeable: the meta's term is the floor recovery probes down to, so a
+	// meta naming a term with no manifest would stop the probe above every
+	// manifest that does exist and hide the whole store. Crashing between the two
+	// only leaves the floor lower than it could be, which costs extra probes and
+	// loses nothing.
+	if err := m.claimPChannelSummaryStore(ctx, pchannel); err != nil {
+		return checkpoint, err
+	}
+
 	// The WAL checkpoint is the boundary: everything below it is in a chunk,
 	// everything above it is replayed. The store keeps no checkpoint of its own.
 	m.ensureActiveSummaries(vchannels, checkpoint)
@@ -169,6 +179,28 @@ func (m *summaryManager) recoverFromSummaryStore(
 		mlog.Uint64("nextGeneration", m.nextGeneration),
 	)
 	return checkpoint, nil
+}
+
+// claimPChannelSummaryStore records this owner's term in the catalog. It is what
+// gives a later opener a probe floor, and what fences a stale owner: an opener
+// that reads a term above its own refuses rather than writing into a store it no
+// longer owns.
+func (m *summaryManager) claimPChannelSummaryStore(ctx context.Context, pchannel string) error {
+	return updatePChannelSummaryMetaWithCAS(ctx, m.Logger(), pchannel,
+		func(currentPB *streamingpb.PChannelSummaryMeta, current *pchannelSummaryStoreMeta) (*streamingpb.PChannelSummaryMeta, error) {
+			if current != nil {
+				if current.Term > m.term {
+					return nil, pchannelSummaryStoreFencedf(
+						"pchannel summary meta of %s owned by newer term %d, own term %d", pchannel, current.Term, m.term,
+					)
+				}
+				if current.Term == m.term {
+					// Already ours: a retried open must not spend a CAS round.
+					return nil, nil
+				}
+			}
+			return (&pchannelSummaryStoreMeta{PChannel: pchannel, Term: m.term}).intoCatalogMeta(), nil
+		})
 }
 
 func (m *summaryManager) loadPChannelSummaryMeta(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {

@@ -197,3 +197,38 @@ func TestRecoverSummariesSelfHealsCorruptChunkAboveManifest(t *testing.T) {
 	require.Len(t, summary.records, 1)
 	require.Contains(t, summary.records, "key-1")
 }
+
+// Dropping the store must remove the MANIFESTS too. They live beside the chunks
+// directory rather than inside it, so a sweep of the chunks prefix alone leaves
+// the only index into the store behind -- and a later re-enable finds it and
+// fails the WAL open on objects that are no longer there.
+func TestRecoverSummariesDropsManifestsWhenIdempotencyDisabled(t *testing.T) {
+	ctx := context.Background()
+
+	// Build a real store under an enabled run first.
+	chunkManager, catalogState := newTestSummaryStore(t)
+	writer := recoverTestSummaryManager(t, ctx, 1, 5, "v1")
+	writer.setNormalMode()
+	_, err := writer.persistPChannelSummary(ctx, writer.Logger(), map[string][]*SummaryRecord{
+		"v1": {newTestSummaryRecord("key-a", 20, 100)},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, catalogState.storeMeta)
+
+	manifestKey := buildPChannelSummaryManifestKey(chunkManager, "p1", 1)
+	exists, err := chunkManager.Exist(ctx, manifestKey)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	// Now open with the feature off.
+	disableRecoveryIdempotency(t)
+	rs := newTestRecoveryStorageForSummary(t, 100)
+	_, err = rs.summaryManager.recoverSummaries(ctx, "p1", rs.checkpoint, rs.vchannels)
+	require.NoError(t, err)
+
+	exists, err = chunkManager.Exist(ctx, manifestKey)
+	require.NoError(t, err)
+	require.False(t, exists, "the manifest must be swept, not only the chunks")
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", 0, 1, false)
+	require.Nil(t, catalogState.storeMeta)
+}

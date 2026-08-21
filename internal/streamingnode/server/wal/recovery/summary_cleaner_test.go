@@ -29,7 +29,8 @@ func TestRunPendingGCDeletesQueuedChunks(t *testing.T) {
 	manager := newTestSummaryManager(t, "p1", 3, newTestSummaryConfig())
 	// Only the first two are queued; the third is still part of the set recovery
 	// reads and must survive.
-	queueTestPendingGC(manager,
+	queueTestPendingGC(
+		manager,
 		&streamingpb.PChannelSummaryChunkRef{Generation: 0, Term: 1},
 		&streamingpb.PChannelSummaryChunkRef{Generation: 1, Term: 2},
 	)
@@ -75,7 +76,8 @@ func TestRunPendingGCLeavesEntryQueuedOnFailure(t *testing.T) {
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	manager := newTestSummaryManager(t, "p1", 2, newTestSummaryConfig())
-	queueTestPendingGC(manager,
+	queueTestPendingGC(
+		manager,
 		&streamingpb.PChannelSummaryChunkRef{Generation: 0, Term: 1},
 		&streamingpb.PChannelSummaryChunkRef{Generation: 1, Term: 1},
 	)
@@ -147,4 +149,45 @@ func TestRetentionSlideQueuesChunksForGC(t *testing.T) {
 	requirePChannelSummaryChunkExists(t, ctx, resource.Resource().ChunkManager(), "p1", 0, 1, false)
 	requirePChannelSummaryChunkExists(t, ctx, resource.Resource().ChunkManager(), "p1", 1, 1, false)
 	requirePChannelSummaryChunkExists(t, ctx, resource.Resource().ChunkManager(), "p1", 2, 1, true)
+}
+
+// A persist that fails must leave every staged record exactly where it was.
+//
+// The loss this pins is silent: the records used to be drained before the write,
+// so a failure discarded them while the consume checkpoint advanced past them.
+// After a restart those keys were in neither a chunk nor the replayable WAL, and
+// a client retry landed as a fresh write.
+func TestPersistFailureKeepsRecordsStaged(t *testing.T) {
+	ctx := context.Background()
+	enableRecoveryIdempotency(t)
+	catalog, _ := newTestPChannelSummaryCatalog(t)
+	chunkManager := mocks.NewChunkManager(t)
+	chunkManager.EXPECT().RootPath().Return("root").Maybe()
+	chunkManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("object storage unavailable")).Maybe()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	manager := newTestSummaryManager(t, "p1", 1, newTestSummaryConfig())
+	manager.setNormalMode()
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
+	for _, record := range newTestSummaryRecords("key", 100, 3) {
+		state.applySummaryRecord(record, true)
+	}
+	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
+
+	// The context is cancelled, which is what a close racing a persist looks like:
+	// the retry helper gives up immediately instead of surfacing the write error.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Error(t, manager.persistSummaryForCheckpoint(cancelled, manager.Logger()))
+
+	// Still staged, and still reported dirty, so the close path's own persist
+	// attempt finds them rather than saving a checkpoint that outran them.
+	require.Len(t, state.peekPendingSummaryRecords(), 3)
+	require.True(t, manager.hasDirtySummary())
+	require.Len(t, state.records, 3)
+	// The generation is not consumed either: a hole would stop recovery's forward
+	// probe short of everything above it.
+	require.Equal(t, uint64(0), manager.nextGeneration)
 }

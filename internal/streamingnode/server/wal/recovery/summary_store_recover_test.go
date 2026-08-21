@@ -200,3 +200,54 @@ func TestSummaryStoreRecoverySkipsRecordsAlreadyCoveredByCheckpoint(t *testing.T
 	summary.observeMessage(newTestIdempotentCommittedInsertMessage(t, "v1", "key-replayed", 50))
 	require.NotContains(t, summary.records, "key-replayed")
 }
+
+// Recovery must claim the store for its own term, and only after the manifest of
+// that term exists. The meta's term is the floor a later opener probes down to,
+// so a meta naming a term with no manifest would stop the probe above every
+// manifest that does exist and hide the whole store.
+func TestSummaryStoreRecoveryClaimsTheStoreAfterPublishingItsManifest(t *testing.T) {
+	ctx := context.Background()
+	_, catalogState := newTestSummaryStore(t)
+	require.Nil(t, catalogState.storeMeta)
+
+	recoverTestSummaryManager(t, ctx, 4, 10, "v1")
+
+	require.NotNil(t, catalogState.storeMeta)
+	require.Equal(t, int64(4), catalogState.storeMeta.GetTerm())
+	// The claimed term always has a manifest, which is what makes it a usable floor.
+	_, found, err := readPChannelSummaryManifest(ctx, "p1", catalogState.storeMeta.GetTerm())
+	require.NoError(t, err)
+	require.True(t, found)
+}
+
+// The claim is what fences a stale owner. Without a writer this branch was
+// unreachable, so a stale opener would happily write into a store a newer term
+// already owned.
+func TestSummaryStoreClaimFencesStaleOwner(t *testing.T) {
+	ctx := context.Background()
+	_, catalogState := newTestSummaryStore(t)
+
+	recoverTestSummaryManager(t, ctx, 9, 10, "v1")
+	require.Equal(t, int64(9), catalogState.storeMeta.GetTerm())
+
+	stale := newTestSummaryManager(t, "p1", 3, newTestSummaryConfig())
+	rs := newTestRecoveryStorageForSummary(t, 10, "v1")
+	_, err := stale.recoverFromSummaryStore(ctx, "p1", rs.checkpoint, rs.vchannels)
+	require.ErrorIs(t, err, ErrPChannelSummaryStoreFenced)
+	// The stale open must not have taken the store over.
+	require.Equal(t, int64(9), catalogState.storeMeta.GetTerm())
+}
+
+// Re-opening at the same term must not spend a CAS round: a WAL open retried
+// after a transient failure is the normal case, not a takeover.
+func TestSummaryStoreClaimIsIdempotentAtTheSameTerm(t *testing.T) {
+	ctx := context.Background()
+	_, catalogState := newTestSummaryStore(t)
+
+	recoverTestSummaryManager(t, ctx, 5, 10, "v1")
+	writes := len(catalogState.operations)
+	require.Positive(t, writes)
+
+	recoverTestSummaryManager(t, ctx, 5, 10, "v1")
+	require.Len(t, catalogState.operations, writes)
+}

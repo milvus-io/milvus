@@ -48,52 +48,103 @@ func (m *summaryManager) persistPChannelSummary(
 	logger *mlog.Logger,
 	recordsByVChannel map[string][]*SummaryRecord,
 ) (uint64, error) {
+	// Object storage is slow, so the generation is read under the lock, the write
+	// happens without it, and the result is committed back under it. Only one
+	// goroutine ever persists, so the generation cannot be claimed twice; the lock
+	// is what keeps the gc worker from observing half-updated state.
+	m.mu.Lock()
 	generation := m.nextGeneration
-	chunkPayload, footer, err := marshalPChannelSummaryChunk(m.pchannel, generation, m.term, recordsByVChannel)
+	term := m.term
+	m.mu.Unlock()
+
+	chunkPayload, footer, err := marshalPChannelSummaryChunk(m.pchannel, generation, term, recordsByVChannel)
 	if err != nil {
 		return 0, err
 	}
-	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), m.pchannel, generation, m.term)
+	chunkKey := buildPChannelSummaryChunkKey(resource.Resource().ChunkManager(), m.pchannel, generation, term)
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelSummaryChunk"), mlog.Uint64("generation", generation)),
 		func(ctx context.Context) error {
-			return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, footer, recordsByVChannel, m.term)
+			return writePChannelSummaryChunkIfAbsent(ctx, chunkKey, chunkPayload, footer, recordsByVChannel, term)
 		}); err != nil {
 		return 0, err
 	}
-	m.nextGeneration = generation + 1
-	m.latestCoveredTT = footer.GetEndTimetick()
 
-	recordPChannelSummaryChunk(m.manifest, chunkIndexEntryFromFooter(footer, uint64(len(chunkPayload))))
-	if err := m.refreshPChannelSummaryManifest(ctx, logger); err != nil {
+	if err := m.refreshPChannelSummaryManifest(ctx, logger, chunkIndexEntryFromFooter(footer, uint64(len(chunkPayload)))); err != nil {
+		// The chunk is durable but unrecorded. That is a state recovery repairs by
+		// probing forward, so nothing is lost -- but this generation must NOT be
+		// consumed, or the next attempt would claim the following one and leave a
+		// hole that stops the probe short of everything above it.
 		return 0, err
 	}
+
+	m.mu.Lock()
+	m.nextGeneration = generation + 1
+	m.latestCoveredTT = footer.GetEndTimetick()
+	m.mu.Unlock()
 	return generation, nil
 }
 
-// refreshPChannelSummaryManifest recomputes retention and publishes the manifest.
+// refreshPChannelSummaryManifest recomputes retention and publishes the manifest,
+// with `recorded` folded in as the chunk this cycle just made durable.
 //
-// Releasing a chunk and queueing it for deletion happen in the same value, so a
-// single PUT carries both: recovery stops depending on the object at the exact
-// moment GC gains the term it needs to name it. No crash can land between the
-// two.
-func (m *summaryManager) refreshPChannelSummaryManifest(ctx context.Context, logger *mlog.Logger) error {
-	dropCompletedPendingGC(m.manifest, m.completedGC)
-	boundary := retentionBoundary(
-		m.manifest,
+// The new manifest is built on a COPY and installed only after the PUT lands.
+// That ordering is what makes releasing a chunk safe: gc reads m.manifest, so
+// until the write is durable it cannot see -- and therefore cannot delete -- a
+// chunk whose release is still only a local decision. Installing first and
+// writing after would let gc delete an object that a crashed PUT leaves the
+// persisted manifest still referencing, which fails every later WAL open with
+// nothing left to read.
+//
+// Releasing a chunk and queueing it for deletion are the same value, so one PUT
+// carries both: recovery stops depending on the object at the exact moment gc
+// gains the term it needs to name it.
+func (m *summaryManager) refreshPChannelSummaryManifest(
+	ctx context.Context,
+	logger *mlog.Logger,
+	recorded *streamingpb.PChannelSummaryChunkIndexEntry,
+) error {
+	m.mu.Lock()
+	next := proto.Clone(m.manifest).(*streamingpb.PChannelSummaryManifest)
+	// A snapshot, not the live map: the gc worker keeps writing to it while the
+	// PUT is in flight, and only what this write actually folds in may be
+	// forgotten afterwards.
+	completed := make(map[pchannelSummaryGCRef]struct{}, len(m.completedGC))
+	for ref := range m.completedGC {
+		completed[ref] = struct{}{}
+	}
+	latestCoveredTT := m.latestCoveredTT
+	term := m.term
+	m.mu.Unlock()
+
+	if recorded != nil {
+		recordPChannelSummaryChunk(next, recorded)
+		if end := recorded.GetEndTimetick(); end > latestCoveredTT {
+			latestCoveredTT = end
+		}
+	}
+	dropCompletedPendingGC(next, completed)
+	releaseBelowRetentionBoundary(next, retentionBoundary(
+		next,
 		m.cfg.idempotencyMinRetainedBytes,
 		m.cfg.idempotencyMaxRetainedChunks,
-		retentionTTLHorizon(m.latestCoveredTT, m.cfg.idempotencyRetentionTTL),
-	)
-	releaseBelowRetentionBoundary(m.manifest, boundary)
+		retentionTTLHorizon(latestCoveredTT, m.cfg.idempotencyRetentionTTL),
+	))
+
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelSummaryManifest")),
 		func(ctx context.Context) error {
-			return writePChannelSummaryManifest(ctx, m.pchannel, m.term, m.manifest)
+			return writePChannelSummaryManifest(ctx, m.pchannel, term, next)
 		}); err != nil {
 		return err
 	}
-	m.completedGC = make(map[pchannelSummaryGCRef]struct{})
+
+	m.mu.Lock()
+	m.manifest = next
+	for ref := range completed {
+		delete(m.completedGC, ref)
+	}
+	m.mu.Unlock()
 	return nil
 }
 
@@ -218,24 +269,37 @@ func buildPChannelSummaryChunkPrefix(cm storage.ChunkManager, pchannel string) s
 	) + "/"
 }
 
-// removeAllPChannelSummaryChunks deletes every chunk object of the pchannel's
+// buildPChannelSummaryStorePrefix returns the object prefix holding EVERYTHING
+// the pchannel's summary store owns: the chunks directory and the per-term
+// manifests, which sit beside it rather than inside it.
+func buildPChannelSummaryStorePrefix(cm storage.ChunkManager, pchannel string) string {
+	return path.Join(
+		cm.RootPath(),
+		"streamingnode",
+		"summary-store",
+		sanitizeSummaryStorePathPart(pchannel),
+	) + "/"
+}
+
+// removeAllPChannelSummaryObjects deletes every object of the pchannel's
 // summary store. It is only correct where no catalog meta references a chunk any
 // more, such as dropping the store while idempotency is disabled. A bootstrap
 // path must not call this based on a stale no-meta read: another owner may have
 // published a meta after the read, and a prefix delete would remove referenced
 // chunks before the stale opener is fenced.
 //
-// A prefix removal (rather than a walk over [MinAvailableGeneration,
-// LatestGeneration]) is what makes that guarantee hold: it also reaps orphans
-// above LatestGeneration left by a persist that wrote the chunk but crashed
-// before saving the meta, and any chunk left behind by an earlier partial
-// removal.
-func removeAllPChannelSummaryChunks(ctx context.Context, pchannel string) error {
-	prefix := buildPChannelSummaryChunkPrefix(resource.Resource().ChunkManager(), pchannel)
-	// A store that was never written has no chunk directory at all: object
-	// storage lists nothing, local storage reports the missing directory.
+// A prefix removal over the whole store root -- not a walk over what the
+// manifest records, and not just the chunks directory -- is what makes that
+// guarantee hold. It reaps the per-term manifests, which live beside the chunks
+// directory rather than inside it; it reaps a chunk written by a persist that
+// crashed before recording it; and it reaps whatever an earlier partial removal
+// left behind.
+func removeAllPChannelSummaryObjects(ctx context.Context, pchannel string) error {
+	prefix := buildPChannelSummaryStorePrefix(resource.Resource().ChunkManager(), pchannel)
+	// A store that was never written has no directory at all: object storage lists
+	// nothing, local storage reports the missing directory.
 	if err := resource.Resource().ChunkManager().RemoveWithPrefix(ctx, prefix); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return errors.Wrapf(err, "failed to remove pchannel summary chunks with prefix %s", prefix)
+		return errors.Wrapf(err, "failed to remove pchannel summary store with prefix %s", prefix)
 	}
 	return nil
 }

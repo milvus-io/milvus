@@ -28,11 +28,20 @@ type summaryManager struct {
 	cfg     *config
 	metrics *recoveryMetrics
 
-	// mu guards all summary state below. The lock order is always
-	// recoveryStorageImpl.mu -> summaryManager.mu: recoveryStorageImpl methods
-	// acquire rs.mu then call into summaryManager (which takes mu), while
-	// summaryManager holds no reference back to recoveryStorageImpl and never
-	// acquires rs.mu, so the ordering is one-directional and deadlock-free.
+	// mu guards EVERYTHING below it: the per-vchannel summaries, and the durable
+	// store's own state -- manifest, completedGC, nextGeneration, latestCoveredTT.
+	// The store state needs it because two goroutines reach it: the recovery
+	// background task publishes manifests from the persist path, and the summary
+	// background task deletes objects from the gc path.
+	//
+	// Object storage is never touched while holding it. Both paths read state
+	// under the lock, do their IO without it, and commit the result back under it,
+	// so a slow or hanging object store cannot block message observation.
+	//
+	// The lock order is always recoveryStorageImpl.mu -> summaryManager.mu:
+	// recoveryStorageImpl methods acquire rs.mu then call into summaryManager,
+	// while summaryManager holds no reference back and never acquires rs.mu, so
+	// the ordering is one-directional and deadlock-free.
 	mu                            sync.Mutex
 	summaryBackgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	vchannelSummaries             map[string]*vchannelSummary
@@ -193,7 +202,7 @@ func (m *summaryManager) observeMessage(msg message.ImmutableMessage) {
 
 func (m *summaryManager) hasDirtySummaryUnsafe() bool {
 	for _, summary := range m.summaries() {
-		if summary.dirty {
+		if summary.hasPendingSummaryRecords() {
 			return true
 		}
 	}
@@ -211,7 +220,7 @@ func (m *summaryManager) setNormalMode() {
 // evictPersistedRecords releases each vchannel's staging buffer once its
 // contents are in a written chunk. Whether a chunk is still in use is a separate
 // concern and is decided by retention, not here.
-func (m *summaryManager) evictPersistedRecords() {
+func (m *summaryManager) evictPersistedRecordsUnsafe() {
 	if m.recoveryMode {
 		return
 	}
