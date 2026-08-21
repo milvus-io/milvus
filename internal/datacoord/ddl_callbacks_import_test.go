@@ -95,6 +95,32 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 	s.Contains(err.Error(), "timeout")
 }
 
+// TestValidateImportRequest_RejectsInternalStoragePath pins the datacoord side
+// of the path-confinement gate. ValidateImportFilePaths is covered on its own
+// (import_util_test.go), but every path the suite passed here was benign, so
+// deleting the call left this package green -- the same wiring standard the
+// PreExecute and duplicate-key tests already hold the other two gates to.
+func (s *ImportCallbacksSuite) TestValidateImportRequest_RejectsInternalStoragePath() {
+	ctx := context.Background()
+
+	server := &Server{
+		meta: newTestMetaWithChunkManager(s.T()), // RootPath() == "files"
+	}
+
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"files/insert_log/1/2/3/100/4"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	}
+
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.Contains(err.Error(), "is a Milvus internal storage directory")
+}
+
 func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsError() {
 	ctx := context.Background()
 
