@@ -65,7 +65,13 @@ class WriteRateLimiter {
               int32_t low_priority_ratio) {
         if (refill_period_us <= 0 || avg_bps <= 0 || max_burst_bps <= 0 ||
             avg_bps > max_burst_bps) {
-            ThrowInfo(ErrorCode::InvalidParameter,
+            // These come from milvus.yaml via initcore (common.diskWriteRate*),
+            // never from a request, so this is a server misconfiguration --
+            // ConfigInvalid, the same code storage_c.cpp already uses for a bad
+            // write-mode string. InvalidParameter carries InputError, which
+            // makes the proxy abort cross-replica failover for what is really a
+            // deployment error.
+            ThrowInfo(ErrorCode::ConfigInvalid,
                       "All parameters must be positive, but got: "
                       "refill_period_us: {}, "
                       "avg_bps: {}, max_burst_bps: {}",
