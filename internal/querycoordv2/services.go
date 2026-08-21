@@ -779,45 +779,24 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
-	replicaFilter := func(replica *meta.Replica) bool {
-		return replica.IsQueryVisible()
-	}
 	// A request that names a resource group is asking which leaders THAT group
-	// can serve from, and the answer is not derivable from the unscoped one:
-	// the response flattens every replica into one list per channel, and a
-	// replica may borrow nodes from another resource group, so node-set
-	// membership is not replica membership. The replica is only in hand here.
+	// can serve from, which needs both a different replica filter and a
+	// different load gate than the unscoped answer -- see
+	// utils.GetShardLeadersByResourceGroup for why neither can be expressed
+	// as a replicaFilter over the native path.
 	if resourceGroup := req.GetResourceGroup(); resourceGroup != "" {
-		// Refuse a resource group that holds no replica of the collection up
-		// front, by name. Falling through would fail on the first channel
-		// with ChannelNotAvailable, which misleads twice over: the channel is
-		// fine (a sibling group may be serving it right now), and the caller
-		// retries an answer that will not change until someone loads the
-		// collection into this group. This is the shard-leader counterpart
-		// of GetReplicaLoadPercentByRG's -1.
-		// Only the strict form refuses: a caller accepting unserviceable
-		// shards (the proxy refreshing its cache) wants the empty answer.
-		holds := req.GetWithUnserviceableShards()
-		if !holds {
-			for _, replica := range s.meta.GetByCollection(ctx, req.GetCollectionID()) {
-				if replica.GetResourceGroup() == resourceGroup {
-					holds = true
-					break
-				}
-			}
-		}
-		if !holds {
-			// merr.Wrapf rather than WrapErrReplicaNotFound: the latter stamps
-			// its argument as a replica id, and the only id in hand here is
-			// the collection's.
-			err := merr.Wrapf(merr.ErrReplicaNotFound,
-				"collection %d has no replica in resource group %q", req.GetCollectionID(), resourceGroup)
-			mlog.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
-			return &querypb.GetShardLeadersResponse{Status: merr.Status(err)}, nil
-		}
-		replicaFilter = func(replica *meta.Replica) bool {
-			return replica.IsQueryVisible() && replica.GetResourceGroup() == resourceGroup
-		}
+		leaders, err := utils.GetShardLeadersByResourceGroup(ctx,
+			s.meta,
+			s.targetMgr,
+			s.dist,
+			s.nodeMgr,
+			req.GetCollectionID(),
+			resourceGroup,
+			req.GetWithUnserviceableShards())
+		return &querypb.GetShardLeadersResponse{
+			Status: merr.Status(err),
+			Shards: leaders,
+		}, nil
 	}
 
 	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
@@ -827,7 +806,9 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		s.nodeMgr,
 		req.GetCollectionID(),
 		req.GetWithUnserviceableShards(),
-		replicaFilter)
+		func(replica *meta.Replica) bool {
+			return replica.IsQueryVisible()
+		})
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,

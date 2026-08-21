@@ -93,6 +93,41 @@ func (f *shardLeaderReadinessFixture) putLoadedCollection(t *testing.T, collecti
 		"the fixture must leave the collection with a current target, which is what readiness reads")
 }
 
+// putLoadingCollection registers collectionID mid-load -- collection status
+// Loading with its single partition at 50% -- and still promotes the given
+// channels into the CURRENT target, which is exactly what happens when one
+// resource group's replicas finish first: shouldUpdateCurrentTarget pools
+// ready delegators across every replica and requires only that each channel
+// be covered by SOME replica, so the leading group's delegators alone promote
+// the target while the collection-wide load percentage stays below 100.
+func (f *shardLeaderReadinessFixture) putLoadingCollection(t *testing.T, collectionID, partitionID int64, channelNames ...string) {
+	ctx := context.Background()
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: collectionID,
+			Status:       querypb.LoadStatus_Loading,
+		},
+		LoadPercentage: 50,
+	}))
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			Status:       querypb.LoadStatus_Loading,
+		},
+		LoadPercentage: 50,
+	}))
+
+	vChannels := make([]*datapb.VchannelInfo, 0, len(channelNames))
+	for _, name := range channelNames {
+		vChannels = append(vChannels, &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name})
+	}
+	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vChannels, nil, nil).Once()
+	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+	require.True(t, f.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID),
+		"the fixture must leave the mid-load collection with a promoted current target")
+}
+
 // putReplica registers a replica of collectionID in rgName holding nodeIDs.
 // The replica ID is the first node id, so distinct replicas in one test need
 // distinct nodes; ReplicaManager indexes by ID and a repeated ID would
