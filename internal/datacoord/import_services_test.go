@@ -336,7 +336,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 }
 
 // importV2RequestFilePath is the single file newImportV2IdempotentRequest asks to
-// import. A duplicate hit is only honored when the original job covers the same files.
+// import.
 const importV2RequestFilePath = "/test/file.json"
 
 // newDuplicatedImportBroadcastResult builds the result the broadcaster returns on an
@@ -450,8 +450,8 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 }
 
 // A duplicate is reported by an explicit flag, never by a non-zero jobID, so a
-// duplicated broadcast carrying jobID 0 must still take the duplicate branch and let
-// the job-existence check decide — not fall through to the freshly allocated 1000.
+// duplicated broadcast carrying jobID 0 must still take the duplicate branch and
+// return that 0 — not fall through to the freshly allocated 1000.
 func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate() {
 	ctx := newImportV2IdempotentContext("run-1")
 

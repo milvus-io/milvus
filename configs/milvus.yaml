@@ -915,10 +915,11 @@ dataCoord:
     # Must be >= streaming.walBroadcaster.tombstone.maxLifetime: the BulkImport
     # idempotency window is bounded by the tombstone retention, so a job GC'd earlier
     # than its tombstone would let an in-window retry resolve to a jobID that
-    # GetImportProgress can no longer find. Leave margin rather than matching the two
-    # exactly: a tombstone's age is measured from the last StreamingCoord start, so a
-    # restart extends its remaining life while this retention keeps counting from the
-    # job's own completion.
+    # GetImportProgress can no longer find. The two defaults are equal, which covers a
+    # window in which StreamingCoord does not restart. A tombstone's age is measured
+    # from the last StreamingCoord start, so each restart extends its remaining life by
+    # up to another maxLifetime while this retention keeps counting from the job's own
+    # completion; raise this value if retries must stay resolvable across restarts.
     taskRetention: 86400
     maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
