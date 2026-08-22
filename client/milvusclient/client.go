@@ -77,10 +77,10 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	// parse authentication parameters
 	c.parseAuthentication()
 	// Parse grpc options
-	options := c.dialOptions()
+	options := c.connectionOptions()
 
 	// Connect the grpc server.
-	if err := c.connect(ctx, addr, options...); err != nil {
+	if err := c.connect(ctx, addr, options); err != nil {
 		return nil, err
 	}
 
@@ -95,39 +95,53 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) dialOptions() []grpc.DialOption {
-	var options []grpc.DialOption
+func (c *Client) connectionOptions() ConnectionOptions {
+	var transportCredentials credentials.TransportCredentials
 	// Construct dial option.
 	if c.config.EnableTLSAuth {
 		if c.config.tlsConfig != nil {
-			options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(c.config.tlsConfig)))
+			transportCredentials = credentials.NewTLS(c.config.tlsConfig)
 		} else {
-			options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+			transportCredentials = credentials.NewTLS(&tls.Config{})
 		}
 	} else {
-		options = append(options, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		transportCredentials = insecure.NewCredentials()
 	}
 
-	// Always apply default connection options first, then let caller override/extend.
-	options = append(options, DefaultGrpcOpts...)
-	options = append(options, c.config.DialOptions...)
+	dialOptions := append([]grpc.DialOption(nil), c.config.DialOptions...)
 
-	options = append(options,
-		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
-			grpc_retry.WithMax(6),
+	var unaryInterceptors []grpc.UnaryClientInterceptor
+	transportRetry := c.config.retryTransportOption()
+	if transportRetry.MaxRetry > 0 {
+		unaryInterceptors = append(unaryInterceptors, grpc_retry.UnaryClientInterceptor(
+			grpc_retry.WithMax(transportRetry.MaxRetry),
 			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
 				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
 			}),
-			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
+			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)))
+	}
 
-		// c.getRetryOnRateLimitInterceptor(),
-		))
+	// c.getRetryOnRateLimitInterceptor(),
+	unaryInterceptors = append(unaryInterceptors, c.MetadataUnaryInterceptor())
 
-	options = append(options, grpc.WithChainUnaryInterceptor(
-		c.MetadataUnaryInterceptor(),
-	))
+	return ConnectionOptions{
+		TransportCredentials: transportCredentials,
+		DialOptions:          dialOptions,
+		UnaryInterceptors:    unaryInterceptors,
+	}
+}
 
-	return options
+func defaultConnectionFactory(ctx context.Context, target string, options ConnectionOptions) (*grpc.ClientConn, error) {
+	dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(options.TransportCredentials)}
+	dialOptions = append(dialOptions, DefaultGrpcOpts...)
+	dialOptions = append(dialOptions, options.DialOptions...)
+	if len(options.UnaryInterceptors) > 0 {
+		dialOptions = append(dialOptions, grpc.WithChainUnaryInterceptor(options.UnaryInterceptors...))
+	}
+	if len(options.StreamInterceptors) > 0 {
+		dialOptions = append(dialOptions, grpc.WithChainStreamInterceptor(options.StreamInterceptors...))
+	}
+	return grpc.DialContext(ctx, target, dialOptions...)
 }
 
 // parseAuthentication prepares authentication headers for grpc inteceptors based on the provided username, password or API key.
@@ -181,11 +195,15 @@ func (c *Client) setIdentifier(identifier string) {
 	c.identifier = identifier
 }
 
-func (c *Client) connect(ctx context.Context, addr string, options ...grpc.DialOption) error {
+func (c *Client) connect(ctx context.Context, addr string, options ConnectionOptions) error {
 	if addr == "" {
 		return errors.New("address is empty")
 	}
-	conn, err := grpc.DialContext(ctx, addr, options...)
+	connectionFactory := c.config.ConnectionFactory
+	if connectionFactory == nil {
+		connectionFactory = defaultConnectionFactory
+	}
+	conn, err := connectionFactory(ctx, addr, options)
 	if err != nil {
 		return err
 	}

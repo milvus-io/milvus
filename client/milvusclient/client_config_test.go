@@ -1,25 +1,137 @@
 package milvusclient
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-func TestDialOptionsAlwaysIncludesDefaults(t *testing.T) {
+func TestConnectionOptionsIncludesCallerDialOptions(t *testing.T) {
 	c := &Client{config: &ClientConfig{
 		DialOptions: []grpc.DialOption{grpc.WithAuthority("test")},
 	}}
-	opts := c.dialOptions()
-	// TLS/insecure (1) + DefaultGrpcOpts (len) + user option (1) + interceptors (2)
-	assert.True(t, len(opts) >= len(DefaultGrpcOpts)+1, "dialOptions should include DefaultGrpcOpts plus user options")
+	opts := c.connectionOptions()
+	assert.Len(t, opts.DialOptions, 1)
+	assert.Len(t, opts.UnaryInterceptors, 2)
+	assert.NotNil(t, opts.TransportCredentials)
 }
 
-func TestDialOptionsWithNilDialOptions(t *testing.T) {
+func TestConnectionOptionsWithNilDialOptions(t *testing.T) {
 	c := &Client{config: &ClientConfig{}}
-	opts := c.dialOptions()
-	assert.True(t, len(opts) >= len(DefaultGrpcOpts), "dialOptions should include DefaultGrpcOpts even when DialOptions is nil")
+	opts := c.connectionOptions()
+	assert.Empty(t, opts.DialOptions)
+	assert.Len(t, opts.UnaryInterceptors, 2)
+	assert.NotNil(t, opts.TransportCredentials)
+}
+
+func TestRetryConfiguration(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        *ClientConfig
+		wantCalls     int
+		wantChainSize int
+	}{
+		{
+			name:          "default retry remains enabled",
+			config:        &ClientConfig{},
+			wantCalls:     6,
+			wantChainSize: 2,
+		},
+		{
+			name:          "retry count is configurable",
+			config:        &ClientConfig{RetryTransport: &RetryTransportOption{MaxRetry: 3}},
+			wantCalls:     3,
+			wantChainSize: 2,
+		},
+		{
+			name:          "zero disables retry",
+			config:        &ClientConfig{RetryTransport: &RetryTransportOption{MaxRetry: 0}},
+			wantCalls:     1,
+			wantChainSize: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &Client{config: test.config}
+			options := client.connectionOptions()
+			require.Len(t, options.UnaryInterceptors, test.wantChainSize)
+
+			calls := 0
+			invoker := func(context.Context, string, any, any, *grpc.ClientConn, ...grpc.CallOption) error {
+				calls++
+				return status.Error(codes.Unavailable, "unavailable")
+			}
+			err := invokeUnaryInterceptors(
+				options.UnaryInterceptors,
+				invoker,
+				nil,
+				grpc_retry.WithBackoff(func(uint) time.Duration { return 0 }),
+			)
+			assert.Equal(t, codes.Unavailable, status.Code(err))
+			assert.Equal(t, test.wantCalls, calls)
+		})
+	}
+}
+
+func TestRetryTransportCodes(t *testing.T) {
+	tests := []struct {
+		name      string
+		code      codes.Code
+		wantCalls int
+	}{
+		{name: "unavailable", code: codes.Unavailable, wantCalls: 2},
+		{name: "resource exhausted", code: codes.ResourceExhausted, wantCalls: 2},
+		{name: "non-retriable", code: codes.InvalidArgument, wantCalls: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &Client{config: &ClientConfig{
+				RetryTransport: &RetryTransportOption{MaxRetry: 2},
+			}}
+			options := client.connectionOptions()
+
+			calls := 0
+			invoker := func(context.Context, string, any, any, *grpc.ClientConn, ...grpc.CallOption) error {
+				calls++
+				return status.Error(test.code, test.code.String())
+			}
+
+			err := invokeUnaryInterceptors(
+				options.UnaryInterceptors,
+				invoker,
+				nil,
+				grpc_retry.WithBackoff(func(uint) time.Duration { return 0 }),
+			)
+			assert.Equal(t, test.code, status.Code(err))
+			assert.Equal(t, test.wantCalls, calls)
+		})
+	}
+}
+
+func invokeUnaryInterceptors(
+	interceptors []grpc.UnaryClientInterceptor,
+	invoker grpc.UnaryInvoker,
+	reply any,
+	callOptions ...grpc.CallOption,
+) error {
+	chainedInvoker := invoker
+	for i := len(interceptors) - 1; i >= 0; i-- {
+		interceptor := interceptors[i]
+		next := chainedInvoker
+		chainedInvoker = func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+			return interceptor(ctx, method, req, reply, cc, next, opts...)
+		}
+	}
+	return chainedInvoker(context.Background(), "/test.Service/Method", nil, reply, nil, callOptions...)
 }
 
 func TestWithGrpcAuthority(t *testing.T) {
@@ -28,7 +140,7 @@ func TestWithGrpcAuthority(t *testing.T) {
 		result := config.WithGrpcAuthority("proxy.example.com")
 
 		assert.Same(t, config, result)
-		// Only grpc.WithAuthority; DefaultGrpcOpts are applied by dialOptions()
+		// Only grpc.WithAuthority; DefaultGrpcOpts are applied separately.
 		assert.Equal(t, 1, len(config.DialOptions))
 	})
 

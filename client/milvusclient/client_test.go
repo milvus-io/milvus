@@ -31,6 +31,28 @@ func (s *ClientSuite) TestNewClient() {
 		s.NotNil(c)
 	})
 
+	s.Run("custom connection factory", func() {
+		var called bool
+		c, err := New(ctx, &ClientConfig{
+			Address: "bufnet",
+			DialOptions: []grpc.DialOption{
+				grpc.WithBlock(),
+				grpc.WithContextDialer(s.mockDialer),
+			},
+			ConnectionFactory: func(factoryCtx context.Context, target string, options ConnectionOptions) (*grpc.ClientConn, error) {
+				called = true
+				s.Equal("bufnet", target)
+				s.NotNil(options.TransportCredentials)
+				s.Len(options.DialOptions, 2)
+				s.Len(options.UnaryInterceptors, 2)
+				return defaultConnectionFactory(factoryCtx, target, options)
+			},
+		})
+		s.NoError(err)
+		s.NotNil(c)
+		s.True(called)
+	})
+
 	s.Run("empty_addr", func() {
 		_, err := New(ctx, &ClientConfig{})
 		s.Error(err)
