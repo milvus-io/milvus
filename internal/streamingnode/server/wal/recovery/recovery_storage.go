@@ -27,6 +27,12 @@ type RecoverySnapshot struct {
 	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
 	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
 	SalvageCheckpoint *utility.ReplicateCheckpoint
+
+	// SummarySnapshots contains the recovered in-memory summary snapshots. They are
+	// plain data: the idempotency interceptor is today's only consumer and turns
+	// them into its dedup window, but nothing here is specific to that use. Rebuilt
+	// from the pchannel summary store during recovery, never persisted to etcd.
+	SummarySnapshots map[string]*VChannelSummarySnapshot
 }
 
 // AlterWALInfo contains information about WAL alteration process.

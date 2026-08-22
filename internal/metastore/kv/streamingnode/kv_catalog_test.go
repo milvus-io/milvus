@@ -101,6 +101,97 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	assert.Equal(t, int64(2), segments[0].GetSegmentId())
 }
 
+func TestCatalogPChannelSummaryMeta(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("get_missing", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		kv.EXPECT().Load(mock.Anything, buildPChannelSummaryMetaKey("p1")).Return("", merr.ErrIoKeyNotFound)
+		meta, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
+		assert.NoError(t, err)
+		assert.Nil(t, meta)
+	})
+
+	t.Run("save_and_get", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+		meta := &streamingpb.PChannelSummaryMeta{
+			Pchannel: "p1",
+			Term:     3,
+		}
+		data, err := proto.Marshal(meta)
+		assert.NoError(t, err)
+
+		kv.EXPECT().Save(mock.Anything, buildPChannelSummaryMetaKey("p1"), string(data)).Return(nil)
+		err = catalog.SavePChannelSummaryMeta(ctx, "p1", meta)
+		assert.NoError(t, err)
+
+		kv.EXPECT().Load(mock.Anything, buildPChannelSummaryMetaKey("p1")).Return(string(data), nil)
+		got, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
+		assert.NoError(t, err)
+		assert.Equal(t, meta.GetPchannel(), got.GetPchannel())
+		assert.Equal(t, meta.GetTerm(), got.GetTerm())
+	})
+
+	t.Run("save_rejects_pchannel_mismatch", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		err := catalog.SavePChannelSummaryMeta(ctx, "p1", &streamingpb.PChannelSummaryMeta{Pchannel: "p2"})
+		assert.Error(t, err)
+	})
+
+	t.Run("get_unmarshal_error", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		kv.EXPECT().Load(mock.Anything, buildPChannelSummaryMetaKey("p1")).Return("invalid-proto", nil)
+		meta, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
+		assert.Error(t, err)
+		assert.Nil(t, meta)
+	})
+
+	t.Run("compare_and_swap", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv).(*catalog)
+		key := buildPChannelSummaryMetaKey("p1")
+		current := &streamingpb.PChannelSummaryMeta{
+			Pchannel: "p1",
+			Term:     1,
+		}
+		currentData, err := proto.Marshal(current)
+		assert.NoError(t, err)
+		target := &streamingpb.PChannelSummaryMeta{
+			Pchannel: "p1",
+			Term:     2,
+		}
+		targetData, err := proto.Marshal(target)
+		assert.NoError(t, err)
+
+		kv.EXPECT().CompareVersionAndSwap(mock.Anything, key, int64(0), string(currentData)).Return(true, nil).Once()
+		swapped, err := catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", nil, current)
+		assert.NoError(t, err)
+		assert.True(t, swapped)
+
+		kv.EXPECT().CompareVersionAndSwap(mock.Anything, key, int64(0), string(currentData)).Return(false, nil).Once()
+		swapped, err = catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", nil, current)
+		assert.NoError(t, err)
+		assert.False(t, swapped)
+
+		kv.EXPECT().MultiSaveAndRemove(mock.Anything, map[string]string{key: string(targetData)}, mock.Anything, mock.Anything).Return(nil).Once()
+		swapped, err = catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", current, target)
+		assert.NoError(t, err)
+		assert.True(t, swapped)
+
+		kv.EXPECT().MultiSaveAndRemove(mock.Anything, map[string]string{key: string(targetData)}, mock.Anything, mock.Anything).Return(merr.WrapErrIoFailedReason("failed to execute transaction")).Once()
+		swapped, err = catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", current, target)
+		assert.NoError(t, err)
+		assert.False(t, swapped)
+	})
+}
+
 func TestCatalogVChannel(t *testing.T) {
 	catalog := newTestEtcdCatalog(t, "testCatalogVChannel")
 	ctx := context.Background()
@@ -375,6 +466,12 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/consume-checkpoint", buildConsumeCheckpointKey("p1"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/consume-checkpoint", buildConsumeCheckpointKey("p2"))
+
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/", buildSummaryStorePrefix("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/", buildSummaryStorePrefix("p2"))
+
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/pchannel-summary-meta", buildPChannelSummaryMetaKey("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/pchannel-summary-meta", buildPChannelSummaryMetaKey("p2"))
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))

@@ -42,11 +42,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	channelNames, err := it.chMgr.GetVChannels(collID)
-	if err != nil {
-		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
-		it.result.Status = merr.Status(err)
-		return err
+	channelNames := it.vChannels
+	if len(channelNames) == 0 {
+		channelNames, err = it.chMgr.GetVChannels(collID)
+		if err != nil {
+			mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
+			it.result.Status = merr.Status(err)
+			return err
+		}
 	}
 
 	mlog.Debug(ctx, "send insert request to virtual channels",
@@ -64,17 +67,20 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	idempotency := it.idempotentInsertDecoration()
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, idempotency)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
+	resp := streaming.WAL().AppendMessagesWithOptions(ctx, msgs, streaming.AppendOption{
+		IdempotencyKey: it.idempotencyKey,
+	})
 	if err := resp.UnwrapFirstError(); err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
@@ -82,9 +88,35 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		} else {
 			it.result.Status = merr.Status(err)
 		}
+		return nil
 	}
 	// Update result.Timestamp for session consistency.
 	it.result.Timestamp = resp.MaxTimeTick()
+
+	if it.idempotencyEnabled {
+		warnOnPartialIdempotentDuplicate(ctx, it.idempotencyKey, resp)
+		if err := mergeDuplicateInsertResults(it.result, resp); err != nil {
+			// The append itself already committed (or deduplicated) durably; the
+			// only reachable cause of a merge failure is an EXPLICIT idempotency
+			// key reused with a payload of a DIFFERENT SHAPE (row count / PK
+			// type), so the stored duplicate result does not line up with this
+			// request structurally (auto keys hash the payload and cannot
+			// diverge). Surface that as an input error naming the misuse —
+			// reporting an internal failure here would tell the client an insert
+			// failed when its data exists, deterministically on every retry. The
+			// mismatch detail goes to the log.
+			//
+			// NOTE: this is best-effort, not a payload-equality guarantee. The
+			// key is trusted by design (no request fingerprint is stored): a key
+			// reused with a same-shape but different payload merges cleanly and
+			// returns the original insert's result. Key uniqueness per logical
+			// request is the client's contract; see the WithIdempotencyKey docs.
+			mlog.Warn(ctx, "idempotent duplicate insert result does not match this request", mlog.Err(err))
+			it.result.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+				"idempotency key was reused with a different payload; the server kept the original insert result",
+			))
+		}
+	}
 	return nil
 }
 
@@ -97,6 +129,7 @@ func repackInsertDataForStreamingService(
 	ez *message.CipherConfig,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
+	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := channelmgr.GetActiveWALName()
@@ -129,6 +162,7 @@ func repackInsertDataForStreamingService(
 			schemaVersion,
 			partialUpdateCAS,
 			walName,
+			idempotency,
 		)
 		if err != nil {
 			return nil, err
@@ -149,6 +183,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
+	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := channelmgr.GetActiveWALName()
@@ -219,6 +254,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				schemaVersion,
 				partialUpdateCAS,
 				walName,
+				idempotency,
 			)
 			if err != nil {
 				return nil, err
@@ -257,6 +293,7 @@ func repackInsertDataByPartitionForStreamingService(
 	schemaVersion int32,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	walName message.WALName,
+	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
 	type pendingInsertPack struct {
 		rowOffsets []int
@@ -270,7 +307,7 @@ func repackInsertDataByPartitionForStreamingService(
 		pack := pending[0]
 		pending = pending[1:]
 		if pack.insertMsg == nil {
-			packedMsgs, err := channelmgr.GenInsertMsgsByPartition(
+			packedMsgs, _, err := channelmgr.GenInsertMsgsByPartition(
 				ctx,
 				0,
 				partitionID,
@@ -307,20 +344,39 @@ func repackInsertDataByPartitionForStreamingService(
 			schemaVersion,
 			ez,
 			partialUpdateCAS,
+			pack.rowOffsets,
+			idempotency,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		// Entity-size packing does not include the streaming header or CAS
-		// metadata. Validate the fully built message and split the original row
-		// offsets again when that final envelope crosses the transport limit.
-		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
+		// Entity-size packing counts only column bytes, so the built envelope is
+		// always larger than the budget the packer spent: row ids, timestamps and
+		// proto framing are never counted. That gap is deliberate and harmless for
+		// a plain insert -- pulsar.maxMessageSize is set below the broker's own
+		// limit precisely so the envelope fits in the headroom -- which is why an
+		// oversized plain message is accepted here rather than re-split.
+		//
+		// CAS metadata and the idempotency result are different: both are attached
+		// after packing and neither is bounded by the row budget. The idempotency
+		// result carries every primary key the write unit produced, so it grows
+		// with the row count and can exhaust the headroom outright. When a message
+		// carrying one of them crosses the limit, split the row offsets and rebuild.
+		//
+		// Rejecting instead would make any insert large enough to be split fail
+		// deterministically the moment idempotency is enabled, while the identical
+		// batch succeeds with it off.
+		carriesUnbudgetedMetadata := partialUpdateCAS != nil || idempotency.enabled()
+		if maxMessageSize <= 0 || !carriesUnbudgetedMetadata || msg.EstimateSize() <= maxMessageSize {
 			messages = append(messages, msg)
 			continue
 		}
 		if len(pack.rowOffsets) == 1 {
-			return nil, merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
+			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"a single insert row does not fit in one WAL message: size=%d bytes, limit=%d bytes",
+				msg.EstimateSize(), maxMessageSize,
+			))
 		}
 
 		middle := len(pack.rowOffsets) / 2
@@ -341,21 +397,28 @@ func buildInsertMessageForStreamingService(
 	schemaVersion int32,
 	ez *message.CipherConfig,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
+	rowOffsets []int,
+	idempotency *insertIdempotencyDecoration,
 ) (message.MutableMessage, error) {
+	header := &message.InsertMessageHeader{
+		CollectionId: collectionID,
+		Partitions: []*message.PartitionSegmentAssignment{
+			{
+				PartitionId: partitionID,
+				Rows:        insertRequest.GetNumRows(),
+				BinarySize:  0, // TODO: current not used, message estimate size is used.
+			},
+		},
+		SchemaVersion: &schemaVersion,
+	}
+	if err := idempotency.decorate(header, rowOffsets); err != nil {
+		return nil, err
+	}
 	builder := message.NewInsertMessageBuilderV1().
 		WithVChannel(channel).
-		WithHeader(&message.InsertMessageHeader{
-			CollectionId: collectionID,
-			Partitions: []*message.PartitionSegmentAssignment{
-				{
-					PartitionId: partitionID,
-					Rows:        insertRequest.GetNumRows(),
-					BinarySize:  0, // TODO: current not used, message estimate size is used.
-				},
-			},
-			SchemaVersion: &schemaVersion,
-		}).
-		WithBody(insertRequest)
+		WithHeader(header).
+		WithBody(insertRequest).
+		WithIdempotencyKey(idempotency.idempotencyKey())
 	if partialUpdateCAS != nil {
 		if err := builder.AddPartialUpdateCAS(partialUpdateCAS); err != nil {
 			return nil, err

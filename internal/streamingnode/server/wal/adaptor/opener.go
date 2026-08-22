@@ -340,14 +340,16 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 		mlog.String("channel", opt.Channel.Name),
 		mlog.Uint64("targetTimeTick", targetTimeTick))
 
+	const defaultWALSwitchFlushTimeout = 1 * time.Minute
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-
-	const defaultWALSwitchFlushTimeout = 1 * time.Minute
+	timeout := time.NewTimer(defaultWALSwitchFlushTimeout)
+	defer timeout.Stop()
 
 	// Periodically check flush progress until target time tick is reached
 	var flusherCP *utility.WALCheckpoint
-	for flusherCP == nil || flusherCP.TimeTick < targetTimeTick {
+waitPersistence:
+	for {
 		select {
 		case <-ticker.C:
 			flusherCP = rs.GetFlusherCheckpointByTimeTick(ctx)
@@ -356,12 +358,12 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 				continue
 			}
 			if flusherCP.TimeTick >= targetTimeTick {
-				mlog.Info(ctx, "flush completed, ready for WAL switch",
+				mlog.Info(ctx, "flush and summary store persistence completed, ready for WAL switch",
 					mlog.String("channel", opt.Channel.Name),
 					mlog.Uint64("flusherCheckpointTS", flusherCP.TimeTick),
 					mlog.Uint64("targetTimeTick", targetTimeTick),
 					mlog.Stringer("targetWAL", targetWALName))
-				break
+				break waitPersistence
 			}
 			remaining := targetTimeTick - flusherCP.TimeTick
 			mlog.Info(ctx, "flush in progress",
@@ -369,7 +371,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 				mlog.Uint64("currentTS", flusherCP.TimeTick),
 				mlog.Uint64("targetTS", targetTimeTick),
 				mlog.Uint64("remainingTS", remaining))
-		case <-time.After(defaultWALSwitchFlushTimeout):
+		case <-timeout.C:
 			mlog.Warn(ctx, "timeout waiting for flush completion",
 				mlog.String("channel", opt.Channel.Name),
 				mlog.Duration("timeout", defaultWALSwitchFlushTimeout))
@@ -477,6 +479,11 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	if finalCheckpoint.ReplicateCheckpoint != nil {
 		finalCheckpoint.ReplicateCheckpoint.MessageID = finalCheckpoint.MessageID
 	}
+
+	// The summary store needs nothing here. It holds no checkpoint of its own:
+	// its chunks are written synchronously before the consume checkpoint that
+	// covers them, so replacing the WAL simply moves the one boundary both sides
+	// already share.
 
 	// Persist final checkpoint to catalog
 	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, finalCheckpoint.IntoProto()); err != nil {

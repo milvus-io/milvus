@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -26,14 +27,13 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 func OpenManager() (Manager, error) {
 	resource.Resource().Logger().Info(context.TODO(), "open wal manager with dynamic opener")
 	// Create dynamic opener directly with interceptors
-	opener := adaptor.NewOpenerAdaptor(newInterceptorBuilders())
+	opener := adaptor.NewOpenerAdaptor(defaultInterceptorBuilders())
 	return newManager(opener), nil
 }
 
-// newInterceptorBuilders keeps shard validation ahead of partial-update write
-// tracking while both remain inside the TimeTick publication boundary.
-func newInterceptorBuilders() []interceptors.InterceptorBuilder {
+func defaultInterceptorBuilders() []interceptors.InterceptorBuilder {
 	return []interceptors.InterceptorBuilder{
+		idempotency.NewInterceptorBuilder(),
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),

@@ -42,6 +42,19 @@ func RecoverRecoveryStorage(
 		rs.Logger().Warn(ctx, "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
+	// Recover the idempotency summary cache before WAL replay. The chunk store is
+	// the source of truth when a chunk write succeeded but catalog metadata was
+	// not advanced before crash. With idempotency disabled recoverSummaries only
+	// drops a stale leftover store; corruption of REFERENCED summary state fails
+	// the WAL open (the WAL may already be truncated past the store's coverage —
+	// see wrapSummaryRecoveryError), while orphan-chunk corruption self-heals. It
+	// returns the (possibly rewound) checkpoint to resume consuming from.
+	rewoundCheckpoint, err := rs.summaryManager.recoverSummaries(ctx, recoveryStreamBuilder.Channel().Name, rs.checkpoint, rs.vchannels)
+	if err != nil {
+		rs.Logger().Warn(ctx, "recovery storage failed", mlog.Err(err))
+		return nil, nil, err
+	}
+	rs.checkpoint = rewoundCheckpoint
 	// recover the state from wal and start the background task to persist the state.
 	snapshot, err := rs.recoverFromStream(ctx, recoveryStreamBuilder, lastTimeTickMessage)
 	if err != nil {
@@ -50,20 +63,26 @@ func RecoverRecoveryStorage(
 	}
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
-	rs.SetLogger(resource.Resource().Logger().With(
+	logger := resource.Resource().Logger().With(
 		mlog.Int64("nodeID", paramtable.GetNodeID()),
 		mlog.FieldComponent(componentRecoveryStorage),
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
-		mlog.String("state", recoveryStorageStateWorking)))
+		mlog.String("state", recoveryStorageStateWorking),
+	)
+	rs.SetLogger(logger)
+	rs.summaryManager.SetLogger(logger)
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
+	rs.summaryManager.setNormalMode()
 	go rs.backgroundTask()
+	//nolint:gosec // G118: the summary background task is a WAL-lifetime goroutine; it must outlive the recovery request context.
+	go rs.summaryManager.summaryBackgroundTask()
 	return rs, snapshot, nil
 }
 
 // newRecoveryStorage creates a new recovery storage.
 func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *recoveryStorageImpl {
 	cfg := newConfig()
-	return &recoveryStorageImpl{
+	rs := &recoveryStorageImpl{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		cfg:                    cfg,
 		mu:                     sync.Mutex{},
@@ -75,6 +94,12 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
 	}
+	rs.summaryManager = newSummaryManager(channel.Name, channel.Term, cfg, rs.metrics, summaryEvictionConfig{
+		// The store hands over everything it retained; the consumer decides how
+		// much of that to cache.
+		retainedBytes: cfg.idempotencyMinRetainedBytes,
+	})
+	return rs
 }
 
 // recoveryStorageImpl is a component that manages the recovery info for the streaming service.
@@ -88,14 +113,15 @@ type recoveryStorageImpl struct {
 	channel                types.PChannelInfo
 	segments               map[int64]*segmentRecoveryInfo
 	vchannels              map[string]*vchannelRecoveryInfo
+	summaryManager         *summaryManager
 	checkpoint             *WALCheckpoint
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
-	persistNotifier        chan struct{}
-	gracefulClosed         bool
-	truncator              walimpls.WALImpls
-	metrics                *recoveryMetrics
-	pendingPersistSnapshot *RecoverySnapshot
+	persistNotifier                chan struct{}
+	gracefulClosed                 bool
+	truncator                      walimpls.WALImpls
+	metrics                        *recoveryMetrics
+	pendingRecoveryPersistSnapshot *RecoverySnapshot
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -161,12 +187,22 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// observeMessage mutates summary state that the summary background task also
+	// touches, so hold summaryManager.mu for the whole message: the per-message
+	// summary updates stay atomic as a group and mutually exclusive with summary
+	// persistence. The lock order is always rs.mu -> summaryManager.mu.
+	r.summaryManager.mu.Lock()
+	defer r.summaryManager.mu.Unlock()
 	r.observeMessage(ctx, msg)
 	return nil
 }
 
 // Close closes the recovery storage and wait the background task stop.
 func (r *recoveryStorageImpl) Close() {
+	if r.summaryManager != nil {
+		r.summaryManager.summaryBackgroundTaskNotifier.Cancel()
+		r.summaryManager.summaryBackgroundTaskNotifier.BlockUntilFinish()
+	}
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
 	r.metrics.Close()
@@ -185,7 +221,11 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
+	return r.consumeDirtySnapshotLocked()
+}
+
+func (r *recoveryStorageImpl) consumeDirtySnapshotLocked() *RecoverySnapshot {
+	if !r.hasDirtyRecoveryStateUnsafe() {
 		return nil
 	}
 
@@ -204,6 +244,9 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot()
 		if shouldBeRemoved {
 			delete(r.vchannels, vchannel.meta.Vchannel)
+			// The vchannel is fully reclaimed; drop its idempotency summary too so
+			// m.vchannelSummaries does not grow without bound under create/drop churn.
+			r.summaryManager.removeSummary(vchannel.meta.Vchannel)
 		}
 		if dirtySnapshot != nil {
 			vchannels[vchannel.meta.Vchannel] = dirtySnapshot
@@ -223,11 +266,20 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	}
 }
 
+func (r *recoveryStorageImpl) hasDirtyRecoveryStateUnsafe() bool {
+	// A dirty summary is dirty recovery state: the chunk covering this
+	// checkpoint has to be written before the checkpoint is persisted, so the
+	// summary having something to write is itself a reason to persist.
+	return r.dirtyCounter > 0 || r.pendingSalvageCheckpoint != nil ||
+		r.summaryManager.hasDirtySummary()
+}
+
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
 		if r.Logger().Level().Enabled(mlog.DebugLevel) {
-			r.Logger().Debug(ctx, "skip the message before the checkpoint",
+			r.Logger().Debug(
+				ctx, "skip the message before the checkpoint",
 				mlog.FieldMessage(msg),
 				mlog.Uint64("checkpoint", r.checkpoint.TimeTick),
 				mlog.Uint64("incoming", msg.TimeTick()),
@@ -236,6 +288,7 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 		return
 	}
 	r.handleMessage(ctx, msg)
+	r.summaryManager.observeMessage(msg)
 
 	r.updateCheckpoint(ctx, msg)
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
@@ -447,7 +500,8 @@ func (r *recoveryStorageImpl) handleCreateSegment(ctx context.Context, msg messa
 	// During WAL replay (e.g., Kafka offset reset), CreateSegment messages may appear
 	// for collections whose vchannels have already been cleaned up.
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-		r.Logger().Warn(ctx, "skip create segment for non-active vchannel",
+		r.Logger().Warn(
+			ctx, "skip create segment for non-active vchannel",
 			mlog.FieldMessage(msg),
 			mlog.String("vchannel", msg.VChannel()),
 			mlog.Int64("segmentID", msg.Header().SegmentId),
@@ -501,7 +555,8 @@ func (r *recoveryStorageImpl) flushSegments(ctx context.Context, msg message.Imm
 	if len(segmentIDs) != len(sealSegmentIDs) {
 		r.detectInconsistency(ctx, msg, "flush segments not exist", mlog.Int64s("wanted", lo.Keys(sealSegmentIDs)), mlog.Int64s("actually", segmentIDs))
 	}
-	r.Logger().Info(ctx, "flush segments of collection by flush", mlog.FieldMessage(msg),
+	r.Logger().Info(
+		ctx, "flush segments of collection by flush", mlog.FieldMessage(msg),
 		mlog.Uint64s("rows", rows),
 		mlog.Uint64s("binarySize", binarySize),
 		mlog.Int("flushedSegmentCount", len(segmentIDs)),
@@ -514,6 +569,9 @@ func (r *recoveryStorageImpl) handleCreateCollection(ctx context.Context, msg me
 		return
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateCollectionMessage(msg)
+	// The vchannel just became active; create its idempotency summary here rather
+	// than rescanning every active vchannel on each observed message.
+	r.summaryManager.ensureSummary(msg.VChannel(), r.checkpoint)
 	r.Logger().Info(ctx, "create collection", mlog.FieldMessage(msg))
 }
 
@@ -669,7 +727,10 @@ func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context
 func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.getFlusherCheckpointUnsafe()
+}
 
+func (r *recoveryStorageImpl) getFlusherCheckpointUnsafe() *WALCheckpoint {
 	var minimumCheckpoint *WALCheckpoint
 	for _, vchannel := range r.vchannels {
 		if vchannel.GetFlushCheckpoint() == nil {

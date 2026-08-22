@@ -95,6 +95,28 @@ func buildDropCollectionMsg(vchannel string, collectionID int64, timetick uint64
 	return message.MustAsImmutableDropCollectionMessageV1(msg)
 }
 
+func TestConsumeDirtySnapshotRemovesDroppedVChannelSummary(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+	rs.summaryManager.cfg.idempotencyEnabled = true
+
+	// Active vchannel with an idempotency summary (as created on create-collection).
+	addActiveVChannel(rs, "v1", 100, []int64{200})
+	rs.summaryManager.ensureSummary("v1", rs.checkpoint)
+	assert.Contains(t, rs.summaryManager.summaries(), "v1")
+
+	// Drop the collection: the vchannel becomes DROPPED.
+	rs.handleDropCollection(context.Background(), buildDropCollectionMsg("v1", 100, 50, 50))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v1"].meta.State)
+
+	// Reclaim the dropped vchannel via a dirty snapshot consume.
+	rs.dirtyCounter = 1
+	rs.consumeDirtySnapshot()
+
+	assert.NotContains(t, rs.vchannels, "v1")
+	assert.NotContains(t, rs.summaryManager.summaries(), "v1",
+		"idempotency summary for a reclaimed dropped vchannel must be removed to avoid unbounded growth")
+}
+
 func TestHandleDropCollection_VChannelAlreadyDropped_FlushesOrphanedSegments(t *testing.T) {
 	rs := newTestRecoveryStorage(t)
 

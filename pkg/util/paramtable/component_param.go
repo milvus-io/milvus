@@ -8207,6 +8207,15 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// idempotent write configuration.
+	IdempotencyEnabled           ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow ParamItem `refreshable:"false"`
+	IdempotencyMinRetainedBytes  ParamItem `refreshable:"false"`
+	IdempotencyRetentionTTL      ParamItem `refreshable:"false"`
+	IdempotencyMaxRetainedChunks ParamItem `refreshable:"false"`
+	IdempotencyGCInterval        ParamItem `refreshable:"false"`
+	IdempotencyMaxKeyLength      ParamItem `refreshable:"false"`
+
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
@@ -8639,6 +8648,76 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.IdempotencyEnabled = ParamItem{
+		Key:          "streaming.idempotency.enabled",
+		Version:      "3.0.0",
+		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
+		DefaultValue: "false",
+		FallbackKeys: []string{"idempotency.enabled"},
+		Export:       false,
+	}
+	p.IdempotencyEnabled.Init(base.mgr)
+
+	p.IdempotencyMaxBytesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.maxBytesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Nothing is evicted until this is reached; then the oldest entries by commit order are replaced. There is deliberately no TTL: any horizon expressed in time is invalidated by time passing, which would leave the window empty after an outage -- exactly when a resuming client needs it.`,
+		DefaultValue: "16777216",
+		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
+
+	p.IdempotencyMinRetainedBytes = ParamItem{
+		Key:          "streaming.idempotency.minRetainedBytes",
+		Version:      "3.0.0",
+		Doc:          `Retention FLOOR for the summary store, in bytes of chunk objects per pchannel. Chunks inside this floor are kept regardless of age, so an outage of any length still leaves the most recent writes recoverable. Accounted per object, because a chunk is retained or released whole.`,
+		DefaultValue: "67108864",
+		FallbackKeys: []string{"idempotency.minRetainedBytesPerVChannel", "idempotency.retainedBytesPerVChannel"},
+		Export:       false,
+	}
+	p.IdempotencyMinRetainedBytes.Init(base.mgr)
+
+	p.IdempotencyRetentionTTL = ParamItem{
+		Key:          "streaming.idempotency.retentionTTL",
+		Version:      "3.0.0",
+		Doc:          `How long summary chunks are kept before they may be released. A chunk is deleted only when it is BOTH older than this AND outside the minRetainedBytes floor, so the floor always wins: time never removes the last window of writes.`,
+		DefaultValue: "10m",
+		FallbackKeys: []string{"idempotency.retentionTTL"},
+		Export:       false,
+	}
+	p.IdempotencyRetentionTTL.Init(base.mgr)
+
+	p.IdempotencyMaxRetainedChunks = ParamItem{
+		Key:          "streaming.idempotency.maxRetainedChunks",
+		Version:      "3.0.0",
+		Doc:          `Hard cap on how many summary chunks stay retained per pchannel. It overrides the byte floor: the floor bounds bytes, but recovery pays per chunk, so a workload writing little per checkpoint would otherwise keep an unbounded number of tiny chunks. When this cap binds, the deduplication window is smaller than minRetainedBytes asks for.`,
+		DefaultValue: "256",
+		FallbackKeys: []string{"idempotency.maxRetainedChunks"},
+		Export:       false,
+	}
+	p.IdempotencyMaxRetainedChunks.Init(base.mgr)
+
+	p.IdempotencyGCInterval = ParamItem{
+		Key:          "streaming.idempotency.gcInterval",
+		Version:      "3.0.0",
+		Doc:          `How often the summary store sweeps chunks queued for deletion. There is no periodic persist: chunks are written synchronously with the WAL consume checkpoint, so this drives gc only.`,
+		DefaultValue: "10s",
+		FallbackKeys: []string{"idempotency.gcInterval"},
+		Export:       false,
+	}
+	p.IdempotencyGCInterval.Init(base.mgr)
+
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:          "streaming.idempotency.maxKeyLength",
+		Version:      "3.0.0",
+		Doc:          `The maximum accepted idempotency key string length in bytes. Explicit idempotency keys longer than this value are rejected.`,
+		DefaultValue: "1024",
+		FallbackKeys: []string{"idempotency.maxKeyLength"},
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

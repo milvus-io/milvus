@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -26,21 +27,33 @@ import (
 //
 //	├── pchannel-1
 //	│   ├── checkpoint
-//	│   ├── vchannels
+//	│   ├── vchannel
 //	│   │   ├── vchannel-1
 //	│   │   │   ├── schema/version-1
 //	│   │   │   └── schema/version-2
 //	│   │   ├── vchannel-2
 //	│   │   │   └── schema/version-1
+//	│   ├── summary-store
+//	│   │   ├── pchannel-summary-meta
+//	│   │   └── vchannel-summary-meta
+//	│   │       └── idempotency
+//	│   │           ├── vchannel-1
+//	│   │           └── vchannel-2
 //	│   └── segment-assign
 //	│       ├── 456398247934
 //	│       ├── 456398247936
 //	│       └── 456398247939
 //	└── pchannel-2
 //	    ├── checkpoint
-//	    ├── vchannels
+//	    ├── vchannel
 //	    │   ├── vchannel-1
 //	    │   └── vchannel-2
+//	    ├── summary-store
+//	    │   ├── pchannel-summary-meta
+//	    │   └── vchannel-summary-meta
+//	    │       └── idempotency
+//	    │           ├── vchannel-1
+//	    │           └── vchannel-2
 //	    └── segment-assign
 //	        ├── 456398247934
 //	        ├── 456398247935
@@ -156,6 +169,98 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 	return removes, kvs, nil
 }
 
+// GetPChannelSummaryMeta gets the pchannel-level physical summary metadata.
+func (c *catalog) GetPChannelSummaryMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelSummaryMeta, error) {
+	key := buildPChannelSummaryMetaKey(pchannelName)
+	value, err := c.metaKV.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	meta := &streamingpb.PChannelSummaryMeta{}
+	if err := proto.Unmarshal([]byte(value), meta); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal pchannel summary meta %s failed", key)
+	}
+	meta, err = normalizePChannelSummaryMeta(pchannelName, meta)
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid pchannel summary meta %s", key)
+	}
+	return meta, nil
+}
+
+// SavePChannelSummaryMeta saves the pchannel-level physical summary metadata.
+func (c *catalog) SavePChannelSummaryMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelSummaryMeta) error {
+	if meta == nil {
+		return nil
+	}
+	stored, err := normalizePChannelSummaryMeta(pchannelName, meta)
+	if err != nil {
+		return err
+	}
+	data, err := proto.Marshal(stored)
+	if err != nil {
+		return errors.Wrapf(err, "marshal pchannel summary meta at pchannel %s failed", pchannelName)
+	}
+	return c.metaKV.Save(ctx, buildPChannelSummaryMetaKey(pchannelName), string(data))
+}
+
+// CompareAndSwapPChannelSummaryMeta atomically replaces pchannel summary metadata
+// when the stored value still equals expected. A nil expected value means
+// create-if-absent.
+func (c *catalog) CompareAndSwapPChannelSummaryMeta(ctx context.Context, pchannelName string, expected *streamingpb.PChannelSummaryMeta, target *streamingpb.PChannelSummaryMeta) (bool, error) {
+	if target == nil {
+		return true, nil
+	}
+	storedTarget, err := normalizePChannelSummaryMeta(pchannelName, target)
+	if err != nil {
+		return false, err
+	}
+	targetData, err := proto.Marshal(storedTarget)
+	if err != nil {
+		return false, errors.Wrapf(err, "marshal target pchannel summary meta at pchannel %s failed", pchannelName)
+	}
+	key := buildPChannelSummaryMetaKey(pchannelName)
+	if expected == nil {
+		return c.metaKV.CompareVersionAndSwap(ctx, key, 0, string(targetData))
+	}
+
+	storedExpected, err := normalizePChannelSummaryMeta(pchannelName, expected)
+	if err != nil {
+		return false, err
+	}
+	expectedData, err := proto.Marshal(storedExpected)
+	if err != nil {
+		return false, errors.Wrapf(err, "marshal expected pchannel summary meta at pchannel %s failed", pchannelName)
+	}
+	if err := c.metaKV.MultiSaveAndRemove(ctx, map[string]string{key: string(targetData)}, nil, predicates.ValueEqual(key, string(expectedData))); err != nil {
+		if errors.Is(err, merr.ErrIoFailed) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// RemovePChannelSummaryMeta removes the pchannel-level physical summary metadata.
+func (c *catalog) RemovePChannelSummaryMeta(ctx context.Context, pchannelName string) error {
+	return c.metaKV.Remove(ctx, buildPChannelSummaryMetaKey(pchannelName))
+}
+
+func normalizePChannelSummaryMeta(pchannelName string, meta *streamingpb.PChannelSummaryMeta) (*streamingpb.PChannelSummaryMeta, error) {
+	if meta == nil {
+		return nil, merr.WrapErrServiceInternalMsg("nil pchannel summary meta")
+	}
+	stored := proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
+	if stored.GetPchannel() == "" {
+		stored.Pchannel = pchannelName
+	} else if stored.GetPchannel() != pchannelName {
+		return nil, merr.WrapErrServiceInternalMsg("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
+	}
+	return stored, nil
+}
+
 // ListSegmentAssignment lists the segment assignment info of the pchannel.
 func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 	prefix := buildSegmentAssignmentPrefix(pChannelName)
@@ -237,6 +342,11 @@ func buildSegmentAssignmentPrefix(pChannelName string) string {
 	return buildWALPrefix(pChannelName) + DirectorySegmentAssign + "/"
 }
 
+// buildSummaryStorePrefix returns the prefix for all physical summary store metadata under a pchannel.
+func buildSummaryStorePrefix(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + DirectorySummaryStore + "/"
+}
+
 // Key functions: return exact keys for individual records.
 
 // buildVChannelKey returns the key for a specific vchannel's metadata.
@@ -252,6 +362,11 @@ func buildVChannelSchemaKey(pChannelName string, vchannelName string, version ui
 // buildSegmentAssignmentKey returns the key for a specific segment assignment.
 func buildSegmentAssignmentKey(pChannelName string, segmentID int64) string {
 	return buildSegmentAssignmentPrefix(pChannelName) + strconv.FormatInt(segmentID, 10)
+}
+
+// buildPChannelSummaryMetaKey returns the key for pchannel-level physical summary metadata.
+func buildPChannelSummaryMetaKey(pchannelName string) string {
+	return buildSummaryStorePrefix(pchannelName) + KeyPChannelSummaryMeta
 }
 
 // buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.

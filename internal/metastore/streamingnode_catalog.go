@@ -15,6 +15,16 @@ type StreamingNodeCataLog interface {
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
 
+	// GetPChannelSummaryMeta gets pchannel-level physical summary metadata.
+	GetPChannelSummaryMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelSummaryMeta, error)
+
+	// SavePChannelSummaryMeta saves pchannel-level physical summary metadata.
+	SavePChannelSummaryMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelSummaryMeta) error
+
+	// RemovePChannelSummaryMeta removes pchannel-level physical summary metadata.
+	// Removing a non-existent meta is a no-op.
+	RemovePChannelSummaryMeta(ctx context.Context, pchannelName string) error
+
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 

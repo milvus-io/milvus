@@ -692,6 +692,252 @@ enum VChannelSchemaState {
 }
 
 ///
+/// Summary store
+///
+// The summary store is a record of what a pchannel durably wrote. It stores
+// committed write facts and nothing about why anyone wants them: the dedup
+// window decides what to keep and for how long, and the store neither knows nor
+// records that decision. Nothing is stored per vchannel.
+//
+// Three artifacts, defined in that order below:
+//
+//   1. meta, in etcd, one per pchannel: the WAL assignment term that last owned
+//      the store, and nothing else. It is not a checkpoint, not a pointer to the
+//      manifest, and not an inventory.
+//   2. manifest, in object storage, one per term: the only description of the
+//      chunk set -- what recovery reads, what a lazy reader indexes by, and what
+//      GC deletes.
+//   3. chunk payloads, in object storage, one object per generation: the facts
+//      themselves, split into per-consumer sections.
+//
+// No position is recorded in any of them. A chunk is written synchronously
+// before the WAL consume checkpoint that covers it, so that checkpoint is
+// already the boundary between what a chunk holds and what the WAL holds;
+// anything stored here could only ever disagree with it.
+//
+// What recovery hands a consumer once it has replayed the chunks is
+// deliberately NOT in this file. It is built at WAL open, consumed once in the
+// same process, and never stored or sent, so it is a plain Go struct
+// (recovery.VChannelSummarySnapshot). Only what crosses a storage or process
+// boundary earns a message here.
+//
+// A physical WAL position is recorded only at pchannel level. Everything below
+// it is addressed by timetick.
+
+// --- Summary store metadata (etcd) ---
+//
+// PChannelSummaryMeta records one thing: which WAL assignment term last owned
+// this store. It is not a checkpoint and not an inventory.
+//
+// There is no persist watermark anywhere in this design. A summary chunk is
+// written synchronously before the WAL consume checkpoint that covers it is
+// persisted, so the two are aligned by construction: everything below the WAL
+// checkpoint is already in a chunk, everything above it is still in the WAL.
+// Recording a second position would only create something that can disagree.
+//
+// The term exists to give recovery a floor when it probes for the newest
+// manifest, so a pchannel with a large assignment term but no store does not
+// pay one probe per term.
+message PChannelSummaryMeta {
+    string pchannel = 1;
+    int64 term      = 2;
+}
+
+// --- Summary store manifest (object storage) ---
+//
+// The manifest is the only description of the chunk set. One live version per
+// pchannel, at {pchannel}.manifest.{term}, rewritten as "inherit the previous
+// manifest, then amend it" so that nothing a previous owner left unfinished can
+// be dropped by accident.
+message PChannelSummaryManifest {
+    // Every chunk recovery may read, one entry each. Generations are contiguous:
+    // retention only ever releases from the oldest end, never from the middle.
+    repeated PChannelSummaryChunkIndexEntry chunks = 1;
+    // Chunks released by retention and not yet deleted. An entry present means
+    // "not deleted yet"; absent means "done". This is both the work queue and the
+    // progress record, so gc needs no watermark of its own -- and no cross-check
+    // against `chunks` either: an entry is only ever moved here by the same
+    // manifest write that stopped recovery depending on it.
+    repeated PChannelSummaryChunkRef pending_gc = 2;
+    // vchannel -> the timetick of the DDL that made every earlier record of that
+    // vchannel meaningless (a drop, an in-place truncate, a dropped partition).
+    //
+    // Clearing the in-memory window is not enough: the chunks already written
+    // still hold those keys verbatim, and recovery replays every retained chunk.
+    // Without this, a restart resurrects keys for rows that no longer exist, and
+    // an auto-derived key -- a hash of the destination and the payload, with no
+    // collection generation in it -- makes a client re-inserting the same rows
+    // hash to the same key and be answered as a duplicate, against an empty
+    // collection.
+    //
+    // Durability does NOT come for free from the write ordering. The persist that
+    // carries this map runs before the consume checkpoint is saved, but it only
+    // runs at all when there is something to persist -- and the DDL wipes the
+    // staging of the vchannel it invalidates, so there is frequently no chunk to
+    // write. A pending entry therefore marks the summary dirty by itself, which is
+    // what schedules the manifest PUT; without that the checkpoint would advance
+    // past the DDL while the tombstone was still only in memory, and a restart
+    // would resurrect exactly the keys it was meant to bury.
+    //
+    // An entry is dropped once no retained chunk reaches below it.
+    map<string, uint64> invalidated_vchannels = 3;
+}
+
+// PChannelSummaryChunkIndexEntry describes one chunk. It mirrors that chunk's
+// footer index into the manifest, which is what lets a consumer locate its own
+// vchannel inside a chunk without opening the chunk, and what lets the retention
+// boundary be computed per vchannel without any read at all.
+message PChannelSummaryChunkIndexEntry {
+    uint64 generation = 1;
+    int64 term        = 2;
+    // The whole object's size. Retention is decided per OBJECT, not per vchannel:
+    // what a retained chunk costs is the object, and what recovery pays to read it
+    // is the object. Accounting a vchannel's slice of it would make the boundary
+    // depend on how the writes happened to be distributed, for a budget that is
+    // spent on the object either way.
+    uint64 object_size = 3;
+    // The chunk's own span, for coarse time filtering before any read.
+    uint64 start_timetick = 4;
+    uint64 end_timetick   = 5;
+    // The chunk footer's per-vchannel index, copied verbatim. Read by a consumer
+    // locating its own section; retention does not look at it.
+    repeated VChannelSummaryChunkIndex vchannels = 6;
+}
+
+// PChannelSummaryChunkRef is the minimum needed to address a chunk object:
+// generation and term together build its key. Nothing else is carried, because
+// gc needs nothing else.
+message PChannelSummaryChunkRef {
+    uint64 generation = 1;
+    int64 term        = 2;
+}
+
+// --- Summary store chunk payloads (object storage) ---
+//
+// A summary chunk lives in object storage, not in etcd, and the object frames
+// its own payloads: a fixed header, the per-vchannel sections back to back, then
+// a footer indexing each section by offset/length, the footer checksum, its
+// length and a trailing magic. The frame is what lets a reader locate one
+// section without decoding the whole object, so it stays hand-rolled binary; the
+// messages below are only the payloads inside it.
+//
+// A vchannel's records are stored as SEPARATE SECTIONS rather than one message,
+// split by which consumer needs them. A consumer range-reads only its own
+// sections: a primary-key index reads the insert section without paying for the
+// idempotency section, and a store written with idempotency disabled has no
+// idempotency section at all. Merging them into one message would force every
+// consumer to decode all of it and would make the keys and the primary keys
+// impossible to store independently.
+//
+// Sections of one vchannel correspond BY POSITION: record i of the idempotency
+// section describes record i of the insert section. Position is used rather than
+// an explicit reference because the sections are written together from one
+// in-memory batch, and record_count on each ref makes the correspondence
+// verifiable on read.
+
+// PChannelSummaryChunkFooter is the chunk object's index. A reader reads it
+// first, from the object's tail.
+message PChannelSummaryChunkFooter {
+    string pchannel   = 1;
+    uint64 generation = 2;
+    int64 term        = 3;
+    // The span covered by the whole object: the earliest and latest timetick
+    // across every vchannel in it. Each vchannel index below carries the same
+    // span narrowed to itself.
+    //
+    // No checkpoint is recorded here. A chunk is written synchronously before the
+    // WAL consume checkpoint that covers it is persisted, so that checkpoint is
+    // already the boundary between what a chunk holds and what the WAL holds; a
+    // second position stored here could only ever disagree with it.
+    uint64 start_timetick = 4;
+    uint64 end_timetick   = 5;
+    repeated VChannelSummaryChunkIndex chunks = 6;
+}
+
+// VChannelSummaryChunkIndex locates one vchannel's sections inside the chunk
+// object. A section absent from here was never written for this vchannel.
+message VChannelSummaryChunkIndex {
+    string vchannel = 1;
+    // This vchannel's own span inside the object.
+    uint64 start_timetick = 2;
+    uint64 end_timetick   = 3;
+    // Optional: written only for vchannels that carry idempotency keys.
+    VChannelSummarySectionRef idempotency = 4;
+    VChannelSummarySectionRef inserts     = 5;
+    // 6 is reserved for the delete section.
+}
+
+// VChannelSummarySectionRef locates one section: where it starts, how long it
+// is, and how many records it holds.
+//
+// No checksum. The object store already guarantees the bytes a read returns are
+// the bytes that were written, so a checksum here would only re-verify that. The
+// failure this format does have to catch is OUR OWN mislocation -- an offset or
+// length computed wrong -- and that is caught without one, because a decode of
+// the wrong bytes fails to parse or yields a record count that disagrees with
+// the one stored here. The footer keeps its checksum, because every offset in
+// the object derives from it and a silently wrong footer would send every read
+// to the wrong place.
+message VChannelSummarySectionRef {
+    uint64 offset       = 1;
+    uint64 length       = 2;
+    uint64 record_count = 3;
+}
+
+// VChannelSummaryIdempotencySection is the idempotency overlay: which client key
+// produced a write, and which rows of that client's request this vchannel took.
+//
+// It holds no message identity and no primary keys. Identity and keys describe
+// the write itself and live in the insert section, which stays readable on its
+// own; this section only annotates them with what the idempotency feature adds.
+// That is also why it is optional: turning idempotency off stops this section
+// from being written without changing anything a write records.
+message VChannelSummaryIdempotencySection {
+    repeated VChannelSummaryIdempotencyRecord records = 1;
+}
+
+// VChannelSummaryIdempotencyRecord is one committed write's idempotency
+// annotation. row_offsets maps the primary keys of the corresponding insert
+// record back to their positions in the client's original request, which is what
+// lets a duplicate append be answered with a result shaped like the first one.
+message VChannelSummaryIdempotencyRecord {
+    string key                  = 1;
+    repeated uint32 row_offsets = 2;
+}
+
+// VChannelSummaryInsertSection is what an insert committed: where and when it
+// landed in the WAL, and the primary keys it produced on this vchannel.
+//
+// This section is self-sufficient on purpose. It is the one a future primary-key
+// index reads, and it must not require the idempotency section to be present or
+// even to exist -- which is also what keeps the primary keys stored exactly once.
+message VChannelSummaryInsertSection {
+    repeated VChannelSummaryInsertRecord records = 1;
+}
+
+message VChannelSummaryInsertRecord {
+    common.MessageID source_message_id         = 1;
+    uint64 source_timetick                     = 2;
+    // The last-confirmed position stamped on the original message.
+    //
+    // It is recorded because an append response carries one and the producer
+    // client treats it as mandatory -- an empty value fails to decode and tears
+    // down the whole producer stream, not just the one request. Replaying the
+    // original value keeps a duplicate response identical to the first one;
+    // substituting the message's own id instead would put a plausible but wrong
+    // read position on the wire, since the true last-confirmed is at or before
+    // it. It also keeps the record a faithful account of the write for anyone
+    // reading the store to diagnose one.
+    common.MessageID last_confirmed_message_id = 3;
+    // The primary keys this vchannel took from the insert.
+    schema.IDs ids                             = 4;
+}
+
+// A delete section would be added here, indexed by its own section ref, once
+// deletes are recorded.
+
+
+///
 /// SegmentAssignment
 ///
 // SegmentAssignmentMeta is the stat of segment assignment.

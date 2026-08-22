@@ -17,10 +17,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -36,9 +38,14 @@ import (
 func TestRecoveryStorage(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryPersistInterval.Key, "1ms")
 	paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "10ms")
+	paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key)
+	})
 
 	vchannelMetas := make(map[string]*streamingpb.VChannelMeta)
 	segmentMetas := make(map[int64]*streamingpb.SegmentAssignmentMeta)
+	var pchannelSummaryMeta *streamingpb.PChannelSummaryMeta
 	cp := &streamingpb.WALCheckpoint{
 		MessageId:     rmq.NewRmqID(1).IntoProto(),
 		TimeTick:      1,
@@ -90,6 +97,19 @@ func TestRecoveryStorage(t *testing.T) {
 		}
 		return nil
 	})
+	snCatalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
+		if pchannelSummaryMeta == nil {
+			return nil, nil
+		}
+		return proto.Clone(pchannelSummaryMeta).(*streamingpb.PChannelSummaryMeta), nil
+	})
+	snCatalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, meta *streamingpb.PChannelSummaryMeta) error {
+		if rand.Int31n(3) == 0 {
+			return errors.New("save failed")
+		}
+		pchannelSummaryMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
+		return nil
+	}).Maybe()
 	mixCoord := mocks.NewMockMixCoordClient(t)
 	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: merr.Success(),
@@ -97,7 +117,10 @@ func TestRecoveryStorage(t *testing.T) {
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(mixCoord)
 
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f))
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	// The store starts empty: there is no bootstrap chunk. Recovery publishes
+	// this term's manifest and only then may write anything.
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f), resource.OptChunkManager(chunkManager))
 	b := &streamBuilder{
 		channel:                types.PChannelInfo{Name: "test_channel"},
 		lastConfirmedMessageID: 1,

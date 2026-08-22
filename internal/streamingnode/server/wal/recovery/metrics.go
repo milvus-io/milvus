@@ -24,6 +24,8 @@ func newRecoveryStorageMetrics(channelInfo types.PChannelInfo) *recoveryMetrics 
 		isOnPersisting:         metrics.WALRecoveryIsOnPersisting.With(constLabels),
 		inMemTimeTick:          metrics.WALRecoveryInMemTimeTick.With(constLabels),
 		persistedTimeTick:      metrics.WALRecoveryPersistedTimeTick.With(constLabels),
+		idempotencyPersist:     metrics.WALIdempotencyPersistTotal.MustCurryWith(constLabels),
+		idempotencyPendingGC:   metrics.WALIdempotencyPendingGC.With(constLabels),
 	}
 }
 
@@ -34,6 +36,8 @@ type recoveryMetrics struct {
 	isOnPersisting         prometheus.Gauge
 	inMemTimeTick          prometheus.Gauge
 	persistedTimeTick      prometheus.Gauge
+	idempotencyPersist     *prometheus.CounterVec
+	idempotencyPendingGC   prometheus.Gauge
 }
 
 // ObserveStateChange sets the state of the recovery storage metrics.
@@ -62,10 +66,27 @@ func (m *recoveryMetrics) ObserveIsOnPersisting(onPersisting bool) {
 	}
 }
 
+func (m *recoveryMetrics) ObserveIdempotencyPersist(success bool) {
+	status := metrics.SuccessLabel
+	if !success {
+		status = metrics.FailLabel
+	}
+	m.idempotencyPersist.WithLabelValues(status).Inc()
+}
+
+func (m *recoveryMetrics) ObserveIdempotencyPendingGC(chunks int) {
+	if chunks < 0 {
+		chunks = 0
+	}
+	m.idempotencyPendingGC.Set(float64(chunks))
+}
+
 func (m *recoveryMetrics) Close() {
 	metrics.WALRecoveryInfo.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryInconsistentEventTotal.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryIsOnPersisting.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryInMemTimeTick.DeletePartialMatch(m.constLabels)
 	metrics.WALRecoveryPersistedTimeTick.DeletePartialMatch(m.constLabels)
+	metrics.WALIdempotencyPersistTotal.DeletePartialMatch(m.constLabels)
+	metrics.WALIdempotencyPendingGC.DeletePartialMatch(m.constLabels)
 }

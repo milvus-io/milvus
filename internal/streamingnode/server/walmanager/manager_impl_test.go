@@ -2,6 +2,7 @@ package walmanager
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,10 +37,28 @@ func TestOpenManager(t *testing.T) {
 }
 
 func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
-	builders := newInterceptorBuilders()
-	assert.Len(t, builders, 6)
-	assert.IsType(t, shard.NewInterceptorBuilder(), builders[4])
-	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[5])
+	builders := defaultInterceptorBuilders()
+	assert.Len(t, builders, 7)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[5])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[6])
+}
+
+func TestDefaultInterceptorBuilderOrder(t *testing.T) {
+	builders := defaultInterceptorBuilders()
+	names := make([]string, 0, len(builders))
+	for _, builder := range builders {
+		names = append(names, reflect.TypeOf(builder).String())
+	}
+
+	assert.Equal(t, []string{
+		"*idempotency.interceptorBuilder",
+		"*redo.interceptorBuilder",
+		"*lock.interceptorBuilder",
+		"*replicate.interceptorBuilder",
+		"*timetick.interceptorBuilder",
+		"*shard.interceptorBuilder",
+		"*partialupdate.interceptorBuilder",
+	}, names)
 }
 
 func TestManager(t *testing.T) {

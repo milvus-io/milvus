@@ -230,10 +230,11 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	// Upsert never carries an idempotency key, so it passes no header decorator.
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))

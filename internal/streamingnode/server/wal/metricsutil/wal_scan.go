@@ -43,6 +43,7 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 		pendingQueueSize: metrics.WALScannerPendingQueueBytes.With(constLabel),
 		timeTickBufSize:  metrics.WALScannerTimeTickBufBytes.With(constLabel),
 		txnBufSize:       metrics.WALScannerTxnBufBytes.With(constLabel),
+		readerDedupDrop:  metrics.WALIdempotencyReaderDedupDropTotal.MustCurryWith(constLabel),
 	}
 }
 
@@ -56,6 +57,7 @@ type ScanMetrics struct {
 	timeTickBufSize  prometheus.Gauge
 	txnBufSize       prometheus.Gauge
 	pendingQueueSize prometheus.Gauge
+	readerDedupDrop  *prometheus.CounterVec
 }
 
 type underlyingScannerMetrics struct {
@@ -111,6 +113,7 @@ func (m *ScanMetrics) Close() {
 	metrics.WALScannerTimeTickBufBytes.Delete(m.constLabel)
 	metrics.WALScannerTxnBufBytes.Delete(m.constLabel)
 	metrics.WALScannerPendingQueueBytes.Delete(m.constLabel)
+	metrics.WALIdempotencyReaderDedupDropTotal.DeletePartialMatch(m.constLabel)
 }
 
 type ScannerMetrics struct {
@@ -165,6 +168,14 @@ func (m *ScannerMetrics) ObserveTimeTickViolation(tailing bool, msgType message.
 		underlying = m.tailing
 	}
 	underlying.timeTickViolationTotal.WithLabelValues(msgType.String()).Inc()
+}
+
+func (m *ScannerMetrics) ObservePhysicalDedupDrop(tailing bool) {
+	scannerModel := metrics.WALScannerModelCatchup
+	if tailing {
+		scannerModel = metrics.WALScannerModelTailing
+	}
+	m.readerDedupDrop.WithLabelValues(scannerModel).Inc()
 }
 
 func (m *ScannerMetrics) UpdatePendingQueueSize(size int) {
