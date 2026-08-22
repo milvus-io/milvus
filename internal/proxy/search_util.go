@@ -1197,3 +1197,34 @@ func getMetricType(toReduceResults []*internalpb.SearchResults) string {
 	}
 	return ""
 }
+
+func validateSparseFloatVectorPlaceholderGroup(placeholderGroup []byte) error {
+	if len(placeholderGroup) == 0 {
+		return merr.WrapErrParameterInvalidMsg("placeholder group is empty")
+	}
+	pb := &commonpb.PlaceholderGroup{}
+	if err := proto.Unmarshal(placeholderGroup, pb); err != nil {
+		return merr.WrapErrParameterInvalidMsg("failed to unmarshal placeholder group: %v", err)
+	}
+
+	foundSparse := false
+	for _, h := range pb.GetPlaceholders() {
+		if h.GetType() != commonpb.PlaceholderType_SparseFloatVector {
+			continue
+		}
+		foundSparse = true
+		if len(h.GetValues()) == 0 {
+			return merr.WrapErrParameterInvalidMsg("sparse float vector search request has no query vectors")
+		}
+		if err := typeutil.ValidateSparseFloatRows(h.GetValues()...); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid sparse float vector in search request: %v", err)
+		}
+	}
+
+	if !foundSparse {
+		return merr.WrapErrParameterInvalidMsg(
+			"sparse float vector field expects PlaceholderType_SparseFloatVector (%d) placeholders, found none (placeholder count=%d)",
+			int32(commonpb.PlaceholderType_SparseFloatVector), len(pb.GetPlaceholders()))
+	}
+	return nil
+}

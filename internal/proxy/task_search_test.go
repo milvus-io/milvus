@@ -7786,3 +7786,79 @@ func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
 		assert.Contains(t, plan.GetOutputFieldIds(), int64(100))
 	})
 }
+
+func buildSparsePlaceholderGroup(t *testing.T, rows [][]byte) []byte {
+	pg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			{
+				Tag:    "$0",
+				Type:   commonpb.PlaceholderType_SparseFloatVector,
+				Values: rows,
+			},
+		},
+	}
+	blob, err := proto.Marshal(pg)
+	require.NoError(t, err)
+	return blob
+}
+
+func misalignedSparseRow(size int, fill byte) []byte {
+	b := make([]byte, size)
+	for i := range b {
+		b[i] = fill
+	}
+	return b
+}
+
+func TestValidateSparseFloatVectorPlaceholderGroup(t *testing.T) {
+	validRow := typeutil.CreateSparseFloatRow([]uint32{1, 30, 200}, []float32{1.1, 2.2, 3.3})
+
+	t.Run("empty placeholder group is allowed", func(t *testing.T) {
+		assert.NoError(t, validateSparseFloatVectorPlaceholderGroup(nil))
+		assert.NoError(t, validateSparseFloatVectorPlaceholderGroup([]byte{}))
+	})
+
+	t.Run("valid single sparse row", func(t *testing.T) {
+		blob := buildSparsePlaceholderGroup(t, [][]byte{validRow})
+		assert.NoError(t, validateSparseFloatVectorPlaceholderGroup(blob))
+	})
+
+	t.Run("valid multiple sparse rows (nq>1)", func(t *testing.T) {
+		row2 := typeutil.CreateSparseFloatRow([]uint32{5, 9}, []float32{0.5, 0.9})
+		blob := buildSparsePlaceholderGroup(t, [][]byte{validRow, row2})
+		assert.NoError(t, validateSparseFloatVectorPlaceholderGroup(blob))
+	})
+
+	t.Run("non-sparse placeholder triggers 'found none' error", func(t *testing.T) {
+		pg := &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				{
+					Tag:    "$0",
+					Type:   commonpb.PlaceholderType_FloatVector,
+					Values: [][]byte{misalignedSparseRow(9, 0x41)},
+				},
+			},
+		}
+		blob, err := proto.Marshal(pg)
+		require.NoError(t, err)
+		e := validateSparseFloatVectorPlaceholderGroup(blob)
+		assert.Error(t, e)
+		assert.ErrorIs(t, e, merr.ErrParameterInvalid)
+		assert.Contains(t, e.Error(), "expects PlaceholderType_SparseFloatVector")
+		assert.Contains(t, e.Error(), "found none")
+	})
+
+	t.Run("no query vectors", func(t *testing.T) {
+		blob := buildSparsePlaceholderGroup(t, [][]byte{})
+		err := validateSparseFloatVectorPlaceholderGroup(blob)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("misaligned size=9 sparse row (core PoC, 8B alignment violation)", func(t *testing.T) {
+		blob := buildSparsePlaceholderGroup(t, [][]byte{misalignedSparseRow(9, 0x41)})
+		err := validateSparseFloatVectorPlaceholderGroup(blob)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
