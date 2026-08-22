@@ -221,6 +221,9 @@ lower than D1.
 
 ## 9. Historical Query Segment Lifecycle
 
+The QueryNode preparation contract and its metadata/TransformLog integration
+boundaries are described in [QueryNode QueryView Resource Preparation](qnview/querynode_queryview_resource_preparation.md).
+
 Sealed Segments on QueryNode:
 
 ```

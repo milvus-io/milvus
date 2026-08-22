@@ -96,6 +96,17 @@ type Loader interface {
 	) error
 }
 
+// QueryViewLoader exposes detached-segment loading primitives used by the
+// QueryView resource manager. It is separate from Loader so existing Loader
+// test doubles and legacy call sites do not gain unrelated obligations.
+type QueryViewLoader interface {
+	Loader
+	ReserveLoadResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error)
+	LoadDeltaLogsWithoutResource(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
+	LoadSegment(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
+	LoadIndex(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo, version int64) error
+}
+
 type ResourceEstimate struct {
 	MaxMemoryCost   uint64
 	MaxDiskCost     uint64
@@ -119,6 +130,24 @@ type requestResourceResult struct {
 	LogicalResource   LoadResource
 	CommittedResource LoadResource
 	ConcurrencyLevel  int
+}
+
+// LoadResourceReservation owns one successful segment loading resource
+// reservation. Release is idempotent so error paths may safely defer it.
+type LoadResourceReservation interface {
+	Release()
+}
+
+type loadResourceReservation struct {
+	loader *segmentLoader
+	result requestResourceResult
+	once   sync.Once
+}
+
+func (r *loadResourceReservation) Release() {
+	r.once.Do(func() {
+		r.loader.freeRequestResource(r.result)
+	})
 }
 
 type LoadResource struct {
@@ -220,7 +249,10 @@ type segmentLoader struct {
 	duf *diskUsageFetcher
 }
 
-var _ Loader = (*segmentLoader)(nil)
+var (
+	_ Loader          = (*segmentLoader)(nil)
+	_ QueryViewLoader = (*segmentLoader)(nil)
+)
 
 func (loader *segmentLoader) Load(ctx context.Context,
 	collectionID int64,
@@ -558,6 +590,14 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	)
 
 	return result, nil
+}
+
+func (loader *segmentLoader) ReserveLoadResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error) {
+	result, err := loader.requestResource(ctx, infos...)
+	if err != nil {
+		return nil, err
+	}
+	return &loadResourceReservation{loader: loader, result: result}, nil
 }
 
 // freeRequestResource returns request memory & storage usage request.
@@ -1152,6 +1192,15 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	return nil
 }
 
+func (loader *segmentLoader) LoadIndex(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo, _ int64) error {
+	if segment == nil {
+		return merr.WrapErrSegmentNotFound(0, "segment is nil")
+	}
+	// The current C API replaces indexes through the segment reopen diff path.
+	// Keep the QueryView-facing method explicit without widening Segment.
+	return segment.Reopen(ctx, loadInfo)
+}
+
 func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
@@ -1565,6 +1614,10 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 	defer loader.freeRequestResource(requestResourceResult)
+	return loader.loadDeltalogs(ctx, segment, loadInfo)
+}
+
+func (loader *segmentLoader) LoadDeltaLogsWithoutResource(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
 	return loader.loadDeltalogs(ctx, segment, loadInfo)
 }
 
