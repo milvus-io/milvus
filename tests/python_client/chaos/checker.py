@@ -117,8 +117,7 @@ class RequestRecords(metaclass=Singleton):
             return
         try:
             with open(self.file_name, "a") as f:
-                for record in self.buffer:
-                    f.write(json.dumps(record) + "\n")
+                f.writelines(json.dumps(record) + "\n" for record in self.buffer)
             self.buffer = []
         except Exception as e:
             log.error(f"RequestRecords flush error: {e}")

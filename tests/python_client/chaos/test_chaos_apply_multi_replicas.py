@@ -58,7 +58,7 @@ def build_chaos_action_pool(chaos_type_str):
             pool.append(ALL_CHAOS_ACTIONS[t])
         else:
             return None
-    return pool if pool else None
+    return pool or None
 
 
 def pick_mixed_chaos_action(pool):
@@ -460,7 +460,7 @@ class TestChaosApplyMultiReplicas:
         assert len(rg_list) > 0, "target_rgs must not be empty"
 
         components = [c.strip() for c in target_components.split(",") if c.strip()] if target_components else None
-        template_path = chaos_template if chaos_template else None
+        template_path = chaos_template or None
 
         chaos_duration_seconds = parse_duration(chaos_duration)
         chaos_pool = build_chaos_action_pool(chaos_type)
@@ -522,7 +522,7 @@ class TestChaosApplyMultiReplicas:
         assert len(rg_list) > 0, "target_rgs must not be empty"
 
         components = [c.strip() for c in target_components.split(",") if c.strip()] if target_components else None
-        template_path = chaos_template if chaos_template else None
+        template_path = chaos_template or None
 
         total_seconds = parse_duration(request_duration)
         interval_seconds = parse_duration(chaos_interval)

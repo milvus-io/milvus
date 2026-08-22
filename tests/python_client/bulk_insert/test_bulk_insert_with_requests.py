@@ -80,7 +80,7 @@ class TestChaos(TestChaosBase):
     @pytest.fixture(scope="function", autouse=True)
     def init_health_checkers(self, collection_name=None):
         log.info("init health checkers")
-        c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        c_name = collection_name or cf.gen_unique_str("Checker_")
         checkers = {
             Op.insert: InsertChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
