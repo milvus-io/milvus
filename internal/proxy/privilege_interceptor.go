@@ -258,3 +258,75 @@ func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOr
 	}
 	return metaCache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
 }
+
+// CheckClusterPrivilege reports whether the caller identified by ctx holds the
+// given cluster-level object privilege.
+//
+// PrivilegeInterceptor covers privileges that a whole RPC requires, declared on
+// the request message via the privilege_ext_obj annotation. That annotation
+// holds exactly one privilege per message, so it cannot express a privilege
+// that depends on request *content* -- for example an import that only reads
+// Milvus's internal storage when the backup option is set. Call this from the
+// task when that is the case.
+//
+// It must keep the same preconditions as PrivilegeInterceptor: dropping any one
+// of them silently changes who is allowed in.
+//
+// req and fullMethod are carried only so a denial can be reported on the same
+// hookutil ActionAuthorize channel as every other privilege denial; pass the
+// same fullMethod the RPC reports under elsewhere.
+func CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+
+	username, _, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		return merr.WrapErrPrivilegeNotAuthenticated("fail to get authentication info: %v", err)
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return nil
+	}
+
+	roleNames, err := GetRole(username)
+	if err != nil {
+		return err
+	}
+	roleNames = append(roleNames, util.RolePublic)
+
+	// Cluster-level privileges are not scoped to a database, so they are
+	// authorized globally -- both the db and the object name are AnyWord.
+	// This mirrors PrivilegeInterceptor, where GetPrivilegeLevel forces
+	// dbName=AnyWord and GetObjectName returns AnyWord for object_name_index<=0.
+	object := funcutil.PolicyForResource(util.AnyWord, commonpb.ObjectType_Global.String(), util.AnyWord)
+	enforcer := privilege.GetEnforcer()
+	for _, roleName := range roleNames {
+		isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+		if !cached {
+			isPermit, err = enforcer.Enforce(roleName, object, objectPrivilege)
+			if err != nil {
+				return err
+			}
+			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+		}
+		if isPermit {
+			return nil
+		}
+	}
+
+	mlog.Info(ctx, "cluster privilege denied",
+		mlog.String("username", username),
+		mlog.Strings("roles", roleNames),
+		mlog.String("privilege", objectPrivilege))
+	err = merr.WrapErrPrivilegeNotPermitted("%s is required", objectPrivilege)
+	// Same report UnaryServerInterceptor emits when PrivilegeInterceptor
+	// refuses, so a content-driven denial lands in the same audit stream as an
+	// annotation-driven one. The branches above are not reported: an internal
+	// enforcer failure is not an authorization decision, and a request with no
+	// auth info never reaches a task -- GrpcAuthInterceptor already refused it
+	// and reported that refusal itself.
+	hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}, err, fullMethod, hookutil.ActionAuthorize)
+	return err
+}

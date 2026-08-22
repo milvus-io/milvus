@@ -126,6 +126,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreExternalSnapshot.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeExportSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateCollection.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropCollection.String()),
@@ -316,6 +317,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegePinSnapshotData.String(),
 		commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String(),
 		commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(),
 	}
 )
 
@@ -437,6 +439,7 @@ var (
 			PrivilegeExpr,
 			commonpb.ObjectPrivilege_PrivilegeRestoreExternalSnapshot.String(),
 			commonpb.ObjectPrivilege_PrivilegeExportSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(),
 		})...,
 	)
 )
