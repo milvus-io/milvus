@@ -30,8 +30,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -545,6 +547,42 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	return float32(doneCnt) / float32(len(targetSegmentIDs))
 }
 
+// filterUnindexedBySnapshotSchema drops segments that only miss indexes on fields
+// absent from the job's schema snapshot: the job never wrote such fields (e.g. one
+// added by a concurrent DDL) and their indexes can only build after the import
+// commits and schema-bump backfill (StorageV3 segments) materializes the field, so
+// waiting on them deadlocks the job (#52154). The out-of-snapshot indexes excluded
+// from the wait are returned so callers can surface them.
+func filterUnindexedBySnapshotSchema(job ImportJob, indexMeta *indexMeta, unindexed []int64) ([]int64, []*model.Index) {
+	schema := job.GetSchema()
+	if schema == nil || len(unindexed) == 0 {
+		return unindexed, nil
+	}
+	snapshotFields := typeutil.NewSet(lo.Map(typeutil.GetAllFieldSchemas(schema), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	})...)
+	snapshotIndexes, excluded := lo.FilterReject(indexMeta.GetIndexesForCollection(job.GetCollectionID(), ""), func(index *model.Index, _ int) bool {
+		return snapshotFields.Contain(index.FieldID)
+	})
+	if len(snapshotIndexes) == 0 {
+		return nil, excluded
+	}
+	// Single batch read of state-only objects; avoids per-segment locking and
+	// SegmentIndex deep clones (IndexFileKeys) on the checker hot path.
+	states := indexMeta.getSegmentsIndexStates(job.GetCollectionID(), unindexed)
+	kept := lo.Filter(unindexed, func(segmentID int64, _ int) bool {
+		segmentStates := states[segmentID]
+		for _, index := range snapshotIndexes {
+			state, ok := segmentStates[index.IndexID]
+			if !ok || state.GetState() != commonpb.IndexState_Finished {
+				return true
+			}
+		}
+		return false
+	})
+	return kept, excluded
+}
+
 func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
 	job := importMeta.GetJob(ctx, jobID)
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
@@ -564,6 +602,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 		targetSegmentIDs = originSegmentIDs
 	}
 	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+	unindexed, _ = filterUnindexedBySnapshotSchema(job, meta.indexMeta, unindexed)
 	return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
 }
 

@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -464,17 +465,25 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		targetSegmentIDs = originSegmentIDs
 	}
 
-	healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
-	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
-		for _, segmentID := range unindexed {
-			select {
-			case getBuildIndexChSingleton() <- segmentID: // accelerate index building:
-			default:
+	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && !importutilv2.IsL0Import(job.GetOptions()) {
+		healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
+		unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
+		unindexed, excluded := filterUnindexedBySnapshotSchema(job, c.meta.indexMeta, unindexed)
+		if len(unindexed) > 0 {
+			for _, segmentID := range unindexed {
+				select {
+				case getBuildIndexChSingleton() <- segmentID: // accelerate index building:
+				default:
+				}
 			}
+			log.Debug(c.ctx, "waiting for import segments building index...", mlog.Int64s("unindexed", unindexed))
+			return
 		}
-		log.Debug(c.ctx, "waiting for import segments building index...", mlog.Int64s("unindexed", unindexed))
-		return
+		if len(excluded) > 0 {
+			log.Info(c.ctx, "import job proceeds without waiting for indexes on fields outside its schema snapshot; they build after commit via schema-bump backfill",
+				mlog.Int64s("excludedIndexIDs", lo.Map(excluded, func(index *model.Index, _ int) int64 { return index.IndexID })),
+				mlog.Int64s("excludedFieldIDs", lo.Map(excluded, func(index *model.Index, _ int) int64 { return index.FieldID })))
+		}
 	}
 	buildIndexDuration := job.GetTR().RecordSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
