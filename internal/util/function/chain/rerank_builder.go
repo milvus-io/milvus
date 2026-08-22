@@ -245,22 +245,21 @@ func convertLegacyParams(rankParams []*commonpb.KeyValuePair) (*schemapb.Functio
 // It produces 4 kinds of chains depending on the reranker, sharing a common tail:
 //
 //  1. RRF:
-//     Merge(RRF) → Sort/GroupBy → [RoundDecimal] → Select
+//     Merge(RRF) → Sort/GroupBy → [RoundDecimal]
 //
 //  2. Weighted:
-//     Merge(Weighted) → Sort/GroupBy → [RoundDecimal] → Select
+//     Merge(Weighted) → Sort/GroupBy → [RoundDecimal]
 //
 //  3. Decay:
-//     Merge(Max|Sum|Avg) → Map(DecayExpr→_decay_score) → Map(NumCombine: $score*_decay_score→$score) → Sort/GroupBy → [RoundDecimal] → Select
+//     Merge(Max|Sum|Avg) → Map(DecayExpr→_decay_score) → Map(NumCombine: $score*_decay_score→$score) → Sort/GroupBy → [RoundDecimal]
 //
 //  4. Model:
-//     Merge(Max) → Map(RerankModelExpr) → Sort/GroupBy → [RoundDecimal] → Select
+//     Merge(Max) → Map(RerankModelExpr) → Sort/GroupBy → [RoundDecimal]
 //
 // Common tail behavior:
 //   - Without grouping: Sort($score, DESC) → Limit(limit, offset)
 //   - With grouping:    GroupBy(field, groupSize, limit, offset, scorer)
 //   - RoundDecimal >= 0: Map(RoundDecimalExpr) rounds $score after ordering
-//   - Select: keeps only $id, $score (plus groupByField, $group_score if grouping)
 func buildRerankChainInternal(
 	collSchema *schemapb.CollectionSchema,
 	funcSchema *schemapb.FunctionSchema,
@@ -347,15 +346,6 @@ func buildRerankChainInternal(
 			[]string{types.ScoreFieldName},
 			[]string{types.ScoreFieldName})
 	}
-
-	// Only keep $id and $score (plus group-by and $group_score if present) in the output.
-	// Other field columns are no longer needed — downstream pipeline stages
-	// (organize/requery) re-fetch fields from segments.
-	selectCols := []string{types.IDFieldName, types.ScoreFieldName}
-	if searchParams.HasGrouping() {
-		selectCols = append(selectCols, searchParams.GroupByField, GroupScoreFieldName)
-	}
-	fc.Select(selectCols...)
 
 	return fc, nil
 }
