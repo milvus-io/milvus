@@ -24,12 +24,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tikverr "github.com/tikv/client-go/v2/error"
+	tikvclient "github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
+	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -433,6 +436,226 @@ func TestWalkWithPagination(t *testing.T) {
 		testFn(-100)
 		testFn(100)
 	})
+}
+
+type walkWithPrefixIterCounter struct {
+	snapshotCalls          int
+	snapshotScanBatchSizes []int
+	iterCalls              int
+	closeCalls             int
+	nextCalls              int
+	nextErrAfterKey        string
+	nextErr                error
+}
+
+type countingSnapshotIterator struct {
+	tikvclient.Iterator
+	counter *walkWithPrefixIterCounter
+}
+
+func (iter *countingSnapshotIterator) Close() {
+	iter.counter.closeCalls++
+	iter.Iterator.Close()
+}
+
+func (iter *countingSnapshotIterator) Next() error {
+	iter.counter.nextCalls++
+	if iter.counter.nextErrAfterKey != "" && string(iter.Key()) == iter.counter.nextErrAfterKey {
+		return iter.counter.nextErr
+	}
+	return iter.Iterator.Next()
+}
+
+func patchWalkWithPrefixSnapshotIter(t *testing.T) *walkWithPrefixIterCounter {
+	t.Helper()
+
+	counter := &walkWithPrefixIterCounter{}
+	originGetSnapshot := getSnapshot
+	getSnapshot = func(txn *txnkv.Client, paginationSize int) *txnsnapshot.KVSnapshot {
+		counter.snapshotCalls++
+		counter.snapshotScanBatchSizes = append(counter.snapshotScanBatchSizes, paginationSize)
+		return originGetSnapshot(txn, paginationSize)
+	}
+	t.Cleanup(func() {
+		getSnapshot = originGetSnapshot
+	})
+
+	var origin func(*txnsnapshot.KVSnapshot, []byte, []byte) (tikvclient.Iterator, error)
+	mocker := mockey.Mock((*txnsnapshot.KVSnapshot).Iter).To(
+		func(ss *txnsnapshot.KVSnapshot, startKey []byte, endKey []byte) (tikvclient.Iterator, error) {
+			counter.iterCalls++
+			iter, err := origin(ss, startKey, endKey)
+			if err != nil {
+				return nil, err
+			}
+			return &countingSnapshotIterator{
+				Iterator: iter,
+				counter:  counter,
+			}, nil
+		}).Origin(&origin).Build()
+	t.Cleanup(func() {
+		mocker.UnPatch()
+	})
+
+	return counter
+}
+
+func TestWalkWithPrefixOpensIteratorPerPage(t *testing.T) {
+	testCases := []struct {
+		name              string
+		totalKeys         int
+		pagination        int
+		expectedPages     int
+		expectedScanBatch int
+	}{
+		{
+			name:              "not divisible by pagination",
+			totalKeys:         5,
+			pagination:        2,
+			expectedPages:     3,
+			expectedScanBatch: 3,
+		},
+		{
+			name:              "exactly divisible by pagination",
+			totalKeys:         6,
+			pagination:        3,
+			expectedPages:     2,
+			expectedScanBatch: 4,
+		},
+		{
+			name:              "single key pages",
+			totalKeys:         4,
+			pagination:        1,
+			expectedPages:     4,
+			expectedScanBatch: 2,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.TODO()
+			rootPath := fmt.Sprintf("/tikv/test/root/walk-prefix-pages/%s", strings.ReplaceAll(testCase.name, " ", "-"))
+			kv := NewTiKV(txnClient, rootPath)
+			require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+			defer kv.Close()
+			defer kv.RemoveWithPrefix(ctx, "")
+
+			kvs := make(map[string]string)
+			expectedKeys := make([]string, 0, testCase.totalKeys)
+			expectedValues := make([]string, 0, testCase.totalKeys)
+			for i := 0; i < testCase.totalKeys; i++ {
+				key := fmt.Sprintf("A/%03d", i)
+				value := fmt.Sprintf("value-%03d", i)
+				kvs[key] = value
+				expectedKeys = append(expectedKeys, kv.GetPath(key))
+				expectedValues = append(expectedValues, value)
+			}
+			sort.Strings(expectedKeys)
+
+			require.NoError(t, kv.MultiSave(ctx, kvs))
+
+			counter := patchWalkWithPrefixSnapshotIter(t)
+			actualKeys := make([]string, 0, testCase.totalKeys)
+			actualValues := make([]string, 0, testCase.totalKeys)
+			err := kv.WalkWithPrefix(ctx, "A", testCase.pagination, func(key []byte, value []byte) error {
+				actualKeys = append(actualKeys, string(key))
+				actualValues = append(actualValues, string(value))
+				return nil
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, expectedKeys, actualKeys)
+			assert.Equal(t, expectedValues, actualValues)
+			assert.Equal(t, 1, counter.snapshotCalls)
+			assert.Equal(t, []int{testCase.expectedScanBatch}, counter.snapshotScanBatchSizes)
+			assert.Equal(t, testCase.expectedPages, counter.iterCalls)
+			assert.Equal(t, testCase.expectedPages, counter.closeCalls)
+		})
+	}
+}
+
+func TestWalkWithPrefixClosesPageIteratorOnFnError(t *testing.T) {
+	ctx := context.TODO()
+	rootPath := "/tikv/test/root/walk-prefix-pages-fn-error"
+	kv := NewTiKV(txnClient, rootPath)
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const (
+		totalKeys  = 7
+		pagination = 3
+		failVisit  = 5
+	)
+	kvs := make(map[string]string)
+	expectedKeys := make([]string, 0, totalKeys)
+	for i := 0; i < totalKeys; i++ {
+		key := fmt.Sprintf("A/%03d", i)
+		kvs[key] = fmt.Sprintf("value-%03d", i)
+		expectedKeys = append(expectedKeys, kv.GetPath(key))
+	}
+	sort.Strings(expectedKeys)
+
+	require.NoError(t, kv.MultiSave(ctx, kvs))
+
+	counter := patchWalkWithPrefixSnapshotIter(t)
+	expectedErr := errors.New("stop walk")
+	actualKeys := make([]string, 0, failVisit)
+	err := kv.WalkWithPrefix(ctx, "A", pagination, func(key []byte, value []byte) error {
+		actualKeys = append(actualKeys, string(key))
+		if len(actualKeys) == failVisit {
+			return expectedErr
+		}
+		return nil
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, expectedErr)
+	assert.Equal(t, expectedKeys[:failVisit], actualKeys)
+	assert.Equal(t, 2, counter.iterCalls)
+	assert.Equal(t, 2, counter.closeCalls)
+}
+
+func TestWalkWithPrefixClosesPageIteratorOnNextError(t *testing.T) {
+	ctx := context.TODO()
+	rootPath := "/tikv/test/root/walk-prefix-pages-next-error"
+	kv := NewTiKV(txnClient, rootPath)
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const (
+		totalKeys  = 7
+		pagination = 3
+		failVisit  = 5
+	)
+	kvs := make(map[string]string)
+	expectedKeys := make([]string, 0, totalKeys)
+	for i := 0; i < totalKeys; i++ {
+		key := fmt.Sprintf("A/%03d", i)
+		kvs[key] = fmt.Sprintf("value-%03d", i)
+		expectedKeys = append(expectedKeys, kv.GetPath(key))
+	}
+	sort.Strings(expectedKeys)
+
+	require.NoError(t, kv.MultiSave(ctx, kvs))
+
+	counter := patchWalkWithPrefixSnapshotIter(t)
+	expectedErr := errors.New("next failed")
+	counter.nextErrAfterKey = expectedKeys[failVisit-1]
+	counter.nextErr = expectedErr
+	actualKeys := make([]string, 0, failVisit)
+	err := kv.WalkWithPrefix(ctx, "A", pagination, func(key []byte, value []byte) error {
+		actualKeys = append(actualKeys, string(key))
+		return nil
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), expectedErr.Error())
+	assert.Equal(t, expectedKeys[:failVisit], actualKeys)
+	assert.Equal(t, 1, counter.snapshotCalls)
+	assert.Equal(t, 2, counter.iterCalls)
+	assert.Equal(t, 2, counter.closeCalls)
 }
 
 func TestElapse(t *testing.T) {
