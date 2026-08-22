@@ -18,12 +18,9 @@ package integration
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"time"
-
-	"github.com/spaolacci/murmur3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -353,18 +350,12 @@ func GenerateBalancedInt64PKs(numRows int, numChannels int, startPK int64) ([]in
 	return result, lastPK + 1
 }
 
-// hashInt64ForChannel computes the hash value for channel assignment.
-// This mirrors the logic in typeutil.Hash32Int64 and HashPK2Channels.
+// hashInt64ForChannel computes the hash value for channel assignment,
+// calling the same helper HashPK2Channels routes with.
 func hashInt64ForChannel(v int64) uint32 {
-	// Must match the behavior of typeutil.Hash32Int64
-	// which uses common.Endian (binary.LittleEndian)
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, uint64(v))
-
-	// Use murmur3 hash (same as typeutil.Hash32Bytes)
-	h := murmur3.New32()
-	h.Write(b)
-	return h.Sum32() & 0x7fffffff
+	// Hash32Int64 only ever returns a nil error.
+	h, _ := typeutil.Hash32Int64(v)
+	return h
 }
 
 // GenerateBalancedVarCharPKs generates varchar primary keys that are evenly distributed across channels.
