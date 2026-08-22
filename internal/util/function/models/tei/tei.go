@@ -46,12 +46,12 @@ func (c *TEIClient) headers() map[string]string {
 	return headers
 }
 
-func (c *TEIClient) Embedding(texts []string, truncate bool, truncationDirection string, prompt string, timeoutMs int64) (*EmbeddingResponse, error) {
+func (c *TEIClient) Embedding(texts []string, truncate bool, truncationDirection string, prompt string, dimensions int, timeoutMs int64) (*EmbeddingResponse, error) {
 	embClient, err := newTEIEmbedding(c.apiKey, c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return embClient.embedding(texts, truncate, truncationDirection, prompt, c.headers(), timeoutMs)
+	return embClient.embedding(texts, truncate, truncationDirection, prompt, dimensions, c.headers(), timeoutMs)
 }
 
 func (c *TEIClient) Rerank(query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
@@ -64,6 +64,7 @@ func (c *TEIClient) Rerank(query string, texts []string, params map[string]any, 
 
 type EmbeddingRequest struct {
 	Inputs              []string `json:"inputs"`
+	Dimensions          int      `json:"dimensions,omitempty"`
 	Truncate            bool     `json:"truncate,omitempty"`
 	TruncationDirection string   `json:"truncation_direction,omitempty"`
 	PromptName          string   `json:"prompt_name,omitempty"`
@@ -89,7 +90,7 @@ func newTEIEmbedding(apiKey string, endpoint string) (*teiEmbedding, error) {
 	}, nil
 }
 
-func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirection string, prompt string, headers map[string]string, timeoutMs int64) (*EmbeddingResponse, error) {
+func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirection string, prompt string, dimensions int, headers map[string]string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	if prompt != "" {
 		var newTexts []string
@@ -101,6 +102,9 @@ func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirect
 		r.Inputs = texts
 	}
 
+	if dimensions != 0 {
+		r.Dimensions = dimensions
+	}
 	r.Truncate = truncate
 	if truncationDirection != "" {
 		r.TruncationDirection = truncationDirection
