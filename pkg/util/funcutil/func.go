@@ -704,6 +704,12 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		} else {
 			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 		}
+	case schemapb.DataType_Decimal:
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
+		} else {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetBytesData().GetData())
+		}
 	default:
 		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldSchema.GetDataType())
 	}

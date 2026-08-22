@@ -81,6 +81,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int64_t>(input);
             break;
         }
+        case DataType::DECIMAL: {
+            result = ExecVisitorImpl<int64_t>(input);
+            break;
+        }
         case DataType::VARCHAR: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()

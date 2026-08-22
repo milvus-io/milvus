@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -5430,4 +5431,93 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		assert.Empty(t, typeutil.GetFieldDataValidData(metaField),
 			"non-nullable $meta should NOT have ValidData auto-filled")
 	})
+}
+
+func TestUpsertTask_queryPreExecute_DecimalField(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_decimal_upsert",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  101,
+				Name:     "price",
+				DataType: schemapb.DataType_Decimal,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.PrecisionKey, Value: "18"},
+					{Key: common.ScaleKey, Value: "4"},
+				},
+			},
+		},
+	})
+
+	dec1 := parameterutil.EncodeUnscaledBytes(199900)  // 19.99
+	dec2 := parameterutil.EncodeUnscaledBytes(-199900) // -19.99
+	dec3 := parameterutil.EncodeUnscaledBytes(0)       // 0
+
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+		},
+		{
+			FieldName: "price", FieldId: 101, Type: schemapb.DataType_Decimal,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{
+				BytesData: &schemapb.BytesArray{Data: [][]byte{dec1, dec2, dec3}},
+			}}},
+		},
+	}
+
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+			},
+			{
+				FieldName: "price", FieldId: 101, Type: schemapb.DataType_Decimal,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{Data: [][]byte{dec1, dec2}},
+				}}},
+			},
+		},
+	}
+
+	task := &upsertTask{
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData: upsertData,
+			NumRows:    3,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    3,
+					Version:    msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	var decimalField *schemapb.FieldData
+	for _, f := range task.insertFieldData {
+		if f.GetFieldName() == "price" {
+			decimalField = f
+			break
+		}
+	}
+	assert.NotNil(t, decimalField)
+	got := decimalField.GetScalars().GetBytesData().GetData()
+	assert.Equal(t, 3, len(got), "merged decimal column should have 3 rows")
+	assert.Equal(t, dec1, got[0])
+	assert.Equal(t, dec2, got[1])
+	assert.Equal(t, dec3, got[2])
 }

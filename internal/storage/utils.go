@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -874,6 +875,27 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
+		case schemapb.DataType_Decimal:
+			srcData := srcField.GetScalars().GetBytesData().GetData()
+			validData := typeutil.GetFieldDataValidData(srcField)
+			decoded := make([]int64, len(srcData))
+			for i, b := range srcData {
+				if len(validData) == len(srcData) && !validData[i] {
+					continue
+				}
+				unscaled, err := parameterutil.DecodeUnscaledBytes(b)
+				if err != nil {
+					return nil, err
+				}
+				decoded[i] = unscaled
+			}
+
+			fieldData = &DecimalFieldData{
+				Data:      decoded,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
+			}
+
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := typeutil.GetFieldDataValidData(srcField)
@@ -1100,6 +1122,19 @@ func mergeTimestamptzField(data *InsertData, fid FieldID, field *TimestamptzFiel
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
+func mergeDecimalField(data *InsertData, fid FieldID, field *DecimalFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &DecimalFieldData{
+			Data:      nil,
+			ValidData: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*DecimalFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
 func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
@@ -1278,6 +1313,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeDoubleField(data, fid, field)
 	case *TimestamptzFieldData:
 		mergeTimestamptzField(data, fid, field)
+	case *DecimalFieldData:
+		mergeDecimalField(data, fid, field)
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
 	case *ArrayFieldData:
@@ -1524,6 +1561,26 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Data: &schemapb.ScalarField_TimestamptzData{
 							TimestamptzData: &schemapb.TimestamptzArray{
 								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *DecimalFieldData:
+			// Values are stored as unscaled int64 internally, but the proto
+			// carries the canonical 8-byte little-endian wire form.
+			bytesData := make([][]byte, 0, len(rawData.Data))
+			for _, unscaled := range rawData.Data {
+				bytesData = append(bytesData, parameterutil.EncodeUnscaledBytes(unscaled))
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Decimal,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: bytesData,
 							},
 						},
 					},

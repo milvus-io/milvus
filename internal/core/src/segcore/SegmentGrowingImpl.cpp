@@ -51,6 +51,7 @@
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/Span.h"
+#include "common/Decimal.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/VectorArray.h"
@@ -609,6 +610,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
                     break;
                 case DataType::INT64:
                 case DataType::TIMESTAMPTZ:
+                case DataType::DECIMAL:
                     field_bytes = num_rows * sizeof(int64_t);
                     break;
                 case DataType::FLOAT:
@@ -2055,6 +2057,27 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
+        case DataType::DECIMAL: {
+            auto vec = dynamic_cast<const ConcurrentVector<int64_t>*>(vec_ptr);
+            AssertInfo(vec, "Pointer of vec_ptr is nullptr for DECIMAL field");
+            auto dst =
+                result->mutable_scalars()->mutable_bytes_data()->mutable_data();
+            auto valid_data_ptr = field_meta.is_nullable()
+                                      ? insert_record_.get_valid_data(field_id)
+                                      : nullptr;
+            for (int64_t i = 0; i < count; ++i) {
+                auto offset = seg_offsets[i];
+                if (offset != INVALID_SEG_OFFSET &&
+                    (valid_data_ptr == nullptr ||
+                     valid_data_ptr->is_valid(offset))) {
+                    auto value = vec->get_element(offset);
+                    dst->at(i) = value ? EncodeDecimalBytes(*value) : "";
+                } else {
+                    dst->at(i) = "";
+                }
+            }
+            break;
+        }
         case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(op_ctx,
                                                  vec_ptr,
@@ -2409,6 +2432,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(op_ctx,
                                          vec_ptr,
