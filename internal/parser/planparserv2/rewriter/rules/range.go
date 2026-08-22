@@ -1,4 +1,4 @@
-package rewriter
+package rules
 
 import (
 	"fmt"
@@ -137,7 +137,7 @@ func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planp
 	return lowerType, true
 }
 
-func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
 		col    *planpb.ColumnInfo
 		effDt  schemapb.DataType // effective type for comparison
@@ -279,7 +279,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 	return out
 }
 
-func (v *visitor) combineOrRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
+func combineOrRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
 	type key struct {
 		colKey  string
 		isLower bool
@@ -517,7 +517,7 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 
 // combineAndBinaryRanges merges BinaryRangeExpr nodes with AND semantics (intersection).
 // Also handles mixing BinaryRangeExpr with UnaryRangeExpr.
-func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	type interval struct {
 		lower         *planpb.GenericValue
 		lowerInc      bool
@@ -731,7 +731,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 
 // combineOrBinaryRanges merges BinaryRangeExpr nodes with OR semantics (union if overlapping/adjacent).
 // Also handles mixing BinaryRangeExpr with UnaryRangeExpr.
-func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
+func combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	type interval struct {
 		lower         *planpb.GenericValue
 		lowerInc      bool

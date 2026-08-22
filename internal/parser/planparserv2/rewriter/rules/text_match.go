@@ -1,4 +1,4 @@
-package rewriter
+package rules
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
-func (v *visitor) combineOrTextMatchToMerged(parts []*planpb.Expr) []*planpb.Expr {
+func combineOrTextMatchToMerged(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
 		col         *planpb.ColumnInfo
 		origIndices []int

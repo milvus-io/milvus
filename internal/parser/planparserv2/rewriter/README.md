@@ -4,7 +4,7 @@ This module performs rule-based logical rewrites on parsed `planpb.Expr` trees r
 
 ### Entry
 - `RewriteExpr(*planpb.Expr) *planpb.Expr` (in `entry.go`)
-  - Recursively visits the expression tree and applies a set of composable, side-effect-free rewrite rules.
+  - Applies an ordered registry of composable rewrite rules with a post-order traversal.
   - Uses global configuration from `paramtable.Get().CommonCfg.EnabledOptimizeExpr`
 - `RewriteExprWithConfig(*planpb.Expr, bool) *planpb.Expr` (in `entry.go`)
   - Same as `RewriteExpr` but allows custom configuration for testing or special cases.
@@ -19,15 +19,31 @@ The rewriter can be configured via the following parameter (refreshable at runti
 
 **IMPORTANT**: IN/NOT IN value list sorting and deduplication **always** runs regardless of this configuration setting, because the execution engine depends on sorted value lists.
 
+### Rewrite Architecture
+
+- The `rewriter` package owns the public entry points and post-order DFS traversal. The `rewriter/rules` package owns the Rule contract, default registry, concrete rules, correctness normalizers, and rule-specific helper algorithms.
+- Rewrite behavior is organized as an ordered rule registry. Registry order is part of the rewrite contract: a new rule should be inserted at the point where its input and output forms compose with the surrounding rules.
+- The rewriter builds the active registry from configuration: Term sorting/deduplication is always registered, while canonicalization and optimization rules are appended only when expression optimization is enabled. Individual rules do not inspect the feature flag.
+- Each node rule implements `rules.Rule` through `Match` and `Apply`. The rewriter invokes `Apply` only after `Match` accepts the current expression. Logical sub-rules follow the same two-stage contract for flattened operands.
+- `Match` performs the inexpensive structural eligibility check. `Apply` performs deeper grouping and type checks, then explicitly reports whether it changed the expression. A rule that reports no change must not rebuild an equivalent node.
+- The rewriter uses a standard explicit post-order DFS stack:
+  1. Push a post-visit task for the current node, then push its children.
+  2. Process every child completely before applying rules to the parent.
+  3. Scan the current node's rules in registry order.
+  4. If a rule changes the node, replace it in its owning slot and traverse that replacement subtree again from its children upward.
+  5. If a complete rule scan makes no change, return to the already-waiting parent task.
+- The child slot is stored as `**planpb.Expr`, so a replacement is written directly into the root variable or the corresponding parent field. No parent pointer, ancestor queue, or stable-node cache is required.
+- A rewrite-application budget is only a defensive guard against mutually inverse or continually expanding custom rules. Normal rules should terminate without reaching it.
+
 ### Implemented Rules
 
-1) IN / NOT IN normalization and merges (`term_in.go`)
+1) IN / NOT IN normalization and merges (`rules/term_in.go`)
 - OR-equals to IN (same column):
   - `a == v1 OR a == v2 ...` → `a IN (v1, v2, ...)`
-  - Numeric columns only merge when count > threshold (default 150); others when count > 1.
+  - At least two compatible equality predicates are required.
 - AND-not-equals to NOT IN (same column):
   - `a != v1 AND a != v2 ...` → `NOT (a IN (v1, v2, ...))`
-  - Same thresholds as above.
+  - At least two compatible not-equal predicates are required.
 - IN vs Equal redundancy elimination (same column):
   - AND: `(a ∈ S) AND (a = v)`:
     - if `v ∈ S` → `a = v`
@@ -38,13 +54,13 @@ The rewriter can be configured via the following parameter (refreshable at runti
   - AND: `(a ∈ S1) AND (a ∈ S2)` → `a ∈ (S1 ∩ S2)`; empty intersection → constant `false`
 - Sort and deduplicate `IN` / `NOT IN` value lists (supported types: bool, int64, float64, string).
 
-2) TEXT_MATCH OR merge (`text_match.go`)
+2) TEXT_MATCH OR merge (`rules/text_match.go`)
 - Merge ORs of `TEXT_MATCH(field, "literal")` on the same column (no options):
   - Concatenate literals with a single space in the order they appear; no tokenization, deduplication, or sorting is performed.
   - Example: `TEXT_MATCH(f, "A C") OR TEXT_MATCH(f, "B D")` → `TEXT_MATCH(f, "A C B D")`
 - If any `TEXT_MATCH` in the group has options (e.g., `minimum_should_match`), this optimization is skipped for that group.
 
-3) ARRAY contains merge (`array_contains.go`)
+3) ARRAY contains merge (`rules/array_contains.go`)
 - OR on the same physical ARRAY column:
   - `array_contains(a, x) OR array_contains(a, y)` → `array_contains_any(a, [x, y])`
   - Existing `array_contains_any` nodes are absorbed, so arbitrarily long and nested OR chains close into one node.
@@ -56,7 +72,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 - Only `ColumnInfo.DataType == Array` participates. JSON columns remain unchanged even though ARRAY and JSON predicates share `JSONContainsExpr` and either function spelling may be used on an ARRAY column.
 - Nil, array-valued, unknown, and NaN elements are excluded from merging. `ElementsSameType` is recomputed and consumed template metadata is cleared on the merged node.
 
-4) Range predicate simplification (`range.go`)
+4) Range predicate simplification (`rules/range.go`)
 - AND tighten (same column):
   - Lower bounds: `a > 10 AND a > 20` → `a > 20` (pick strongest lower)
   - Upper bounds: `a < 50 AND a < 60` → `a < 50` (pick strongest upper)
@@ -102,12 +118,15 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
 - Rewrite runs after template value filling; template placeholders do not appear here.
-- Optional visitor rewrites do not descend into `MatchExpr` or `ElementFilterExpr` predicates.
+- Optional optimizer traversal remains limited to `BinaryExpr`, `UnaryExpr`, `TermExpr`, and `ValueExpr`, so it does not descend into `MatchExpr` or `ElementFilterExpr` predicates. The always-on correctness normalizers retain their broader traversal policy.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
-- Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
 - Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.
+- **Known limitation / TODO**: grouped predicate emission in `rules/term_in.go`, `rules/range.go`, and `rules/text_match.go` is still map-based, so independent groups may not preserve first-occurrence order. Preserving encounter order is intentionally left for a follow-up.
 
-### Pass Ordering (current)
+### Ordered Rule Registry
+
+The logical pipelines below define the registry order for each logical node. Children finish first. If the logical node is rewritten, its replacement subtree is processed again before the waiting parent is allowed to run.
+
 - OR branch:
   1. Flatten
   2. ARRAY `Contains` / `ContainsAny` → `ContainsAny`
@@ -134,12 +153,17 @@ The rewriter can be configured via the following parameter (refreshable at runti
 Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 
 ### File Structure
-- `entry.go`      — rewrite entry and visitor orchestration
-- `util.go`       — shared helpers (column keying, value classification, sorting/dedup, constructors)
-- `array_contains.go` — physical ARRAY contains Any/All merges
-- `term_in.go`    — IN/NOT IN normalization and conversions
-- `text_match.go` — TEXT_MATCH OR merge (no options)
-- `range.go`      — range tightening/weakening and interval construction
+- `entry.go`      — public rewrite entry and configuration lookup
+- `rewriter.go`   — explicit post-order stack and rewrite-application guard
+- `api.go`        — compatibility wrappers for public helper APIs
+- `rules/rule.go` — public Rule interface and shared logical-rule contracts
+- `rules/rule_registry.go` — ordered default node and logical rule registries
+- `rules/rule_*.go` — one concrete rule type with its `Match` and `Apply` implementations per file
+- `rules/util.go` — shared helpers (column keying, value classification, sorting/dedup, constructors)
+- `rules/array_contains.go` — physical ARRAY contains Any/All merges
+- `rules/term_in.go` — IN/NOT IN normalization and conversions
+- `rules/text_match.go` — TEXT_MATCH OR merge (no options)
+- `rules/range.go` — range tightening/weakening and interval construction
 
 ### Future Extensions
 - More IN-range algebra (e.g., `IN` vs exact equality propagation across subtrees).
@@ -149,5 +173,4 @@ Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH
   - Tautology detection: `(a > 10) OR (a <= 10)` → `true` (for non-NULL values)
   - Absorption laws: `(a > 10) OR ((a > 10) AND (b > 20))` → `a > 10`
 - Advanced BinaryRangeExpr merging:
-  - OR with 3+ intervals: Currently limited to 2 intervals. Full interval merging algorithm needed for `(10 < x < 20) OR (15 < x < 25) OR (22 < x < 30)` → `(10 < x < 30)`.
   - OR with unbounded + bounded: Currently skipped. Could optimize `(x > 10) OR (5 < x < 15)` → `x > 5`.
