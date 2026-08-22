@@ -6443,8 +6443,50 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             self.display_side_by_side_comparison(query_text, actual_rerank_results, gt, doc_to_original,
                                                milvus_scores=distances, gt_scores=gt_scores)
 
-            # Use strict comparison since scores are now normalized to f32 precision
-            assert gt == actual_rerank_results, "Rerank result is different from ground truth rerank result"
+            # Compare order only where the ground-truth score gap is resolvable. The
+            # reranker service is not bit-reproducible across independent batch calls
+            # (see #52737): batched GPU inference reduces several distinct sequences in
+            # a non-deterministic order, and float16 amplifies that into ~1e-3 relative
+            # score movement. Neighbouring candidates separated by less than that are
+            # indistinguishable, so exact rank equality is not a valid contract.
+            self._assert_rerank_orders_approx(gt, gt_scores, actual_rerank_results)
+
+    @staticmethod
+    def _assert_rerank_orders_approx(gt_docs, gt_scores, actual_docs, eps_rel=1e-2):
+        """Assert Milvus rerank order matches ground truth except for unresolvable ties.
+
+        TEI's batched GPU rerank is not bit-reproducible across independent calls:
+        reducing several distinct sequences is order-non-deterministic and float16
+        amplifies that into ~1e-3 relative score movement (measured up to ~8e-3 on a
+        real failing run; see #52737). Two adjacent candidates whose ground-truth
+        scores differ by less than the tolerance are indistinguishable, so either
+        order is acceptable; exact rank order is only a contract where the
+        ground-truth score gap exceeds eps_rel relative to the scores involved.
+        """
+        assert len(gt_docs) == len(actual_docs), (
+            f"rerank returned {len(actual_docs)} docs, ground truth has {len(gt_docs)}"
+        )
+        assert set(gt_docs) == set(actual_docs), (
+            "rerank result is different from ground truth rerank result"
+        )
+        actual_pos = {doc: i for i, doc in enumerate(actual_docs)}
+        for i, doc in enumerate(gt_docs):
+            j = actual_pos[doc]
+            if i == j:
+                continue
+            # The doc moved ranks. That is only acceptable when every ground-truth
+            # score gap spanning its ground-truth and actual positions is
+            # unresolvable, i.e. all adjacent pairs in [min(i, j), max(i, j)]
+            # differ by less than eps_rel (relative to the scores involved).
+            lo, hi = min(i, j), max(i, j)
+            for k in range(lo, hi):
+                gap = abs(gt_scores[k] - gt_scores[k + 1])
+                if gap > eps_rel * max(abs(gt_scores[k]), abs(gt_scores[k + 1]), 1e-12):
+                    raise AssertionError(
+                        f"rerank order differs at rank {i}: doc moved {i}->{j} while "
+                        f"neighbouring ground-truth scores {gt_scores[k]:.8g} and "
+                        f"{gt_scores[k + 1]:.8g} differ by {gap:.2e} (> {eps_rel:.1e} relative)"
+                    )
 
     @pytest.mark.parametrize("ranker_model", [
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
