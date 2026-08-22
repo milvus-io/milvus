@@ -601,19 +601,97 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, merr.Wrap(err, "fail to balance")
 	}
+	for channelID, requiredVersion := range expectedLayout.BlockedChannels {
+		b.Logger().Warn(ctx, "pchannel assignment blocked by recovery storage compatibility",
+			mlog.FieldPChannel(channelID.Name),
+			mlog.Int32("requiredRecoveryStorageVersion", int32(requiredVersion)),
+		)
+	}
+	if err := validateExpectedLayoutCapabilities(currentLayout, expectedLayout); err != nil {
+		return false, err
+	}
+	blockedLayoutChanged, blockedErr := b.fenceIncompatibleBlockedChannels(ctx, pchannelView, currentLayout, expectedLayout)
 
 	b.Logger().Info(ctx, "balance policy generate result success, try to assign...", mlog.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
 	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
 	if err != nil {
-		return false, merr.Wrap(err, "fail to assign pchannels")
+		return blockedLayoutChanged, errors.CombineErrors(blockedErr, merr.Wrap(err, "fail to assign pchannels"))
 	}
 
 	if len(modifiedChannels) == 0 {
 		b.Logger().Info(ctx, "no change of balance result need to be applied")
+		return blockedLayoutChanged, blockedErr
+	}
+	return true, errors.CombineErrors(blockedErr, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels))
+}
+
+func (b *balancerImpl) fenceIncompatibleBlockedChannels(
+	ctx context.Context,
+	view *channel.PChannelView,
+	currentLayout CurrentLayout,
+	expectedLayout ExpectedLayout,
+) (bool, error) {
+	currentAssignments := make(map[types.ChannelID]types.PChannelInfoAssigned)
+	for channelID, meta := range view.Channels {
+		if meta.IsAssignedOrAssigning() {
+			currentAssignments[channelID] = meta.CurrentAssignment()
+		}
+	}
+	channelIDs := incompatibleBlockedChannelIDs(currentLayout, expectedLayout, currentAssignments)
+	if len(channelIDs) == 0 {
 		return false, nil
 	}
-	return true, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels)
+
+	assignments := make([]types.PChannelInfoAssigned, 0, len(channelIDs))
+	channels := make([]types.PChannelInfo, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		meta := view.Channels[channelID]
+		assignments = append(assignments, meta.CurrentAssignment())
+		channels = append(channels, meta.ChannelInfo())
+	}
+
+	g, _ := errgroup.WithContext(ctx)
+	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
+	for _, assignment := range assignments {
+		assignment := assignment
+		g.Go(func() error {
+			opCtx, cancel := context.WithTimeout(ctx, opTimeout)
+			defer cancel()
+			if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
+				return merr.Wrapf(err, "fence incompatible assignment %s", assignment.String())
+			}
+			b.Logger().Info(ctx, "fenced incompatible pchannel assignment", mlog.String("assignment", assignment.String()))
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return false, err
+	}
+	if err := b.channelMetaManager.MarkAsUnavailable(ctx, channels); err != nil {
+		return false, merr.Wrap(err, "mark incompatible blocked pchannels unavailable")
+	}
+	return true, nil
+}
+
+func incompatibleBlockedChannelIDs(
+	currentLayout CurrentLayout,
+	expectedLayout ExpectedLayout,
+	currentAssignments map[types.ChannelID]types.PChannelInfoAssigned,
+) []types.ChannelID {
+	channelIDs := make([]types.ChannelID, 0, len(expectedLayout.BlockedChannels))
+	for channelID := range expectedLayout.BlockedChannels {
+		assignment, ok := currentAssignments[channelID]
+		if !ok {
+			continue
+		}
+		node, ok := currentLayout.AllNodesInfo[assignment.Node.ServerID]
+		if !ok || node.RecoveryStorageVersion >= assignment.Channel.RequiredRecoveryStorageVersion {
+			continue
+		}
+		channelIDs = append(channelIDs, channelID)
+	}
+	return channelIDs
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.
@@ -653,6 +731,25 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 // applyBalanceResultToStreamingNode apply the balance result to streaming node.
 func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[types.ChannelID]*channel.PChannelMeta) error {
 	b.Logger().Info(ctx, "balance result need to be applied...", mlog.Int("modifiedChannelCount", len(modifiedChannels)))
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	if err != nil {
+		return merr.Wrap(err, "failed to refresh streaming node capabilities before assignment")
+	}
+	for _, pchannel := range modifiedChannels {
+		node, ok := nodes[pchannel.CurrentServerID()]
+		if !ok {
+			return status.NewInner("target streaming node %d disappeared before assigning pchannel %s", pchannel.CurrentServerID(), pchannel.Name())
+		}
+		if node.RecoveryStorageVersion < pchannel.RequiredRecoveryStorageVersion() {
+			return status.NewInner(
+				"target streaming node %d supports recovery storage version %d, below required version %d for pchannel %s",
+				pchannel.CurrentServerID(),
+				node.RecoveryStorageVersion,
+				pchannel.RequiredRecoveryStorageVersion(),
+				pchannel.Name(),
+			)
+		}
+	}
 
 	// different channel can be execute concurrently.
 	g, _ := errgroup.WithContext(ctx)
@@ -693,6 +790,23 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	// huge unavaiable time may be caused by this,
 	// should be fixed in future.
 	return g.Wait()
+}
+
+func validateExpectedLayoutCapabilities(currentLayout CurrentLayout, expectedLayout ExpectedLayout) error {
+	for channelID, assignment := range expectedLayout.ChannelAssignment {
+		nodeInfo, ok := currentLayout.AllNodesInfo[assignment.Node.ServerID]
+		if ok && nodeInfo.RecoveryStorageVersion >= assignment.Channel.RequiredRecoveryStorageVersion {
+			continue
+		}
+		return status.NewInner(
+			"streaming node %d supports recovery storage version %d, below required version %d for pchannel %s",
+			assignment.Node.ServerID,
+			nodeInfo.RecoveryStorageVersion,
+			assignment.Channel.RequiredRecoveryStorageVersion,
+			channelID.Name,
+		)
+	}
+	return nil
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.

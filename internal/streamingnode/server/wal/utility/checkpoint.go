@@ -1,6 +1,8 @@
 package utility
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -8,7 +10,7 @@ import (
 
 const (
 	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
-	// the checkpoint is set into the catalog.
+	RecoveryMagicRecoveryStorageV2    int64 = 2 // recovery metadata uses one published global checkpoint.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
@@ -17,23 +19,17 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		return nil
 	}
 	return &WALCheckpoint{
-		MessageID:           message.MustUnmarshalMessageID(cp.MessageId),
-		TimeTick:            cp.TimeTick,
-		Magic:               cp.RecoveryMagic,
-		ReplicateConfig:     cp.ReplicateConfig,
-		ReplicateCheckpoint: NewReplicateCheckpointFromProto(cp.ReplicateCheckpoint),
-		AlterWalState:       cp.AlterWalState,
+		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
+		TimeTick:  cp.TimeTick,
+		Magic:     cp.RecoveryMagic,
 	}
 }
 
 // WALCheckpoint represents a consume checkpoint in the Write-Ahead Log (WAL).
 type WALCheckpoint struct {
-	MessageID           message.MessageID // should always be not nil.
-	TimeTick            uint64
-	Magic               int64
-	ReplicateCheckpoint *ReplicateCheckpoint
-	ReplicateConfig     *commonpb.ReplicateConfiguration
-	AlterWalState       *streamingpb.AlterWALState
+	MessageID message.MessageID // should always be not nil.
+	TimeTick  uint64
+	Magic     int64
 }
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
@@ -42,25 +38,41 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		return nil
 	}
 	return &streamingpb.WALCheckpoint{
-		MessageId:           message.MustMarshalMessageID(c.MessageID),
-		TimeTick:            c.TimeTick,
-		RecoveryMagic:       c.Magic,
-		ReplicateConfig:     c.ReplicateConfig,
-		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
-		AlterWalState:       c.AlterWalState,
+		MessageId:     message.MustMarshalMessageID(c.MessageID),
+		TimeTick:      c.TimeTick,
+		RecoveryMagic: c.Magic,
 	}
 }
 
 // Clone creates a new WALCheckpoint with the same values as the original.
 func (c *WALCheckpoint) Clone() *WALCheckpoint {
 	return &WALCheckpoint{
-		MessageID:           c.MessageID,
-		TimeTick:            c.TimeTick,
-		Magic:               c.Magic,
-		ReplicateConfig:     c.ReplicateConfig,
-		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
-		AlterWalState:       c.AlterWalState,
+		MessageID: c.MessageID,
+		TimeTick:  c.TimeTick,
+		Magic:     c.Magic,
 	}
+}
+
+// PChannelRecoveryControlMetaFromLegacyCheckpoint converts the control fields
+// embedded in the legacy WAL checkpoint into the standalone recovery-control
+// component used by RecoveryStorage V2.
+func PChannelRecoveryControlMetaFromLegacyCheckpoint(cp *streamingpb.WALCheckpoint) *streamingpb.PChannelRecoveryControlMeta {
+	if cp == nil {
+		return nil
+	}
+	control := &streamingpb.PChannelRecoveryControlMeta{
+		CheckpointTimeTick: cp.GetTimeTick(),
+	}
+	if cp.GetReplicateConfig() != nil {
+		control.ReplicateConfig = proto.Clone(cp.GetReplicateConfig()).(*commonpb.ReplicateConfiguration)
+	}
+	if cp.GetReplicateCheckpoint() != nil {
+		control.ReplicateCheckpoint = proto.Clone(cp.GetReplicateCheckpoint()).(*commonpb.ReplicateCheckpoint)
+	}
+	if cp.GetAlterWalState() != nil {
+		control.AlterWalState = proto.Clone(cp.GetAlterWalState()).(*streamingpb.AlterWALState)
+	}
+	return control
 }
 
 // NewReplicateCheckpointFromProto creates a new ReplicateCheckpoint from a protobuf message.

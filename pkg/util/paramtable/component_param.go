@@ -357,6 +357,7 @@ type commonConfig struct {
 	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+	NodeSchedulerMaxConcurrencyRatio  ParamItem `refreshable:"true"`
 
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnableDriverPrefetch              ParamItem `refreshable:"true"`
@@ -1500,6 +1501,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.NodeSchedulerMaxConcurrencyRatio = ParamItem{
+		Key:          "common.nodeScheduler.maxConcurrencyRatio",
+		Version:      "3.0",
+		DefaultValue: "2",
+		Doc:          "Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.",
+		Export:       true,
+	}
+	p.NodeSchedulerMaxConcurrencyRatio.Init(base.mgr)
 
 	p.EnabledOptimizeExpr = ParamItem{
 		Key:          "common.enabledOptimizeExpr",
@@ -8206,6 +8216,10 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+	WALRecoveryTaskConcurrency           ParamItem `refreshable:"true"`
+	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
+	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
+	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -8622,13 +8636,48 @@ but not wait for the persist interval.`,
 	p.WALRecoveryGracefulCloseTimeout = ParamItem{
 		Key:     "streaming.walRecovery.gracefulCloseTimeout",
 		Version: "2.6.0",
-		Doc: `The graceful close timeout for wal recovery, 3s by default.
-When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
-If that persist operation exceeds this timeout, the wal recovery module will close right now.`,
+		Doc: `Deprecated. RecoveryStorage no longer persists recovery metadata during close.
+This no-op setting is retained so existing configurations remain loadable.`,
 		DefaultValue: "3s",
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALRecoveryTaskConcurrency = ParamItem{
+		Key:          "streaming.walRecovery.taskConcurrency",
+		Version:      "2.6.10",
+		Doc:          `The max number of recovery storage async tasks running concurrently per pchannel, 16 by default. Non-positive value means unlimited.`,
+		DefaultValue: "16",
+		Export:       true,
+	}
+	p.WALRecoveryTaskConcurrency.Init(base.mgr)
+
+	p.WALRecoveryTailLowWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.lowWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.",
+		DefaultValue: "4g",
+		Export:       true,
+	}
+	p.WALRecoveryTailLowWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailSoftWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.softWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "8g",
+		Export:       true,
+	}
+	p.WALRecoveryTailSoftWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailHighWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.highWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "16g",
+		Export:       true,
+	}
+	p.WALRecoveryTailHighWatermark.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",

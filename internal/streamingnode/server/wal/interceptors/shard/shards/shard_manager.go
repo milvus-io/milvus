@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -129,44 +130,41 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
 	map[int64]stats.SegmentBelongs,
 ) {
-	// recover the segment infos from the streaming node segment assignment meta storage
+	if recoverInfos == nil || recoverInfos.WritePathRecovery == nil {
+		// An absent write-path snapshot means there is no write-path state to
+		// restore; degrade to an empty allocation set instead of panicking on
+		// a nil dereference at the recovery boundary.
+		return make(map[PartitionUniqueKey]map[int64]*segmentAllocManager), make(map[int64]stats.SegmentBelongs)
+	}
+	return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections)
+}
+
+func newSegmentAllocManagersFromWritePathRecovery(
+	pchannel types.PChannelInfo,
+	segments map[int64]moduleapi.SegmentWritePathRecoveryState,
+	collections map[int64]*CollectionInfo,
+) (map[PartitionUniqueKey]map[int64]*segmentAllocManager, map[int64]stats.SegmentBelongs) {
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
-	growingBelongs := make(map[int64]stats.SegmentBelongs)
-	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
-	for _, rawMeta := range recoverInfos.SegmentAssignments {
-		coll, ok := collections[rawMeta.GetCollectionId()]
-		if !ok {
-			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
+	growingBelongs := make(map[int64]stats.SegmentBelongs, len(segments))
+	for segmentID, state := range segments {
+		if _, ok := collections[state.CollectionID]; !ok {
+			panic(fmt.Sprintf("write path recovery state is dirty, collection not found, %d", state.CollectionID))
 		}
-		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
-			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
+		if _, ok := collections[state.CollectionID].PartitionIDs[state.PartitionID]; !ok {
+			panic(fmt.Sprintf("write path recovery state is dirty, partition not found, %d", state.PartitionID))
 		}
-		if _, ok := seenSegments[rawMeta.GetSegmentId()]; ok {
-			panic(fmt.Sprintf("segment assignment meta is dirty, segment repeated, %d", rawMeta.GetSegmentId()))
+		uniqueKey := PartitionUniqueKey{CollectionID: state.CollectionID, PartitionID: state.PartitionID}
+		if partitionToSegmentManagers[uniqueKey] == nil {
+			partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
 		}
-		seenSegments[rawMeta.GetSegmentId()] = struct{}{}
-		uniqueKey := PartitionUniqueKey{
-			CollectionID: rawMeta.GetCollectionId(),
-			PartitionID:  rawMeta.GetPartitionId(),
-		}
-		switch rawMeta.GetState() {
-		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
-			m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
-			growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
-				PChannel:     pchannel.Name,
-				VChannel:     m.GetVChannel(),
-				CollectionID: rawMeta.GetCollectionId(),
-				PartitionID:  rawMeta.GetPartitionId(),
-				SegmentID:    m.GetSegmentID(),
-			}
-			if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
-				partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
-			}
-			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
-		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
-			continue
-		default:
-			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
+		manager := newSegmentAllocManagerFromRecovery(pchannel, state)
+		partitionToSegmentManagers[uniqueKey][segmentID] = manager
+		growingBelongs[segmentID] = stats.SegmentBelongs{
+			PChannel:     pchannel.Name,
+			VChannel:     state.VChannel,
+			CollectionID: state.CollectionID,
+			PartitionID:  state.PartitionID,
+			SegmentID:    segmentID,
 		}
 	}
 	return partitionToSegmentManagers, growingBelongs
@@ -174,26 +172,30 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
 func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*CollectionInfo {
-	// collectionMap is a map from collectionID to collectionInfo.
-	collectionInfoMap := make(map[int64]*CollectionInfo, len(recoverInfos.VChannels))
-	for _, vchannelInfo := range recoverInfos.VChannels {
-		currentPartition := make(map[int64]struct{}, len(vchannelInfo.CollectionInfo.Partitions))
-		for _, partition := range vchannelInfo.CollectionInfo.Partitions {
-			currentPartition[partition.PartitionId] = struct{}{}
+	if recoverInfos == nil || recoverInfos.WritePathRecovery == nil {
+		return make(map[int64]*CollectionInfo)
+	}
+	return newCollectionInfosFromWritePathRecovery(recoverInfos.WritePathRecovery.VChannels)
+}
+
+func newCollectionInfosFromWritePathRecovery(
+	vchannels map[string]moduleapi.VChannelWritePathRecoveryState,
+) map[int64]*CollectionInfo {
+	collectionInfoMap := make(map[int64]*CollectionInfo, len(vchannels))
+	for vchannel, state := range vchannels {
+		partitionIDs := make(map[int64]struct{}, len(state.PartitionIDs)+1)
+		for _, partitionID := range state.PartitionIDs {
+			partitionIDs[partitionID] = struct{}{}
 		}
-		// add all partitions id into the collection info.
-		currentPartition[common.AllPartitionsID] = struct{}{}
-		// Only keep the latest schema, as shard_interceptor only needs the current write view
-		var latestSchema *streamingpb.CollectionSchemaOfVChannel
-		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
-			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
-		}
+		partitionIDs[common.AllPartitionsID] = struct{}{}
 		collectionInfo := &CollectionInfo{
-			VChannel:     vchannelInfo.Vchannel,
-			PartitionIDs: currentPartition,
+			VChannel:     vchannel,
+			PartitionIDs: partitionIDs,
 		}
-		collectionInfo.setSchema(latestSchema)
-		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = collectionInfo
+		if state.Schema != nil {
+			collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: state.Schema})
+		}
+		collectionInfoMap[state.CollectionID] = collectionInfo
 	}
 	return collectionInfoMap
 }

@@ -20,8 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -39,10 +42,40 @@ func TestCatalog_SaveRecoverySnapshot_Nil(t *testing.T) {
 	assert.NoError(t, catalog.SaveRecoverySnapshot(context.Background(), "p1", nil))
 }
 
+func TestCatalog_SaveRecoverySnapshot_CheckpointOnly(t *testing.T) {
+	checkpoint := &streamingpb.WALCheckpoint{TimeTick: 42}
+
+	for _, tc := range []struct {
+		name      string
+		commitErr error
+	}{
+		{name: "success"},
+		{name: "failure", commitErr: errors.New("commit failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kv := mocks.NewMetaKv(t)
+			kv.EXPECT().MaxTxnOps().Return(128)
+			kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.MatchedBy(func(saves map[string]string) bool {
+				require.Len(t, saves, 1)
+				value, ok := saves[buildConsumeCheckpointKey("p1")]
+				if !ok {
+					return false
+				}
+				persisted := &streamingpb.WALCheckpoint{}
+				return proto.Unmarshal([]byte(value), persisted) == nil && proto.Equal(checkpoint, persisted)
+			}), mock.Anything).Return(tc.commitErr)
+
+			err := NewCataLog(kv).SaveRecoverySnapshot(context.Background(), "p1", &metastore.WALRecoverySnapshot{
+				ConsumeCheckpoint: checkpoint,
+			})
+			assert.ErrorIs(t, err, tc.commitErr)
+		})
+	}
+}
+
 // TestCatalog_SaveRecoverySnapshot_Atomic proves a full snapshot that fits
 // the etcd txn limit is applied as a single guarded MultiSaveAndRemove call,
-// carrying every part's key: segment assignment, vchannel, salvage
-// checkpoint, and consume checkpoint.
+// carrying every module upsert/removal plus salvage and consume checkpoints.
 func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
@@ -60,6 +93,7 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
 			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
 		},
+		RemovedSegmentIDs: []int64{2},
 		VChannels: map[string]*streamingpb.VChannelMeta{
 			"vch1": {
 				Vchannel:       "vch1",
@@ -67,18 +101,44 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{},
 			},
 		},
-		SalvageCheckpoint: &commonpb.ReplicateCheckpoint{ClusterId: "cluster1"},
-		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 42},
+		VChannelBaseMetas: map[string]*streamingpb.VChannelMeta{
+			"vch2": {Vchannel: "vch2", CollectionInfo: &streamingpb.CollectionInfoOfVChannel{}},
+		},
+		RemovedVChannels: map[string]*streamingpb.VChannelMeta{
+			"vch3": {
+				Vchannel: "vch3",
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{CheckpointTimeTick: 7},
+				}},
+			},
+		},
+		TransformLogMetas: map[string]*streamingpb.VChannelTransformLogMeta{
+			"p1_100v2": {CheckpointTimeTick: 8},
+		},
+		RemovedTransformLogs: []string{"p1_200v3"},
+		SalvageCheckpoint:    &commonpb.ReplicateCheckpoint{ClusterId: "cluster1"},
+		ConsumeCheckpoint:    &streamingpb.WALCheckpoint{TimeTick: 42},
 	}
 	err := catalog.SaveRecoverySnapshot(context.Background(), "p1", snapshot)
 	assert.NoError(t, err)
 
-	assert.Empty(t, removals)
 	assert.Contains(t, saves, buildSegmentAssignmentKey("p1", 1))
 	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
+	assert.Contains(t, saves, buildVChannelKey("p1", "vch2"))
+	transformSaveKey, err := buildTransformLogKey("p1", "p1_100v2")
+	require.NoError(t, err)
+	assert.Contains(t, saves, transformSaveKey)
 	assert.Contains(t, saves, buildSalvageCheckpointPath("p1", "cluster1"))
 	assert.Contains(t, saves, buildConsumeCheckpointKey("p1"))
-	assert.Len(t, saves, 4)
+	assert.Len(t, saves, 6)
+	transformRemoveKey, err := buildTransformLogKey("p1", "p1_200v3")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		buildSegmentAssignmentKey("p1", 2),
+		buildVChannelKey("p1", "vch3"),
+		buildVChannelSchemaKey("p1", "vch3", 7),
+		transformRemoveKey,
+	}, removals)
 }
 
 // TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped proves nil/empty parts
@@ -108,10 +168,9 @@ func TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped(t *testing.T) {
 	assert.Contains(t, saves, buildConsumeCheckpointKey("p1"))
 }
 
-// TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved proves a flushed
-// segment assignment is staged as a Remove, matching SaveSegmentAssignments'
-// encoding.
-func TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved(t *testing.T) {
+// TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRetained proves a flushed
+// segment assignment remains recoverable until explicit cleanup.
+func TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRetained(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
 	var saves map[string]string
@@ -130,19 +189,20 @@ func TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err)
-	assert.Empty(t, saves)
-	assert.Equal(t, []string{buildSegmentAssignmentKey("p1", 1)}, removals)
+	assert.Empty(t, removals)
+	assert.Contains(t, saves, buildSegmentAssignmentKey("p1", 1))
 }
 
-// TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRemoved proves a dropped
-// vchannel (and its schema versions) is staged as Removes, matching
-// SaveVChannels' encoding.
-func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRemoved(t *testing.T) {
+// TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRetained proves a dropped
+// vchannel and its schemas remain recoverable until explicit cleanup.
+func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRetained(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var saves map[string]string
 	var removals []string
 	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, s map[string]string, dels []string, _ ...predicates.Predicate) error {
+			saves = s
 			removals = dels
 			return nil
 		}).Once()
@@ -154,16 +214,18 @@ func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRemoved(t *testing.T) {
 				Vchannel: "vch1",
 				State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
 				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-					Schemas: []*streamingpb.CollectionSchemaOfVChannel{{CheckpointTimeTick: 5}},
+					Schemas: []*streamingpb.CollectionSchemaOfVChannel{{
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						CheckpointTimeTick: 5,
+					}},
 				},
 			},
 		},
 	})
 	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{
-		buildVChannelSchemaKey("p1", "vch1", 5),
-		buildVChannelKey("p1", "vch1"),
-	}, removals)
+	assert.Empty(t, removals)
+	assert.Contains(t, saves, buildVChannelSchemaKey("p1", "vch1", 5))
+	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
 }
 
 // TestCatalog_SaveRecoverySnapshot_VChannelEncodingMatchesEncoder proves the

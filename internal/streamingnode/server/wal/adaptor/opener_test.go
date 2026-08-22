@@ -15,12 +15,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -62,9 +61,10 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 
 func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testing.T) {
 	channel := types.PChannelInfo{
-		Name:       "replicate-recovery-failure-cleanup",
-		Term:       1,
-		AccessMode: types.AccessModeRW,
+		Name:                           "replicate-recovery-failure-cleanup",
+		Term:                           1,
+		AccessMode:                     types.AccessModeRW,
+		RequiredRecoveryStorageVersion: types.RecoveryStorageVersionV2,
 	}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, channel.Name).Return(
@@ -84,8 +84,10 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().Close().Return().Once()
 	snapshot := &recovery.RecoverySnapshot{
-		VChannels:          map[string]*streamingpb.VChannelMeta{},
-		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
+		WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+			VChannels:       map[string]moduleapi.VChannelWritePathRecoveryState{},
+			GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+		},
 		Checkpoint: &recovery.WALCheckpoint{
 			MessageID: rmq.NewRmqID(1),
 			TimeTick:  1,
@@ -122,6 +124,28 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 	if registered {
 		resource.Resource().SegmentStatsManager().UnregisterSealOperator(sealOperator)
 	}
+}
+
+func TestValidateRWWALRecoveryStorageVersion(t *testing.T) {
+	v2Channel := types.PChannelInfo{
+		Name:                           "pchannel",
+		RequiredRecoveryStorageVersion: types.RecoveryStorageVersionV2,
+	}
+	assert.NoError(t, validateRWWALRecoveryStorageVersion(v2Channel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicStreamingInitialized,
+	}))
+
+	legacyChannel := v2Channel
+	legacyChannel.RequiredRecoveryStorageVersion = types.RecoveryStorageVersionLegacy
+	assert.Error(t, validateRWWALRecoveryStorageVersion(legacyChannel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicRecoveryStorageV2,
+	}))
+	assert.Error(t, validateRWWALRecoveryStorageVersion(legacyChannel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicStreamingInitialized,
+	}))
+	assert.Error(t, validateRWWALRecoveryStorageVersion(v2Channel, &utility.WALCheckpoint{
+		Magic: utility.RecoveryMagicRecoveryStorageV2 + 1,
+	}))
 }
 
 func TestDetermineLastConfirmedMessageID(t *testing.T) {
@@ -165,97 +189,4 @@ func TestDetermineLastConfirmedMessageID(t *testing.T) {
 	}, 4)
 	lastConfirmedMessageID = determineLastConfirmedMessageID(rmq.NewRmqID(5), txnBuffer)
 	assert.Equal(t, rmq.NewRmqID(1), lastConfirmedMessageID)
-}
-
-func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
-	channel := types.PChannelInfo{
-		Name:       "alter-wal-flushing-test",
-		Term:       1,
-		AccessMode: types.AccessModeRW,
-	}
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().
-		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.MatchedBy(func(checkpoint *streamingpb.WALCheckpoint) bool {
-			return checkpoint.GetAlterWalState().GetStage() == streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
-		})).
-		Return(nil)
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
-
-	roWAL := adaptImplsToROWAL(&firstTimeTickWALImpls{
-		channel: channel,
-		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
-			return rmq.NewRmqID(1), nil
-		},
-	}, func() {})
-	rateLimitComponent := roWAL.WALRateLimitComponent
-
-	rs := mock_recovery.NewMockRecoveryStorage(t)
-	rs.EXPECT().
-		GetFlusherCheckpointByTimeTick(mock.Anything).
-		Return(&recovery.WALCheckpoint{
-			MessageID: rmq.NewRmqID(2),
-			TimeTick:  100,
-		})
-	rs.EXPECT().Close().Return()
-
-	snapshot := &recovery.RecoverySnapshot{
-		Checkpoint: &recovery.WALCheckpoint{
-			MessageID: rmq.NewRmqID(1),
-			TimeTick:  10,
-			AlterWalState: &streamingpb.AlterWALState{
-				TargetWalName: commonpb.WALName_Test,
-				TimeTick:      100,
-				Stage:         streamingpb.AlterWALStage_FLUSHING,
-			},
-		},
-		AlterWALInfo: &recovery.AlterWALInfo{
-			FoundAlterWALMsg: true,
-			TargetWALName:    commonpb.WALName_Test,
-			AlterWALTs:       100,
-		},
-	}
-
-	var capturedParam *flusherimpl.RecoverWALFlusherParam
-	mockRecoverFlusher := mockey.Mock(flusherimpl.RecoverWALFlusher).
-		To(func(param *flusherimpl.RecoverWALFlusherParam) *flusherimpl.WALFlusherImpl {
-			captured := *param
-			capturedParam = &captured
-			return &flusherimpl.WALFlusherImpl{}
-		}).
-		Build()
-	defer mockRecoverFlusher.UnPatch()
-
-	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).
-		To(func(*flusherimpl.WALFlusherImpl) {
-			rs.Close()
-		}).
-		Build()
-	defer mockFlusherClose.UnPatch()
-	param := &interceptors.InterceptorBuildParam{}
-	resources := &walOpenResources{
-		roWAL:           roWAL,
-		param:           param,
-		recoveryStorage: rs,
-	}
-
-	err := (&openerAdaptorImpl{}).handleAlterWALFlushingStage(
-		context.Background(),
-		&wal.OpenOption{Channel: channel},
-		roWAL,
-		rs,
-		resources,
-		snapshot,
-	)
-	resources.Close()
-
-	require.NoError(t, err)
-	require.NotNil(t, capturedParam)
-	require.NotNil(t, capturedParam.RateLimitComponent)
-	require.NotNil(t, capturedParam.WAL)
-	assert.Same(t, rateLimitComponent, capturedParam.RateLimitComponent)
-	assert.Same(t, roWAL, capturedParam.WAL.Get())
-	assert.Same(t, rs, capturedParam.RecoveryStorage)
-	assert.Equal(t, channel, capturedParam.ChannelInfo)
-	assert.Same(t, snapshot, capturedParam.RecoverySnapshot)
-	assert.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, snapshot.Checkpoint.AlterWalState.Stage)
 }

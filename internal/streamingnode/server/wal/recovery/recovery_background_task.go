@@ -5,28 +5,15 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/samber/lo"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-// isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
-func (rs *recoveryStorageImpl) isDirty() bool {
-	if rs.pendingPersistSnapshot != nil {
-		return true
-	}
-
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
-}
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
 // promise there's only one consumer of wal.
@@ -38,10 +25,6 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
 		ticker.Stop()
-		rs.Logger().Info(context.TODO(), "recovery storage background task, perform a graceful exit...")
-		if err := rs.persistDritySnapshotWhenClosing(); err != nil {
-			rs.Logger().Warn(context.TODO(), "failed to persist dirty snapshot when closing", mlog.Err(err))
-		}
 		rs.backgroundTaskNotifier.Finish(struct{}{})
 		rs.Logger().Info(context.TODO(), "recovery storage background task exit")
 	}()
@@ -59,20 +42,6 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	}
 }
 
-// persistDritySnapshotWhenClosing persists the dirty snapshot when closing the recovery storage.
-func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
-	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
-	defer cancel()
-
-	for rs.isDirty() {
-		if err := rs.persistDirtySnapshot(ctx, mlog.InfoLevel); err != nil {
-			return err
-		}
-	}
-	rs.gracefulClosed = true
-	return nil
-}
-
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
 func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlog.Level) (err error) {
 	if rs.pendingPersistSnapshot == nil {
@@ -88,106 +57,190 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	logger := rs.Logger().With(
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
-		mlog.Int("vchannelCount", len(snapshot.VChannels)),
-		mlog.Int("segmentCount", len(snapshot.SegmentAssignments)),
 	)
 	defer func() {
 		if err != nil {
-			logger.Warn(ctx, "failed to persist dirty snapshot", mlog.Err(err))
+			logger.Warn(context.TODO(), "failed to persist dirty snapshot", mlog.Err(err))
 			return
 		}
 		rs.pendingPersistSnapshot = nil
-		logger.Log(ctx, lvl, "persist dirty snapshot")
+		logger.Log(context.TODO(), lvl, "persist dirty snapshot")
 		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
-	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
-		logger.Warn(ctx, "failed to drop all virtual channels", mlog.Err(err))
+	recoverySnapshot, err := rs.buildRecoverySnapshot(snapshot)
+	if err != nil {
 		return err
 	}
+	if err := rs.saveRecoverySnapshot(ctx, recoverySnapshot); err != nil {
+		return err
+	}
+	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
+		dirtySnapshot.MarkPersisted()
+	}
+	if snapshot.ControlDirty {
+		rs.mu.Lock()
+		rs.persistedControl = clonePChannelControl(snapshot.PChannelControl)
+		rs.mu.Unlock()
+	}
+	if snapshot.CheckpointDirty {
+		rs.mu.Lock()
+		rs.checkpoint = snapshot.Checkpoint.Clone()
+		rs.mu.Unlock()
+		if rs.tailController != nil {
+			rs.tailController.Publish(snapshot.LogicalEndOffset)
+		}
+		rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
+		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
+	}
+	return
+}
 
-	// The catalog persists the whole snapshot as a single compound write, with
-	// the consume checkpoint always the last/commit-marker op - so a
-	// whole-snapshot retry is always safe (every part is an idempotent put).
-	recoverySnapshot := &metastore.WALRecoverySnapshot{
-		SegmentAssignments: snapshot.SegmentAssignments,
-		VChannels:          snapshot.VChannels,
-		ConsumeCheckpoint:  snapshot.Checkpoint.IntoProto(),
+func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnapshot) (*metastore.WALRecoverySnapshot, error) {
+	recoverySnapshot := &metastore.WALRecoverySnapshot{}
+	type snapshotIdentity struct {
+		module    moduleapi.ModuleName
+		vchannel  string
+		segmentID int64
+	}
+	seen := make(map[snapshotIdentity]struct{}, len(snapshot.ModuleDirtySnaps))
+	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
+		key := dirtySnapshot.Key()
+		if key.PChannel != "" && key.PChannel != rs.channel.Name {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"dirty snapshot pchannel mismatch: expected %s, got %s",
+				rs.channel.Name,
+				key.PChannel,
+			)
+		}
+		identity := snapshotIdentity{
+			module:    dirtySnapshot.ModuleName(),
+			vchannel:  key.VChannel,
+			segmentID: key.SegmentID,
+		}
+		if identity.module == moduleapi.ModuleNameSegment {
+			identity.vchannel = ""
+		} else {
+			identity.segmentID = 0
+		}
+		if _, ok := seen[identity]; ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"duplicate dirty snapshot for module %s, vchannel %s, segment %d",
+				identity.module,
+				identity.vchannel,
+				identity.segmentID,
+			)
+		}
+		seen[identity] = struct{}{}
+
+		switch dirtySnapshot.ModuleName() {
+		case moduleapi.ModuleNameVChannel:
+			if key.VChannel == "" {
+				return nil, merr.WrapErrServiceInternalMsg("vchannel dirty snapshot is missing vchannel key")
+			}
+			meta, ok := dirtySnapshot.Payload().(*streamingpb.VChannelMeta)
+			if !ok || meta == nil {
+				return nil, merr.WrapErrServiceInternalMsg("vchannel dirty snapshot payload is not VChannelMeta")
+			}
+			if meta.GetVchannel() != key.VChannel {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"vchannel dirty snapshot key mismatch: expected %s, got %s",
+					key.VChannel,
+					meta.GetVchannel(),
+				)
+			}
+			switch dirtySnapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				if recoverySnapshot.VChannels == nil {
+					recoverySnapshot.VChannels = make(map[string]*streamingpb.VChannelMeta)
+				}
+				recoverySnapshot.VChannels[key.VChannel] = meta
+			case moduleapi.SnapshotOpUpsertBase:
+				if recoverySnapshot.VChannelBaseMetas == nil {
+					recoverySnapshot.VChannelBaseMetas = make(map[string]*streamingpb.VChannelMeta)
+				}
+				recoverySnapshot.VChannelBaseMetas[key.VChannel] = meta
+			case moduleapi.SnapshotOpDelete:
+				if recoverySnapshot.RemovedVChannels == nil {
+					recoverySnapshot.RemovedVChannels = make(map[string]*streamingpb.VChannelMeta)
+				}
+				recoverySnapshot.RemovedVChannels[key.VChannel] = meta
+			default:
+				return nil, merr.WrapErrServiceInternalMsg("unknown vchannel snapshot op: %d", dirtySnapshot.Op())
+			}
+		case moduleapi.ModuleNameSegment:
+			switch dirtySnapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := dirtySnapshot.Payload().(*streamingpb.SegmentAssignmentMeta)
+				if !ok || meta == nil {
+					return nil, merr.WrapErrServiceInternalMsg("segment dirty snapshot payload is not SegmentAssignmentMeta")
+				}
+				if meta.GetSegmentId() != key.SegmentID {
+					return nil, merr.WrapErrServiceInternalMsg(
+						"segment dirty snapshot key mismatch: expected %d, got %d",
+						key.SegmentID,
+						meta.GetSegmentId(),
+					)
+				}
+				if recoverySnapshot.SegmentAssignments == nil {
+					recoverySnapshot.SegmentAssignments = make(map[int64]*streamingpb.SegmentAssignmentMeta)
+				}
+				recoverySnapshot.SegmentAssignments[key.SegmentID] = meta
+			case moduleapi.SnapshotOpDelete:
+				recoverySnapshot.RemovedSegmentIDs = append(recoverySnapshot.RemovedSegmentIDs, key.SegmentID)
+			default:
+				return nil, merr.WrapErrServiceInternalMsg("unknown segment snapshot op: %d", dirtySnapshot.Op())
+			}
+		case moduleapi.ModuleNameTransformLog:
+			if key.VChannel == "" {
+				return nil, merr.WrapErrServiceInternalMsg("transformlog dirty snapshot is missing vchannel key")
+			}
+			switch dirtySnapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := dirtySnapshot.Payload().(*streamingpb.VChannelTransformLogMeta)
+				if !ok || meta == nil {
+					return nil, merr.WrapErrServiceInternalMsg("transformlog dirty snapshot payload is not VChannelTransformLogMeta")
+				}
+				if recoverySnapshot.TransformLogMetas == nil {
+					recoverySnapshot.TransformLogMetas = make(map[string]*streamingpb.VChannelTransformLogMeta)
+				}
+				recoverySnapshot.TransformLogMetas[key.VChannel] = meta
+			case moduleapi.SnapshotOpDelete:
+				recoverySnapshot.RemovedTransformLogs = append(recoverySnapshot.RemovedTransformLogs, key.VChannel)
+			default:
+				return nil, merr.WrapErrServiceInternalMsg("unknown transformlog snapshot op: %d", dirtySnapshot.Op())
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unknown module dirty snapshot: %s", dirtySnapshot.ModuleName())
+		}
 	}
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
 	}
-	if err := rs.retryOperationWithBackoff(ctx,
-		logger.With(
-			mlog.String("op", "persistRecoverySnapshot"),
-			mlog.Int64s("segmentIds", lo.Keys(snapshot.SegmentAssignments)),
-			mlog.Strings("vchannels", lo.Keys(snapshot.VChannels)),
-		),
-		func(ctx context.Context) error {
-			return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, rs.channel.Name, recoverySnapshot)
-		}); err != nil {
-		return err
+	if snapshot.ControlDirty {
+		recoverySnapshot.PChannelControlMeta = clonePChannelControl(snapshot.PChannelControl)
 	}
+	if snapshot.CheckpointDirty {
+		recoverySnapshot.ConsumeCheckpoint = snapshot.Checkpoint.IntoProto()
+	}
+	return recoverySnapshot, nil
+}
 
-	// sample the checkpoint for truncator to make wal truncation.
-	rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
-	rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
-	return
+func (rs *recoveryStorageImpl) saveRecoverySnapshot(ctx context.Context, snapshot *metastore.WALRecoverySnapshot) error {
+	return retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "persistRecoverySnapshot")), func(ctx context.Context) error {
+		return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, rs.channel.Name, snapshot)
+	})
 }
 
 func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, checkpoint *WALCheckpoint) {
-	flusherCP := rs.getFlusherCheckpoint()
-	if flusherCP == nil {
+	if rs.truncator == nil || checkpoint == nil || checkpoint.MessageID == nil {
 		return
 	}
-	// use the smaller one to truncate the wal.
-	if flusherCP.MessageID.LTE(checkpoint.MessageID) {
-		_ = rs.truncator.Truncate(ctx, flusherCP.MessageID)
-	} else {
-		_ = rs.truncator.Truncate(ctx, checkpoint.MessageID)
-	}
+	_ = rs.truncator.Truncate(ctx, checkpoint.MessageID)
 }
 
-// dropAllVirtualChannel drops all virtual channels that are in the dropped state.
-// TODO: DropVirtualChannel will be called twice here,
-// call it in recovery storage is used to promise the drop virtual channel must be called after recovery.
-// In future, the flowgraph will be deprecated, all message operation will be implement here.
-// So the DropVirtualChannel will only be called once after that.
-func (rs *recoveryStorageImpl) dropAllVirtualChannel(ctx context.Context, vcs map[string]*streamingpb.VChannelMeta) error {
-	channels := make([]string, 0, len(vcs))
-	for channelName, vc := range vcs {
-		if vc.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-			channels = append(channels, channelName)
-		}
-	}
-	if len(channels) == 0 {
-		return nil
-	}
-
-	mixCoordClient, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
-
-	for _, channelName := range channels {
-		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "dropAllVirtualChannel")), func(ctx context.Context) error {
-			resp, err := mixCoordClient.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				ChannelName: channelName,
-			})
-			return merr.CheckRPCCall(resp, err)
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// retryOperationWithBackoff retries the operation with exponential backoff.
-func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
-	backoff := rs.newBackoff()
+func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
+	backoff := newBackoff()
 	for {
 		err := op(ctx)
 		if err == nil {
@@ -198,9 +251,12 @@ func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, lo
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if !isRetryableRecoveryPersistError(err) {
+			return err
+		}
 
 		nextInterval := backoff.NextBackOff()
-		logger.Warn(ctx, "failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
+		logger.Warn(context.TODO(), "failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
 		select {
 		case <-time.After(nextInterval):
 		case <-ctx.Done():
@@ -209,13 +265,29 @@ func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, lo
 	}
 }
 
-// newBackoff creates a new backoff instance with the default settings.
-func (rs *recoveryStorageImpl) newBackoff() *backoff.ExponentialBackOff {
+func isRetryableRecoveryPersistError(err error) bool {
+	if merr.IsRetryableErr(err) {
+		return true
+	}
+	if merr.IsNonRetryableErr(err) || errors.IsAny(
+		err,
+		merr.ErrServiceInternal,
+		merr.ErrDataIntegrity,
+		merr.ErrSerializationFailed,
+		merr.ErrParameterInvalid,
+	) {
+		return false
+	}
+	// MetaKv implementations can return untyped transport/backend errors.
+	// Preserve the existing retry behavior for those unknown errors.
+	return true
+}
+
+func newBackoff() *backoff.ExponentialBackOff {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
 	backoff.Reset()
-
 	return backoff
 }

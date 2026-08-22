@@ -47,40 +47,22 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 		TimeTick:  0,
 	}
 	newCheckpoint := NewWALCheckpointFromProto(protoCheckpoint)
-	assert.Equal(t, "by-dev", newCheckpoint.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", newCheckpoint.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(0), newCheckpoint.ReplicateCheckpoint.TimeTick)
-	assert.Nil(t, newCheckpoint.ReplicateCheckpoint.MessageID)
-	assert.NotNil(t, newCheckpoint.ReplicateConfig)
+	assert.True(t, messageID.EQ(newCheckpoint.MessageID))
+	control := PChannelRecoveryControlMetaFromLegacyCheckpoint(protoCheckpoint)
+	assert.Equal(t, timeTick, control.GetCheckpointTimeTick())
+	assert.Equal(t, "by-dev", control.GetReplicateCheckpoint().GetClusterId())
+	assert.Equal(t, "p1", control.GetReplicateCheckpoint().GetPchannel())
+	assert.NotNil(t, control.GetReplicateConfig())
 
 	protoCheckpoint.ReplicateCheckpoint.MessageId = rmq.NewRmqID(2).IntoProto()
 	protoCheckpoint.ReplicateCheckpoint.TimeTick = 123456
 
-	newCheckpoint = NewWALCheckpointFromProto(protoCheckpoint)
-	assert.Equal(t, "by-dev", newCheckpoint.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", newCheckpoint.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(123456), newCheckpoint.ReplicateCheckpoint.TimeTick)
-	assert.True(t, rmq.NewRmqID(2).EQ(newCheckpoint.ReplicateCheckpoint.MessageID))
-	assert.NotNil(t, newCheckpoint.ReplicateConfig)
+	control = PChannelRecoveryControlMetaFromLegacyCheckpoint(protoCheckpoint)
+	assert.Equal(t, uint64(123456), control.GetReplicateCheckpoint().GetTimeTick())
+	assert.Equal(t, rmq.NewRmqID(2).IntoProto(), control.GetReplicateCheckpoint().GetMessageId())
 
+	// New checkpoints intentionally contain only the global WAL position.
 	proto = newCheckpoint.IntoProto()
-	checkpoint2 = NewWALCheckpointFromProto(proto)
-	assert.True(t, messageID.EQ(checkpoint2.MessageID))
-	assert.Equal(t, timeTick, checkpoint2.TimeTick)
-	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
-	assert.Equal(t, "by-dev", checkpoint2.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", checkpoint2.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
-	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
-	assert.NotNil(t, checkpoint2.ReplicateConfig)
-
-	checkpoint2 = newCheckpoint.Clone()
-	assert.True(t, messageID.EQ(checkpoint2.MessageID))
-	assert.Equal(t, timeTick, checkpoint2.TimeTick)
-	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
-	assert.Equal(t, "by-dev", checkpoint2.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", checkpoint2.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
-	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
-	assert.NotNil(t, checkpoint2.ReplicateConfig)
+	assert.Nil(t, proto.GetReplicateConfig())
+	assert.Nil(t, proto.GetReplicateCheckpoint())
 }

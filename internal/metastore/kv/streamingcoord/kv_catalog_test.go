@@ -88,6 +88,31 @@ func newTestCatalog(t *testing.T) (metastore.StreamingCoordCataLog, map[string]s
 	return NewCataLog(kv), kvStorage, kv
 }
 
+func TestCatalogGetRecoveryStorageVersion(t *testing.T) {
+	catalog, storage, _ := newTestCatalog(t)
+	versionCatalog := catalog.(interface {
+		GetRecoveryStorageVersion(context.Context, string) (streamingpb.RecoveryStorageVersion, error)
+	})
+
+	version, err := versionCatalog.GetRecoveryStorageVersion(context.Background(), "missing")
+	require.NoError(t, err)
+	assert.Equal(t, streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY, version)
+
+	key := "streamingnode-meta/wal/p1/consume-checkpoint"
+	checkpoint, err := proto.Marshal(&streamingpb.WALCheckpoint{RecoveryMagic: 2})
+	require.NoError(t, err)
+	storage[key] = string(checkpoint)
+	version, err = versionCatalog.GetRecoveryStorageVersion(context.Background(), "p1")
+	require.NoError(t, err)
+	assert.Equal(t, streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_V2, version)
+
+	checkpoint, err = proto.Marshal(&streamingpb.WALCheckpoint{RecoveryMagic: 3})
+	require.NoError(t, err)
+	storage[key] = string(checkpoint)
+	_, err = versionCatalog.GetRecoveryStorageVersion(context.Background(), "p1")
+	assert.Error(t, err)
+}
+
 func TestCatalogMetaKeys(t *testing.T) {
 	assert.Equal(t, canonicalCChannelMetaKeyForTest, CChannelMetaKey)
 	assert.Equal(t, canonicalVersionKeyForTest, VersionKey)

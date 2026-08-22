@@ -191,6 +191,23 @@ type ImmutableMessage interface {
 	IntoBroadcastMutableMessage() BroadcastMutableMessage
 }
 
+// OwnedImmutableMessage owns the root reference to one immutable message.
+// Clone creates independently releasable references for consumers.
+type OwnedImmutableMessage interface {
+	Message() ImmutableMessage
+	Clone() RetainedImmutableMessage
+	RegisterExclusiveCallback(callback func())
+	Release()
+}
+
+// RetainedImmutableMessage owns one independently releasable reference.
+type RetainedImmutableMessage interface {
+	Message() ImmutableMessage
+	Clone() RetainedImmutableMessage
+	Release()
+	retainedImmutableMessage()
+}
+
 // ImmutableTxnMessage is the read-only transaction message interface.
 // Once a transaction is committed, the wal will generate a transaction message.
 // The MessageType() is always return MessageTypeTransaction if it's a transaction message.
@@ -272,4 +289,40 @@ type SpecializedImmutableMessage[H proto.Message, B proto.Message] interface {
 
 	// MustBody return the message body, panic if error occurs.
 	MustBody() B
+}
+
+// SpecializedOwnedImmutableMessage is the owned form of a specialized
+// immutable message.
+type SpecializedOwnedImmutableMessage[H proto.Message, B proto.Message] interface {
+	Message() SpecializedImmutableMessage[H, B]
+	Clone() SpecializedRetainedImmutableMessage[H, B]
+	CloneHandle() RetainedImmutableMessage
+	Untyped() OwnedImmutableMessage
+}
+
+// SpecializedRetainedImmutableMessage is the retained form of a specialized
+// immutable message.
+type SpecializedRetainedImmutableMessage[H proto.Message, B proto.Message] interface {
+	Message() SpecializedImmutableMessage[H, B]
+	Clone() SpecializedRetainedImmutableMessage[H, B]
+	CloneHandle() RetainedImmutableMessage
+	Release()
+}
+
+// OwnedImmutableTxnMessage owns the root reference to one assembled
+// transaction message.
+type OwnedImmutableTxnMessage interface {
+	Message() ImmutableTxnMessage
+	Clone() RetainedImmutableTxnMessage
+	CloneHandle() RetainedImmutableMessage
+	Untyped() OwnedImmutableMessage
+}
+
+// RetainedImmutableTxnMessage owns one independently releasable reference to
+// an assembled transaction message.
+type RetainedImmutableTxnMessage interface {
+	Message() ImmutableTxnMessage
+	Clone() RetainedImmutableTxnMessage
+	CloneHandle() RetainedImmutableMessage
+	Release()
 }

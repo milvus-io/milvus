@@ -3,6 +3,7 @@ package streamingcoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+const (
+	recoveryStorageCheckpointPrefix = "streamingnode-meta"
+	recoveryStorageCheckpointDir    = "wal"
+	recoveryStorageCheckpointKey    = "consume-checkpoint"
 )
 
 // NewCataLog creates a new catalog instance
@@ -45,6 +52,32 @@ func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 // catalog is a kv based catalog.
 type catalog struct {
 	metaKV kv.MetaKv
+}
+
+// GetRecoveryStorageVersion returns the RecoveryStorage format committed by a
+// pchannel checkpoint. A missing checkpoint is legacy-compatible.
+func (c *catalog) GetRecoveryStorageVersion(ctx context.Context, pchannel string) (streamingpb.RecoveryStorageVersion, error) {
+	key := path.Join(recoveryStorageCheckpointPrefix, recoveryStorageCheckpointDir, pchannel, recoveryStorageCheckpointKey)
+	value, err := c.metaKV.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY, nil
+	}
+	if err != nil {
+		return streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY, err
+	}
+	checkpoint := &streamingpb.WALCheckpoint{}
+	if err := proto.Unmarshal([]byte(value), checkpoint); err != nil {
+		return streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY, errors.Wrapf(err, "unmarshal recovery checkpoint for pchannel %s failed", pchannel)
+	}
+	switch checkpoint.GetRecoveryMagic() {
+	case 0, 1:
+		return streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY, nil
+	case 2:
+		return streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_V2, nil
+	default:
+		return streamingpb.RecoveryStorageVersion_RECOVERY_STORAGE_VERSION_LEGACY,
+			merr.WrapErrDataIntegrityMsg("unknown recovery checkpoint version %d for pchannel %s", checkpoint.GetRecoveryMagic(), pchannel)
+	}
 }
 
 // GetCChannel returns the control channel

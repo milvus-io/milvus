@@ -83,6 +83,65 @@ func (_c *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetPChannelRecoveryControlMeta provides a mock function with given fields: ctx, pChannelName
+func (_m *MockStreamingNodeCataLog) GetPChannelRecoveryControlMeta(ctx context.Context, pChannelName string) (*streamingpb.PChannelRecoveryControlMeta, error) {
+	ret := _m.Called(ctx, pChannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPChannelRecoveryControlMeta")
+	}
+
+	var r0 *streamingpb.PChannelRecoveryControlMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*streamingpb.PChannelRecoveryControlMeta, error)); ok {
+		return rf(ctx, pChannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *streamingpb.PChannelRecoveryControlMeta); ok {
+		r0 = rf(ctx, pChannelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.PChannelRecoveryControlMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pChannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPChannelRecoveryControlMeta'
+type MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call struct {
+	*mock.Call
+}
+
+// GetPChannelRecoveryControlMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pChannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) GetPChannelRecoveryControlMeta(ctx interface{}, pChannelName interface{}) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	return &MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call{Call: _e.mock.On("GetPChannelRecoveryControlMeta", ctx, pChannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call) Run(run func(ctx context.Context, pChannelName string)) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call) Return(_a0 *streamingpb.PChannelRecoveryControlMeta, _a1 error) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call) RunAndReturn(run func(context.Context, string) (*streamingpb.PChannelRecoveryControlMeta, error)) *MockStreamingNodeCataLog_GetPChannelRecoveryControlMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, pChannelName
 func (_m *MockStreamingNodeCataLog) GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, pChannelName)
@@ -201,6 +260,65 @@ func (_c *MockStreamingNodeCataLog_ListSegmentAssignment_Call) RunAndReturn(run 
 	return _c
 }
 
+// ListTransformLogMeta provides a mock function with given fields: ctx, pchannelName
+func (_m *MockStreamingNodeCataLog) ListTransformLogMeta(ctx context.Context, pchannelName string) (map[string]*streamingpb.VChannelTransformLogMeta, error) {
+	ret := _m.Called(ctx, pchannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListTransformLogMeta")
+	}
+
+	var r0 map[string]*streamingpb.VChannelTransformLogMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (map[string]*streamingpb.VChannelTransformLogMeta, error)); ok {
+		return rf(ctx, pchannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) map[string]*streamingpb.VChannelTransformLogMeta); ok {
+		r0 = rf(ctx, pchannelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]*streamingpb.VChannelTransformLogMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pchannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_ListTransformLogMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListTransformLogMeta'
+type MockStreamingNodeCataLog_ListTransformLogMeta_Call struct {
+	*mock.Call
+}
+
+// ListTransformLogMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) ListTransformLogMeta(ctx interface{}, pchannelName interface{}) *MockStreamingNodeCataLog_ListTransformLogMeta_Call {
+	return &MockStreamingNodeCataLog_ListTransformLogMeta_Call{Call: _e.mock.On("ListTransformLogMeta", ctx, pchannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_ListTransformLogMeta_Call) Run(run func(ctx context.Context, pchannelName string)) *MockStreamingNodeCataLog_ListTransformLogMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_ListTransformLogMeta_Call) Return(_a0 map[string]*streamingpb.VChannelTransformLogMeta, _a1 error) *MockStreamingNodeCataLog_ListTransformLogMeta_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_ListTransformLogMeta_Call) RunAndReturn(run func(context.Context, string) (map[string]*streamingpb.VChannelTransformLogMeta, error)) *MockStreamingNodeCataLog_ListTransformLogMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListVChannel provides a mock function with given fields: ctx, pchannelName
 func (_m *MockStreamingNodeCataLog) ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error) {
 	ret := _m.Called(ctx, pchannelName)
@@ -256,54 +374,6 @@ func (_c *MockStreamingNodeCataLog_ListVChannel_Call) Return(_a0 []*streamingpb.
 }
 
 func (_c *MockStreamingNodeCataLog_ListVChannel_Call) RunAndReturn(run func(context.Context, string) ([]*streamingpb.VChannelMeta, error)) *MockStreamingNodeCataLog_ListVChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveConsumeCheckpoint provides a mock function with given fields: ctx, pChannelName, checkpoint
-func (_m *MockStreamingNodeCataLog) SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error {
-	ret := _m.Called(ctx, pChannelName, checkpoint)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveConsumeCheckpoint")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *streamingpb.WALCheckpoint) error); ok {
-		r0 = rf(ctx, pChannelName, checkpoint)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveConsumeCheckpoint'
-type MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call struct {
-	*mock.Call
-}
-
-// SaveConsumeCheckpoint is a helper method to define mock.On call
-//   - ctx context.Context
-//   - pChannelName string
-//   - checkpoint *streamingpb.WALCheckpoint
-func (_e *MockStreamingNodeCataLog_Expecter) SaveConsumeCheckpoint(ctx interface{}, pChannelName interface{}, checkpoint interface{}) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
-	return &MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call{Call: _e.mock.On("SaveConsumeCheckpoint", ctx, pChannelName, checkpoint)}
-}
-
-func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) Run(run func(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint)) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(*streamingpb.WALCheckpoint))
-	})
-	return _c
-}
-
-func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) Return(_a0 error) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) RunAndReturn(run func(context.Context, string, *streamingpb.WALCheckpoint) error) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

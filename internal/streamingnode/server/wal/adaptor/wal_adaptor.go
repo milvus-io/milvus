@@ -10,7 +10,6 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
@@ -66,7 +65,6 @@ func adaptImplsToRWWAL(
 	roWAL *roWALAdaptorImpl,
 	builders []interceptors.InterceptorBuilder,
 	interceptorParam *interceptors.InterceptorBuildParam,
-	flusher *flusherimpl.WALFlusherImpl,
 ) *walAdaptorImpl {
 	if roWAL.Channel().AccessMode != types.AccessModeRW {
 		panic("wal should be read-write")
@@ -78,8 +76,7 @@ func adaptImplsToRWWAL(
 		// TODO: remove the pool, use a queue instead.
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  interceptorParam,
-		interceptorBuildResult: buildInterceptor(builders, interceptorParam),
-		flusher:                flusher,
+		interceptorBuildResult: buildInterceptorsAndReleaseInitialSnapshot(builders, interceptorParam),
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
@@ -99,7 +96,6 @@ type walAdaptorImpl struct {
 	appendExecutionPool    *conc.Pool[struct{}]
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
-	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
 	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
@@ -108,11 +104,14 @@ type walAdaptorImpl struct {
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
 	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
-	recoveryMetrics := w.flusher.Metrics()
+	recoveryTimeTick := uint64(0)
+	if w.param.RecoveryStorage != nil {
+		recoveryTimeTick = w.param.RecoveryStorage.Metrics().RecoveryTimeTick
+	}
 	return types.RWWALMetrics{
 		ChannelInfo:      w.Channel(),
 		MVCCTimeTick:     currentMVCC.Timetick,
-		RecoveryTimeTick: recoveryMetrics.RecoveryTimeTick,
+		RecoveryTimeTick: recoveryTimeTick,
 	}
 }
 
@@ -335,11 +334,10 @@ func (w *walAdaptorImpl) Close() {
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 
-	// close the flusher.
-	w.Logger().Info(context.TODO(), "wal begin to close flusher...")
-	if w.flusher != nil {
-		// only in test, the flusher is nil.
-		w.flusher.Close()
+	// close the recovery-owned persistence path.
+	w.Logger().Info(context.TODO(), "wal begin to close recovery storage...")
+	if w.param.RecoveryStorage != nil {
+		w.param.RecoveryStorage.Close()
 	}
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
@@ -405,4 +403,13 @@ func buildInterceptor(builders []interceptors.InterceptorBuilder, param *interce
 			}
 		},
 	}
+}
+
+func buildInterceptorsAndReleaseInitialSnapshot(
+	builders []interceptors.InterceptorBuilder,
+	param *interceptors.InterceptorBuildParam,
+) interceptorBuildResult {
+	result := buildInterceptor(builders, param)
+	param.InitialRecoverSnapshot = nil
+	return result
 }

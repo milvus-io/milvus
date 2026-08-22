@@ -29,7 +29,13 @@ type recoveryStreamBuilderImpl struct {
 
 // Build builds a recovery stream.
 func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamParam) recovery.RecoveryStream {
-	scanner := newRecoveryScannerAdaptor(b.roWALImpls, param.StartCheckpoint, b.scanMetrics.NewScannerMetrics())
+	scanner := newRecoveryScannerAdaptor(
+		b.roWALImpls,
+		param.StartCheckpoint,
+		param.StartAfter,
+		b.scanMetrics.NewScannerMetrics(),
+		param.UseWriteAheadBuffer,
+	)
 	recoveryStream := &recoveryStreamImpl{
 		notifier:  syncutil.NewAsyncTaskNotifier[error](),
 		param:     param,

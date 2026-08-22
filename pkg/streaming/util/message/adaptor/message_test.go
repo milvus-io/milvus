@@ -170,6 +170,30 @@ func TestNewMsgPackFromCreateSegmentMessage(t *testing.T) {
 	assert.Equal(t, tt, pack.EndTs)
 }
 
+func TestNewMsgPackFromRecoveryBarrier(t *testing.T) {
+	messageID := rmq.NewRmqID(2)
+	lastConfirmed := rmq.NewRmqID(1)
+	barrier := message.NewRecoveryBarrierMessageBuilderV2().
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).
+		WithAllVChannel().
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmed(lastConfirmed).
+		IntoImmutableMessage(messageID)
+
+	pack, err := NewMsgPackFromMessage(barrier)
+	require.NoError(t, err)
+	require.NotNil(t, pack)
+	assert.Equal(t, uint64(100), pack.BeginTs)
+	assert.Equal(t, uint64(100), pack.EndTs)
+	assert.Empty(t, pack.Msgs)
+	require.Len(t, pack.StartPositions, 1)
+	require.Len(t, pack.EndPositions, 1)
+	assert.Equal(t, uint64(100), pack.StartPositions[0].GetTimestamp())
+	assert.Equal(t, uint64(100), pack.EndPositions[0].GetTimestamp())
+}
+
 func TestNewMsgPackFromCreateIndexMessage(t *testing.T) {
 	id := rmq.NewRmqID(1)
 
