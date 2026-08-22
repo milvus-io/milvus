@@ -44,6 +44,11 @@ func (req *AlterLoadConfigRequest) CheckIfLoadPartitionsExecutable() error {
 	if req.Current.Collection == nil {
 		return nil
 	}
+	// Skip replica count validation for collections where the user explicitly set
+	// a replica number — the cluster-level config does not apply to them.
+	if req.Current.GetUserSpecifiedReplicaMode() {
+		return nil
+	}
 	expectedReplicaNumber := 0
 	for _, num := range req.Expected.ExpectedReplicaNumber {
 		expectedReplicaNumber += num
