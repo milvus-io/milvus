@@ -4403,6 +4403,28 @@ func TestExpr_Power(t *testing.T) {
 	}
 }
 
+func TestExpr_TimestamptzFieldToField(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:  2000,
+		Name:     "TimestamptzField2",
+		DataType: schemapb.DataType_Timestamptz,
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	expr, err := ParseExpr(helper, "TimestamptzField > TimestamptzField2", nil)
+	require.NoError(t, err)
+	compare := expr.GetCompareExpr()
+	require.NotNil(t, compare)
+	assert.Equal(t, schemapb.DataType_Timestamptz, compare.GetLeftColumnInfo().GetDataType())
+	assert.Equal(t, schemapb.DataType_Timestamptz, compare.GetRightColumnInfo().GetDataType())
+	assert.Equal(t, planpb.OpType_GreaterThan, compare.GetOp())
+
+	_, err = ParseExpr(helper, "TimestamptzField > Int64Field", nil)
+	require.Error(t, err)
+}
+
 // ============================================================================
 // Error Handling Tests
 // These tests cover the int64OverflowError type and error handling paths
