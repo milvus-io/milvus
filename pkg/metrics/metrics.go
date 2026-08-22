@@ -171,7 +171,6 @@ const (
 	// model function/UDF labels
 	functionTypeName = "function_type_name"
 	functionProvider = "function_provider"
-	functionName     = "function_name"
 
 	// entities label
 	LoadedLabel         = "loaded"
