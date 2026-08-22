@@ -460,17 +460,25 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		mlog.Int64("refreshedRows", refreshedRows),
 		mlog.Int64("rowDelta", refreshedRows-baselineRows))
 
-	// Intentionally allow the collection schema to advance while tasks are
-	// running. For the current additive-only scope, an older-schema refresh can
-	// be applied; it may miss newly added external columns, and the next refresh
-	// self-heals them. Segment-level validation still rejects schema-version
-	// rollback, but drop, rename, or type changes need a schema gate or lock
-	// before they are supported.
+	for _, segment := range updatedSegments {
+		if segment.GetSchemaVersion() != job.GetSchemaVersion() {
+			return merr.WrapErrServiceInternalMsg(
+				"refresh result segment %d schema version %d does not match job schema version %d",
+				segment.GetID(),
+				segment.GetSchemaVersion(),
+				job.GetSchemaVersion(),
+			)
+		}
+	}
+
+	// Schema changes during refresh invalidate the job. The user must rerun
+	// refresh so DataNode builds replacement segments from the current schema.
 	return applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
 		baselineSegmentIDs,
+		job.GetSchemaVersion(),
 		keptSegments,
 		updatedSegments,
 		mlog.FieldJobID(job.GetJobId()),
@@ -686,6 +694,7 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 		StartTime:      startTime,
 		Progress:       0,
 		TaskIds:        []int64{},
+		SchemaVersion:  collection.Schema.GetVersion(),
 	}
 
 	if err := m.refreshMeta.AddJob(job); err != nil {
@@ -938,6 +947,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 			FileIndexEnd:         plan.FileIndexEnd,
 			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
 			OwnedSegmentIds:      append([]int64(nil), plan.OwnedSegmentIDs...),
+			SchemaVersion:        job.GetSchemaVersion(),
 		}
 		log.Debug(ctx, "planned external refresh task",
 			mlog.FieldTaskID(taskID),
