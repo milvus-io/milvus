@@ -23,6 +23,15 @@
 
 const uint32_t SYS_PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace milvus {
+MmapChunkTarget::~MmapChunkTarget() {
+    if (mapped_data_ != nullptr) {
+        munmap(mapped_data_, cap_);
+    }
+    if (owns_file_ && !file_path_.empty()) {
+        unlink(file_path_.c_str());
+    }
+}
+
 void
 MemChunkTarget::write(const void* data, size_t size) {
     AssertInfo(size + size_ <= cap_, "can not exceed target capacity");
@@ -76,7 +85,14 @@ MmapChunkTarget::release() {
                "failed to map: {}, map_size={}",
                strerror(errno),
                cap_);
-    return static_cast<char*>(m);
+    mapped_data_ = static_cast<char*>(m);
+    return mapped_data_;
+}
+
+void
+MmapChunkTarget::TransferOwnership() noexcept {
+    mapped_data_ = nullptr;
+    owns_file_ = false;
 }
 
 size_t
