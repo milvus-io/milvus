@@ -18,25 +18,312 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestL0CompactionTaskSuite(t *testing.T) {
 	suite.Run(t, new(L0CompactionTaskSuite))
+}
+
+func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             200,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	deltaPath := basePath + "/_delta/9001"
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
+	}}
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, basePath, base)
+			require.EqualValues(t, 7, version)
+			require.Equal(t, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 3}}, updates.DeltaLogs)
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	task := &l0CompactionTask{meta: meta, committedV3Manifests: make(map[int64]string)}
+	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 200, deltalogs))
+
+	updated := meta.GetSegment(context.Background(), 200)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.EqualValues(t, 3, updated.GetStats().GetDeleteNumRows())
+	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/201"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             201,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	deltaPath := basePath + "/_delta/9001"
+	// Each attempt receives a fresh result, as a re-query of the worker would.
+	freshDeltalogs := func() []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
+		}}
+	}
+
+	var commitCount int
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(_ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			commitCount++
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	task := &l0CompactionTask{meta: meta}
+	// First attempt publishes the manifest and records the deltalog on the segment.
+	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 201, freshDeltalogs()))
+	// A retry (saveSegmentMeta re-run after a failed meta_saved/etcd write) with
+	// the same output must not append the deltalog to the manifest a second time.
+	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 201, freshDeltalogs()))
+
+	require.Equal(t, 1, commitCount, "manifest must be committed exactly once across retries")
+	updated := meta.GetSegment(context.Background(), 201)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.EqualValues(t, 3, updated.GetStats().GetDeleteNumRows(), "delete count must not double on retry")
+	require.Len(t, updated.GetDeltalogs(), 1)
+	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 1)
+}
+
+func addL0SaveMetaFixture(t *testing.T, mt *meta, inputIDs []int64, targets ...*datapb.SegmentInfo) {
+	t.Helper()
+	for _, id := range inputIDs {
+		require.NoError(t, mt.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    id,
+			State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L0,
+		})))
+	}
+	for _, target := range targets {
+		require.NoError(t, mt.AddSegment(context.Background(), NewSegmentInfo(target)))
+	}
+}
+
+func l0DeltaOutput(segmentID int64, basePath string) *datapb.CompactionSegment {
+	return &datapb.CompactionSegment{
+		SegmentID: segmentID,
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath + "/_delta/9001", EntriesNum: 3, MemorySize: 128}},
+		}},
+	}
+}
+
+func requireL0InputsRetired(t *testing.T, mt *meta, inputIDs []int64) {
+	t.Helper()
+	for _, id := range inputIDs {
+		seg := mt.GetSegment(context.Background(), id)
+		require.Equal(t, commonpb.SegmentState_Dropped, seg.GetState())
+		require.True(t, seg.GetCompacted())
+	}
+}
+
+// A V3 delta target retired (dropped) by a concurrent compaction while the L0
+// plan was executing must not wedge the task: saveSegmentMeta skips it before
+// any manifest I/O, and the input L0 segments are still retired so the task
+// reaches meta_saved instead of re-polling a permanent error forever.
+func TestL0CompactionSaveSegmentMetaSkipsDroppedV3Target(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/240"
+	manifest7 := packed.MarshalManifestPath(basePath, 7)
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	inputs := []int64{140, 141}
+	addL0SaveMetaFixture(t, mt, inputs, &datapb.SegmentInfo{
+		ID:             240,
+		State:          commonpb.SegmentState_Dropped,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifest7,
+	})
+
+	var commitCount atomic.Int32
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
+		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+			commitCount.Add(1)
+			return nil
+		}).Build()
+	defer mockCommit.UnPatch()
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		InputSegments: inputs,
+	}, nil, mt)
+
+	require.NoError(t, task.saveSegmentMeta([]*datapb.CompactionSegment{l0DeltaOutput(240, basePath)}))
+
+	require.Zero(t, commitCount.Load(), "dropped target must not reach CommitSegmentManifest")
+	require.Equal(t, manifest7, mt.GetSegment(context.Background(), 240).GetManifestPath())
+	requireL0InputsRetired(t, mt, inputs)
+}
+
+// A target that passes the saveSegmentMeta health check but drops before the
+// commit lands surfaces as ErrSegmentNotFound from CommitSegmentManifest. That
+// is the same benign terminal outcome as the pre-check — the contract the
+// stats caller already honors — so the save still succeeds and the input
+// segments retire.
+func TestL0CompactionSaveSegmentMetaSwallowsNotFoundFromManifestCommit(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/241"
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	inputs := []int64{142, 143}
+	addL0SaveMetaFixture(t, mt, inputs, &datapb.SegmentInfo{
+		ID:             241,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 7),
+	})
+
+	var commitCount atomic.Int32
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
+		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+			commitCount.Add(1)
+			return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
+		}).Build()
+	defer mockCommit.UnPatch()
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		InputSegments: inputs,
+	}, nil, mt)
+
+	require.NoError(t, task.saveSegmentMeta([]*datapb.CompactionSegment{l0DeltaOutput(241, basePath)}))
+
+	require.EqualValues(t, 1, commitCount.Load())
+	requireL0InputsRetired(t, mt, inputs)
+}
+
+// Any manifest commit failure other than a vanished segment must keep failing
+// the save so the scheduler retries: the input segments stay live and the task
+// does not reach meta_saved on a partially published result.
+func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/242"
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	inputs := []int64{144}
+	addL0SaveMetaFixture(t, mt, inputs, &datapb.SegmentInfo{
+		ID:             242,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 7),
+	})
+
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
+		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+			return merr.WrapErrServiceInternalMsg("manifest commit failed")
+		}).Build()
+	defer mockCommit.UnPatch()
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		InputSegments: inputs,
+	}, nil, mt)
+
+	require.Error(t, task.saveSegmentMeta([]*datapb.CompactionSegment{l0DeltaOutput(242, basePath)}))
+
+	seg := mt.GetSegment(context.Background(), 144)
+	require.Equal(t, commonpb.SegmentState_Flushed, seg.GetState(), "inputs must not retire on a failed save")
+	require.False(t, seg.GetCompacted())
+}
+
+// The V3 manifest commits must overlap rather than run serially on the
+// scheduler goroutine: each mocked commit blocks until all targets have
+// entered, so a serial implementation stalls on the first call and fails via
+// the timeout error instead of hanging.
+func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
+	const targets = 3
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "16")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	inputs := []int64{145}
+	basePaths := make(map[int64]string, targets)
+	targetInfos := make([]*datapb.SegmentInfo, 0, targets)
+	output := make([]*datapb.CompactionSegment, 0, targets)
+	for i := int64(0); i < targets; i++ {
+		segID := 243 + i
+		basePath := fmt.Sprintf("/tmp/milvus/insert_log/1/10/%d", segID)
+		basePaths[segID] = basePath
+		targetInfos = append(targetInfos, &datapb.SegmentInfo{
+			ID:             segID,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 7),
+		})
+		output = append(output, l0DeltaOutput(segID, basePath))
+	}
+	addL0SaveMetaFixture(t, mt, inputs, targetInfos...)
+
+	release := make(chan struct{})
+	var entered atomic.Int32
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
+		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+			if entered.Add(1) == targets {
+				close(release)
+			}
+			select {
+			case <-release:
+				return nil
+			case <-time.After(30 * time.Second):
+				return errors.New("v3 manifest commits did not overlap; fan-out is serial")
+			}
+		}).Build()
+	defer mockCommit.UnPatch()
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		InputSegments: inputs,
+	}, nil, mt)
+
+	require.NoError(t, task.saveSegmentMeta(output))
+
+	require.EqualValues(t, targets, entered.Load())
+	requireL0InputsRetired(t, mt, inputs)
 }
 
 type L0CompactionTaskSuite struct {
@@ -66,6 +353,9 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: actualDeltaPath, EntriesNum: 3}},
 		}},
 	}}
+	// A legacy/non-manifest destination continues through the compatibility
+	// operator. StorageV3 destinations are committed by meta directly.
+	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(nil).Once()
 
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, operators ...UpdateOperator) error {
