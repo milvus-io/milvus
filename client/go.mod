@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/client/v3
 
-go 1.24.9
+go 1.25.0
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.8.0
@@ -17,7 +17,7 @@ require (
 	github.com/tidwall/gjson v1.17.1
 	github.com/x448/float16 v0.8.4
 	go.uber.org/atomic v1.11.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 )
