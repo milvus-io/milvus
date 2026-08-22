@@ -907,15 +907,19 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			t.rerankMeta = meta
 		}
 		querynodeFunctionChains = qnChains
+
+		if hasFunctionChainStage(qnChains, schemapb.FunctionChainStage_FunctionChainStageL1Rerank) && t.aggCtx != nil {
+			return merr.WrapErrParameterInvalidMsg("L1 function chain is not supported with search_aggregation")
+		}
 	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
-	// Search iterator v2 uses the final result score as the ANN continuation
+	// Search iterators use the final result score to derive the ANN continuation
 	// bound. Function rerank rewrites that score, so the next iterator request
 	// would interpret a rerank score in the ANN metric domain.
-	if queryInfo.GetSearchIteratorV2Info() != nil && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
-		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator v2")
+	if isIterator && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator")
 	}
 
 	// order_by and function rerank cannot be used together
