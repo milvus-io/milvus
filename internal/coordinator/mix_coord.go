@@ -461,6 +461,10 @@ func (s *mixCoordImpl) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.S
 	return s.rootcoordServer.ShowCollectionIDs(ctx, req)
 }
 
+func (s *mixCoordImpl) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return s.rootcoordServer.GetRLSMetadata(ctx, req)
+}
+
 func (s *mixCoordImpl) AlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.AlterCollection(ctx, req)
 }

@@ -874,10 +874,13 @@ message BatchUpdateManifestV2ColumnGroups {
 
 // AlterRLSMetadataMessageHeader identifies the collection whose RLS metadata
 // is being updated. The collection-scoped broadcaster resource key serializes
-// this mutation with collection DDL.
+// this mutation with collection DDL. Cache expirations are replayed by the ACK
+// callback so active Proxies invalidate their RLS state before the resource is
+// released.
 message AlterRLSMetadataMessageHeader {
     int64 db_id = 1;
     int64 collection_id = 2;
+    CacheExpirations cache_expirations = 3;
 }
 
 // AlterRLSMetadataMessageBody carries the complete post-image so replay does
@@ -905,10 +908,12 @@ message RLSPrincipalMetadata {
 }
 
 // DropRLSMetadataMessageHeader identifies the collection whose RLS metadata
-// is being removed.
+// is being removed and carries the Proxy RLS cache expiration applied by the
+// ACK callback.
 message DropRLSMetadataMessageHeader {
     int64 db_id = 1;
     int64 collection_id = 2;
+    CacheExpirations cache_expirations = 3;
 }
 
 // DropRLSMetadataMessageBody carries one stable logical identity. Replaying a
