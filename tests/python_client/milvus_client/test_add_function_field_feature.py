@@ -3808,3 +3808,133 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_add_bm25_function_field_on_backfilled_varchar_input(self):
+        """
+        target: verify BM25 add_function_field whose input VARCHAR was itself added after
+                sealed data neither crashes datanode nor corrupts data (issue #52159)
+        method: seal rows without the varchar; add_collection_field(varchar+analyzer);
+                gate the bump on schema-version consistency stats; verify null backfill
+                through output_fields; insert valued rows; add a BM25 function using the
+                added varchar as input; gate again; verify search hits and per-row values
+        expected: both bumps reach consistent==total; old rows read back null; BM25 hits
+                  only valued rows; every row value byte-exact; total count intact
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        n_old, n_new = 50, 20
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field("code", DataType.INT64)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        # Feature-carrying sibling columns: every row's code/vec derive from its pk so the
+        # final read-back can prove the bumps corrupted nothing besides adding fields.
+        expected_code = {i: 1000 + i for i in range(n_old)}
+        expected_vec = {i: [float(i), 0.0, 0.0, 0.0] for i in range(n_old)}
+        client.insert(
+            collection_name,
+            [{"id": i, "vec": expected_vec[i], "code": expected_code[i]} for i in range(n_old)],
+        )
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=120)
+        client.load_collection(collection_name)
+        schema_version_initial = client.describe_collection(collection_name)["schema_version"]
+
+        # Step 1: the future BM25 input field does not exist yet — add it now.
+        client.add_collection_field(
+            collection_name,
+            field_name="doc_text",
+            data_type=DataType.VARCHAR,
+            max_length=512,
+            nullable=True,
+            enable_analyzer=True,
+            analyzer_params={"tokenizer": "standard"},
+        )
+        schema_version_after_add_field = client.describe_collection(collection_name)["schema_version"]
+        assert schema_version_after_add_field > schema_version_initial
+        assert self.wait_for_schema_version_consistency(client, collection_name), (
+            "add-field schema bump did not reach segment consistency"
+        )
+
+        # Step 2: value-level oracle — every sealed row reads back null for the added field.
+        old_rows = client.query(collection_name, filter=f"id < {n_old}", output_fields=["id", "doc_text"], limit=n_old)
+        assert len(old_rows) == n_old
+        assert all(row["doc_text"] is None for row in old_rows)
+
+        expected_text = {100 + i: f"docmarker row{100 + i} milvus backfilled input" for i in range(n_new)}
+        expected_code.update({pk: 2000 + pk for pk in expected_text})
+        expected_vec.update({pk: [0.0, float(pk), 0.0, 0.0] for pk in expected_text})
+        client.insert(
+            collection_name,
+            [
+                {"id": pk, "vec": expected_vec[pk], "code": expected_code[pk], "doc_text": text}
+                for pk, text in expected_text.items()
+            ],
+        )
+        client.flush(collection_name)
+
+        # Step 3: BM25 whose input is the ADDED field — the function backfill must
+        # materialize over segments where the input itself was backfilled null.
+        sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        bm25_function = Function(
+            name="bm25_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["doc_text"],
+            output_field_names=["sparse"],
+        )
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
+
+        schema_version_after_add_function = client.describe_collection(collection_name)["schema_version"]
+        assert schema_version_after_add_function > schema_version_after_add_field
+        assert self.wait_for_schema_version_consistency(client, collection_name), (
+            "function-field schema bump did not reach segment consistency"
+        )
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
+        self.release_collection(client, collection_name)
+        client.load_collection(collection_name)
+
+        search_res = self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["docmarker row105"],
+            anns_field="sparse",
+            expected_id=105,
+            label="BM25 on backfilled varchar input",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id"],
+            limit=10,
+        )
+        hit_ids = [hit["id"] for hit in search_res[0]]
+        assert all(pk >= 100 for pk in hit_ids), f"null-input rows must not match: {hit_ids}"
+
+        # Step 4: value-level integrity — the added column reads back null for old rows and
+        # byte-exact for new rows, and the sibling columns still match what was inserted.
+        all_rows = client.query(
+            collection_name,
+            filter="id >= 0",
+            output_fields=["id", "doc_text", "code", "vec"],
+            limit=n_old + n_new,
+        )
+        assert len(all_rows) == n_old + n_new
+        for row in all_rows:
+            pk = row["id"]
+            assert row["doc_text"] == expected_text.get(pk), f"id={pk} doc_text mismatch"
+            assert row["code"] == expected_code[pk], f"id={pk} sibling code corrupted"
+            assert len(row["vec"]) == 4 and all(abs(a - b) < 1e-6 for a, b in zip(row["vec"], expected_vec[pk])), (
+                f"id={pk} sibling vec corrupted"
+            )
+
+        self.drop_collection(client, collection_name)
