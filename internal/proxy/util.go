@@ -1521,11 +1521,10 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
-	hoo := hookutil.GetHook()
-	user, err := hoo.VerifyAPIKey(rawToken)
+	user, err := hookutil.GetHook().VerifyAPIKey(rawToken)
 	if err != nil {
-		log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
-		return "", merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
+		log.Warn("fail to verify apikey with hook", zap.Error(err))
+		return "", merr.WrapErrParameterInvalidMsg("invalid API key")
 	}
 	return user, nil
 }
@@ -1554,7 +1553,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
-	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
+	log.Ctx(ctx).Debug("credential cache populated")
 	privilegeCache.UpdateCredential(credInfo)
 	return true
 }

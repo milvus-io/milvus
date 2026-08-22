@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -225,6 +226,23 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb.BuildIndexInfo {
+	if params == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(params).(*indexcgopb.BuildIndexInfo)
+	if config := redacted.GetStorageConfig(); config != nil {
+		redactStorageCredentialsForLog(
+			&config.AccessKeyID,
+			&config.SecretAccessKey,
+			&config.SslCACert,
+			&config.GcpCredentialJSON,
+		)
+	}
+	return redacted
+}
+
 func (it *indexBuildTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", it.req.GetClusterID()),
@@ -326,7 +344,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			it.req.GetSegmentID())
 		buildIndexParams.Manifest = it.req.GetManifest()
 	}
-	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
+	log.Info("create index", zap.Any("buildIndexParams", redactBuildIndexParamsForLog(buildIndexParams)))
 
 	// set plugin context after logging the indexParams to avoid logging sensitive data
 	if it.pluginContext != nil {

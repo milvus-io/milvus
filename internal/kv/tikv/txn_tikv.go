@@ -317,7 +317,7 @@ func (kv *txnTiKV) Save(ctx context.Context, key, value string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV Save() error", zap.String("key", key), zap.String("value", value))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV Save() error", zap.String("key", key))
 
 	loggingErr = kv.putTiKVMeta(ctx, key, value)
 	return loggingErr
@@ -330,7 +330,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSave() error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSave() error", zap.Strings("keys", lo.Keys(kvs)), zap.Int("len", len(kvs)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -346,13 +346,13 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 		// Check if value is empty or taking reserved EmptyValue
 		byteValue, err := convertEmptyStringToByte(value)
 		if err != nil {
-			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSave()", key, value))
+			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to cast value for key %s in MultiSave()", key))
 			return loggingErr
 		}
 		// Save the value within a transaction
 		err = txn.Set([]byte(key), byteValue)
 		if err != nil {
-			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set (%s:%s) for MultiSave()", key, value), err.Error())
+			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set value for key %s in MultiSave()", key), err.Error())
 			return loggingErr
 		}
 	}
@@ -361,7 +361,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSave()", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSave() operation", zap.Any("kvs", kvs))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSave() operation", zap.Strings("keys", lo.Keys(kvs)))
 	return nil
 }
 
@@ -442,7 +442,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", zap.Strings("saveKeys", lo.Keys(saves)), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -484,12 +484,12 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 		// Check if value is empty or taking reserved EmptyValue
 		byteValue, err := convertEmptyStringToByte(value)
 		if err != nil {
-			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemove", key, value))
+			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to cast value for key %s in MultiSaveAndRemove", key))
 			return loggingErr
 		}
 		err = txn.Set([]byte(key), byteValue)
 		if err != nil {
-			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemove", key, value), err.Error())
+			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set value for key %s in MultiSaveAndRemove", key), err.Error())
 			return loggingErr
 		}
 	}
@@ -499,7 +499,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSaveAndRemove", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", zap.Any("saves", saves), zap.Strings("removals", removals))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", zap.Strings("saveKeys", lo.Keys(saves)), zap.Strings("removals", removals))
 	return nil
 }
 
@@ -510,7 +510,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", zap.Strings("saveKeys", lo.Keys(saves)), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -572,12 +572,12 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 		// Check if value is empty or taking reserved EmptyValue
 		byteValue, err := convertEmptyStringToByte(value)
 		if err != nil {
-			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
+			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to cast value for key %s in MultiSaveAndRemoveWithPrefix()", key))
 			return loggingErr
 		}
 		err = txn.Set([]byte(key), byteValue)
 		if err != nil {
-			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value), err.Error())
+			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set value for key %s in MultiSaveAndRemoveWithPrefix()", key), err.Error())
 			return loggingErr
 		}
 	}
@@ -587,7 +587,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSaveAndRemoveWithPrefix", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", zap.Any("saves", saves), zap.Strings("removals", removals))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", zap.Strings("saveKeys", lo.Keys(saves)), zap.Strings("removals", removals))
 	return nil
 }
 
@@ -700,7 +700,7 @@ func (kv *txnTiKV) putTiKVMeta(ctx context.Context, key, val string) error {
 	// Check if the value being written needs to be empty placeholder
 	byteValue, err := convertEmptyStringToByte(val)
 	if err != nil {
-		return merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for putTiKVMeta", key, val))
+		return merr.Wrap(err, fmt.Sprintf("Failed to cast value for key %s in putTiKVMeta", key))
 	}
 	err = txn.Set([]byte(key), byteValue)
 	if err != nil {
