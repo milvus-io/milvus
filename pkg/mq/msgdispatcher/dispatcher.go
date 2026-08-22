@@ -82,6 +82,10 @@ type Dispatcher struct {
 	includeSkipWhenSplit bool
 }
 
+type msgStreamErrorProvider interface {
+	Error() error
+}
+
 func NewDispatcher(
 	ctx context.Context,
 	factory msgstream.Factory,
@@ -242,7 +246,27 @@ func (d *Dispatcher) work() {
 		case <-d.done:
 			log.Info(d.ctx, "stop working")
 			return
-		case pack := <-d.stream.Chan():
+		case pack, ok := <-d.stream.Chan():
+			if !ok {
+				err := merr.WrapErrMqInternalMsg("message stream closed unexpectedly")
+				if provider, ok := d.stream.(msgStreamErrorProvider); ok {
+					if streamErr := provider.Error(); streamErr != nil {
+						err = merr.Wrap(streamErr, "message stream terminated")
+					}
+				}
+				log.Error(d.ctx, "message stream terminated", mlog.Err(err))
+				d.targets.Range(func(_ string, target *target) bool {
+					target.notifyStreamError(err)
+					target.close()
+					return true
+				})
+				// Keep the dispatcher goroutine participating in the manager's
+				// pause/terminate handshake. Returning immediately would leave a
+				// later pause signal buffered with no worker to consume it, which can
+				// deadlock a subsequent remove/resume cycle.
+				<-d.done
+				return
+			}
 			if pack == nil || len(pack.EndPositions) != 1 {
 				log.Error(d.ctx, "consumed invalid msgPack", mlog.Any("pack", pack))
 				continue

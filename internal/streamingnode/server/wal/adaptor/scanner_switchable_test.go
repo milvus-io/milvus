@@ -1,12 +1,131 @@
 package adaptor
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestCatchupScannerUsesCurrentWALForCurrentWALPosition(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+	messageCh := make(chan message.ImmutableMessage)
+	innerScanner := mock_walimpls.NewMockScannerImpls(t)
+	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
+	innerScanner.EXPECT().Close().Return(nil).Once()
+	currentWAL.(*mock_walimpls.MockWALImpls).EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
+	openerCalled := false
+	scanner := newSwitchableScanner(
+		"current-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(1)),
+		make(chan message.ImmutableMessage),
+		func(_ context.Context, walName message.WALName, gotChannel types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			openerCalled = true
+			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
+		},
+		nil,
+	)
+
+	catchup, ok := scanner.(*catchupScanner)
+	require.True(t, ok)
+	openedScanner, err := catchup.openCatchupScannerImpls(context.Background())
+	require.NoError(t, err)
+	require.Same(t, innerScanner, openedScanner)
+	require.False(t, openerCalled)
+	require.NoError(t, openedScanner.Close())
+}
+
+func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel", AccessMode: types.AccessModeRW}
+	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
+	currentTimeTick := newTestTimeTickMessage(200, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentWAL := newTestCurrentWAL(t, channel)
+	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentTimeTick)
+	writeAheadBuffer := wab.NewWriteAheadBuffer(
+		channel.Name,
+		mlog.With(),
+		1024*1024,
+		time.Minute,
+		currentTimeTick,
+	)
+	defer writeAheadBuffer.Close()
+
+	outputCh := make(chan message.ImmutableMessage, 4)
+	readerWALNames := make([]message.WALName, 0, 2)
+	scanner := newSwitchableScanner(
+		"cross-wal-catchup-reader",
+		mlog.With(),
+		currentWAL,
+		writeAheadBuffer,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		outputCh,
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			switch walName {
+			case message.WALNameRocksmq:
+				return oldWAL, nil
+			case message.WALNameTest:
+				return currentReadWAL, nil
+			default:
+				t.Fatalf("unexpected WAL name %s", walName)
+				return nil, nil
+			}
+		},
+		func(walName message.WALName) {
+			readerWALNames = append(readerWALNames, walName)
+		},
+	)
+
+	next, err := scanner.Do(context.Background())
+	require.NoError(t, err)
+	tailing, ok := next.(*tailingScanner)
+	require.True(t, ok)
+	require.Equal(t, marker, <-outputCh)
+	require.Equal(t, currentTimeTick, <-outputCh)
+	require.Equal(t, []message.WALName{message.WALNameRocksmq, message.WALNameTest}, readerWALNames)
+
+	idleTimeTick := newTestNonPersistedTimeTickMessage(
+		201,
+		walimplstest.NewTestMessageID(1),
+		walimplstest.NewTestMessageID(1),
+	)
+	writeAheadBuffer.Append(nil, idleTimeTick)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan switchableScannerResult, 1)
+	go func() {
+		next, err := tailing.Do(ctx)
+		resultCh <- switchableScannerResult{next: next, err: err}
+	}()
+
+	receivedIdleTimeTick, isTailing := isTailingScanImmutableMessage(<-outputCh)
+	require.True(t, isTailing)
+	require.Equal(t, idleTimeTick, receivedIdleTimeTick)
+	cancel()
+	result := <-resultCh
+	require.Nil(t, result.next)
+	require.ErrorIs(t, result.err, context.Canceled)
+}
 
 func TestOldVersionLastConfirmedTracker_DefaultWindowSize(t *testing.T) {
 	tracker := newOldVersionLastConfirmedTracker(0)
@@ -21,15 +140,10 @@ func TestOldVersionLastConfirmedTracker_BeforeWindowFull(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	// First message: should return itself (the first one)
 	result := tracker.Track(ids[0])
 	assert.Equal(t, ids[0], result)
-
-	// Second message: still returns the first one (window not full)
 	result = tracker.Track(ids[1])
 	assert.Equal(t, ids[0], result)
-
-	// Third message: still returns the first one (window size = 3, need 4th to start sliding)
 	result = tracker.Track(ids[2])
 	assert.Equal(t, ids[0], result)
 }
@@ -42,25 +156,12 @@ func TestOldVersionLastConfirmedTracker_WindowSliding(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	// Fill the window: track ids[0], ids[1], ids[2]
 	tracker.Track(ids[0])
 	tracker.Track(ids[1])
 	tracker.Track(ids[2])
-
-	// 4th message (ids[3]): window is now [ids[0], ids[1], ids[2], ids[3]]
-	// len=4 > windowSize=3, return ids[4-3-1] = ids[0]
-	result := tracker.Track(ids[3])
-	assert.Equal(t, ids[0], result, "should return the message 3 positions back")
-
-	// 5th message (ids[4]): window is [ids[0]..ids[4]]
-	// return ids[5-3-1] = ids[1]
-	result = tracker.Track(ids[4])
-	assert.Equal(t, ids[1], result, "should return the message 3 positions back")
-
-	// 6th message (ids[5]): window is [ids[0]..ids[5]]
-	// return ids[6-3-1] = ids[2]
-	result = tracker.Track(ids[5])
-	assert.Equal(t, ids[2], result, "should return the message 3 positions back")
+	assert.Equal(t, ids[0], tracker.Track(ids[3]))
+	assert.Equal(t, ids[1], tracker.Track(ids[4]))
+	assert.Equal(t, ids[2], tracker.Track(ids[5]))
 }
 
 func TestOldVersionLastConfirmedTracker_WindowSizeOne(t *testing.T) {
@@ -71,38 +172,30 @@ func TestOldVersionLastConfirmedTracker_WindowSizeOne(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	// First message: returns itself
-	result := tracker.Track(ids[0])
-	assert.Equal(t, ids[0], result)
-
-	// Second message: returns the one 1 position back = ids[0]
-	result = tracker.Track(ids[1])
-	assert.Equal(t, ids[0], result)
-
-	// Third message: returns ids[1]
-	result = tracker.Track(ids[2])
-	assert.Equal(t, ids[1], result)
+	assert.Equal(t, ids[0], tracker.Track(ids[0]))
+	assert.Equal(t, ids[0], tracker.Track(ids[1]))
+	assert.Equal(t, ids[1], tracker.Track(ids[2]))
 }
 
 func TestOldVersionLastConfirmedTracker_LargeWindow(t *testing.T) {
-	windowSize := 30
+	const windowSize = 30
 	tracker := newOldVersionLastConfirmedTracker(windowSize)
 
-	totalMessages := 100
+	const totalMessages = 100
 	ids := make([]*mock_message.MockMessageID, totalMessages)
 	for i := range ids {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	for i := 0; i < totalMessages; i++ {
-		result := tracker.Track(ids[i])
-		if i < windowSize {
-			// Before window is full, always return the first ID
-			assert.Equal(t, ids[0], result, "before window full, should return first ID at i=%d", i)
-		} else {
-			// After window is full, return the ID from windowSize positions back
-			expected := ids[i-windowSize]
-			assert.Equal(t, expected, result, "should return ID from %d positions back at i=%d", windowSize, i)
-		}
+	for _, id := range ids[:windowSize] {
+		assert.Equal(t, ids[0], tracker.Track(id))
+	}
+
+	expectedIDs := ids[:totalMessages-windowSize]
+	remainingIDs := ids[windowSize:]
+	for len(remainingIDs) > 0 {
+		assert.Equal(t, expectedIDs[0], tracker.Track(remainingIDs[0]))
+		expectedIDs = expectedIDs[1:]
+		remainingIDs = remainingIDs[1:]
 	}
 }

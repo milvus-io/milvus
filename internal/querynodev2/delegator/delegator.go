@@ -376,6 +376,22 @@ func (sd *shardDelegator) Start() {
 	sd.lifetime.SetState(lifetime.Working)
 }
 
+// MarkStreamingUnavailable makes the delegator immediately unserviceable when
+// its DML stream terminates permanently. The leader-view notification lets
+// QueryCoord observe the unavailable channel and schedule a reload instead of
+// leaving a silently stalled tsafe on this QueryNode.
+func (sd *shardDelegator) MarkStreamingUnavailable(err error) {
+	if sd.lifetime.GetState() == lifetime.Stopped {
+		return
+	}
+	ctx := context.TODO()
+	sd.getLogger(ctx).Error(ctx, "streaming data source is unavailable", mlog.Err(err))
+	sd.lifetime.SetState(lifetime.Stopped)
+	sd.tsCond.LockAndBroadcast()
+	sd.tsCond.L.Unlock()
+	sd.notifyLeaderViewUpdated()
+}
+
 // Collection returns delegator collection id.
 func (sd *shardDelegator) Collection() int64 {
 	return sd.collectionID

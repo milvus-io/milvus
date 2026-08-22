@@ -114,7 +114,10 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 
 // Close closes the wal.
 func (w *walImpl) Close() {
-	if w.p != nil {
-		w.p.Close() // close all producer
-	}
+	// The Rocksmq producer's Close destroys the topic. A streaming WAL topic is
+	// also the historical source for readers that may reconnect from a position
+	// before an AlterWAL boundary, so closing one RW WAL instance must not remove
+	// the topic while those readers can still be consuming it. The producer has
+	// no per-instance resources beyond the client owned by openerImpl; the client
+	// is closed when the opener itself is closed.
 }

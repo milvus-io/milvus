@@ -35,6 +35,7 @@ type gracefulCloseFunc func()
 func adaptImplsToROWAL(
 	basicWAL walimpls.WALImpls,
 	cleanup func(),
+	underlyingROWALImplsOpener underlyingROWALImplsOpener,
 ) *roWALAdaptorImpl {
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("wal"),
@@ -44,11 +45,12 @@ func adaptImplsToROWAL(
 	roWAL := &roWALAdaptorImpl{
 		WALRateLimitComponent: rate.NewWALRateLimitComponent(basicWAL.Channel()),
 
-		roWALImpls:      basicWAL,
-		lifetime:        typeutil.NewLifetime(),
-		availableCtx:    ctx,
-		availableCancel: cancel,
-		idAllocator:     typeutil.NewIDAllocator(),
+		roWALImpls:                 basicWAL,
+		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+		lifetime:                   typeutil.NewLifetime(),
+		availableCtx:               ctx,
+		availableCancel:            cancel,
+		idAllocator:                typeutil.NewIDAllocator(),
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
 			idAllocator: typeutil.NewIDAllocator(),
@@ -205,14 +207,31 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
 	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg,
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			// The lock interceptor still holds its lock while this callback is running.
+			// Recheck the fence here so an append that passed the fast-path check
+			// before AlterWAL cannot be persisted after the AlterWAL message.
+			if w.isFenced.Load() {
+				return nil, walimpls.ErrFenced
+			}
+
 			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
 				// do not persist the message if the hint is set.
 				return notPersistHint.MessageID, nil
 			}
+
 			metricsGuard.StartWALImplAppend()
 			msgID, err := w.retryAppendWhenRecoverableError(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
-			return msgID, err
+			if err != nil {
+				return msgID, err
+			}
+
+			if msg.MessageType() == message.MessageTypeAlterWAL {
+				// Fence while the lock interceptor still holds the exclusive lock.
+				w.Logger().Info(ctx, "alter WAL message appended, marking WAL as fenced")
+				w.isFenced.Store(true)
+			}
+			return msgID, nil
 		})
 	metricsGuard.FinishAppend()
 	if err != nil {
@@ -227,13 +246,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		}
 		return nil, err
 	}
-	// Mark WAL as fenced if alter WAL message is appended successfully
-	// This prevents further append operations during WAL switch
 	if msg.MessageType() == message.MessageTypeAlterWAL {
-		w.Logger().Info(ctx, "alter WAL message appended, marking WAL as fenced")
-		w.isFenced.CompareAndSwap(false, true)
 		w.forceCancelAfterGracefulTimeout()
-		w.Logger().Info(ctx, "WAL marked as fenced for WAL switch, all append operations will be rejected")
+		w.Logger().Info(ctx, "alter WAL message appended, WAL marked as fenced, all append operations will be rejected")
 	}
 	w.appendRateCounter.Add(int64(msg.EstimateSize()))
 

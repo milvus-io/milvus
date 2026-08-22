@@ -36,9 +36,10 @@ type (
 )
 
 type StreamConfig struct {
-	VChannel string
-	Pos      *Pos
-	SubPos   SubPos
+	VChannel      string
+	Pos           *Pos
+	SubPos        SubPos
+	OnStreamError func(error)
 }
 
 func NewStreamConfig(vchannel string, pos *Pos, subPos SubPos) *StreamConfig {

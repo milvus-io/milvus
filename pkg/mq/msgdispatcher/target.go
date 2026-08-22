@@ -35,12 +35,14 @@ type target struct {
 	filterSameTimeTick bool
 	latestTimeTick     uint64
 	isLagged           bool
+	onStreamError      func(error)
 
-	closeMu   sync.Mutex
-	closeOnce sync.Once
-	closed    bool
-	maxLag    time.Duration
-	timer     *time.Timer
+	closeMu       sync.Mutex
+	closeOnce     sync.Once
+	streamErrOnce sync.Once
+	closed        bool
+	maxLag        time.Duration
+	timer         *time.Timer
 
 	cancelCh lifetime.SafeChan
 }
@@ -53,6 +55,7 @@ func newTarget(streamConfig *StreamConfig, filterSameTimeTick bool) *target {
 		subPos:             streamConfig.SubPos,
 		pos:                streamConfig.Pos,
 		filterSameTimeTick: filterSameTimeTick,
+		onStreamError:      streamConfig.OnStreamError,
 		latestTimeTick:     0,
 		cancelCh:           lifetime.NewSafeChan(),
 		maxLag:             maxTolerantLag,
@@ -60,6 +63,14 @@ func newTarget(streamConfig *StreamConfig, filterSameTimeTick bool) *target {
 	}
 	t.closed = false
 	return t
+}
+
+func (t *target) notifyStreamError(err error) {
+	t.streamErrOnce.Do(func() {
+		if t.onStreamError != nil {
+			t.onStreamError(err)
+		}
+	})
 }
 
 func (t *target) close() {
