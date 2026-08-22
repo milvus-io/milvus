@@ -41,20 +41,28 @@ def _minio_address(minio_host):
     return address
 
 
+def _minio_secure(minio_host):
+    return str(minio_host or "").startswith("https://")
+
+
 def get_minio_config(minio_host=None, minio_bucket=None):
+    address = _minio_address(minio_host)
+    external_source_host = os.getenv("MILVUS_EXTERNAL_SOURCE_MINIO_HOST")
     return {
-        "address": _minio_address(minio_host),
+        "address": address,
+        "external_source_address": _minio_address(external_source_host or address),
         "access_key": "minioadmin",
         "secret_key": "minioadmin",
         "bucket": minio_bucket or cf.param_info.param_bucket_name or "milvus-bucket",
-        "secure": str(minio_host or "").startswith("https://"),
+        "secure": _minio_secure(minio_host),
+        "external_source_secure": _minio_secure(external_source_host) if external_source_host else _minio_secure(minio_host),
     }
 
 
 def build_external_source(cfg, key_prefix):
     """Build a full s3:// URL that Milvus's extfs resolver can use directly."""
     # Trailing slash matters: refresh lists objects under the prefix.
-    return f"s3://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
+    return f"s3://{cfg.get('external_source_address', cfg['address'])}/{cfg['bucket']}/{key_prefix}/"
 
 
 def _minio_endpoint_url(cfg):
@@ -78,7 +86,7 @@ def build_external_spec(cfg=None, fmt="parquet", cloud_provider="minio", **extra
             "region": "us-east-1",
             "access_key_id": cfg["access_key"],
             "access_key_value": cfg["secret_key"],
-            "use_ssl": "true" if cfg["secure"] else "false",
+            "use_ssl": "true" if cfg.get("external_source_secure", cfg["secure"]) else "false",
         },
     }
     spec.update(extra)
