@@ -531,6 +531,12 @@ func mapObjectStorageError(fileName string, err error) error {
 		return err
 	}
 
+	// Preserve context termination so callers can stop retries and classify
+	// canceled operations correctly.
+	if merr.IsCanceledOrTimeout(err) {
+		return err
+	}
+
 	switch err := err.(type) {
 	case *azcore.ResponseError:
 		switch err.ErrorCode {

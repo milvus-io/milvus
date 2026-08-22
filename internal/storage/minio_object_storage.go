@@ -109,7 +109,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 	for object := range in {
 		if object.Err != nil {
-			return object.Err
+			return mapObjectStorageError(prefix, object.Err)
 		}
 		if !walkFunc(&ChunkObjectInfo{FilePath: object.Key, ModifyTime: object.LastModified}) {
 			return nil
