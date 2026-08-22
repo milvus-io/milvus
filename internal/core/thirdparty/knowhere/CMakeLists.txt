@@ -14,7 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION v2.6.18 )
+# Includes zilliztech/knowhere#1764, which fixes COSINE/IP CalcDistByIDs
+# when all requested DiskANN vectors are cached on the 2.6 branch.
+set( KNOWHERE_VERSION 845a1d70 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
