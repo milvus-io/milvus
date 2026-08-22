@@ -260,7 +260,234 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
 	}).Return()
 
-	assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
+	assert.NoError(t, inspector.createIndexForSegment(ctx, meta.GetCollection(segment.CollectionID), segment, 5))
+}
+
+func TestIndexInspector_ReloadFromMetaUsesCachedCollection(t *testing.T) {
+	// Recovery reads the collection from the local meta cache only: when the
+	// cache already holds the collection, recovered tasks get the per column
+	// estimate without going through the handler (rootcoord).
+	const (
+		collID    = UniqueID(2)
+		vecField  = UniqueID(101)
+		numRows   = int64(3000)
+		groupSize = int64(2 * 1024 * 1024 * 1024)
+	)
+
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	// no GetCollection expectation: any handler resolution fails the test
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+		3: {
+			CollectionID: collID,
+			FieldID:      vecField,
+			IndexID:      3,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			},
+		},
+	}
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+	m.collections.Insert(collID, &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				{
+					FieldID:       vecField,
+					Name:          "vec",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		},
+	})
+
+	for _, segmentID := range []UniqueID{1, 2} {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segmentID,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     0,
+						ChildFields: []int64{100, vecField},
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: groupSize},
+						},
+					},
+				},
+			},
+		}
+		m.segments.SetSegment(segmentID, segment)
+		err := m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			CollectionID: collID,
+			SegmentID:    segmentID,
+			IndexID:      3,
+			BuildID:      100 + segmentID,
+			NumRows:      numRows,
+			IndexState:   commonpb.IndexState_Unissued,
+		})
+		assert.NoError(t, err)
+	}
+
+	slots := make([]int64, 0, 2)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		slots = append(slots, t.GetTaskSlot())
+	}).Return()
+
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+	inspector.reloadFromMeta()
+
+	assert.Len(t, slots, 2)
+	indexParams := m.indexMeta.indexes[collID][3].IndexParams
+	expected := calculateIndexTaskSlot(int64(128*4)*numRows, numRows, indexParams)
+	for _, slot := range slots {
+		assert.Equal(t, expected, slot)
+		assert.Less(t, slot, calculateIndexTaskSlot(groupSize, numRows, indexParams))
+	}
+}
+
+func TestIndexInspector_ReloadFromMetaNeverResolvesThroughHandler(t *testing.T) {
+	// Recovery runs synchronously in Start(), so it must never load a
+	// collection through the handler (rootcoord): a StorageV2 segment keeps the
+	// whole binlog size, and a projection-capable segment whose collection is
+	// not cached yet falls back to the conservative group size.
+	const (
+		collID    = UniqueID(2)
+		vecField  = UniqueID(101)
+		numRows   = int64(3000)
+		fieldSize = int64(600 * 1024 * 1024)
+	)
+
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	// no GetCollection expectation: any resolution attempt fails the test
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+		3: {
+			CollectionID: collID,
+			FieldID:      vecField,
+			IndexID:      3,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			},
+		},
+	}
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+	// segment 1 is StorageV2, segment 2 is projection-capable but its
+	// collection is not cached: both must keep the conservative binlog size
+	// without any handler lookup.
+	segments := []*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: vecField,
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: fieldSize},
+						},
+					},
+				},
+			},
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             2,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     0,
+						ChildFields: []int64{100, vecField},
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: fieldSize},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, segment := range segments {
+		m.segments.SetSegment(segment.GetID(), segment)
+		err := m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			CollectionID: collID,
+			SegmentID:    segment.GetID(),
+			IndexID:      3,
+			BuildID:      100 + segment.GetID(),
+			NumRows:      numRows,
+			IndexState:   commonpb.IndexState_Unissued,
+		})
+		assert.NoError(t, err)
+	}
+
+	slots := make([]int64, 0, 2)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		slots = append(slots, t.GetTaskSlot())
+	}).Return()
+
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+	inspector.reloadFromMeta()
+
+	assert.Len(t, slots, 2)
+	indexParams := m.indexMeta.indexes[collID][3].IndexParams
+	for _, slot := range slots {
+		assert.Equal(t, calculateIndexTaskSlot(fieldSize, numRows, indexParams), slot)
+	}
 }
 
 func TestIndexInspector_isExternalCollection(t *testing.T) {
@@ -284,6 +511,10 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	}
 
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
+			return m.GetCollection(collectionID), nil
+		}).Maybe()
 
 	t.Run("collection not found", func(t *testing.T) {
 		assert.False(t, inspector.isExternalCollection(999))
@@ -354,6 +585,10 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	}
 
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
+			return m.GetCollection(collectionID), nil
+		}).Maybe()
 
 	t.Run("normal unsorted segment is skipped", func(t *testing.T) {
 		m.collections.Insert(2, &collectionInfo{
@@ -473,7 +708,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 
-	err := inspector.createIndexForSegment(ctx, segment, 5)
+	err := inspector.createIndexForSegment(ctx, meta.GetCollection(segment.CollectionID), segment, 5)
 	assert.NoError(t, err)
 
 	segIndexes := meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
@@ -735,4 +970,259 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(14))
 	})
+}
+
+func TestIndexInspector_estimateIndexFieldSize(t *testing.T) {
+	const (
+		collID   = UniqueID(2)
+		vecField = UniqueID(101)
+		numRows  = int64(3000)
+		// The synthetic column group of an external segment covers every
+		// column at once, so it is much larger than the indexed field alone.
+		groupSize = int64(2 * 1024 * 1024 * 1024)
+	)
+
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
+			return m.GetCollection(collectionID), nil
+		}).Maybe()
+
+	externalSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+			{
+				FieldID:       vecField,
+				Name:          "vec",
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vec_col",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+	// An external segment carries a single fake column group listing every
+	// field in ChildFields, so getFieldBinlogSize reports the whole segment.
+	externalSegment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   collID,
+			NumOfRows:      numRows,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "manifest.json",
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID:     0,
+					ChildFields: []int64{100, vecField},
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: numRows, MemorySize: groupSize},
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("collection not found falls back to binlog size", func(t *testing.T) {
+		assert.Equal(t, groupSize, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, vecField))
+	})
+
+	t.Run("shared column group is attributed per field", func(t *testing.T) {
+		// a normal storage v3 segment sharing one column group behaves the
+		// same way: only the indexed column is read out of the group
+		m.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+					{
+						FieldID:  vecField,
+						Name:     "vec",
+						DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+		})
+		assert.Equal(t, int64(128*4)*numRows, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, vecField))
+	})
+
+	t.Run("single field column group keeps the measured size", func(t *testing.T) {
+		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             2,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: vecField,
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: groupSize},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, groupSize, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), segment, vecField))
+	})
+
+	t.Run("storage v2 shared group falls back to the group size", func(t *testing.T) {
+		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             3,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     0,
+						ChildFields: []int64{100, vecField},
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: groupSize},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, groupSize, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), segment, vecField))
+	})
+
+	t.Run("external collection estimates from schema", func(t *testing.T) {
+		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
+		assert.Equal(t, int64(128*4)*numRows, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, vecField))
+	})
+
+	t.Run("external collection falls back on unknown field", func(t *testing.T) {
+		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
+		assert.Equal(t, groupSize, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, 999))
+	})
+}
+
+func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
+	paramtable.Init()
+
+	const (
+		collID   = UniqueID(2)
+		vecField = UniqueID(101)
+		indexID  = UniqueID(5)
+		numRows  = int64(3000)
+		// 2GB column group: the whole-segment size would ask for
+		// (2GB / 512MB) * indexTaskSlotUsage slots.
+		groupSize = int64(2 * 1024 * 1024 * 1024)
+	)
+
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+		indexID: {
+			CollectionID: collID,
+			FieldID:      vecField,
+			IndexID:      indexID,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			},
+		},
+	}
+	m.collections.Insert(collID, &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				{
+					FieldID:       vecField,
+					Name:          "vec",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		},
+	})
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   collID,
+			PartitionID:    3,
+			NumOfRows:      numRows,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "manifest.json",
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID:     0,
+					ChildFields: []int64{100, vecField},
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: numRows, MemorySize: groupSize},
+					},
+				},
+			},
+		},
+	}
+	m.segments.SetSegment(segment.GetID(), segment)
+
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+
+	var enqueuedSlot int64
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		enqueuedSlot = t.GetTaskSlot()
+	}).Return()
+
+	err := inspector.createIndexForSegment(ctx, m.GetCollection(collID), segment, indexID)
+	assert.NoError(t, err)
+
+	// 128 dim float vector over 3000 rows is ~1.5MB, the smallest slot bucket,
+	// instead of the whole 2GB column group.
+	indexParams := m.indexMeta.indexes[collID][indexID].IndexParams
+	expected := calculateIndexTaskSlot(int64(128*4)*numRows, numRows, indexParams)
+	assert.Equal(t, expected, enqueuedSlot)
+	assert.Less(t, enqueuedSlot, calculateIndexTaskSlot(groupSize, numRows, indexParams))
 }
