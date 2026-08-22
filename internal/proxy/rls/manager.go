@@ -18,13 +18,15 @@ package rls
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -37,7 +39,7 @@ type UniqueID = typeutil.UniqueID
 type policySnapshot struct {
 	Version     int64
 	RefreshedAt time.Time
-	Policies    []*rootcoordpb.RLSPolicyInfo
+	Policies    []*rlsutil.RowPolicy
 }
 
 type principalTagsSnapshot struct {
@@ -48,10 +50,36 @@ type principalTagsSnapshot struct {
 
 type SnapshotVersionAllocator func(ctx context.Context) (uint64, error)
 
-type SnapshotManager interface {
+type Manager interface {
 	Init(ctx context.Context, coord CoordClient, allocVersion SnapshotVersionAllocator) error
 	RefreshPolicySnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error
 	RefreshPrincipalTagsSnapshot(ctx context.Context, coord CoordClient, dbName string, collectionName string, collectionID UniqueID, version uint64) error
+
+	GetRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs) (*planpb.Expr, error)
+	ApplyRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs, plan *planpb.PlanNode) error
+	GetRLSCheckPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs) (*planpb.Expr, error)
+}
+
+type exprKind int
+
+const (
+	usingExprKind exprKind = iota
+	checkExprKind
+)
+
+type compiledKey struct {
+	action rlsutil.PolicyAction
+	kind   exprKind
+}
+
+type compiledCacheEntry struct {
+	schemaVersion int32
+	timezone      string
+	expression    *compiledExpression
+}
+
+func (entry *compiledCacheEntry) matchesSchemaContext(schemaVersion int32, timezone string) bool {
+	return entry != nil && entry.schemaVersion == schemaVersion && entry.timezone == timezone
 }
 
 type collectionState struct {
@@ -60,8 +88,9 @@ type collectionState struct {
 	principalTagVersion               int64
 	policyLastSuccessfulRefresh       time.Time
 	principalTagLastSuccessfulRefresh time.Time
-	policies                          map[string]*rootcoordpb.RLSPolicyInfo
+	policies                          map[string]*rlsutil.RowPolicy
 	principalTags                     map[string]map[string]string
+	compiled                          map[compiledKey]*compiledCacheEntry
 }
 
 type collectionKey struct {
@@ -74,13 +103,14 @@ type manager struct {
 	dependencyMu      sync.RWMutex
 	coord             CoordClient
 	allocVersion      SnapshotVersionAllocator
+	validateFreshness bool
 	metadataRefreshes conc.Singleflight[struct{}]
 	refreshLocks      *lock.KeyLock[UniqueID]
 }
 
 var defaultManager = newManager()
 
-func DefaultManager() SnapshotManager {
+func DefaultManager() Manager {
 	return defaultManager
 }
 
@@ -100,17 +130,25 @@ func (m *manager) configure(coord CoordClient, allocVersion SnapshotVersionAlloc
 	defer m.dependencyMu.Unlock()
 	m.coord = coord
 	m.allocVersion = allocVersion
+	m.validateFreshness = true
 }
 
-func (m *manager) refreshDependencies() (CoordClient, SnapshotVersionAllocator) {
+func (m *manager) refreshDependencies() (CoordClient, SnapshotVersionAllocator, bool) {
 	m.dependencyMu.RLock()
 	defer m.dependencyMu.RUnlock()
-	return m.coord, m.allocVersion
+	return m.coord, m.allocVersion, m.validateFreshness
 }
 
 func (m *manager) ensureFreshMetadata(ctx context.Context, collectionID UniqueID) error {
 	if m == nil || collectionID == 0 {
 		return merr.WrapErrServiceInternalMsg("failed to validate RLS metadata freshness with invalid manager or collection id")
+	}
+	coord, allocVersion, validateFreshness := m.refreshDependencies()
+	if !validateFreshness {
+		return nil
+	}
+	if coord == nil || allocVersion == nil {
+		return merr.WrapErrServiceInternalMsg("failed to refresh RLS metadata without required dependencies")
 	}
 	refreshTTL := paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.GetAsDuration(time.Second)
 	if refreshTTL <= 0 {
@@ -126,8 +164,8 @@ func (m *manager) ensureFreshMetadata(ctx context.Context, collectionID UniqueID
 		if policyDue, principalTagsDue := m.snapshotRefreshDue(collectionID, refreshTTL, time.Now()); !policyDue && !principalTagsDue {
 			return struct{}{}, nil
 		}
-		coord, allocVersion := m.refreshDependencies()
-		if coord == nil || allocVersion == nil {
+		coord, allocVersion, validateFreshness := m.refreshDependencies()
+		if !validateFreshness || coord == nil || allocVersion == nil {
 			return struct{}{}, merr.WrapErrServiceInternalMsg("failed to refresh RLS metadata without required dependencies")
 		}
 		version, err := allocVersion(ctx)
@@ -175,12 +213,13 @@ func (state *collectionState) setRLSPolicySnapshot(snapshot policySnapshot) bool
 	}
 	state.policyVersion = snapshot.Version
 	state.policyLastSuccessfulRefresh = snapshot.RefreshedAt
-	state.policies = map[string]*rootcoordpb.RLSPolicyInfo{}
+	state.policies = map[string]*rlsutil.RowPolicy{}
+	state.compiled = map[compiledKey]*compiledCacheEntry{}
 	for _, policy := range snapshot.Policies {
 		if policy == nil || policy.GetPolicyName() == "" {
 			continue
 		}
-		state.policies[policy.GetPolicyName()] = proto.Clone(policy).(*rootcoordpb.RLSPolicyInfo)
+		state.policies[policy.GetPolicyName()] = cloneRowPolicy(policy)
 	}
 	return true
 }
@@ -216,7 +255,7 @@ func (state *collectionState) setRLSPrincipalTagsSnapshot(snapshot principalTags
 	return true
 }
 
-func (m *manager) removeCollection(_ context.Context, collectionID UniqueID) {
+func (m *manager) removeCollection(ctx context.Context, collectionID UniqueID) {
 	if m == nil || collectionID == 0 {
 		return
 	}
@@ -228,10 +267,190 @@ func (m *manager) removeCollection(_ context.Context, collectionID UniqueID) {
 	delete(m.collections, newCollectionKey(collectionID))
 }
 
+func (m *manager) GetRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs) (*planpb.Expr, error) {
+	return m.getRLSPredicate(ctx, collectionID, principalName, action, enforceRLS, usingExprKind, schemaHelper, visitorArgs, func(policy *rlsutil.RowPolicy) string {
+		return policy.GetUsingExpr()
+	})
+}
+
+func (m *manager) ApplyRLSUsingPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs, plan *planpb.PlanNode) error {
+	predicate, err := m.GetRLSUsingPredicate(ctx, collectionID, principalName, action, enforceRLS, schemaHelper, visitorArgs)
+	if err != nil {
+		return err
+	}
+	return MergePredicateToPlan(plan, predicate)
+}
+
+func (m *manager) GetRLSCheckPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs) (*planpb.Expr, error) {
+	return m.getRLSPredicate(ctx, collectionID, principalName, action, enforceRLS, checkExprKind, schemaHelper, visitorArgs, func(policy *rlsutil.RowPolicy) string {
+		return policy.GetCheckExpr()
+	})
+}
+
+func (m *manager) getRLSPredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, enforceRLS bool, kind exprKind, schemaHelper *typeutil.SchemaHelper, visitorArgs *planparserv2.ParserVisitorArgs, exprSelector func(*rlsutil.RowPolicy) string) (*planpb.Expr, error) {
+	if !enforceRLS {
+		return nil, nil
+	}
+	if m == nil || collectionID == 0 {
+		return nil, denyNoApplicableRLSPolicy(action, kind)
+	}
+	if err := m.ensureFreshMetadata(ctx, collectionID); err != nil {
+		return nil, merr.Wrapf(err, "failed to validate RLS metadata for collection %d", collectionID)
+	}
+
+	state := m.getCollectionState(newCollectionKey(collectionID))
+	if state == nil {
+		return nil, denyNoApplicableRLSPolicy(action, kind)
+	}
+	compiledExpr, tags, err := state.getCompiledExprAndTags(principalName, action, kind, schemaHelper, visitorArgs, exprSelector)
+	if err != nil || compiledExpr == nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, denyNoApplicableRLSPolicy(action, kind)
+	}
+
+	expr, err := compiledExpr.Instantiate(principalName, tags)
+	if err != nil {
+		return nil, err
+	}
+	if expr == nil {
+		return nil, denyNoApplicableRLSPolicy(action, kind)
+	}
+	if isAlwaysTrueExpr(expr) {
+		return nil, nil
+	}
+	return expr, nil
+}
+
+func denyNoApplicableRLSPolicy(action rlsutil.PolicyAction, kind exprKind) error {
+	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: no applicable %s policies", rlsActionOperation(action), kind.policyLabel())
+}
+
+func (kind exprKind) policyLabel() string {
+	switch kind {
+	case checkExprKind:
+		return "check"
+	default:
+		return "using"
+	}
+}
+
+func rlsActionOperation(action rlsutil.PolicyAction) string {
+	switch action {
+	case rlsutil.PolicyActionQuery:
+		return "query"
+	case rlsutil.PolicyActionQueryIterator:
+		return "query iterator"
+	case rlsutil.PolicyActionSearch:
+		return "search"
+	case rlsutil.PolicyActionSearchIterator:
+		return "search iterator"
+	case rlsutil.PolicyActionHybridSearch:
+		return "hybrid search"
+	case rlsutil.PolicyActionDelete:
+		return "delete"
+	case rlsutil.PolicyActionInsert:
+		return "insert"
+	case rlsutil.PolicyActionUpsert:
+		return "upsert"
+	default:
+		return "unknown"
+	}
+}
+
+func orderedPolicies(policiesByName map[string]*rlsutil.RowPolicy) []*rlsutil.RowPolicy {
+	names := make([]string, 0, len(policiesByName))
+	for name := range policiesByName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	policies := make([]*rlsutil.RowPolicy, 0, len(names))
+	for _, name := range names {
+		policies = append(policies, policiesByName[name])
+	}
+	return policies
+}
+
+func (state *collectionState) getCompiledExprAndTags(principalName string, action rlsutil.PolicyAction, kind exprKind, schemaHelper *typeutil.SchemaHelper, _ *planparserv2.ParserVisitorArgs, exprSelector func(*rlsutil.RowPolicy) string) (*compiledExpression, map[string]string, error) {
+	key := compiledKey{
+		action: action,
+		kind:   kind,
+	}
+	var schemaVersion int32
+	var timezone string
+	if schemaHelper != nil {
+		schemaVersion = schemaHelper.GetVersion()
+		timezone = schemaHelper.GetTimezone()
+	}
+
+	state.mu.RLock()
+	if len(state.policies) == 0 {
+		state.mu.RUnlock()
+		return nil, nil, nil
+	}
+	if entry, ok := state.compiled[key]; ok && entry.matchesSchemaContext(schemaVersion, timezone) {
+		tags := state.principalTags[principalName]
+		state.mu.RUnlock()
+		return entry.expression, tags, nil
+	}
+	state.mu.RUnlock()
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.policies) == 0 {
+		return nil, nil, nil
+	}
+
+	if state.compiled == nil {
+		state.compiled = map[compiledKey]*compiledCacheEntry{}
+	}
+	if entry, ok := state.compiled[key]; ok && entry.matchesSchemaContext(schemaVersion, timezone) {
+		return entry.expression, state.principalTags[principalName], nil
+	}
+
+	policies := orderedPolicies(state.policies)
+	templates, combinedExpr := preparePolicyExprTemplates(policies, action, exprSelector)
+	if maxExpressionLength := paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt(); len(combinedExpr) > maxExpressionLength {
+		return nil, nil, merr.WrapErrServiceQuotaExceededMsg("RLS combined expression exceeds max length %d", maxExpressionLength)
+	}
+	var policyVisitorArgs *planparserv2.ParserVisitorArgs
+	if schemaHelper != nil {
+		policyVisitorArgs = &planparserv2.ParserVisitorArgs{Timezone: timezone}
+	}
+	compiledExpr, err := compileExprTemplates(schemaHelper, templates, policyVisitorArgs)
+	if err != nil {
+		return nil, nil, err
+	}
+	state.compiled[key] = &compiledCacheEntry{
+		schemaVersion: schemaVersion,
+		timezone:      timezone,
+		expression:    compiledExpr,
+	}
+	return compiledExpr, state.principalTags[principalName], nil
+}
+
 func newCollectionState() *collectionState {
 	return &collectionState{
-		policies:      map[string]*rootcoordpb.RLSPolicyInfo{},
+		policies:      map[string]*rlsutil.RowPolicy{},
 		principalTags: map[string]map[string]string{},
+		compiled:      map[compiledKey]*compiledCacheEntry{},
+	}
+}
+
+func cloneRowPolicy(policy *rlsutil.RowPolicy) *rlsutil.RowPolicy {
+	if policy == nil {
+		return nil
+	}
+	return &rlsutil.RowPolicy{
+		PolicyName:  policy.PolicyName,
+		PolicyType:  policy.PolicyType,
+		Actions:     slices.Clone(policy.Actions),
+		UsingExpr:   policy.UsingExpr,
+		CheckExpr:   policy.CheckExpr,
+		Description: policy.Description,
+		PolicyId:    policy.PolicyId,
 	}
 }
 
