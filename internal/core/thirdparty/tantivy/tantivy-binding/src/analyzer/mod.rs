@@ -1,5 +1,6 @@
 mod analyzer;
 mod build_in_analyzer;
+pub(crate) mod char_filter;
 mod dict;
 mod filter;
 
