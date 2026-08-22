@@ -17,9 +17,10 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 
 #include "common/JsonCastType.h"
 #include "common/Types.h"
@@ -65,7 +66,8 @@ class IndexFactory {
                       const std::map<std::string, std::string>& index_params,
                       bool mmap_enable,
                       int64_t num_rows,
-                      int64_t dim);
+                      int64_t dim,
+                      std::optional<bool> field_nullable = std::nullopt);
 
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
@@ -83,7 +85,18 @@ class IndexFactory {
         IndexVersion index_version,
         uint64_t index_size_in_bytes,
         const std::map<std::string, std::string>& index_params,
-        bool mmap_enable);
+        bool mmap_enable,
+        int64_t num_rows);
+
+    LoadResourceRequest
+    ScalarIndexLoadResource(
+        DataType field_type,
+        IndexVersion index_version,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        bool field_nullable);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
@@ -144,6 +157,16 @@ class IndexFactory {
     // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
     FRIEND_TEST(StringIndexMarisaTest, Reverse);
+
+    LoadResourceRequest
+    ScalarIndexLoadResourceImpl(
+        DataType field_type,
+        IndexVersion index_version,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        std::optional<bool> field_nullable);
 
     template <typename T>
     ScalarIndexPtr<T>

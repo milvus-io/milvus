@@ -15,11 +15,14 @@
 #include <stdint.h>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <roaring/roaring.hh>
 
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
@@ -30,6 +33,7 @@
 #include "common/protobuf_utils.h"
 #include "fmt/core.h"
 #include "index/IndexStats.h"
+#include "index/InvertedIndexUtil.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "pb/plan.pb.h"
@@ -216,8 +220,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         // Tantivy index size
         total += wrapper_->index_size_bytes();
 
-        // null_offset_: vector<size_t>
-        total += null_offset_.capacity() * sizeof(size_t);
+        total += RoaringMemoryBytes(null_offsets_);
 
         this->cached_byte_size_ = total;
     }
@@ -318,6 +321,20 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual void
     RetainTantivyIndexFiles(std::vector<std::string>& index_files);
 
+    void
+    AddNullOffset(size_t offset) {
+        AssertInfo(offset <= std::numeric_limits<uint32_t>::max(),
+                   "row offset {} exceeds uint32 range",
+                   offset);
+        null_offsets_.add(static_cast<uint32_t>(offset));
+    }
+
+    void
+    OptimizeNullOffsets() {
+        null_offsets_.runOptimize();
+        null_offsets_.shrinkToFit();
+    }
+
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
@@ -334,9 +351,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     DiskFileManagerPtr disk_file_manager_;
 
     folly::SharedMutexWritePriority mutex_{};
-    // all data need to be built to align the offset
-    // so need to store null_offset_ in inverted index additionally
-    std::vector<size_t> null_offset_{};
+    // Tantivy does not retain null rows, so keep their row ids separately.
+    // CRoaring adapts each container between sparse arrays, dense bitmaps and
+    // runs, avoiding the 8-byte-per-row overhead of std::vector<size_t>.
+    roaring::Roaring null_offsets_{};
 
     // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
     //

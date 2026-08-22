@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
@@ -96,7 +97,8 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_load_info_.dim);
+            index_load_info_.dim,
+            file_manager_context_.fieldDataMeta.field_schema.nullable());
     // this is an estimation, error could be up to 20%.
     return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
                                                 request.final_disk_cost),
@@ -127,7 +129,8 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_load_info_.dim);
+            index_load_info_.dim,
+            file_manager_context_.fieldDataMeta.field_schema.nullable());
     index->SetCellSize(milvus::cachinglayer::ResourceUsage(
         request.final_memory_cost, request.final_disk_cost));
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
@@ -149,6 +152,11 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     } else {
         config_[milvus::index::ENABLE_MMAP] = "false";
     }
+
+    // Plumb the segment row count into the load config so JSON typed-path
+    // indexes size their exists bitmap from the true row domain (tantivy
+    // Count() only covers non-null rows).
+    config_[INDEX_NUM_ROWS_KEY] = index_load_info_.num_rows;
 
     // Check for cancellation before loading index data
     CheckCancellation(ctx, segment_id, "LoadIndex");
