@@ -38,11 +38,16 @@ func TestFilterCompactionFieldBinlogsKeepsChildFieldMatch(t *testing.T) {
 	require.Equal(t, []int64{102, 103}, filtered[0].GetChildFields())
 }
 
-func TestCompactionReadSchemaFiltersMissingScalarAndStructChildren(t *testing.T) {
+func TestCompactionReadSchemaKeepsAbsentOrdinaryDropsMissingFunctionOutputs(t *testing.T) {
+	// Absent ordinary fields (scalars and struct children) stay in the read
+	// schema — the reader layer fills them. Only function outputs missing from
+	// storage are dropped: they are computed by the RecordMaterializer.
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "missing", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "sparse_missing", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{FieldID: 103, Name: "sparse_present", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{
 			{
@@ -63,14 +68,20 @@ func TestCompactionReadSchemaFiltersMissingScalarAndStructChildren(t *testing.T)
 		},
 	}
 
-	readSchema := compactionReadSchema(schema, map[int64]struct{}{100: {}, 201: {}})
+	fieldIDs := func(fields []*schemapb.FieldSchema) []int64 {
+		ids := make([]int64, 0, len(fields))
+		for _, field := range fields {
+			ids = append(ids, field.GetFieldID())
+		}
+		return ids
+	}
+
+	readSchema := compactionReadSchema(schema, map[int64]struct{}{100: {}, 201: {}, 103: {}})
 	require.NotNil(t, readSchema)
-	require.Len(t, readSchema.GetFields(), 1)
-	require.EqualValues(t, 100, readSchema.GetFields()[0].GetFieldID())
-	require.Len(t, readSchema.GetStructArrayFields(), 1)
-	require.EqualValues(t, 200, readSchema.GetStructArrayFields()[0].GetFieldID())
-	require.Len(t, readSchema.GetStructArrayFields()[0].GetFields(), 1)
-	require.EqualValues(t, 201, readSchema.GetStructArrayFields()[0].GetFields()[0].GetFieldID())
+	require.ElementsMatch(t, []int64{100, 101, 103}, fieldIDs(readSchema.GetFields()))
+	require.Len(t, readSchema.GetStructArrayFields(), 2)
+	require.ElementsMatch(t, []int64{201, 202}, fieldIDs(readSchema.GetStructArrayFields()[0].GetFields()))
+	require.ElementsMatch(t, []int64{301}, fieldIDs(readSchema.GetStructArrayFields()[1].GetFields()))
 }
 
 func TestCompactionReadSchemaNilSchema(t *testing.T) {

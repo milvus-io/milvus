@@ -2278,14 +2278,12 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(5, got.GetInsertBinlogCount())
 	})
 
-	suite.Run("in-place result leaves Binlogs untouched and applies the stats increment once", func() {
-		// V3 in-place adoption must NOT merge the result's InsertLogs into
-		// SegmentInfo.Binlogs: a partially populated in-memory array defeats
-		// QueryNode's memory estimation, which returns early on any non-empty
-		// BinlogPaths instead of falling through to the complete
-		// Stats.LoadResource summary. Binlogs stay as-is (matching persistence,
-		// where kv_catalog resets the array for V3), and replaying the result
-		// must not re-apply the manifest-gated statistics delta.
+	suite.Run("in-place result atomically merges ordinary and function-output column groups", func() {
+		// The compactor ships only the groups this run wrote, so the receiver
+		// must upsert them: the live Binlogs keeps the complete column set and
+		// a not-yet-restarted QueryNode estimate stays correct. Replaying the
+		// result must neither duplicate the new groups nor re-apply the
+		// manifest-gated statistics delta.
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2339,25 +2337,29 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
-		// Binlogs stay exactly as they were: only the pre-existing group, no
-		// appended-column upsert (the estimator contract above).
-		suite.ElementsMatch([]int64{0},
+		// The pre-existing group survives and both newly appended groups are
+		// visible through the same adopted manifest.
+		suite.ElementsMatch([]int64{0, 101, 102},
 			lo.Map(infos[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
-		suite.ElementsMatch([]int64{0, 1, 100}, infos[0].GetBinlogs()[0].GetChildFields(),
-			"the pre-existing group keeps its fields")
+		for _, fb := range infos[0].GetBinlogs() {
+			if fb.GetFieldID() == 0 {
+				suite.ElementsMatch([]int64{0, 1, 100}, fb.GetChildFields(),
+					"no child collision, so the pre-existing group keeps its fields")
+			}
+		}
 		firstStats := infos[0].GetStats()
 		suite.EqualValues(1792, firstStats.GetInsertBinlogSize())
 		suite.EqualValues(3, firstStats.GetInsertBinlogCount())
 		suite.Equal(map[int64]int64{100: 0, 101: 5, 102: 0}, firstStats.GetNullCounts())
 
 		// Replay: the segment now sits at resultManifest, so this is the
-		// idempotent-adoption branch. Binlogs stay untouched and the
-		// manifest-gated increment must not be accumulated twice.
+		// idempotent-adoption branch. The merge must not duplicate either new
+		// group, and the manifest-gated increment must not be accumulated twice.
 		replayed, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(replayed, 1)
-		suite.Require().Len(replayed[0].GetBinlogs(), 1)
-		suite.ElementsMatch([]int64{0},
+		suite.Require().Len(replayed[0].GetBinlogs(), 3)
+		suite.ElementsMatch([]int64{0, 101, 102},
 			lo.Map(replayed[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
 		replayedStats := replayed[0].GetStats()
 		suite.EqualValues(1792, replayedStats.GetInsertBinlogSize())
@@ -2365,13 +2367,11 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Equal(map[int64]int64{100: 0, 101: 5, 102: 0}, replayedStats.GetNullCounts())
 	})
 
-	suite.Run("index eligibility does not depend on Binlogs population", func() {
-		// Regression pin for the estimator contract: adoption must NOT land the
-		// materialized column group in SegmentInfo.Binlogs (QueryNode estimation
-		// falls through to Stats.LoadResource only when Binlogs is untouched),
-		// and the index-eligibility gate must still admit the materialized
-		// function-output field — it is gated by the schema-version advance,
-		// not by Binlogs membership; the index worker reads the manifest.
+	suite.Run("materialized column group is visible on the live segment", func() {
+		// Regression pin: the merged column group keeps the live Binlogs
+		// complete (pre-restart QueryNode estimation reads it), while index
+		// eligibility is gated by the schema-version advance — the inspector
+		// does not read Binlogs and the build worker reads the manifest.
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2413,7 +2413,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				fields[childFieldID] = struct{}{}
 			}
 		}
-		suite.NotContains(fields, int64(102), "materialized group must NOT be merged into Binlogs (estimator contract)")
+		suite.Contains(fields, int64(102), "materialized function-output field must be visible on live Binlogs")
 		suite.Contains(fields, int64(100), "pre-existing fields keep their data")
 
 		handler := NewNMockHandler(suite.T())

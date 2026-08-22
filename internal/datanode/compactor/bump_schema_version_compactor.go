@@ -518,6 +518,19 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 		}
 	}
 
+	// Absent ordinary fields (including absent function inputs) enter the read
+	// schema so the reader fills them per its contract; the writer then takes
+	// the appended columns straight from the read record, and functions see
+	// target-schema values for their inputs.
+	for _, field := range diff.absentOrdinaryFields {
+		fieldID := field.GetFieldID()
+		if _, ok := seen[fieldID]; ok {
+			continue
+		}
+		seen[fieldID] = struct{}{}
+		readFields = append(readFields, field)
+	}
+
 	schema := t.plan.GetSchema()
 	return &schemapb.CollectionSchema{
 		Name:               schema.GetName(),

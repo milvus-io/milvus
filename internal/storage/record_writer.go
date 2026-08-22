@@ -36,6 +36,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// toWriterRecord returns r as an arrow.Record projected onto the writer's own
+// schema, plus a release func the caller must defer. The fast path (returning
+// the backing arrow record untouched) is taken only when r is a
+// simpleArrowRecord whose schema already equals the writer's; otherwise the
+// writer's columns are selected by field ID, narrowing an over-wide record
+// (e.g. the additive schema-bump reader record carrying a row-anchor column in
+// addition to the appended field) to exactly the writer's column set. Passing
+// such an over-wide record straight to the FFI writer misaligns column count
+// against the writer's manifest and crashes loon_writer_write.
+func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) (arrow.Record, func()) {
+	if sar, ok := r.(*simpleArrowRecord); ok && sar.r.Schema().Equal(arrowSchema) {
+		return sar.r, func() {}
+	}
+	// Include struct sub-fields, matching the writer's arrow schema layout.
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	arrays := make([]arrow.Array, len(allFields))
+	for i, field := range allFields {
+		arrays[i] = r.Column(field.GetFieldID())
+	}
+	rec := array.NewRecord(arrowSchema, arrays, int64(r.Len()))
+	return rec, rec.Release
+}
+
 var _ RecordWriter = (*packedRecordWriter)(nil)
 
 type packedRecordWriter struct {
@@ -195,20 +218,8 @@ type packedRecordBatchWriter struct {
 }
 
 func (pw *packedRecordBatchWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// Get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
-	}
+	rec, release := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)

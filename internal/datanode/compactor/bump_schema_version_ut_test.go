@@ -521,7 +521,9 @@ func appendArrowValues(t *testing.T, dst []any, col arrow.Array) []any {
 		case *array.Int32:
 			dst = append(dst, int64(arr.Value(i)))
 		case *array.String:
-			dst = append(dst, arr.Value(i))
+			// String.Value aliases the reader's arrow buffer without copying;
+			// clone it so the value survives the reader's Close (buffer free).
+			dst = append(dst, strings.Clone(arr.Value(i)))
 		case *array.Binary:
 			dst = append(dst, append([]byte(nil), arr.Value(i)...))
 		case *array.FixedSizeBinary:
@@ -979,7 +981,9 @@ func TestBumpUTBumpOnlyWhenFunctionOutputsPresent(t *testing.T) {
 // additive
 // ---------------------------------------------------------------------------
 
-// [A2][S0] +default column: every historical row gets the declared default.
+// [A2][S0] +default column: backfilled as NULL — the reader layer null-fills
+// absent fields and default materialization is deferred; the declared default
+// must not leak into historical rows.
 func TestBumpUTAdditiveDefaultColumn(t *testing.T) {
 	setupBumpUTEnv(t)
 	const addedID = int64(103)
@@ -989,15 +993,16 @@ func TestBumpUTAdditiveDefaultColumn(t *testing.T) {
 	}))
 
 	seg := runCompact(t, fix)
-	want := goldenWithAdded(fix.rows, addedID, func(int) any { return int64(42) })
+	want := goldenWithAdded(fix.rows, addedID, func(int) any { return nil })
 	readSchema := &schemapb.CollectionSchema{Fields: append(physicalReadFields(fix.sourceSchema),
 		typeutil.GetField(fix.targetSchema, addedID))}
 	verifySegmentData(t, fix.cfg, seg.GetManifest(), readSchema, want)
-	require.EqualValues(t, 0, seg.GetStats().GetNullCounts()[addedID])
+	require.EqualValues(t, len(fix.rows), seg.GetStats().GetNullCounts()[addedID])
 }
 
 // [A3][S0] mixed additions: nullable + default + nullable-TEXT(binary NULL) in
-// one pass; all three column groups land, old columns stay golden.
+// one pass; all three column groups land as NULL backfill, old columns stay
+// golden.
 func TestBumpUTAdditiveMixedColumns(t *testing.T) {
 	setupBumpUTEnv(t)
 	const nullID, defID, textID = int64(103), int64(104), int64(105)
@@ -1016,7 +1021,7 @@ func TestBumpUTAdditiveMixedColumns(t *testing.T) {
 
 	seg := runCompact(t, fix)
 	want := goldenWithAdded(fix.rows, nullID, func(int) any { return nil })
-	want = goldenWithAdded(want, defID, func(int) any { return int64(7) })
+	want = goldenWithAdded(want, defID, func(int) any { return nil })
 	want = goldenWithAdded(want, textID, func(int) any { return nil })
 	readSchema := &schemapb.CollectionSchema{Fields: append(physicalReadFields(fix.sourceSchema),
 		typeutil.GetField(fix.targetSchema, nullID),

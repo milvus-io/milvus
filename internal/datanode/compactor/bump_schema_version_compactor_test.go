@@ -572,7 +572,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	segment := result.GetSegments()[0]
 	s.Require().Len(segment.GetInsertLogs(), 1)
 	s.EqualValues(ordinaryFieldID, segment.GetInsertLogs()[0].GetFieldID())
-	s.EqualValues(0, segment.GetStats().GetNullCounts()[ordinaryFieldID])
+	// Absent fields are backfilled as NULL regardless of a declared default:
+	// the reader layer null-fills, default materialization is deferred.
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ordinaryFieldID])
 
 	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ordinaryFieldID)},
@@ -585,7 +587,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	s.Require().True(ok)
 	s.Equal(3, column.Len())
 	for i := 0; i < column.Len(); i++ {
-		s.EqualValues(42, column.Value(i))
+		s.True(column.IsNull(i))
 	}
 }
 
@@ -612,7 +614,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	s.Require().NoError(err)
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows(), "an added TTL field must not filter rows during additive reconciliation")
-	s.EqualValues(0, segment.GetStats().GetNullCounts()[ttlFieldID])
+	// NULL backfill even with a declared default: null TTL values never expire.
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ttlFieldID])
 
 	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ttlFieldID)},
@@ -623,7 +626,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	s.Require().NoError(err)
 	column := record.Column(ttlFieldID).(*array.Int64)
 	for i := 0; i < column.Len(); i++ {
-		s.Equal(expireAt, column.Value(i))
+		s.True(column.IsNull(i))
 	}
 }
 
@@ -1329,8 +1332,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMaterializesAbsent
 	ttlColumn, ok := record.Column(ttlFieldID).(*array.Int64)
 	s.Require().True(ok)
 	s.Equal(3, ttlColumn.Len())
+	// NULL backfill even with a declared default; null TTL values never expire.
 	for i := 0; i < ttlColumn.Len(); i++ {
-		s.Equal(expireAt, ttlColumn.Value(i))
+		s.True(ttlColumn.IsNull(i))
 	}
 }
 
@@ -1942,8 +1946,15 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaBumpPhysicalDiffSkipsPr
 	}))
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaUsesPhysicalAnchorAndInputsOnly() {
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaAnchorPlusReaderFilledAbsents() {
 	s.setupTest()
+	var absentInput *schemapb.FieldSchema
+	for _, field := range s.task.plan.GetSchema().GetFields() {
+		if field.GetFieldID() == 101 {
+			absentInput = field
+		}
+	}
+	s.Require().NotNil(absentInput)
 	diff := &schemaBumpPhysicalDiff{
 		existingFields: map[int64]struct{}{
 			common.RowIDField:     {},
@@ -1951,14 +1962,18 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaUsesPhysica
 			100:                   {},
 			// Function input 101 is intentionally absent.
 		},
-		missingFunctions: s.task.plan.GetSchema().GetFunctions(),
+		missingFunctions:     s.task.plan.GetSchema().GetFunctions(),
+		absentOrdinaryFields: []*schemapb.FieldSchema{absentInput},
 	}
 
 	readSchema, logicalInputFieldIDs, err := s.task.additiveReadSchema(diff)
 	s.Require().NoError(err)
 	s.Equal([]int64{101}, logicalInputFieldIDs)
-	s.Require().Len(readSchema.GetFields(), 1)
-	s.EqualValues(common.RowIDField, readSchema.GetFields()[0].GetFieldID())
+	// The physical anchor is read as-is; the absent ordinary input stays in the
+	// read schema so the reader fills it (default/null) for function execution.
+	s.ElementsMatch([]int64{common.RowIDField, 101}, lo.Map(readSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRejectsMissingSystemAnchor() {

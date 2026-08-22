@@ -24,8 +24,6 @@ import (
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -43,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -288,54 +287,26 @@ func TestRMBM25MaterializeBadOutputs(t *testing.T) {
 // U5/U6: synthesis failure release + reader wrap failure
 // ---------------------------------------------------------------------------
 
-// [U5][S1] when synthesizing the second missing field fails, the first field's
-// already-built array is released (no leak) and the error propagates.
-func TestRMWrapSynthesisPartialFailureReleases(t *testing.T) {
-	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
-	original := memory.DefaultAllocator
-	memory.DefaultAllocator = alloc
-	defer func() { memory.DefaultAllocator = original }()
+// failingFunctionMaterializer forces a Wrap-time error for failure-path tests.
+type failingFunctionMaterializer struct{}
 
-	func() {
-		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-			{FieldID: 103, Name: "ok_nullable", DataType: schemapb.DataType_Int64, Nullable: true},
-			{FieldID: 104, Name: "bad_required", DataType: schemapb.DataType_Int64}, // non-nullable, no default
-		}}
-		materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
-		require.NoError(t, err)
-		defer materializer.Close()
-
-		builder := array.NewInt64Builder(alloc)
-		defer builder.Release()
-		builder.AppendValues([]int64{1, 2, 3}, nil)
-		pk := builder.NewInt64Array()
-		defer pk.Release()
-
-		record := &materializerTestRecord{len: 3, columns: map[storage.FieldID]arrow.Array{100: pk}}
-		wrapped, err := materializer.Wrap(record)
-		require.Error(t, err)
-		require.Nil(t, wrapped)
-	}()
-	alloc.AssertSize(t, 0)
+func (failingFunctionMaterializer) Materialize(storage.Record) (map[int64]arrow.Array, error) {
+	return nil, merr.WrapErrServiceInternalMsg("injected materialize failure")
 }
+
+func (failingFunctionMaterializer) Close() {}
 
 // [U6][S1] materializedRecordReader propagates Wrap failures, cleans the
 // previous record, and leaves the base record reader-owned.
 func TestRMMaterializedReaderWrapFailure(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-		{FieldID: 104, Name: "bad_required", DataType: schemapb.DataType_Int64},
-	}}
-	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
-	require.NoError(t, err)
+	materializer := &RecordMaterializer{materializers: []FunctionMaterializer{failingFunctionMaterializer{}}}
 
 	ints := newInt64Array(t, []int64{1, 2})
 	defer ints.Release()
 	base := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: ints}}
 	reader := newMaterializedRecordReader(&stubRecordReader{records: []storage.Record{base}}, materializer)
 
-	_, err = reader.Next()
+	_, err := reader.Next()
 	require.Error(t, err)
 	require.Zero(t, base.releaseCount, "base record stays owned by its reader")
 	require.NoError(t, reader.Close())

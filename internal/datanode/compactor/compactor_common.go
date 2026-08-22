@@ -341,9 +341,16 @@ func compactionReadSchema(schema *schemapb.CollectionSchema, existingFields map[
 	return readSchema
 }
 
+// compactionFieldReadable keeps a field in the read schema when it is
+// physically present, or when the reader layer can synthesize it (absent
+// ordinary fields are reader-filled with default/null). Only function outputs
+// missing from storage are excluded: storage cannot synthesize them and the
+// RecordMaterializer computes them instead.
 func compactionFieldReadable(field *schemapb.FieldSchema, existingFields map[int64]struct{}) bool {
-	_, ok := existingFields[field.GetFieldID()]
-	return ok
+	if _, ok := existingFields[field.GetFieldID()]; ok {
+		return true
+	}
+	return !field.GetIsFunctionOutput()
 }
 
 func filterCompactionFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, readFields map[int64]struct{}) []*datapb.FieldBinlog {
