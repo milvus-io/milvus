@@ -597,6 +597,105 @@ func (s *DelegatorSuite) TestSearch() {
 		s.Error(err)
 	})
 
+	s.Run("advanced_search_cancels_and_waits_other_sub_requests_on_failure", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		startedBlockingReq := make(chan struct{})
+		blockingReqCanceled := make(chan struct{})
+		var startedOnce sync.Once
+		var canceledOnce sync.Once
+
+		runSearch := func(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+			if req.GetReq().GetTopk() == 1 {
+				return &internalpb.SearchResults{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    "mocked sub request error",
+					},
+				}, nil
+			}
+			startedOnce.Do(func() {
+				close(startedBlockingReq)
+			})
+			<-ctx.Done()
+			canceledOnce.Do(func() {
+				close(blockingReqCanceled)
+			})
+			return &internalpb.SearchResults{
+				Status: merr.Status(ctx.Err()),
+			}, nil
+		}
+
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).RunAndReturn(runSearch)
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).RunAndReturn(runSearch)
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+				Req: &internalpb.SearchRequest{
+					Base:       commonpbutil.NewMsgBase(),
+					IsAdvanced: true,
+					SubReqs: []*internalpb.SubSearchRequest{
+						{
+							Topk:       1,
+							Nq:         1,
+							MetricType: metric.JACCARD,
+						},
+						{
+							Topk:       2,
+							Nq:         1,
+							MetricType: metric.JACCARD,
+						},
+					},
+				},
+				DmlChannels: []string{s.vchannelName},
+			})
+			errCh <- err
+		}()
+
+		s.Eventually(func() bool {
+			select {
+			case <-startedBlockingReq:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
+
+		var err error
+		s.Eventually(func() bool {
+			select {
+			case err = <-errCh:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
+		s.Error(err)
+
+		select {
+		case <-blockingReqCanceled:
+		default:
+			s.Fail("advanced search returned before canceling and waiting for other sub requests")
+			cancel()
+		}
+	})
+
 	s.Run("wrong_channel", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
