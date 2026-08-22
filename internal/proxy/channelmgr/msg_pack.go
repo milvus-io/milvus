@@ -45,9 +45,11 @@ func getMaxSingleRowSize(walName message.WALName) (int, bool) {
 	case message.WALNameKafka:
 		limit := paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
 		return limit, limit > 0
-	case message.WALNameRocksmq, message.WALNameWoodpecker:
-		// RocksMQ page size and Woodpecker batch size are not hard limits
-		// on an individual WAL entry.
+	case message.WALNameWoodpecker:
+		limit := paramtable.Get().WoodpeckerCfg.MaxMessageSize.GetAsInt()
+		return limit, limit > 0
+	case message.WALNameRocksmq:
+		// RocksMQ page size is not a hard limit on an individual WAL entry.
 		return 0, false
 	default:
 		return 0, false
