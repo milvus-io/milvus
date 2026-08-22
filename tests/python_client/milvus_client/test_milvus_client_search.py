@@ -6367,6 +6367,30 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
             log.info(f"{'-' * 58} | {'-' * 58}")
 
+    def assert_rerank_order_matches_ground_truth(self, actual_rerank_results, gt, gt_scores, rtol=1e-2, atol=1e-6):
+        """
+        Compare Milvus's rerank order against the ground truth order, tolerating
+        reorderings between documents whose ground truth scores are within the
+        reranker service's own run-to-run reproducibility. Repeated calls to the
+        same reranker service can return scores that drift by up to ~5e-3
+        relative between calls, which is enough to flip the order of
+        neighbouring candidates without indicating a real Milvus defect.
+
+        Documents whose ground truth scores differ by more than the tolerance
+        must still keep their relative order; only near-tied documents may swap.
+        """
+        assert set(actual_rerank_results) == set(gt), \
+            f"Rerank result set differs from ground truth: {actual_rerank_results} vs {gt}"
+        actual_rank = {doc: idx for idx, doc in enumerate(actual_rerank_results)}
+        for i in range(len(gt)):
+            for j in range(i + 1, len(gt)):
+                tolerance = atol + rtol * max(abs(gt_scores[i]), abs(gt_scores[j]))
+                if gt_scores[i] - gt_scores[j] > tolerance:
+                    assert actual_rank[gt[i]] < actual_rank[gt[j]], \
+                        (f"Rerank order violated beyond score tolerance: expected "
+                         f"'{gt[i]}' (score {gt_scores[i]}) before '{gt[j]}' "
+                         f"(score {gt_scores[j]}), tolerance {tolerance}")
+
     def compare_milvus_rerank_with_origin_rerank(self, query_texts, rerank_results, results_without_rerank,
                                                  enable_truncate=False,
                                                  provider_type=None,
@@ -6443,8 +6467,10 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             self.display_side_by_side_comparison(query_text, actual_rerank_results, gt, doc_to_original,
                                                milvus_scores=distances, gt_scores=gt_scores)
 
-            # Use strict comparison since scores are now normalized to f32 precision
-            assert gt == actual_rerank_results, "Rerank result is different from ground truth rerank result"
+            # Tolerate reordering only between documents whose ground truth scores
+            # are within the reranker service's own run-to-run reproducibility;
+            # order between documents with a clear score gap must still match.
+            self.assert_rerank_order_matches_ground_truth(actual_rerank_results, gt, gt_scores)
 
     @pytest.mark.parametrize("ranker_model", [
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
