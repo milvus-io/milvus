@@ -322,7 +322,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType data_type,
                            DataType element_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs);
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows = 0,
+                           size_t offset = 0);
 
 // Streams the field's data out of a storage-v3 manifest batch by batch,
 // invoking `consumer` on the calling thread in batch order. Batch decoding
@@ -361,7 +363,9 @@ IterateFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const std::function<void(FieldDataPtr)>& consumer,
-    int64_t max_inflight_bytes = kStreamingInflightBytes);
+    int64_t max_inflight_bytes = kStreamingInflightBytes,
+    size_t max_rows = 0,
+    size_t offset = 0);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
@@ -371,6 +375,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
+    size_t max_rows = 0,
+    size_t offset = 0,
     std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt);
 
 std::vector<FieldDataPtr>

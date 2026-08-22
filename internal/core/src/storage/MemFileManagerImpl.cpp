@@ -227,6 +227,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     AssertInfo(element_type.has_value(),
                "[StorageV2] element type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
+    auto max_rows =
+        index::GetValueFromConfig<int64_t>(config, NUM_ROWS_KEY).value_or(0);
+    auto offset =
+        index::GetValueFromConfig<int64_t>(config, OFFSET_KEY).value_or(0);
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);
@@ -261,6 +265,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          data_type,
                                          dim,
                                          element_type,
+                                         max_rows,
+                                         offset,
                                          storage_column_mapping);
     }
 
@@ -273,7 +279,9 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                                   data_type.value(),
                                                   element_type.value(),
                                                   dim,
-                                                  fs_);
+                                                  fs_,
+                                                  max_rows,
+                                                  offset);
     // field data list could differ for storage v2 group list
     return field_datas;
 }
@@ -471,6 +479,8 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                       field_type,
                                       1,  // scalar field
                                       element_type,
+                                      0,
+                                      0,
                                       GetStorageColumnMapping(field_id));
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
