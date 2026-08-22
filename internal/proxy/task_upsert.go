@@ -807,6 +807,34 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 				sd.TimestamptzData.Data = ret
 			}
 
+		case *schemapb.ScalarField_DateData:
+			validRowNum := getValidNumber(validData)
+			if validRowNum == 0 {
+				sd.DateData.Data = make([]int32, 0)
+			} else {
+				ret := make([]int32, 0, validRowNum)
+				for i, valid := range validData {
+					if valid {
+						ret = append(ret, sd.DateData.Data[i])
+					}
+				}
+				sd.DateData.Data = ret
+			}
+
+		case *schemapb.ScalarField_TimeData:
+			validRowNum := getValidNumber(validData)
+			if validRowNum == 0 {
+				sd.TimeData.Data = make([]int64, 0)
+			} else {
+				ret := make([]int64, 0, validRowNum)
+				for i, valid := range validData {
+					if valid {
+						ret = append(ret, sd.TimeData.Data[i])
+					}
+				}
+				sd.TimeData.Data = ret
+			}
+
 		case *schemapb.ScalarField_GeometryWktData:
 			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
@@ -1006,6 +1034,38 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_TimestamptzData{
 						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: make([]int64, upsertIDSize),
+						},
+					},
+				},
+			},
+		}), nil
+	case schemapb.DataType_Date:
+		return withValidData(&schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DateData{
+						DateData: &schemapb.DateArray{
+							Data: make([]int32, upsertIDSize),
+						},
+					},
+				},
+			},
+		}), nil
+	case schemapb.DataType_Time:
+		return withValidData(&schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimeData{
+						TimeData: &schemapb.TimeArray{
 							Data: make([]int64, upsertIDSize),
 						},
 					},

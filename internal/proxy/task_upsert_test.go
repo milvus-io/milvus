@@ -3945,6 +3945,48 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 		assert.Equal(t, []bool{true, false, true, false}, typeutil.GetFieldDataValidData(field))
 	})
 
+	t.Run("date with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Date,
+			FieldName: "date_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false},
+					Data: &schemapb.ScalarField_DateData{
+						DateData: &schemapb.DateArray{
+							Data: []int32{1, 0},
+						},
+					},
+				},
+			},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, []int32{1}, field.GetScalars().GetDateData().GetData())
+	})
+
+	t.Run("time with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Time,
+			FieldName: "time_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false},
+					Data: &schemapb.ScalarField_TimeData{
+						TimeData: &schemapb.TimeArray{
+							Data: []int64{1_000_000, 0},
+						},
+					},
+				},
+			},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1_000_000}, field.GetScalars().GetTimeData().GetData())
+	})
+
 	t.Run("geometry WKT with null values", func(t *testing.T) {
 		field := &schemapb.FieldData{
 			Type:      schemapb.DataType_Geometry,

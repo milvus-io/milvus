@@ -1322,6 +1322,19 @@ func Test_castRangeValue(t *testing.T) {
 		_, err := castRangeValue(schemapb.DataType_Float, value)
 		assert.Error(t, err)
 	})
+
+	t.Run("date string packs days", func(t *testing.T) {
+		value := NewString("1970-01-02")
+		result, err := castRangeValue(schemapb.DataType_Date, value)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), result.GetInt64Val())
+	})
+
+	t.Run("invalid date string fails", func(t *testing.T) {
+		value := NewString("2024-02-30")
+		_, err := castRangeValue(schemapb.DataType_Date, value)
+		assert.Error(t, err)
+	})
 }
 
 // Test_hexDigit tests the hexDigit helper function

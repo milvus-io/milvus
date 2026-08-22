@@ -403,6 +403,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
+			if dtype == schemapb.DataType_Date || dtype == schemapb.DataType_Time {
+				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
 			if dtype == schemapb.DataType_JSON && !fieldSchema.IsDynamic {
 				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 				return merr.WrapErrParameterInvalidMsg(msg)
@@ -450,6 +454,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				if dtype != schemapb.DataType_Timestamptz {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
 				}
+			case *schemapb.ValueField_DateData:
+				return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Date")
+			case *schemapb.ValueField_TimeData:
+				return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Time")
 			case *schemapb.ValueField_StringData:
 				if dtype != schemapb.DataType_VarChar && dtype != schemapb.DataType_Timestamptz {
 					if dtype != schemapb.DataType_VarChar {
