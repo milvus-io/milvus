@@ -22,11 +22,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -199,6 +202,39 @@ func TestHTTPWrapper(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestWrapperPostRecordsMetricsThroughTimeoutMiddleware(t *testing.T) {
+	ginHandler := gin.New()
+	app := ginHandler.Group("/v2/vectordb", func(c *gin.Context) {
+		c.Set(ContextUsername, util.UserRoot)
+	})
+	app.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(
+		func() any { return &DatabaseReq{} },
+		func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil)})
+			return merr.Success(), nil
+		},
+	)))
+
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	total := metrics.ProxyFunctionCall.WithLabelValues(
+		nodeID, "ShowCollections", metrics.TotalLabel, metrics.CauseNA, DefaultDbName, "",
+	)
+	success := metrics.ProxyFunctionCall.WithLabelValues(
+		nodeID, "ShowCollections", metrics.SuccessLabel, metrics.CauseNA, DefaultDbName, "",
+	)
+	totalBefore := testutil.ToFloat64(total)
+	successBefore := testutil.ToFloat64(success)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, ListAction), bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, float64(1), testutil.ToFloat64(total)-totalBefore)
+	require.Equal(t, float64(1), testutil.ToFloat64(success)-successBefore)
 }
 
 func TestGrpcWrapper(t *testing.T) {
@@ -531,6 +567,22 @@ func TestTimeoutMiddlewareCommitsBufferedResponsesAndMetadata(t *testing.T) {
 			assert.Equal(t, "trace-"+testcase.name, value)
 		})
 	}
+}
+
+func TestTimeoutMiddlewarePreservesMatchedRoutePath(t *testing.T) {
+	ginHandler := gin.New()
+	path := "/middleware/timeout/routes/:id"
+	matchedPath := make(chan string, 1)
+	ginHandler.GET(path, timeoutMiddleware(func(c *gin.Context) {
+		matchedPath <- matchedRoutePath(c)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/middleware/timeout/routes/42", nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, path, <-matchedPath)
 }
 
 func TestTimeoutMiddlewarePropagatesAbortToOriginalContext(t *testing.T) {
