@@ -61,6 +61,12 @@ type ClientConfig struct {
 
 	DialOptions []grpc.DialOption // Dial options for GRPC.
 
+	// ConnectionFactory creates the underlying gRPC client connection. When nil,
+	// the client uses grpc.DialContext. A custom factory can integrate the Milvus
+	// client with a platform-specific gRPC connection framework while preserving
+	// the Milvus transport settings and interceptors.
+	ConnectionFactory ConnectionFactory
+
 	RetryRateLimit *RetryRateLimitOption // option for retry on rate limit inteceptor
 
 	DisableConn bool
