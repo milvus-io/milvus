@@ -12,6 +12,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -702,6 +703,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		internalSubReq.PlaceholderGroup = convertedPlaceholder
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
+		if paramtable.Get().ProxyCfg.SearchPlaceholderLogEnabled.GetAsBool() {
+			log.RatedInfo(ctx, rate.Limit(paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat()),
+				"proxy search request placeholder",
+				mlog.Stringer("placeholder", placeholderStringer{placeholder: subReq.GetPlaceholderGroup()}))
+		}
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			mlog.Stringer("plan", plan)) // may be very large if large term passed.
@@ -820,6 +826,88 @@ func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	return texts, nil
+}
+
+// placeholderGroupToLogString renders a search placeholder group into a human-readable
+// string (query vectors or query text) for logging.
+func placeholderGroupToLogString(placeholderGroup []byte) string {
+	if len(placeholderGroup) == 0 {
+		return ""
+	}
+	pg := &commonpb.PlaceholderGroup{}
+	if err := proto.Unmarshal(placeholderGroup, pg); err != nil {
+		return "<failed to unmarshal placeholder group>"
+	}
+
+	var sb strings.Builder
+	for i, ph := range pg.GetPlaceholders() {
+		if i > 0 {
+			sb.WriteString(" | ")
+		}
+		fmt.Fprintf(&sb, "[type=%s nq=%d] ", ph.GetType().String(), len(ph.GetValues()))
+		sb.WriteString(placeholderValueToLogString(ph))
+	}
+	return sb.String()
+}
+
+func placeholderValueToLogString(ph *commonpb.PlaceholderValue) string {
+	switch ph.GetType() {
+	case commonpb.PlaceholderType_VarChar:
+		return fmt.Sprintf("texts=%v", funcutil.GetVarCharFromPlaceholder(ph))
+	case commonpb.PlaceholderType_Int64:
+		vals := make([]int64, 0, len(ph.GetValues()))
+		for _, v := range ph.GetValues() {
+			if iv, err := typeutil.BytesToInt64(v); err == nil {
+				vals = append(vals, iv)
+			}
+		}
+		return fmt.Sprintf("values=%v", vals)
+	case commonpb.PlaceholderType_BinaryVector, commonpb.PlaceholderType_EmbListBinaryVector:
+		return fmt.Sprintf("vectors=%v", ph.GetValues())
+	case commonpb.PlaceholderType_FloatVector, commonpb.PlaceholderType_EmbListFloatVector:
+		return fmt.Sprintf("vectors=%v", byteVectorsToFloat32Vectors(ph.GetValues()))
+	case commonpb.PlaceholderType_Float16Vector, commonpb.PlaceholderType_EmbListFloat16Vector:
+		return fmt.Sprintf("vectors=%v", lo.Map(ph.GetValues(), func(v []byte, _ int) []float32 {
+			return typeutil.Float16BytesToFloat32Vector(v)
+		}))
+	case commonpb.PlaceholderType_BFloat16Vector, commonpb.PlaceholderType_EmbListBFloat16Vector:
+		return fmt.Sprintf("vectors=%v", lo.Map(ph.GetValues(), func(v []byte, _ int) []float32 {
+			return typeutil.BFloat16BytesToFloat32Vector(v)
+		}))
+	case commonpb.PlaceholderType_Int8Vector, commonpb.PlaceholderType_EmbListInt8Vector:
+		return fmt.Sprintf("vectors=%v", lo.Map(ph.GetValues(), func(v []byte, _ int) []int8 {
+			return lo.Map(v, func(b byte, _ int) int8 { return int8(b) })
+		}))
+	case commonpb.PlaceholderType_SparseFloatVector, commonpb.PlaceholderType_EmbListSparseFloatVector:
+		return fmt.Sprintf("vectors=%v", lo.Map(ph.GetValues(), func(v []byte, _ int) map[uint32]float32 {
+			return typeutil.SparseFloatBytesToMap(v)
+		}))
+	default:
+		return fmt.Sprintf("values=%v", ph.GetValues())
+	}
+}
+
+func byteVectorsToFloat32Vectors(values [][]byte) [][]float32 {
+	vecs := make([][]float32, 0, len(values))
+	for _, v := range values {
+		vec := make([]float32, 0, len(v)/4)
+		for j := 0; j+4 <= len(v); j += 4 {
+			vec = append(vec, typeutil.BytesToFloat32(v[j:j+4]))
+		}
+		vecs = append(vecs, vec)
+	}
+	return vecs
+}
+
+// placeholderStringer lazily renders a placeholder group for logging, so the
+// unmarshal/decode work only happens when the log entry is actually emitted
+// (after the rate limit allows it), not on every search request.
+type placeholderStringer struct {
+	placeholder []byte
+}
+
+func (s placeholderStringer) String() string {
+	return placeholderGroupToLogString(s.placeholder)
 }
 
 func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
@@ -1121,6 +1209,11 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
+	if paramtable.Get().ProxyCfg.SearchPlaceholderLogEnabled.GetAsBool() {
+		log.RatedInfo(ctx, rate.Limit(paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat()),
+			"proxy search request placeholder",
+			mlog.Stringer("placeholder", placeholderStringer{placeholder: t.request.GetPlaceholderGroup()}))
+	}
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		mlog.Stringer("plan", plan)) // may be very large if large term passed.
