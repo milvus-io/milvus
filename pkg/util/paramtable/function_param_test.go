@@ -104,3 +104,16 @@ func TestFunctionConfig(t *testing.T) {
 
 	assert.Equal(t, 30*time.Second, cfg.ModelRequestTimeout.GetAsDurationByParse())
 }
+
+func TestFunctionConfigPyUDF(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.FunctionCfg
+
+	assert.False(t, cfg.PyUDFEnabled.GetAsBool())
+
+	oldEnabled := cfg.PyUDFEnabled.SwapTempValue("true")
+	defer cfg.PyUDFEnabled.SwapTempValue(oldEnabled)
+
+	assert.True(t, cfg.PyUDFEnabled.GetAsBool())
+}

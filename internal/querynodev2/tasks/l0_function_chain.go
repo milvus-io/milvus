@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow/memory/mallocator"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -32,6 +34,10 @@ import (
 )
 
 type l0RerankChainBuilder func(context.Context, int, *chain.DataFrame) (*chain.FuncChain, error)
+
+var newL0RerankAllocator = func() memory.Allocator {
+	return mallocator.NewMallocator()
+}
 
 func appendL0RerankReduceContract(fc *chain.FuncChain) *chain.FuncChain {
 	fc.Sort(chaintypes.ScoreFieldName, true, chaintypes.IDFieldName)
@@ -139,7 +145,7 @@ func (t *SearchTask) applyPublicL0Rerank(segDFs []*chain.DataFrame, prepared *pr
 	// a fresh FuncChain for each segment so operator/function execution state is not
 	// shared across concurrent per-segment execution.
 	return executeL0RerankChains(t.ctx, segDFs, func(context.Context, int, *chain.DataFrame) (*chain.FuncChain, error) {
-		fc, err := chain.FuncChainFromReprWithContext(repr, defaultAllocator, chaintypes.FunctionBuildContext{})
+		fc, err := chain.FuncChainFromReprWithContext(repr, newL0RerankAllocator(), chaintypes.FunctionBuildContext{})
 		if err != nil {
 			return nil, err
 		}

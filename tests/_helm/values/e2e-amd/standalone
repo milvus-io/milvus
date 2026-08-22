@@ -37,6 +37,9 @@ log:
 extraConfigFiles:
   user.yaml: |+
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         # enable storage v3
         useLoonFFI: true
@@ -54,6 +57,9 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    function:
+      pyUDF:
+        enabled: true
     quotaAndLimits:
       flushRate:
         collection:

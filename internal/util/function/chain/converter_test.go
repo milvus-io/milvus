@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow/memory/mallocator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -2443,6 +2444,61 @@ func (s *ConverterSuite) TestNullableRoundTrip_StringWithNulls() {
 	s.Require().Len(exported.FieldsData, 1)
 	s.NotNil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 	s.Equal([]bool{true, false}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
+}
+
+func (s *ConverterSuite) TestExportCopiesCBackedStringStorage() {
+	pool := memory.NewCheckedAllocator(mallocator.NewMallocator())
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       2,
+		Topks:      []int64{2},
+		Scores:     []float32{0.9, 0.8},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{Data: []string{"pk-1", "pk-2"}},
+			},
+		},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: "label",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"red", "blue"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	df, err := FromSearchResultData(resultData, pool, []string{"label"})
+	s.Require().NoError(err)
+	defer func() {
+		df.Release()
+		pool.AssertSize(s.T(), 0)
+	}()
+
+	exported, err := ToSearchResultData(df)
+	s.Require().NoError(err)
+
+	// Arrow strings are zero-copy views into their value buffers. Overwriting
+	// those buffers after export deterministically verifies that the protobuf
+	// owns independent copies before the C-backed DataFrame is released.
+	idChunk := df.Column(types.IDFieldName).Chunk(0).(*array.String)
+	for i := range idChunk.ValueBytes() {
+		idChunk.ValueBytes()[i] = 'x'
+	}
+	fieldChunk := df.Column("label").Chunk(0).(*array.String)
+	for i := range fieldChunk.ValueBytes() {
+		fieldChunk.ValueBytes()[i] = 'y'
+	}
+
+	s.Equal([]string{"pk-1", "pk-2"}, exported.GetIds().GetStrId().GetData())
+	s.Require().Len(exported.GetFieldsData(), 1)
+	s.Equal([]string{"red", "blue"}, exported.GetFieldsData()[0].GetScalars().GetStringData().GetData())
 }
 
 // =============================================================================
