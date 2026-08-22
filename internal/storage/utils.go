@@ -90,6 +90,11 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 // ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
 func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
+		if field.GetElementNullable() &&
+			(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+			return merr.WrapErrParameterInvalidMsg("element nullable %s is not supported in V1 storage format, fieldName=%s",
+				field.GetDataType().String(), field.GetName())
+		}
 		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 			return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
@@ -100,6 +105,11 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
+			if field.GetElementNullable() &&
+				(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+				return merr.WrapErrParameterInvalidMsg("element nullable %s is not supported in V1 storage format, structName=%s, fieldName=%s",
+					field.GetDataType().String(), structField.GetName(), field.GetName())
+			}
 			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 				return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())
@@ -889,10 +899,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &ArrayFieldData{
-				ElementType: field.GetElementType(),
-				Data:        srcData,
-				ValidData:   validData,
-				Nullable:    field.GetNullable(),
+				ElementType:     field.GetElementType(),
+				Data:            srcData,
+				ValidData:       validData,
+				Nullable:        field.GetNullable(),
+				ElementNullable: field.GetElementNullable(),
 			}
 
 		case schemapb.DataType_JSON:
@@ -910,11 +921,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &VectorArrayFieldData{
-				ElementType: field.GetElementType(),
-				Data:        vectorArray.GetData(),
-				Dim:         vectorArray.GetDim(),
-				ValidData:   validData,
-				Nullable:    field.GetNullable(),
+				ElementType:     field.GetElementType(),
+				Data:            vectorArray.GetData(),
+				Dim:             vectorArray.GetDim(),
+				ValidData:       validData,
+				Nullable:        field.GetNullable(),
+				ElementNullable: field.GetElementNullable(),
 			}
 		case schemapb.DataType_Geometry:
 			srcData := srcField.GetScalars().GetGeometryData().GetData()
@@ -1116,13 +1128,17 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &ArrayFieldData{
-			ElementType: field.ElementType,
-			Data:        nil,
-			ValidData:   nil,
+			ElementType:     field.ElementType,
+			Data:            nil,
+			ValidData:       nil,
+			Nullable:        field.Nullable,
+			ElementNullable: field.ElementNullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*ArrayFieldData)
+	fieldData.Nullable = fieldData.Nullable || field.Nullable
+	fieldData.ElementNullable = fieldData.ElementNullable || field.ElementNullable
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
@@ -1225,15 +1241,17 @@ func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFlo
 func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &VectorArrayFieldData{
-			Data:        nil,
-			Dim:         field.Dim,
-			ElementType: field.ElementType,
-			ValidData:   nil,
-			Nullable:    field.Nullable,
+			Data:            nil,
+			Dim:             field.Dim,
+			ElementType:     field.ElementType,
+			ValidData:       nil,
+			Nullable:        field.Nullable,
+			ElementNullable: field.ElementNullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*VectorArrayFieldData)
+	fieldData.ElementNullable = fieldData.ElementNullable || field.ElementNullable
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
@@ -1382,11 +1400,6 @@ func boolFieldDataToPbBytes(field *BoolFieldData) ([]byte, error) {
 
 func stringFieldDataToPbBytes(field *StringFieldData) ([]byte, error) {
 	arr := &schemapb.StringArray{Data: field.Data}
-	return proto.Marshal(arr)
-}
-
-func arrayFieldDataToPbBytes(field *ArrayFieldData) ([]byte, error) {
-	arr := &schemapb.ArrayArray{Data: field.Data}
 	return proto.Marshal(arr)
 }
 
@@ -1544,15 +1557,17 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		case *ArrayFieldData:
+			arrayData := &schemapb.ArrayArray{
+				ElementType: rawData.ElementType,
+				Data:        rawData.Data,
+			}
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_Array,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_ArrayData{
-							ArrayData: &schemapb.ArrayArray{
-								Data: rawData.Data,
-							},
+							ArrayData: arrayData,
 						},
 					},
 				},
@@ -1666,17 +1681,18 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		case *VectorArrayFieldData:
+			vectorArray := &schemapb.VectorArray{
+				Dim:         rawData.Dim,
+				ElementType: rawData.ElementType,
+				Data:        rawData.Data,
+			}
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								Data:        rawData.Data,
-								ElementType: rawData.ElementType,
-								Dim:         rawData.Dim,
-							},
+							VectorArray: vectorArray,
 						},
 						Dim: rawData.Dim,
 					},

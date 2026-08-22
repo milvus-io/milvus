@@ -203,7 +203,7 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					elementType = f.GetElementType()
 				}
 
-				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
+				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy, f.GetElementNullable())
 				if err != nil {
 					return merr.WrapErrServiceInternalMsg("deserialize error on type %s: %v", dt, err)
 				}
