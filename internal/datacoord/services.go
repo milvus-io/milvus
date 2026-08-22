@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -675,9 +676,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-				operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
-			}
 			// set segment to SegmentState_Flushed
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
 		}
@@ -716,6 +714,22 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		if isSegmentHealthy(segment) && !segment.GetIsInvisible() {
+			if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+				CollectionID: segment.GetCollectionID(),
+				Segments: []dataview.LoadableSegment{{
+					SegmentID:   segment.GetID(),
+					VChannel:    segment.GetInsertChannel(),
+					PartitionID: segment.GetPartitionID(),
+				}},
+			}); err != nil {
+				mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+				return merr.Status(err), nil
+			}
+		}
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
@@ -2158,6 +2172,16 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	mlog.Info(ctx, "receive NotifyDropPartition request",
 		mlog.String("channelname", channel),
 		mlog.Any("partitionID", partitionIDs))
+	if s.dataViewManager != nil {
+		for _, collectionID := range s.meta.GetCollectionIDsByPartition(ctx, partitionIDs) {
+			if _, err := s.dataViewManager.OnDropPartition(ctx, DropPartitionDataViewEvent{
+				CollectionID: collectionID,
+				PartitionIDs: partitionIDs,
+			}); err != nil {
+				return err
+			}
+		}
+	}
 	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
@@ -2178,6 +2202,21 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		if err != nil {
 			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
 			return err
+		}
+		if s.dataViewManager != nil {
+			segmentIDs := make([]int64, 0)
+			for _, segment := range s.meta.SelectSegments(ctx, WithCollection(collectionID), WithChannel(channelName)) {
+				if segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+					segmentIDs = append(segmentIDs, segment.GetID())
+				}
+			}
+			if _, err = s.dataViewManager.OnTruncate(ctx, TruncateDataViewEvent{
+				CollectionID: collectionID,
+				SegmentIDs:   segmentIDs,
+			}); err != nil {
+				mlog.Warn(ctx, "OnTruncate DataView failed", mlog.Err(err))
+				return err
+			}
 		}
 		// drop segments that were updated before the flush timestamp
 		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
@@ -3193,7 +3232,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
 	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
-	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+	collectionID, segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
 
 	commitTs := req.GetCommitTimestamp()
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
@@ -3209,25 +3248,66 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		if len(ops) == 0 {
 			return nil
 		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return merr.Status(err), nil
 	}
+	// HandleCommitVchannel holds importMeta's write lock while running the
+	// callback. Publish after it returns so the DataView catalog write does not
+	// block unrelated import metadata operations. This also runs on an
+	// idempotent retry whose vchannel was already committed.
+	if s.dataViewManager != nil && collectionID != 0 {
+		loadableSegments := s.getImportDataViewSegments(ctx, segIDs)
+		if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
+			CollectionID: collectionID,
+			Segments:     loadableSegments,
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after import commit",
+				mlog.FieldJobID(jobID),
+				mlog.String("vchannel", vchannel),
+				mlog.Err(err))
+			return merr.Status(err), nil
+		}
+	}
 	return merr.Success(), nil
+}
+
+// getImportDataViewSegments returns the final loadable subset of the Segment
+// candidates. Import sorting leaves superseded Segments dropped or invisible,
+// so their current SegmentMeta state is the source of truth.
+func (s *Server) getImportDataViewSegments(ctx context.Context, segmentIDs []int64) []dataview.LoadableSegment {
+	segments := make([]dataview.LoadableSegment, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if !isSegmentHealthy(segment) || segment.GetIsInvisible() {
+			continue
+		}
+		segments = append(segments, dataview.LoadableSegment{
+			SegmentID:   segment.GetID(),
+			VChannel:    segment.GetInsertChannel(),
+			PartitionID: segment.GetPartitionID(),
+		})
+	}
+	return segments
 }
 
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
 // the given import job that are assigned to the given vchannel.
 // This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
-func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
+func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) (int64, []int64) {
 	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	var collectionID int64
 	var segIDs []int64
 	for _, task := range tasks {
 		it, ok := task.(*importTask)
 		if !ok {
 			continue
 		}
+		collectionID = it.GetCollectionID()
 		// Collect all candidate segment IDs from this task (safe copies).
 		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
 		candidates = append(candidates, it.GetSegmentIDs()...)
@@ -3243,5 +3323,5 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 			segIDs = append(segIDs, segID)
 		}
 	}
-	return segIDs
+	return collectionID, segIDs
 }

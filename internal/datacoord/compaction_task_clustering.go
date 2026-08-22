@@ -597,14 +597,30 @@ func (t *clusteringCompactionTask) completeTask() error {
 		return merr.WrapErrClusteringCompactionMetaError("SavePartitionStatsAndVersion", err)
 	}
 
-	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
-		mlog.Warn(context.TODO(), "completeTask update task state to completed failed", mlog.Err(err))
-		return err
-	}
 	// mark input segments as dropped
 	// now, the segment view only includes the result segments.
 	if err = t.markInputSegmentsDropped(); err != nil {
-		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, skip it and wait retry")
+		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, wait for retry", mlog.Err(err))
+		return err
+	}
+	if meta, ok := t.meta.(*meta); ok {
+		meta.segMu.Lock()
+		segments := make([]*SegmentInfo, 0, len(t.GetTaskProto().GetResultSegments()))
+		for _, segmentID := range t.GetTaskProto().GetResultSegments() {
+			if segment := meta.segments.GetSegment(segmentID); segment != nil {
+				segments = append(segments, segment)
+			}
+		}
+		err = meta.publishDataViewAfterCompaction(context.TODO(), t.GetTaskProto(), segments)
+		meta.segMu.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+
+	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
+		mlog.Warn(context.TODO(), "completeTask update task state to completed failed", mlog.Err(err))
+		return err
 	}
 
 	return nil

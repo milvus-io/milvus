@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/dataview"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -77,6 +79,92 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 	).Once()
 
 	s.NoError(task.saveSegmentMeta(output))
+}
+
+func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUpdatesLatestDataViewWithoutVersionAdvance() {
+	ctx := context.Background()
+	meta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	manifestBasePath := "/tmp/milvus/insert_log/1/10/200"
+	for _, segment := range []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            200,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			ManifestPath:  packed.MarshalManifestPath(manifestBasePath, 3),
+		},
+	} {
+		s.Require().NoError(meta.AddSegment(ctx, NewSegmentInfo(segment)))
+	}
+	dataViewCatalog, ok := meta.catalog.(dataview.Catalog)
+	s.Require().True(ok)
+	meta.dataViewManager = dataview.NewManager(dataViewCatalog)
+	_, err = meta.dataViewManager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{
+		CollectionID: 1,
+		VChannels:    []string{"ch-1"},
+	})
+	s.Require().NoError(err)
+	_, err = meta.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments: []dataview.LoadableSegment{{
+			SegmentID:       200,
+			VChannel:        "ch-1",
+			PartitionID:     10,
+			ManifestVersion: 0,
+		}},
+	})
+	s.Require().NoError(err)
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		NodeID:        NullNodeID,
+		State:         datapb.CompactionTaskState_executing,
+		Channel:       "ch-1",
+		InputSegments: []int64{100, 101},
+		Pos:           &msgpb.MsgPosition{Timestamp: 800},
+	}, nil, meta)
+	task.committedV3Manifests[200] = packed.MarshalManifestPath(manifestBasePath, 4)
+	output := []*datapb.CompactionSegment{{
+		SegmentID: 200,
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: "/tmp/milvus/delta/9001", EntriesNum: 3}},
+		}},
+	}}
+
+	s.Require().NoError(task.saveSegmentMeta(output))
+
+	ref, err := meta.dataViewManager.Latest(ctx, 1)
+	s.Require().NoError(err)
+	s.Require().NotNil(ref)
+	defer ref.Deref()
+	view := ref.DataView()
+	s.Equal(int64(2), view.GetDataVersion().GetStreamingVersion())
+	s.Equal(int64(0), view.GetDataVersion().GetCompactVersion())
+	s.Equal(int64(1), view.GetDataVersion().GetTransformVersion())
+	s.Equal([]int64{4}, view.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
 }
 
 func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {

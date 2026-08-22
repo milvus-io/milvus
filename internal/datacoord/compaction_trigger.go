@@ -946,6 +946,9 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 }
 
 func canTriggerSortCompaction(segment *SegmentInfo) bool {
+	// TODO: Move sorting of newly flushed Segments to StreamingNode so it can
+	// publish the final sorted Segment directly. Until then, DataCoord publishes
+	// the flushed Segment first and SortCompaction replaces it in DataView.
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&

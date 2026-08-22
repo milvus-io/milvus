@@ -12,6 +12,7 @@ import (
 func TestDataVersion(t *testing.T) {
 	dvs := []DataVersion{
 		FromProtoDataVersion(&viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0}),
+		FromProtoDataVersion(&viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0, TransformVersion: 1}),
 		FromProtoDataVersion(&viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}),
 		FromProtoDataVersion(&viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}),
 		FromProtoDataVersion(&viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 0}),
@@ -28,7 +29,7 @@ func TestDataVersion(t *testing.T) {
 	}
 
 	// Test IntoProto round-trip.
-	dv := DataVersion{StreamingVersion: 2, CompactVersion: 3}
+	dv := DataVersion{StreamingVersion: 2, CompactVersion: 3, TransformVersion: 4}
 	assert.Equal(t, dv, FromProtoDataVersion(dv.IntoProto()))
 }
 
@@ -41,6 +42,10 @@ func TestQueryViewVersion(t *testing.T) {
 		FromProtoQueryViewVersion(&viewpb.QueryViewVersion{
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
 			QueryVersion: 2,
+		}),
+		FromProtoQueryViewVersion(&viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0, TransformVersion: 1},
+			QueryVersion: 1,
 		}),
 		FromProtoQueryViewVersion(&viewpb.QueryViewVersion{
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1},
@@ -70,7 +75,7 @@ func TestQueryViewVersion(t *testing.T) {
 
 	// Test IntoProto round-trip.
 	qv := QueryViewVersion{
-		DataVersion:  DataVersion{StreamingVersion: 2, CompactVersion: 1},
+		DataVersion:  DataVersion{StreamingVersion: 2, CompactVersion: 1, TransformVersion: 2},
 		QueryVersion: 3,
 	}
 	assert.Equal(t, qv, FromProtoQueryViewVersion(qv.IntoProto()))
@@ -105,14 +110,14 @@ func TestQueryViewIdentifiersString(t *testing.T) {
 	assert.Equal(t, "Preparing", state.String())
 	assert.Equal(t, "unknown", NodeType(0).String())
 
-	dv := DataVersion{StreamingVersion: 2, CompactVersion: 3}
-	assert.Equal(t, "2/3", dv.String())
+	dv := DataVersion{StreamingVersion: 2, CompactVersion: 3, TransformVersion: 4}
+	assert.Equal(t, "2/3/4", dv.String())
 
 	qv := QueryViewVersion{
 		DataVersion:  dv,
 		QueryVersion: 4,
 	}
-	assert.Equal(t, "2/3/4", qv.String())
+	assert.Equal(t, "2/3/4/4", qv.String())
 
 	key := QueryViewKey{
 		ShardID: ShardID{
@@ -121,5 +126,5 @@ func TestQueryViewIdentifiersString(t *testing.T) {
 		},
 		QueryViewVersion: qv,
 	}
-	assert.Equal(t, "10-by-dev-rootcoord-dml_0_1v0-2/3/4", key.String())
+	assert.Equal(t, "10-by-dev-rootcoord-dml_0_1v0-2/3/4/4", key.String())
 }

@@ -81,6 +81,54 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestDataViewCollectionRecoveryValidator(t *testing.T) {
+	mockey.PatchConvey("validate CollectionMeta state for DataView recovery", t, func() {
+		lookupErr := errors.New("lookup failed")
+		meta := &MetaTable{}
+		mockey.Mock((*MetaTable).GetCollectionByID).To(func(
+			_ *MetaTable,
+			_ context.Context,
+			_ string,
+			collectionID UniqueID,
+			_ Timestamp,
+			_ bool,
+		) (*model.Collection, error) {
+			switch collectionID {
+			case 1:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionCreated}, nil
+			case 2:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionCreating}, nil
+			case 3:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionDropping}, nil
+			case 4:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionDropped}, nil
+			case 5:
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
+			case 6:
+				return nil, lookupErr
+			default:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState(100)}, nil
+			}
+		}).Build()
+
+		core := &Core{meta: meta}
+		recover, err := core.ValidateDataViewCollectionForRecovery(context.Background(), 1)
+		require.NoError(t, err)
+		require.True(t, recover)
+		for _, collectionID := range []int64{2, 3, 4, 5} {
+			recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), collectionID)
+			require.NoError(t, err)
+			require.False(t, recover)
+		}
+		recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), 6)
+		require.ErrorIs(t, err, lookupErr)
+		require.False(t, recover)
+		recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), 7)
+		require.Error(t, err)
+		require.False(t, recover)
+	})
+}
+
 // testBoundIndexRecorder captures FieldIndexes applied through the fake
 // CreateIndexV2 ack callback so DDL tests can assert on bound-index creation.
 var testBoundIndexRecorder = struct {

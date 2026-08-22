@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -480,6 +482,25 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
+	}
+	if mt.dataViewManager != nil {
+		addSegments := lo.Map(normalizedUpdatedSegments, func(segment *datapb.SegmentInfo, _ int) dataview.LoadableSegment {
+			return dataview.LoadableSegment{
+				SegmentID:   segment.GetID(),
+				VChannel:    segment.GetInsertChannel(),
+				PartitionID: segment.GetPartitionID(),
+			}
+		})
+		if _, err := mt.dataViewManager.OnExternalRefresh(ctx, ExternalRefreshDataViewEvent{
+			CollectionID: collectionID,
+			AddSegments:  addSegments,
+			DropSegments: segmentsToDrop,
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after external collection refresh",
+				mlog.Int64s("addSegments", lo.Map(addSegments, func(segment dataview.LoadableSegment, _ int) int64 { return segment.SegmentID })),
+				mlog.Int64s("dropSegments", segmentsToDrop),
+				mlog.Err(err))
+		}
 	}
 
 	mlog.Info(ctx, "external collection segments updated successfully",

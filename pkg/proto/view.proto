@@ -12,10 +12,40 @@ service ViewSyncService {
 }
 
 // DataVersion is the composite version embedded in a QueryView version.
-// Values are ordered lexicographically by (streaming_version, compact_version).
+// Values are ordered lexicographically by
+// (streaming_version, compact_version, transform_version).
 message DataVersion {
     int64 streaming_version = 1;
     int64 compact_version = 2;
+    int64 transform_version = 3;
+}
+
+// DataViewOfCollection is the complete loadable sealed-segment membership
+// snapshot for one collection at a DataVersion.
+message DataViewOfCollection {
+    int64 collection_id = 1;
+    repeated DataViewOfShard shards = 2;
+    DataVersion data_version = 3;
+}
+
+// DataViewOfShard groups loadable segments by partition for one vchannel.
+message DataViewOfShard {
+    string vchannel = 1;
+    repeated DataViewOfPartition partitions = 2;
+    // TODO: Add the shard transform_start_after_timetick only after
+    // StreamingNode provides the shard-level Growing-Segment Flush barrier
+    // required to publish a safe, monotonic Transform frontier.
+}
+
+message DataViewOfPartition {
+    int64 partition_id = 1;
+    // segment_ids and segment_manifest_versions are parallel packed arrays.
+    // A manifest version of 0 means the consumer must resolve SegmentInfo
+    // through Coordinator metadata. A positive version identifies a canonical
+    // StorageV3 manifest that the QueryNode can locate from collection,
+    // partition, Segment ID, and this version alone.
+    repeated int64 segment_ids = 2 [packed = true];
+    repeated int64 segment_manifest_versions = 3 [packed = true];
 }
 
 // QueryViewState represents the distributed lifecycle of a QueryView.

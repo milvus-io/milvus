@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -932,6 +933,25 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			// Sync JSON key indexes
 			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
 				return err
+			}
+			if meta.dataViewManager != nil {
+				segment := meta.GetSegment(ctx, result.GetSegmentId())
+				if segment == nil {
+					continue
+				}
+				if _, err := meta.dataViewManager.OnCopySegmentComplete(ctx, CopySegmentCompleteDataViewEvent{
+					CollectionID: task.GetCollectionId(),
+					Segments: []dataview.LoadableSegment{{
+						SegmentID:   segment.GetID(),
+						VChannel:    segment.GetInsertChannel(),
+						PartitionID: segment.GetPartitionID(),
+					}},
+				}); err != nil {
+					mlog.Warn(ctx, "failed to publish DataView after copy segment completion",
+						WrapCopySegmentTaskLog(task,
+							mlog.Int64("segmentID", result.GetSegmentId()),
+							mlog.Err(err))...)
+				}
 			}
 
 			mlog.Info(context.TODO(), "update copy segment info done",
