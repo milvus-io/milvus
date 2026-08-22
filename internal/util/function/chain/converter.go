@@ -278,7 +278,11 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 	}
 
 	// Import ID column ($id)
-	if ids := resultData.GetIds(); ids != nil {
+	// Zero-hit results may carry Ids as a non-nil shell whose IdField oneof is
+	// unset (e.g. querynode emptySearchResultData forwarded verbatim by the
+	// single-channel reduce fast path); it holds no IDs, so treat it exactly
+	// like Ids == nil.
+	if ids := resultData.GetIds(); ids.GetIdField() != nil {
 		if err := importIDs(builder, ids, offsets, alloc); err != nil {
 			return nil, err
 		}
@@ -287,6 +291,9 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 		if err := importEmptyIDs(builder, offsets, alloc); err != nil {
 			return nil, err
 		}
+	} else if ids != nil {
+		// IdField unset but rows present: malformed input.
+		return nil, importIDs(builder, ids, offsets, alloc)
 	}
 
 	// Import Score column ($score)
