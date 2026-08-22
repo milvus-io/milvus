@@ -1698,7 +1698,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const SegmentLoadInfo>& current,
         FieldId field_id);
 
-
     static StateDelta
     MakeStateDelta(const SchemaPtr& schema_snapshot,
                    const std::shared_ptr<const SegmentLoadInfo>& load_info,

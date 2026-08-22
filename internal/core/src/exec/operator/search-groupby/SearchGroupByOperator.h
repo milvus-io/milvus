@@ -394,7 +394,6 @@ struct CompositeGroupByMap {
         }
         return true;
     }
-
 };
 
 // Multi-field DataGetter that reads multiple fields and builds CompositeGroupKey

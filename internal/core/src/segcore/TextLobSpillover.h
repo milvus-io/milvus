@@ -71,7 +71,6 @@ struct TextLobRef {
         milvus::fastmem::FastMemcpy(&ref, s.data(), kEncodedSize);
         return ref;
     }
-
 };
 
 /**

@@ -1027,4 +1027,3 @@ TEST(CanonicalizeArrowVariants, AllNullStringView) {
     EXPECT_TRUE(out->IsNull(1));
     EXPECT_TRUE(out->IsNull(2));
 }
-
