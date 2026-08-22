@@ -106,8 +106,14 @@ const (
 )
 
 const (
-	ContextRequest                = "request"
-	ContextResponse               = "response"
+	ContextRequest  = "request"
+	ContextResponse = "response"
+	// ContextUsername is duplicated as authenticatedUsernameKey in
+	// internal/proxy, which cannot import this package (it is imported BY this
+	// package). internal/proxy's authorizeConfigView reads the identity this
+	// key carries and serves the configuration views to root only, so renaming
+	// this without renaming that turns those views into a 401 for everyone,
+	// root included. Change both.
 	ContextUsername               = "username"
 	ContextToken                  = "token"
 	VectorCollectionsPath         = "/vector/collections"

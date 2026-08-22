@@ -39,6 +39,19 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	// Mark some keys as immutable for testing
 	mgr.ImmutableUpdate("test.immutable.key1")
+	for _, key := range []string{
+		"test.alter.config.key1",
+		"test.alter.config.legacy",
+		"test.alter.config.empty",
+		"test.alter.config.reset_me",
+		"test.alter.mixed.keep",
+		"test.alter.mixed.remove",
+		"test.alter.config.key2",
+		"test.alter.config.key3",
+		"test.immutable.key1",
+	} {
+		mgr.RegisterConfigKey(key)
+	}
 
 	coord := &mixCoordImpl{}
 
@@ -318,16 +331,210 @@ func TestHandleAlterConfig(t *testing.T) {
 	})
 }
 
+// These reject before any etcd access, so they must not sit behind the live-etcd
+// requirement of TestHandleAlterConfig — they are the checks that keep a
+// credential or an undeclared key out of etcd in the first place.
+func TestHandleAlterConfigValidation(t *testing.T) {
+	paramtable.Init()
+	mgr := paramtable.GetBaseTable().Manager()
+	coord := &mixCoordImpl{}
+
+	t.Run("security-governing config cannot be altered at all", func(t *testing.T) {
+		params := paramtable.Get()
+		for _, key := range []string{
+			params.CommonCfg.AuthorizationEnabled.Key,
+			params.CommonCfg.SuperUsers.Key,
+			params.CommonCfg.DefaultRootPassword.Key,
+			// The privilege tables and the /expr switches are the ones the
+			// original two-name fence let through.
+			params.RbacConfig.ClusterAdminPrivileges.Key,
+			params.CommonCfg.EnablePublicPrivilege.Key,
+			params.CommonCfg.ExprEnabled.Key,
+			params.CommonCfg.ExprAuthMode.Key,
+			// Declared outside common.security. but decides RBAC alias handling.
+			params.ProxyCfg.ResolveAliasForPrivilege.Key,
+			// Undeclared legacy alias read by EnablePublicPrivilege's Formatter:
+			// nothing normalises its spelling, so the fence has to.
+			"proxy.enablePublicPrivilege",
+			"proxy_enablePublicPrivilege",
+			"PROXY_ENABLEPUBLICPRIVILEGE",
+			"proxyenablepublicprivilege",
+			// Re-spellings of a declared fenced key.
+			"COMMON_SECURITY_SUPERUSERS",
+			"common/security/superUsers",
+		} {
+			for _, cfg := range []map[string]interface{}{{"key": key, "value": "false"}, {"key": key}} {
+				reqBody := map[string]interface{}{"configs": []map[string]interface{}{cfg}}
+				body, _ := json.Marshal(reqBody)
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+				w := httptest.NewRecorder()
+				coord.HandleAlterConfig(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code, key)
+				assert.Contains(t, w.Body.String(), "security-governing configuration", key)
+			}
+		}
+	})
+
+	t.Run("sensitive config should fail before etcd access", func(t *testing.T) {
+		const key = "test.alter.sensitive"
+		mgr.RegisterConfigKey(key)
+		mgr.RegisterSensitiveKey(key)
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "secret"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("sensitive config cannot be deleted either", func(t *testing.T) {
+		const key = "test.alter.sensitive.delete"
+		mgr.RegisterConfigKey(key)
+		mgr.RegisterSensitiveKey(key)
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		// A delete is not a removal, it is a reversion: whatever the yaml or the
+		// compiled default says comes back, and for minio.secretAccessKey that
+		// is "minioadmin". An endpoint with no authentication in front of it
+		// does not get to do that, for the same reason it does not get to write
+		// the key.
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("undeclared config may still be deleted, secret-named or not", func(t *testing.T) {
+		// Where the reasoning above stops. An operator holding a key an older
+		// build wrote needs some way to remove it, and a secret-named one is
+		// precisely the case that argument is about — so the name-pattern guess
+		// must not fence it. Only a key Milvus itself declares to be a
+		// credential is undeletable.
+		for _, legacy := range []string{
+			"test.alter.undeclared.password",
+			"test.alter.undeclared.apiKey",
+			"test.alter.undeclared.private_key",
+		} {
+			reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": legacy}}}
+			body, _ := json.Marshal(reqBody)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			coord.HandleAlterConfig(w, req)
+			assert.NotEqual(t, http.StatusBadRequest, w.Code, legacy)
+			assert.NotContains(t, w.Body.String(), "sensitive configuration", legacy)
+		}
+	})
+
+	t.Run("undeclared config may still be deleted", func(t *testing.T) {
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": "test.alter.undeclared.legacy"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		// Validation is what this asserts, so assert only that. What happens
+		// after it depends on whether this package has an etcd to talk to, and
+		// TestHandleAlterConfig above requires that it does.
+		assert.NotEqual(t, http.StatusBadRequest, w.Code)
+		assert.NotContains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("sensitive ParamGroup member may still be deleted", func(t *testing.T) {
+		// The other side of the delete fence. credential.* is Sensitive because
+		// its members are open-ended, not because anyone reviewed this one, and
+		// there is no compiled default for a delete to revert to — so fencing it
+		// would only strand whatever is already in etcd.
+		const key = "credential.aksk1.secret_access_key"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.NotEqual(t, http.StatusBadRequest, w.Code)
+		assert.NotContains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("sensitive ParamGroup member cannot be set", func(t *testing.T) {
+		// credential.* is a declared, sensitive ParamGroup: a member of it needs
+		// no prior registration to resolve, and must still be refused.
+		const key = "credential.aksk1.secret_access_key"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "s3cret"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "sensitive configuration")
+	})
+
+	t.Run("unregistered config may still be deleted", func(t *testing.T) {
+		// A key an older build wrote must remain removable even though nothing
+		// declares it any more; only setting one is refused.
+		const key = "test.alter.no.longer.declared"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.NotEqual(t, http.StatusBadRequest, w.Code)
+		assert.NotContains(t, w.Body.String(), "unregistered configuration")
+	})
+
+	t.Run("unregistered config should fail before etcd access", func(t *testing.T) {
+		const key = "test.alter.unregistered"
+		reqBody := map[string]interface{}{"configs": []map[string]interface{}{{"key": key, "value": "value"}}}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "unregistered configuration")
+	})
+}
+
 func TestHandleGetConfig(t *testing.T) {
 	paramtable.Init()
 	mgr := paramtable.GetBaseTable().Manager()
 
 	coord := &mixCoordImpl{}
 
-	// Seed configs directly via Manager.SetConfig (no etcd needed).
-	mgr.SetConfig("test.getconfig.key1", "val1")
-	mgr.SetConfig("test.getconfig.key2", "val2")
-	mgr.SetConfig("test.getconfig.key3", "val3")
+	// Seed configs directly via Manager (no etcd needed). Scalars go through
+	// SetConfig; ParamGroup members go through SetMapConfig, which keeps the
+	// dotted identity a file or etcd source would have given them.
+	scalars := map[string]string{
+		"test.getconfig.key1":   "val1",
+		"test.getconfig.key2":   "val2",
+		"test.getconfig.key3":   "val3",
+		"test.getconfig.opaque": "opaque-secret",
+		"pulsar.authParams":     "token:broker-secret",
+		"AWS_SECRET_ACCESS_KEY": "environment-secret",
+	}
+	groupMembers := map[string]string{
+		"credential.aksk1.secret_access_key":             "param-group-secret",
+		"kafka.consumer.ssl.key.pem":                     "inline-private-key",
+		"function.analyzer.lindera.download_urls.ipadic": "https://example.invalid/dict",
+	}
+	for key, value := range scalars {
+		mgr.SetConfig(key, value)
+	}
+	for key, value := range groupMembers {
+		mgr.SetMapConfig(key, value)
+	}
+	t.Cleanup(func() {
+		// This manager is the process-global paramtable; leaving these behind
+		// would leak into every other test in the package.
+		for key := range scalars {
+			mgr.ResetConfig(key)
+		}
+		for key := range groupMembers {
+			mgr.ResetConfig(key)
+		}
+	})
+	for _, key := range []string{"test.getconfig.key1", "test.getconfig.key2", "test.getconfig.key3", "test.getconfig.opaque"} {
+		mgr.RegisterConfigKey(key)
+	}
+	mgr.RegisterSensitiveKey("test.getconfig.opaque")
 
 	type configResult struct {
 		Key    string `json:"key"`
@@ -428,16 +635,55 @@ func TestHandleGetConfig(t *testing.T) {
 	})
 
 	t.Run("sensitive keys are redacted", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password", nil)
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password,test.getconfig.opaque", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		configs := parseResponse(t, w)
-		require.Len(t, configs, 3)
+		require.Len(t, configs, 4)
 		assert.Contains(t, configs[0].Error, "sensitive")
 		assert.Equal(t, "val1", configs[1].Value)
 		assert.Contains(t, configs[2].Error, "sensitive")
+		assert.Contains(t, configs[3].Error, "sensitive")
+		assert.NotContains(t, w.Body.String(), "opaque-secret")
+	})
+
+	t.Run("sensitive ParamGroup members and undeclared keys are denied", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=credential.aksk1.secret_access_key,kafka.consumer.ssl.key.pem,pulsar.authParams,AWS_SECRET_ACCESS_KEY,function.analyzer.lindera.download_urls.ipadic,kafkaconsumersslkeypem", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 6)
+		for _, result := range configs[:3] {
+			assert.Contains(t, result.Error, "sensitive")
+		}
+		// The collapsed spelling of a sensitive ParamGroup member addresses the
+		// same entry and must get the same answer.
+		assert.Contains(t, configs[5].Error, "sensitive")
+		assert.Contains(t, configs[3].Error, "unregistered")
+		// A declared, non-credential ParamGroup member stays readable: hiding
+		// infrastructure detail from root is not what this endpoint is for.
+		assert.Equal(t, "https://example.invalid/dict", configs[4].Value)
+		assert.NotContains(t, w.Body.String(), "param-group-secret")
+		assert.NotContains(t, w.Body.String(), "inline-private-key")
+		assert.NotContains(t, w.Body.String(), "broker-secret")
+		assert.NotContains(t, w.Body.String(), "environment-secret")
+	})
+
+	t.Run("unregistered keys are denied", func(t *testing.T) {
+		mgr.SetConfig("test.getconfig.unknown", "unknown-secret")
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.unknown", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 1)
+		assert.Contains(t, configs[0].Error, "unregistered")
+		assert.NotContains(t, w.Body.String(), "unknown-secret")
 	})
 
 	t.Run("all empty keys should fail", func(t *testing.T) {

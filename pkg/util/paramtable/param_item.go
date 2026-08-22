@@ -45,6 +45,12 @@ type ParamItem struct {
 	Formatter func(originValue string) string
 	Forbidden bool
 	Immutable bool
+	// Sensitive marks values that must be redacted from configuration
+	// projections. Scalar GetValue calls remain raw for internal consumers.
+	Sensitive bool
+	// NonSensitive exempts a reviewed secret-like key name from fallback
+	// matching. It must not be combined with Sensitive.
+	NonSensitive bool
 
 	manager *config.Manager
 
@@ -56,12 +62,35 @@ type ParamItem struct {
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
+	if pi.Sensitive && pi.NonSensitive {
+		// Contradictory metadata. Sensitive wins at runtime, so this would fail
+		// closed rather than leak, but it would also mean a declaration that
+		// says "reviewed, not a credential" is quietly not in force. The
+		// declaration site is where that has to be noticed.
+		panic(fmt.Sprintf("%s is declared both Sensitive and NonSensitive", pi.Key))
+	}
 	pi.manager = manager
+	pi.manager.RegisterConfigKey(pi.Key)
+	for _, key := range pi.FallbackKeys {
+		pi.manager.RegisterConfigKey(key)
+	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
+	}
+	if pi.Sensitive {
+		pi.manager.RegisterSensitiveKey(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.RegisterSensitiveKey(key)
+		}
+	}
+	if pi.NonSensitive {
+		pi.manager.RegisterNonSensitiveKey(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.RegisterNonSensitiveKey(key)
+		}
 	}
 
 	currentValue := pi.GetValue()
@@ -101,20 +130,31 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 		return
 	}
 
+	logOldValue := pi.configValueForLog(oldValue)
+	logNewValue := pi.configValueForLog(newValue)
+
 	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
 		mlog.Error(context.TODO(), "param change callback failed",
 			mlog.String("key", pi.Key),
-			mlog.String("oldValue", oldValue),
-			mlog.String("newValue", newValue),
+			mlog.String("oldValue", logOldValue),
+			mlog.String("newValue", logNewValue),
 			mlog.Err(err))
 	} else {
 		mlog.Info(context.TODO(), "param value changed",
 			mlog.String("key", pi.Key),
-			mlog.String("oldValue", oldValue),
-			mlog.String("newValue", newValue))
+			mlog.String("oldValue", logOldValue),
+			mlog.String("newValue", logNewValue))
 	}
 
 	pi.lastValue.Store(&newValue)
+}
+
+func (pi *ParamItem) configValueForLog(value string) string {
+	if pi.manager == nil {
+		// Only reachable before Init; assume the worst.
+		return config.RedactedValue
+	}
+	return pi.manager.RedactValue(pi.Key, value)
 }
 
 // Get original value with error
@@ -389,6 +429,15 @@ type ParamGroup struct {
 	Version   string
 	Doc       string
 	Export    bool
+	// Sensitive marks every value below KeyPrefix as sensitive. Use it when the
+	// members are provider- or plugin-defined, so the core cannot enumerate
+	// which of them carry credentials.
+	Sensitive bool
+	// NonSensitiveSuffixes lists the leaf names below KeyPrefix that the group
+	// itself defines and that are known not to be credentials — an enable flag,
+	// an endpoint URL. Only meaningful together with Sensitive; every other leaf
+	// below the prefix still fails closed.
+	NonSensitiveSuffixes []string
 
 	GetFunc func() map[string]string
 	DocFunc func(string) string
@@ -398,13 +447,20 @@ type ParamGroup struct {
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
 	pg.manager = manager
+	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
+	if pg.Sensitive {
+		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)
+		for _, suffix := range pg.NonSensitiveSuffixes {
+			pg.manager.RegisterNonSensitiveSuffix(pg.KeyPrefix, suffix)
+		}
+	}
 }
 
 func (pg *ParamGroup) GetValue() map[string]string {
 	if pg.GetFunc != nil {
 		return pg.GetFunc()
 	}
-	values := pg.manager.GetBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
+	values := pg.manager.GetByRaw(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
 	return values
 }
 

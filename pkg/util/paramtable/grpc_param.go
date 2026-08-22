@@ -136,6 +136,23 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
+
+	// The per-cluster CDC namespaces are keyed by cluster ID and read by exact
+	// key through base.Get, not as a group — GetClusterTLSConfig and
+	// GetClusterAuthority below. They are declared anyway because a namespace
+	// nothing declares is invisible to the configuration projections and refused
+	// by the management endpoints, which would leave cross-cluster TLS
+	// unconfigurable through them.
+	//
+	// Registered directly rather than through a ParamGroup field: a field would
+	// buy a GetValue nothing calls, and grpcConfig is embedded in fifteen
+	// server and client configs, so it would buy thirty of them.
+	//
+	// Paths, not key material: the files they point at are the secret, and
+	// hiding the paths would only cost operators the ability to see how CDC is
+	// wired.
+	base.mgr.RegisterConfigPrefix("tls.clusters.")
+	base.mgr.RegisterConfigPrefix("grpc.clusters.")
 }
 
 // GetClusterTLSConfig returns per-cluster outbound TLS cert paths for CDC connections.

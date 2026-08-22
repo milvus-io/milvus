@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -1182,9 +1183,13 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
+	// Names only: this map is the target broker's own configuration, which is
+	// where kafka.saslPassword / pulsar.authParams style material is supplied,
+	// and it arrives from the request body rather than from the config manager,
+	// so no declared-sensitivity metadata applies to it.
 	logger.Info(req.Context(), "HandleAlterWAL start",
 		mlog.String("targetWAL", requestBody.TargetWALName),
-		mlog.Any("config", requestBody.Config))
+		mlog.Strings("configKeys", lo.Keys(requestBody.Config)))
 
 	if err := s.broadcastAlterWALMessage(req.Context(), commonpb.WALName(targetWAL), requestBody.Config); err != nil {
 		logger.Info(req.Context(), "HandleAlterWAL failed to broadcast AlterWALMessage",
@@ -1307,17 +1312,39 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Check for duplicate keys
-		if _, exists := seen[config.Key]; exists {
+		// Resolve the external key before any mutation, so every check below sees
+		// one identity regardless of how the caller spelled it.
+		canonicalKey, registeredKind := paramMgr.ResolveRegisteredConfigKey(config.Key)
+
+		// Deduplicate on the identity the write actually lands under, not the
+		// caller's spelling: AlterConfigsInEtcd strips separators, so
+		// "kafka.consumer.a.b" and "kafka.consumer.ab" address one etcd key and
+		// would otherwise reach the same transaction twice.
+		if _, exists := seen[pkgconfig.EtcdConfigKey(canonicalKey)]; exists {
 			logger.Info(request.Context(), "HandleAlterConfig duplicate key found", mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
-		seen[config.Key] = struct{}{}
+		seen[pkgconfig.EtcdConfigKey(canonicalKey)] = struct{}{}
 
-		// Check if it's mqtype configuration
-		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
-		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
+		// Keys that decide who may do anything at all are out of reach of an
+		// endpoint that asks nobody who they are. This one is on the metrics
+		// port with no authentication in front of it, so letting it rewrite the
+		// authorization switch or the superuser list would make every other
+		// check here decorative. Deletes are refused too: dropping an etcd entry
+		// that holds "authorization enabled" is itself a way to turn it off.
+		// IsSecurityGoverningConfig normalises to the identity the write would
+		// address, so every spelling of a fenced key is caught, declared or not.
+		if paramtable.IsSecurityGoverningConfig(canonicalKey) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// Check if it's mqtype configuration, on the same identity for the same
+		// reason: "mq_type" and "MQTYPE" address the entry "mq.type" does.
+		if strings.Contains(pkgconfig.EtcdConfigKey(canonicalKey), "mqtype") {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
@@ -1325,7 +1352,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		}
 
 		// Check if the configuration is immutable - immutable keys cannot be modified
-		if paramMgr.IsImmutable(config.Key) {
+		if paramMgr.IsImmutable(canonicalKey) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
@@ -1333,10 +1360,49 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		}
 
 		if config.Value != nil {
-			configsToUpdate[config.Key] = *config.Value
-		} else {
-			keysToDelete = append(keysToDelete, config.Key)
+			if registeredKind == pkgconfig.RegisteredConfigUnknown {
+				logger.Info(request.Context(), "HandleAlterConfig attempted to set unregistered config",
+					mlog.String("key", config.Key))
+				writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+				return
+			}
+			// Never write a credential through the generic config endpoint:
+			// secrets have their own lifecycle and must not be copied into etcd
+			// in cleartext, even when the caller is root.
+			if paramMgr.IsSensitive(canonicalKey) {
+				logger.Info(request.Context(), "HandleAlterConfig attempted to set sensitive config",
+					mlog.String("key", config.Key))
+				writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+				return
+			}
+			configsToUpdate[canonicalKey] = *config.Value
+			continue
 		}
+
+		// A delete is fenced too, but only for a key Milvus itself declares to
+		// be a credential. Deleting such a key is not a removal, it is a
+		// reversion to the compiled default, and those defaults are real
+		// working credentials — dropping the etcd entry that holds an operator's
+		// minio.secretAccessKey puts "minioadmin" back, on an endpoint with no
+		// authentication in front of it.
+		//
+		// A ParamGroup member is a different case: what a delete reverts it to is
+		// the yaml, and every sensitive group member Milvus ships is empty
+		// there — credential.*, function.*.credential, kafka.consumer/producer.*
+		// all default to no value — so reverting one yields nothing rather than
+		// a working credential. Fencing them would only strand entries: a
+		// kafka.consumer.* tuning value written through this endpoint before the
+		// group was marked could never be removed through it again. Undeclared
+		// keys stay deletable for the same reason, whatever their name looks
+		// like — the name-pattern fallback classifies those too, and it is
+		// exactly the secret-named legacy key that this escape hatch is for.
+		if registeredKind == pkgconfig.RegisteredConfigScalar && paramMgr.IsSensitive(canonicalKey) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to delete a declared credential",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+		keysToDelete = append(keysToDelete, canonicalKey)
 	}
 
 	// Get EtcdSource to save the configuration
@@ -1352,7 +1418,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
 		logger.Info(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
-			mlog.Any("updates", configsToUpdate),
+			mlog.Strings("updates", lo.Keys(configsToUpdate)),
 			mlog.Strings("deletes", keysToDelete),
 			mlog.Err(err))
 		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
@@ -1362,7 +1428,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	logger.Info(request.Context(), "HandleAlterConfig success",
 		mlog.Int("updates", len(configsToUpdate)),
 		mlog.Int("deletes", len(keysToDelete)),
-		mlog.Any("updated", configsToUpdate),
+		mlog.Strings("updated", lo.Keys(configsToUpdate)),
 		mlog.Strings("deleted", keysToDelete))
 
 	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
@@ -1404,17 +1470,15 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Redact sensitive config keys (passwords, secrets, tokens).
-		normalizedKey := strings.ToLower(key)
-		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
-			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
+		source, value, err := paramMgr.GetRegisteredConfig(key)
+		switch {
+		case errors.Is(err, pkgconfig.ErrKeyUnregistered):
+			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
+		case errors.Is(err, pkgconfig.ErrKeySensitive):
 			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
-			continue
-		}
-		source, value, err := paramMgr.GetConfig(key)
-		if err != nil {
+		case err != nil:
 			results = append(results, configResult{Key: key, Error: err.Error()})
-		} else {
+		default:
 			results = append(results, configResult{Key: key, Value: value, Source: source})
 		}
 	}

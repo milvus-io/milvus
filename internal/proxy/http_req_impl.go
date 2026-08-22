@@ -31,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -41,43 +43,78 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// authenticatedUsernameKey matches httpserver.ContextUsername, which the
+// distributed proxy authentication middleware populates. It is spelled out
+// again here because internal/proxy cannot import
+// internal/distributed/proxy/httpserver — that package imports this one.
+const authenticatedUsernameKey = "username"
+
 var (
 	contentType        = "application/json"
 	defaultDB          = "default"
 	httpDBName         = "db_name"
 	HTTPCollectionName = "collection_name"
 	UnknownData        = "unknown"
-	sensitiveMark      = "*****"
-	sensitiveKeys      = []string{
-		"secretaccesskey",
-		"secret_access_key",
-		"password",
-		"apikey",
-		"credentialjson",
-		"credential_json",
-	}
+	// sensitiveMark is the redaction marker the access/trace log shares with the
+	// configuration projections, so an operator sees one shape for "withheld".
+	sensitiveMark = config.RedactedValue
 )
 
-func hideSensitive(configs map[string]string) {
-	checkFunc := func(key string) bool {
-		for _, sensitive := range sensitiveKeys {
-			if strings.Contains(strings.ToLower(key), sensitive) {
-				return true
-			}
+// authorizeConfigView restricts the configuration views to root.
+//
+// Root and not common.security.superUsers: an authorization input has to be at
+// least as hard to write as the thing it authorizes, and superUsers is
+// configuration. /management/config/alter refuses to touch anything
+// IsSecurityGoverningConfig covers, superUsers included, but that endpoint is on
+// the metrics port and has no authentication of its own — so the list would be
+// only as protected as that one fence. root is an identity, not a config value.
+func authorizeConfigView() gin.HandlerFunc {
+	// Read once, at router construction: internal/distributed/proxy installs the
+	// authentication middleware that populates the username from the same flag
+	// at the same moment. Re-reading it per request would let a runtime Save
+	// turn the gate on while the middleware that feeds it stays absent, and then
+	// nobody — root included — could read the view.
+	authorizationEnabled := paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool()
+
+	return func(c *gin.Context) {
+		if !authorizationEnabled {
+			return
 		}
-		return false
-	}
-	for key := range configs {
-		if checkFunc(key) {
-			configs[key] = sensitiveMark
+
+		usernameValue, ok := c.Get(authenticatedUsernameKey)
+		username, isString := usernameValue.(string)
+		if !ok || !isString || username == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				mhttp.HTTPReturnCode:    merr.Code(merr.ErrNeedAuthenticate),
+				mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error(),
+			})
+			return
+		}
+		if username != util.UserRoot {
+			err := merr.WrapErrPrivilegeNotPermitted("only root user can read configuration views")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				mhttp.HTTPReturnCode:    merr.Code(err),
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
 		}
 	}
 }
 
-func getConfigs(configs map[string]string) gin.HandlerFunc {
-	hideSensitive(configs)
+// getProjectedConfigs serves a configuration projection produced by the owning
+// config.Manager, and serves it verbatim. The name is the contract: what is
+// passed in MUST already have been through Manager.GetConfigs/GetConfigsView or
+// an equivalent, because nothing here will redact it. Redaction belongs to that
+// manager — only it knows which of its keys are declared, and the hook table's
+// keys are unknown to the main one.
+//
+// It takes a function rather than a map because the routes are registered once,
+// at startup, and a map captured there would answer every later request with
+// the configuration the process booted with — an endpoint whose whole purpose
+// is to report the configuration in force, reporting one that may no longer be.
+func getProjectedConfigs(project func() map[string]string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		bs, err := json.Marshal(configs)
+		bs, err := json.Marshal(project())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),

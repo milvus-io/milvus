@@ -19,6 +19,8 @@ package coordinator
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -53,7 +55,10 @@ func (c *WALCallback) alterWALV2AckCallback(
 ) error {
 	logger := mlog.With(
 		mlog.Stringer("targetWALName", result.Message.Header().TargetWalName),
-		mlog.Any("config", result.Message.Header().Config),
+		// Names only: this is the target broker's own configuration, where
+		// sasl.password / ssl.key.pem style material is supplied. It is attached
+		// with mlog.With, so every line below would otherwise carry it.
+		mlog.Strings("configKeys", lo.Keys(result.Message.Header().Config)),
 		mlog.Uint64("broadcastID", result.Message.BroadcastHeader().BroadcastID),
 	)
 

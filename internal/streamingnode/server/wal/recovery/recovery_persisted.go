@@ -166,7 +166,7 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		mlog.String("checkpoint", checkpoint.MessageId.String()),
 		mlog.Uint64("timetick", checkpoint.TimeTick),
 		mlog.Int64("magic", checkpoint.RecoveryMagic),
-		mlog.Any("alterWALState", checkpoint.AlterWalState),
+		mlog.Any("alterWALState", utility.LoggableAlterWALState(checkpoint.AlterWalState)),
 	)
 	return checkpoint, nil
 }

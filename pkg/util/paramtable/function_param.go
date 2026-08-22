@@ -53,6 +53,13 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.textEmbedding.providers.",
 		Version:   "2.6.0",
 		Export:    true,
+		// Provider entries are open-ended, so the group defaults to sensitive.
+		// The three leaves the group itself defines are not credentials: hiding
+		// whether a provider is enabled, or which endpoint it points at, is the
+		// same over-reach as hiding minio.address, and it would make them
+		// unalterable too. Only <provider>.credential stays hidden.
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable", "url", "resource_name"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.enable":
@@ -133,9 +140,11 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.TextEmbeddingProviders.Init(base.mgr)
 
 	p.RerankModelProviders = ParamGroup{
-		KeyPrefix: "function.rerank.model.providers.",
-		Version:   "2.6.0",
-		Export:    true,
+		KeyPrefix:            "function.rerank.model.providers.",
+		Version:              "2.6.0",
+		Export:               true,
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable", "url"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.credential":
@@ -194,6 +203,27 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.ZillizProviders = ParamGroup{
 		KeyPrefix: "function.models.zilliz.",
 		Version:   "2.6.5",
+		Sensitive: true,
+		// Every leaf this group actually defines — see loadConfig in
+		// internal/util/function/models/zilliz/zilliz_client.go. An endpoint, a
+		// TLS switch, a CA *path* and an SNI override are infrastructure detail
+		// of exactly the kind minio.address and tls.clusters.* stay readable
+		// for; the file certFile points at is the secret, not the path.
+		//
+		// The group stays Sensitive so that a member nobody has thought of yet
+		// fails closed. Do not copy this list from the two groups above: theirs
+		// name different leaves, and a suffix that matches no real member
+		// silently exempts nothing — which is what this list used to do.
+		//
+		// Two things to know about what the exemption buys. It applies once the
+		// key is configured, because an exemption is only honoured for a
+		// segmentation something vouched for (resolvedKey.segmented) — an
+		// unconfigured member reads as sensitive, though there is nothing behind
+		// it to read. And ParamGroup.GetValue hands the consumer lower-cased
+		// leaves, so loadConfig's camelCase lookups for enableTLS, certFile and
+		// serverNameOverride do not match today; that is a pre-existing bug in
+		// the consumer, unrelated to this classification.
+		NonSensitiveSuffixes: []string{"endpoint", "enableTLS", "certFile", "serverNameOverride"},
 	}
 	p.ZillizProviders.Init(base.mgr)
 

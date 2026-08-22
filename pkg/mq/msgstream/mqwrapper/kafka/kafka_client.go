@@ -2,8 +2,9 @@ package kafka
 
 import (
 	"context"
-	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,21 +44,16 @@ func getBasicConfig(address string) kafka.ConfigMap {
 	}
 }
 
+// ConfigtoString returns a deterministic, value-free summary of a Kafka
+// configuration. Values are intentionally omitted because arbitrary
+// librdkafka options can contain credentials or inline private keys.
 func ConfigtoString(config kafka.ConfigMap) string {
-	configString := "["
+	keys := make([]string, 0, len(config))
 	for key := range config {
-		if key == "sasl.password" || key == "sasl.username" {
-			configString += key + ":" + "*** "
-		} else {
-			value, _ := config.Get(key, nil)
-			configString += key + ":" + fmt.Sprintf("%v ", value)
-		}
+		keys = append(keys, key)
 	}
-	if len(configString) > 1 {
-		configString = configString[:len(configString)-1]
-	}
-	configString += "]"
-	return configString
+	sort.Strings(keys)
+	return "[" + strings.Join(keys, " ") + "]"
 }
 
 func NewKafkaClientInstance(address string) *kafkaClient {
@@ -66,9 +62,17 @@ func NewKafkaClientInstance(address string) *kafkaClient {
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
-	mlog.Info(context.TODO(), "init kafka Config ", mlog.String("commonConfig", ConfigtoString(config)),
-		mlog.String("extraConsumerConfig", ConfigtoString(extraConsumerConfig)),
-		mlog.String("extraProducerConfig", ConfigtoString(extraProducerConfig)),
+	// Kafka extra configs may contain arbitrary authentication material (for
+	// example ssl.key.pem or sasl.jaas.config), so ConfigtoString prints the
+	// option names without their values: a key-name allowlist cannot safely
+	// classify every librdkafka option, but knowing which options are set is
+	// what makes a broker misconfiguration diagnosable.
+	brokers, _ := config.Get("bootstrap.servers", "")
+	mlog.Info(context.TODO(), "init kafka config",
+		mlog.Any("brokers", brokers),
+		mlog.String("commonConfigKeys", ConfigtoString(config)),
+		mlog.String("extraConsumerConfigKeys", ConfigtoString(extraConsumerConfig)),
+		mlog.String("extraProducerConfigKeys", ConfigtoString(extraProducerConfig)),
 	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
@@ -258,7 +262,8 @@ func (kc *kafkaClient) StringToMsgID(id string) (common.MessageID, error) {
 func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafka.ConfigMap) {
 	for k, v := range special {
 		if existingConf, _ := current.Get(k, nil); existingConf != nil {
-			mlog.Warn(context.TODO(), fmt.Sprintf("The existing config :  %v=%v  will be covered by the special kafka config :  %v.", k, v, existingConf))
+			// Both the existing and replacement values may be credentials.
+			mlog.Warn(context.TODO(), "special kafka config overrides existing config", mlog.String("key", k))
 		}
 
 		current.SetKey(k, v)
