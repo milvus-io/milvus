@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -89,6 +90,7 @@ type compactionInspector struct {
 	handler          Handler
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
+	mixCoord         types.MixCoord
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -180,7 +182,7 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 }
 
 func newCompactionInspector(meta CompactionMeta,
-	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
+	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager, mixCoord types.MixCoord,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
@@ -194,6 +196,7 @@ func newCompactionInspector(meta CompactionMeta,
 		scheduler:        scheduler,
 		analyzeScheduler: analyzeScheduler,
 		ievm:             ievm,
+		mixCoord:         mixCoord,
 	}
 }
 
@@ -596,7 +599,7 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = newL0CompactionTask(t, c.allocator, c.meta)
+		task = newL0CompactionTask(t, c.allocator, c.meta, c.mixCoord)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler, c.ievm)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:

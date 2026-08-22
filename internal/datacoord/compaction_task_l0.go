@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -29,11 +30,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -45,6 +49,7 @@ type l0CompactionTask struct {
 
 	allocator allocator.Allocator
 	meta      CompactionMeta
+	mixCoord  types.MixCoord
 
 	times                *taskcommon.Times
 	committedV3Manifests map[int64]string
@@ -176,6 +181,7 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 		UpdateCompactionSegmentSizeMetrics(result.GetSegments())
+		t.refreshQueryTargetIfImport()
 		t.processMetaSaved()
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
@@ -217,10 +223,11 @@ func (t *l0CompactionTask) GetTaskProto() *datapb.CompactionTask {
 	return task.(*datapb.CompactionTask)
 }
 
-func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta) *l0CompactionTask {
+func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, mixCoord types.MixCoord) *l0CompactionTask {
 	task := &l0CompactionTask{
 		allocator:            allocator,
 		meta:                 meta,
+		mixCoord:             mixCoord,
 		times:                taskcommon.NewTimes(),
 		committedV3Manifests: make(map[int64]string),
 	}
@@ -411,6 +418,56 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 
 func (t *l0CompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
+}
+
+// hasImportProducedInput reports whether any input L0 segment carries a commit timestamp,
+// which only an import job's segments do.
+func (t *l0CompactionTask) hasImportProducedInput() bool {
+	for _, segID := range t.GetTaskProto().GetInputSegments() {
+		segment := t.meta.GetSegment(context.TODO(), segID)
+		if segment == nil {
+			continue
+		}
+		if segment.GetCommitTimestamp() != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// refreshQueryTargetIfImport asks QueryCoord to refresh its next target for
+// this task's collection when the completed compaction's input included an
+// import-produced L0 segment. The RPC runs in a background goroutine; its
+// outcome does not affect the caller.
+func (t *l0CompactionTask) refreshQueryTargetIfImport() {
+	if t.mixCoord == nil {
+		return
+	}
+	if !t.hasImportProducedInput() {
+		return
+	}
+	collectionID := t.GetTaskProto().GetCollectionID()
+	planID := t.GetTaskProto().GetPlanID()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
+		defer cancel()
+		resp, err := t.mixCoord.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_LoadCollection)),
+			CollectionID: collectionID,
+			Refresh:      true,
+		})
+		err = merr.CheckRPCCall(resp, err)
+		if err == nil {
+			return
+		}
+		if errors.Is(err, merr.ErrCollectionNotLoaded) {
+			mlog.Info(ctx, "skip query target refresh after l0 compaction, collection not loaded",
+				mlog.Int64("planID", planID), mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			return
+		}
+		mlog.Warn(ctx, "query target refresh after l0 compaction failed",
+			mlog.Int64("planID", planID), mlog.FieldCollectionID(collectionID), mlog.Err(err))
+	}()
 }
 
 func (t *l0CompactionTask) hasAssignedWorker() bool {

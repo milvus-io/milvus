@@ -18,7 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -30,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -121,7 +125,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		NodeID:        1,
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
-	}, nil, s.mockMeta)
+	}, nil, s.mockMeta, nil)
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
@@ -151,7 +155,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		NodeID:        1,
 		State:         datapb.CompactionTaskState_executing,
-	}, nil, s.mockMeta)
+	}, nil, s.mockMeta, nil)
 
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
@@ -181,7 +185,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		NodeID:        1,
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
-	}, nil, s.mockMeta)
+	}, nil, s.mockMeta, nil)
 	plan, err := task.BuildCompactionRequest()
 	// Fast finish: should return a plan with only L0 segments (no error)
 	s.NoError(err)
@@ -238,7 +242,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 		NodeID:        1,
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
-	}, s.mockAlloc, s.mockMeta)
+	}, s.mockAlloc, s.mockMeta, nil)
 
 	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(0, 0, errors.New("mock alloc err"))
 
@@ -258,7 +262,7 @@ func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskSt
 		State:         state,
 		Channel:       "ch-1",
 		InputSegments: []int64{100, 101},
-	}, s.mockAlloc, s.mockMeta)
+	}, s.mockAlloc, s.mockMeta, nil)
 }
 
 func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
@@ -702,7 +706,7 @@ func (s *L0CompactionTaskSuite) TestSelectFlushedSegment_ForceSelectAllFlag() {
 			State:         datapb.CompactionTaskState_executing,
 			InputSegments: []int64{100, 101},
 			Pos:           triggeredView.latestDeletePos,
-		}, nil, s.mockMeta)
+		}, nil, s.mockMeta, nil)
 
 		flushed, _, err := task.selectFlushedSegment()
 		s.Require().NoError(err)
@@ -781,7 +785,7 @@ func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
 			Type:         datapb.CompactionType_Level0DeleteCompaction,
 			Channel:      channel,
 			Pos:          &msgpb.MsgPosition{Timestamp: triggerTs},
-		}, mockAlloc, mockMeta)
+		}, mockAlloc, mockMeta, nil)
 	}
 
 	t.Run("import segment not selected when trigger pos < commit_timestamp", func(t *testing.T) {
@@ -799,5 +803,164 @@ func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, selected, 1, "import segment with commit_ts=5000 must be selected at triggerTs=6000")
 		assert.Equal(t, int64(777), selected[0].GetID())
+	})
+}
+
+// TestL0CompactionTask_HasImportProducedInput verifies that hasImportProducedInput
+// distinguishes import-produced L0 segments (non-zero CommitTimestamp, stamped by
+// HandleCommitVchannel) from streaming-produced L0 segments (CommitTimestamp == 0).
+func TestL0CompactionTask_HasImportProducedInput(t *testing.T) {
+	streamingL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              100,
+		Level:           datapb.SegmentLevel_L0,
+		CommitTimestamp: 0,
+	}}
+	importL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              101,
+		Level:           datapb.SegmentLevel_L0,
+		CommitTimestamp: 5000,
+	}}
+	droppedImportL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              102,
+		Level:           datapb.SegmentLevel_L0,
+		State:           commonpb.SegmentState_Dropped,
+		CommitTimestamp: 5000,
+	}}
+	segments := map[int64]*SegmentInfo{
+		100: streamingL0,
+		101: importL0,
+		102: droppedImportL0,
+	}
+
+	makeTask := func(inputSegments []int64) *l0CompactionTask {
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetSegment(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, segID int64) *SegmentInfo {
+				return segments[segID]
+			},
+		).Maybe()
+		return newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     19530,
+			CollectionID:  1,
+			PartitionID:   10,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			State:         datapb.CompactionTaskState_executing,
+			InputSegments: inputSegments,
+		}, nil, mockMeta, nil)
+	}
+
+	t.Run("streaming only", func(t *testing.T) {
+		task := makeTask([]int64{100})
+		assert.False(t, task.hasImportProducedInput())
+	})
+
+	t.Run("contains an import L0", func(t *testing.T) {
+		task := makeTask([]int64{100, 101})
+		assert.True(t, task.hasImportProducedInput())
+	})
+
+	t.Run("missing segment", func(t *testing.T) {
+		task := makeTask([]int64{999})
+		assert.False(t, task.hasImportProducedInput())
+	})
+
+	t.Run("dropped but import-produced", func(t *testing.T) {
+		// The predicate must recognize an import-produced L0 even after
+		// saveSegmentMeta has marked it Dropped, since that is the state
+		// it will actually observe when called post-compaction.
+		task := makeTask([]int64{102})
+		assert.True(t, task.hasImportProducedInput())
+	})
+}
+
+// TestL0CompactionTask_RefreshQueryTargetIfImport verifies that
+// refreshQueryTargetIfImport asks QueryCoord to refresh the next target exactly
+// when the input L0 segments include an import-produced one, and that the
+// refresh runs asynchronously without affecting the caller.
+func TestL0CompactionTask_RefreshQueryTargetIfImport(t *testing.T) {
+	const collectionID = int64(42)
+
+	streamingL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              100,
+		Level:           datapb.SegmentLevel_L0,
+		CommitTimestamp: 0,
+	}}
+	importL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              101,
+		Level:           datapb.SegmentLevel_L0,
+		CommitTimestamp: 5000,
+	}}
+	segments := map[int64]*SegmentInfo{
+		100: streamingL0,
+		101: importL0,
+	}
+
+	makeTask := func(t *testing.T, inputSegments []int64, mixCoord *mocks.MixCoord) *l0CompactionTask {
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetSegment(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, segID int64) *SegmentInfo {
+				return segments[segID]
+			},
+		).Maybe()
+		return newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     19530,
+			CollectionID:  collectionID,
+			PartitionID:   10,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			State:         datapb.CompactionTaskState_executing,
+			InputSegments: inputSegments,
+		}, nil, mockMeta, mixCoord)
+	}
+
+	t.Run("import L0 triggers exactly one refresh", func(t *testing.T) {
+		var calls atomic.Int64
+		mixCoord := mocks.NewMixCoord(t)
+		mixCoord.EXPECT().LoadCollection(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+				assert.True(t, req.GetRefresh())
+				assert.EqualValues(t, collectionID, req.GetCollectionID())
+				calls.Add(1)
+				return merr.Success(), nil
+			},
+		).Once()
+
+		task := makeTask(t, []int64{100, 101}, mixCoord)
+		task.refreshQueryTargetIfImport()
+
+		assert.Eventually(t, func() bool {
+			return calls.Load() == 1
+		}, time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("streaming-only L0 triggers no refresh", func(t *testing.T) {
+		// No LoadCollection expectation is registered, so any call fails the test.
+		mixCoord := mocks.NewMixCoord(t)
+		task := makeTask(t, []int64{100}, mixCoord)
+		task.refreshQueryTargetIfImport()
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("refresh failure does not affect compaction", func(t *testing.T) {
+		mixCoord := mocks.NewMixCoord(t)
+		called := make(chan struct{})
+		mixCoord.EXPECT().LoadCollection(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+				close(called)
+				return nil, errors.New("mock rpc error")
+			},
+		).Once()
+
+		task := makeTask(t, []int64{101}, mixCoord)
+		assert.NotPanics(t, func() {
+			task.refreshQueryTargetIfImport()
+		})
+
+		select {
+		case <-called:
+		case <-time.After(time.Second):
+			t.Fatal("LoadCollection was never called")
+		}
 	})
 }
