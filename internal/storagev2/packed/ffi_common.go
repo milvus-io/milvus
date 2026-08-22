@@ -144,10 +144,10 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
 
-	// Add TLS min version
-	if storageConfig.GetSslTlsMinVersion() != "" {
+	// Add TLS min version (skip "default" — consistent with C++ layer filtering)
+	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
 		keys = append(keys, PropertyFSTLSMinVersion)
-		values = append(values, storageConfig.GetSslTlsMinVersion())
+		values = append(values, v)
 	}
 
 	// Add CRC32C checksum
