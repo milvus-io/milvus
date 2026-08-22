@@ -270,13 +270,19 @@ func classifyLoonErr(err error) error {
 // The returned WriterOutput is owned by the caller and must be Destroy'd
 // after the surrounding commit (success or failure).
 func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, basePath string) (logs map[int64]*datapb.FieldBinlog, files packed.WriterOutput, err error) {
-	if len(pack.insertData) == 0 {
+	if len(pack.insertData) == 0 || !hasInsertRows(pack.insertData) {
 		return make(map[int64]*datapb.FieldBinlog), nil, nil
 	}
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
 		return nil, nil, err
+	}
+	if rec == nil || rec.Len() == 0 {
+		if rec != nil {
+			rec.Release()
+		}
+		return make(map[int64]*datapb.FieldBinlog), nil, nil
 	}
 	defer rec.Release()
 

@@ -203,6 +203,10 @@ func (pw *FFIPackedWriter) Destroy() {
 }
 
 func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
+	if recordBatch == nil || recordBatch.NumCols() == 0 || recordBatch.NumRows() == 0 {
+		return nil
+	}
+
 	var caa cdata.CArrowArray
 	var cas cdata.CArrowSchema
 
