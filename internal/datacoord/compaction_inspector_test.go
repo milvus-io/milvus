@@ -61,6 +61,9 @@ type CompactionPlanHandlerSuite struct {
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// checkCompaction() records terminal failures/timeouts via GetCompactionTaskMeta();
+	// any test whose tasks reach a failed/timeout state exercises this call.
+	s.mockMeta.EXPECT().GetCompactionTaskMeta().Return(newTestCompactionTaskMeta(s.T())).Maybe()
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
 	s.mockAlloc = mockAlloc
