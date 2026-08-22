@@ -32,6 +32,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type insertMsgBatch struct {
+	start int
+	end   int
+}
+
+func contiguousRowRange(rowOffsets []int) (int, int, bool) {
+	if len(rowOffsets) == 0 || rowOffsets[0] < 0 {
+		return 0, 0, false
+	}
+
+	start := rowOffsets[0]
+	for i, offset := range rowOffsets {
+		if offset != start+i {
+			return 0, 0, false
+		}
+	}
+	return start, start + len(rowOffsets), true
+}
+
+func canCreateInsertRangeView(insertMsg *msgstream.InsertMsg, start, end int) bool {
+	return start >= 0 && end > start &&
+		end <= len(insertMsg.HashValues) &&
+		end <= len(insertMsg.GetTimestamps()) &&
+		end <= len(insertMsg.GetRowIDs())
+}
+
 // GetActiveWALName returns the name of the currently active WAL implementation.
 func GetActiveWALName() message.WALName {
 	return streamingutil.MustSelectWALName()
@@ -86,7 +112,6 @@ func GenInsertMsgsByPartition(ctx context.Context,
 			SegmentID:      segmentID,
 			ShardName:      channelName,
 			Version:        msgpb.InsertDataVersion_ColumnBased,
-			FieldsData:     make([]*schemapb.FieldData, len(insertMsg.GetFieldsData())),
 		}
 		msg := &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
@@ -99,13 +124,12 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	}
 
 	fieldsData := insertMsg.GetFieldsData()
-	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
-
-	repackedMsgs := make([]msgstream.TsMsg, 0)
+	sizeIdxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
+	batches := make([]insertMsgBatch, 0, 1)
+	batchStart := 0
 	requestSize := 0
-	msg := createInsertMsg(segmentID, channelName)
-	for _, offset := range rowOffsets {
-		fieldIdxs := idxComputer.Compute(int64(offset))
+	for i, offset := range rowOffsets {
+		fieldIdxs := sizeIdxComputer.Compute(int64(offset))
 		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
 		if err != nil {
 			return nil, err
@@ -117,22 +141,66 @@ func GenInsertMsgsByPartition(ctx context.Context,
 			))
 		}
 
-		// If the insert message size exceeds the threshold, flush the current
-		// message first.
-		if msg.NumRows > 0 && requestSize+curRowMessageSize >= splitThreshold {
-			repackedMsgs = append(repackedMsgs, msg)
-			msg = createInsertMsg(segmentID, channelName)
+		// If the insert message size exceeds the threshold, finish the current
+		// batch first. Do not emit an empty batch before adding the first row.
+		if i > batchStart && requestSize+curRowMessageSize >= splitThreshold {
+			batches = append(batches, insertMsgBatch{start: batchStart, end: i})
+			batchStart = i
 			requestSize = 0
 		}
-
-		typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
-		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
-		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
-		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
-		msg.NumRows++
 		requestSize += curRowMessageSize
 	}
-	if msg.NumRows > 0 {
+	if batchStart < len(rowOffsets) {
+		batches = append(batches, insertMsgBatch{start: batchStart, end: len(rowOffsets)})
+	}
+
+	repackedMsgs := make([]msgstream.TsMsg, 0, len(batches))
+	var (
+		rangeIdxComputer  *typeutil.FieldDataIdxComputer
+		appendIdxComputer *typeutil.FieldDataIdxComputer
+		dataStarts        []int64
+	)
+	for _, batch := range batches {
+		msg := createInsertMsg(segmentID, channelName)
+		batchOffsets := rowOffsets[batch.start:batch.end]
+		rowStart, rowEnd, contiguous := contiguousRowRange(batchOffsets)
+		if contiguous && canCreateInsertRangeView(insertMsg, rowStart, rowEnd) {
+			if rangeIdxComputer == nil {
+				rangeIdxComputer = typeutil.NewFieldDataIdxComputer(fieldsData)
+				dataStarts = make([]int64, len(fieldsData))
+			}
+			copy(dataStarts, rangeIdxComputer.Compute(int64(rowStart)))
+			dataEnds := rangeIdxComputer.Compute(int64(rowEnd))
+			fieldViews, ok := typeutil.CreateFieldDataRangeView(
+				fieldsData,
+				int64(rowStart),
+				int64(rowEnd),
+				dataStarts,
+				dataEnds,
+			)
+			if ok {
+				msg.FieldsData = fieldViews
+				msg.HashValues = insertMsg.HashValues[rowStart:rowEnd:rowEnd]
+				msg.Timestamps = insertMsg.Timestamps[rowStart:rowEnd:rowEnd]
+				msg.RowIDs = insertMsg.RowIDs[rowStart:rowEnd:rowEnd]
+				msg.NumRows = uint64(rowEnd - rowStart)
+				repackedMsgs = append(repackedMsgs, msg)
+				continue
+			}
+		}
+
+		if appendIdxComputer == nil {
+			appendIdxComputer = typeutil.NewFieldDataIdxComputer(fieldsData)
+		}
+		msg.FieldsData = make([]*schemapb.FieldData, len(fieldsData))
+		for _, offset := range batchOffsets {
+			fieldIdxs := appendIdxComputer.Compute(int64(offset))
+			typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
+			msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
+			msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
+			msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
+			msg.NumRows++
+		}
 		repackedMsgs = append(repackedMsgs, msg)
 	}
 
