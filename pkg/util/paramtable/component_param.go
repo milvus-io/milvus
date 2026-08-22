@@ -7549,8 +7549,11 @@ type dataNodeConfig struct {
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
-	StorageFormat  ParamItem `refreshable:"false"`
-	DeltalogFormat ParamItem `refreshable:"false"`
+	StorageFormat ParamItem `refreshable:"false"`
+
+	// storage
+	MultiPartUploadSize ParamItem `refreshable:"true"`
+	DeltalogFormat      ParamItem `refreshable:"false"`
 
 	// index services config
 	BuildParallel               ParamItem `refreshable:"false"`
@@ -8097,6 +8100,34 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       true,
 	}
 	p.DeltalogFormat.Init(base.mgr)
+
+	p.MultiPartUploadSize = ParamItem{
+		Key:          "dataNode.storage.multiPartUploadSize",
+		Version:      "2.6.21",
+		DefaultValue: "10485760",
+		Doc: `The size of each part in multipart upload to object storage.
+Unit: Byte. Valid range: 5MiB (5242880) ~ 5GiB (5368709120).
+Affects StorageV2 (packed Parquet) and StorageV3 writers; in-progress multipart uploads are not affected by hot updates.
+Increasing this value raises the maximum single-object size allowed by S3 multipart upload
+(max 10000 parts), but may increase memory usage and per-part retry cost.`,
+		Export: true,
+		Formatter: func(v string) string {
+			size := getAsInt64(v)
+			const (
+				defaultPartSize int64 = 10 * 1024 * 1024
+				minPartSize     int64 = 5 * 1024 * 1024        // S3 minimum part size
+				maxPartSize     int64 = 5 * 1024 * 1024 * 1024 // S3 maximum part size
+			)
+			if size < minPartSize || size > maxPartSize {
+				mlog.Warn(context.TODO(), "invalid multipart upload size, reset to default",
+					mlog.String("value", v),
+					mlog.Int64("effective", defaultPartSize))
+				return strconv.FormatInt(defaultPartSize, 10)
+			}
+			return strconv.FormatInt(size, 10)
+		},
+	}
+	p.MultiPartUploadSize.Init(base.mgr)
 
 	p.BuildParallel = ParamItem{
 		Key:          "indexNode.scheduler.buildParallel",

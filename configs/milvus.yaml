@@ -997,6 +997,11 @@ dataNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]
+    # The size of each part in multipart upload to object storage. Unit: Byte. Valid range: 5MiB ~ 5GiB.
+    # Affects StorageV2 (packed Parquet) and StorageV3 writers. Increase this value when large compaction
+    # output files exceed the S3 multipart upload limit of 10000 parts
+    # (e.g. set to 209715200 for 200MiB to support ~1.95TiB objects).
+    multiPartUploadSize: 10485760 # 10MiB default
     deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode

@@ -355,7 +355,9 @@ func newPackedRecordBatchWriter(
 		return nil, merr.WrapErrParameterInvalid(len(schemaBasedFormats), len(columnGroups),
 			"schema based writer formats size must match column groups size")
 	}
-	extraProperties := map[string]string{}
+	extraProperties := map[string]string{
+		packed.PropertyWriterMultiPartUploadSize: strconv.FormatInt(multiPartUploadSize, 10),
+	}
 	if writerFormat != "" {
 		extraProperties[packed.PropertyWriterFormat] = writerFormat
 	}
@@ -554,12 +556,13 @@ func NewPackedTextBatchWriter(
 			fmt.Sprintf("can not build schema based writer pattern %s", err.Error()))
 	}
 	config := &packed.SegmentWriterConfig{
-		SegmentPath:        basePath,
-		TextColumns:        textColumnConfigs,
-		ColumnGroups:       columnGroups,
-		WriterFormat:       writerFormat,
-		SchemaBasedPattern: schemaBasedPattern,
-		SchemaBasedFormats: schemaBasedFormats,
+		SegmentPath:         basePath,
+		TextColumns:         textColumnConfigs,
+		ColumnGroups:        columnGroups,
+		WriterFormat:        writerFormat,
+		SchemaBasedPattern:  schemaBasedPattern,
+		SchemaBasedFormats:  schemaBasedFormats,
+		MultiPartUploadSize: multiPartUploadSize,
 	}
 
 	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
