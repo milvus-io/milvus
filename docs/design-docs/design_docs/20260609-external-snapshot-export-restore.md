@@ -36,7 +36,9 @@ The feature has explicit non-goals:
 - No streaming copy. Milvus must not download object bytes to a node and upload
   them again just to cross buckets.
 - No cross-provider copy, cross-endpoint copy, or provider-specific source-auth
-  extension.
+  extension — except the Azure source-read SAS added in
+  [§10](#10-azure-cross-account-copy-via-source-sas), which is a scoped
+  exception, not a general source-auth mechanism.
 - No external collection export. Its StorageV3 manifests may reference lake
   fragments outside the snapshot file set. Full support requires copying those
   fragments, rewriting the manifest references, and clearing
@@ -335,8 +337,10 @@ Layer 2: request `external_spec.extfs`.
 - An explicit request credential mode replaces inherited instance credentials.
   `use_iam=true`, raw AK/SK, and `credential_json` are mutually exclusive.
 - Snapshot validation is stricter than a generic external spec parser. It must
-  reject generic `role_arn`, `gcp_target_service_account`, SAS, anonymous auth,
-  source-auth URLs, and independent dual credentials.
+  reject generic `role_arn`, `gcp_target_service_account`, SAS as a credential
+  mode, anonymous auth, source-auth URLs, and independent dual credentials; the
+  only accepted SAS is the Azure source-read token of
+  [§10](#10-azure-cross-account-copy-via-source-sas).
 - Endpoint, provider, region, and TLS information encoded by the metadata URI
   is authoritative. Conflicting `external_spec` values are rejected. Standard
   AWS, Aliyun, Tencent, Huawei, GCP, and Azure endpoints are recognized;
@@ -353,7 +357,8 @@ Provider notes:
 - Azure storage supports account key mode and the existing workload/managed
   identity path. Request-level account key fields take precedence over the
   process-level `AZURE_STORAGE_CONNECTION_STRING`; a request SAS token is not
-  supported.
+  supported as a credential mode — the one SAS the API accepts is the
+  cross-account source-read grant of [§10](#10-azure-cross-account-copy-via-source-sas).
 
 Restore persistence red line:
 
@@ -445,7 +450,10 @@ Provider limitations fail closed:
 - Different providers cannot be copied by one server-side request.
 - Different endpoints or independent MinIO/S3-compatible services cannot be
   copied by one server-side request.
-- Request-only source-auth mechanisms such as SAS are outside the snapshot API.
+- Request-only source-auth mechanisms such as SAS are outside the snapshot API,
+  with the scoped Azure exception of
+  [§10](#10-azure-cross-account-copy-via-source-sas), where the SAS is the only
+  way one provider-side request can read a cross-account source.
 - If provider, endpoint, region, or credential probing shows that copy cannot be
   expressed as one provider-side request, Milvus rejects the request before
   scheduling work.
@@ -732,3 +740,90 @@ Standalone client build:
 
 - Root module and standalone `client/` module both build against the published
   milvus-proto version that contains the snapshot APIs.
+
+## 10. Azure Cross-Account Copy via Source SAS
+
+- **Added:** 2026-08-22
+- **Issue:** https://github.com/milvus-io/milvus/issues/52769
+- **Status:** Proposed
+
+This section is a scoped exception to the non-goal "no provider-specific
+source-auth extension": Azure is the one provider whose copy API cannot read a
+cross-account source under any single-principal credential, yet trivially can
+with a read-scoped SAS on the source URL.
+
+### Motivation
+
+On Azure the instance bucket and the backup bucket commonly live in different
+storage accounts. Azure's copy authorization table ([Copy Blob From URL]) says
+that for a source blob in another storage account, neither Shared Key
+authorization nor the request's own Microsoft Entra ID token may authorize the
+source read — only a SAS token with Read (`r`) permission on the source URL
+(or a public source). Since the snapshot copy is one `StartCopyFromURL` request
+authorized by the destination account's credential, a cross-account copy is
+impossible to express without source-URL auth, which is why
+`validateProviderEndpointPair` fails closed on `sameAzureAccountEndpoint`.
+
+### Contract
+
+`external_spec.extfs` gains one Azure-only key:
+
+```json
+{"extfs": {
+  "cloud_provider": "azure",
+  "access_key_id": "backup-account", "access_key_value": "...",
+  "source_sas_token": "sv=2024-08-04&sig=...&sp=r"
+}}
+```
+
+- `source_sas_token` is a read-scoped SAS (user delegation, service, or account
+  SAS) for the **copy source** container: the instance bucket for export, the
+  foreign bucket for restore. A leading `?` is tolerated and trimmed.
+- It is **not** a credential mode: the destination side still uses exactly one
+  of the existing modes (instance credential, `use_iam`, raw AK/SK), and the
+  mutual-exclusion rules of §4 are unchanged.
+- It is valid only when the copy actually crosses storage accounts, and only
+  within one sovereign cloud (public, China, US Gov, Germany). Same-account
+  requests carrying a SAS, and cross-cloud requests, are rejected as input
+  errors — an unused or meaningless SAS signals misconfiguration.
+- The value is redacted like `credential_json` on every log, error, and
+  user-visible surface, and follows the same `external_spec` persistence
+  lifecycle: retained only while an export job is non-terminal, cleared on the
+  first terminal update.
+
+### Authorization model
+
+The core invariant of §6 still holds — there must exist one provider-side copy
+request that can read the source and write the destination:
+
+- **Export** (source = instance account, destination = foreign account): the
+  copier client is the foreign-account client (Layer 2 raw credentials or IAM).
+  Its credential authorizes the destination write; source URLs are built
+  against the instance account's service endpoint with the SAS appended, which
+  authorizes the source read.
+- **Restore / copy-source** (source = foreign account, destination = instance
+  account): the copier client is the instance-credential client, whose
+  credential authorizes the destination write; source URLs are built against
+  the foreign account's service endpoint with the SAS appended.
+
+Metadata reads and writes keep using each side's own client, exactly as
+before; only the large-object copy request changes.
+
+### Implementation notes
+
+- `objectstorage.Config` carries `AzureSourceEndpoint` (source account service
+  host) and `AzureSourceSAS`; the Azure object-storage client builds copy
+  source URLs from an anonymous-credential service client at that host and
+  appends the SAS per URL.
+- Copy-source verification during Azure copy polling compares URL identities
+  without the query string, because the service does not guarantee that
+  `x-ms-copy-source` echoes the SAS.
+- `restoreProviderCopyConfig` is unchanged for same-account Layer 2 copies; a
+  SAS-bearing restore resolves to a different copier config
+  (instance credential + source endpoint/SAS) instead.
+- No proto or C++ changes: the SAS rides inside the opaque `external_spec`
+  JSON that already propagates from Proxy through DataCoord, WAL, job state,
+  and DataNode tasks, and the C++ LOB paths keep reading the foreign bucket
+  with its own credential as before.
+
+[Copy Blob From URL]: https://learn.microsoft.com/en-us/rest/api/storageservices/copy-blob-from-url

@@ -30,6 +30,18 @@ type Config struct {
 	// IgnoreAzureConnectionString keeps request-scoped Azure account credentials
 	// from being overridden by the process-level connection string.
 	IgnoreAzureConnectionString bool
+
+	// AzureSourceEndpoint is the blob service endpoint host of a copy source that
+	// lives in a different Azure storage account than the client's own
+	// credential, e.g. "otheraccount.blob.core.windows.net". It is set together
+	// with AzureSourceSAS for cross-account server-side copies only.
+	AzureSourceEndpoint string
+
+	// AzureSourceSAS is a read-scoped SAS token appended to copy source blob
+	// URLs when the source is in a different Azure storage account: neither a
+	// shared key nor the request's own OAuth token can authorize reading a
+	// foreign account's blob, so the source URL must carry its own grant.
+	AzureSourceSAS string
 }
 
 func NewDefaultConfig() *Config {
