@@ -834,7 +834,8 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		// and can re-issue refresh after fixing the source. Pure
 		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
 		// existing transient path so a real outage still gets retried.
-		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
+		if merr.GetErrorType(err) == merr.InputError ||
+			errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
 			errors.Is(err, packed.ErrLoonTransient) ||
 			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
