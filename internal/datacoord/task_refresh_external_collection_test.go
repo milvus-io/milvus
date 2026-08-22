@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1504,6 +1505,80 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSegment(t *testing.T) {
+	// A replayed apply (the gate's entry pass after a DataCoord restart, or a
+	// racing checker path) must not re-patch a baseline segment whose
+	// manifest already landed: the re-patch would erase the
+	// TextStatsLogs/JsonKeyStats the stats inspector rebuilt since the first
+	// apply, and an existing NEWER manifest must never be regressed.
+	ctx := context.Background()
+	collectionID := int64(100)
+	partitionID := int64(1)
+	segmentID := int64(10)
+	manifestBasePath := "files/insert_log/100/1/10"
+	catalog := &stubCatalog{}
+	mt := &meta{
+		collections: newTestCollections(collectionID),
+		segments:    NewSegmentsInfo(),
+		catalog:     catalog,
+	}
+	oldSeg := &datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: "by-dev-rootcoord-dml_0_v1",
+		NumOfRows:     100,
+		State:         commonpb.SegmentState_Flushed,
+		ManifestPath:  packed.MarshalManifestPath(manifestBasePath, 1),
+		SchemaVersion: 3,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 0,
+			Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 100, MemorySize: 1000, LogSize: 1000}},
+		}},
+	}
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg))
+
+	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
+	patched.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 2)
+	patched.SchemaVersion = 4
+
+	apply := func() error {
+		return applyExternalCollectionSegmentUpdateForBaseline(
+			ctx,
+			mt,
+			collectionID,
+			[]int64{segmentID},
+			nil,
+			[]*datapb.SegmentInfo{patched},
+		)
+	}
+	require.NoError(t, apply())
+	require.Equal(t, packed.MarshalManifestPath(manifestBasePath, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
+
+	// The stats inspector rebuilds text / JSON-key stats after the first
+	// apply (e.g. during the index-gate hold).
+	rebuilt := mt.segments.GetSegment(segmentID).Clone()
+	rebuilt.TextStatsLogs = map[int64]*datapb.TextIndexStats{1: {FieldID: 1}}
+	rebuilt.JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {FieldID: 2}}
+	mt.segments.SetSegment(segmentID, rebuilt)
+	catalog.alteredSegments = nil
+
+	// Same-manifest replay: must be a no-op that preserves the rebuilt stats.
+	require.NoError(t, apply())
+	assert.Nil(t, catalog.alteredSegments, "an already-applied patch must not write segment meta again")
+	got := mt.segments.GetSegment(segmentID)
+	assert.Contains(t, got.GetTextStatsLogs(), int64(1), "replay must not erase rebuilt text stats")
+	assert.Contains(t, got.GetJsonKeyStats(), int64(2), "replay must not erase rebuilt JSON-key stats")
+
+	// Stale replay against a NEWER existing manifest: must not regress it.
+	newer := mt.segments.GetSegment(segmentID).Clone()
+	newer.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 3)
+	mt.segments.SetSegment(segmentID, newer)
+	require.NoError(t, apply())
+	assert.Equal(t, packed.MarshalManifestPath(manifestBasePath, 3), mt.segments.GetSegment(segmentID).GetManifestPath(),
+		"a stale patch replay must never walk the manifest backwards")
 }
 
 func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
