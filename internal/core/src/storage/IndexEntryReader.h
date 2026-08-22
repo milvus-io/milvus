@@ -169,9 +169,9 @@ class IndexEntryReader {
     IndexEntryReader() = default;
 
     void
-    ReadFooterAndDirectory();
+    ReadFooterAndDirectory(size_t initial_tail_size, bool validate_magic);
     void
-    ValidateMagic();
+    ValidateMagic(const uint8_t* magic) const;
     void
     CheckCancelled(const std::string& operation) const;
 
@@ -258,7 +258,7 @@ class IndexEntryReader {
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
     std::shared_ptr<milvus::InputStream> input_;
-    int64_t file_size_ = 0;
+    size_t file_size_ = 0;
     int64_t collection_id_ = 0;
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
     folly::CancellationToken cancellation_token_;
@@ -274,8 +274,6 @@ class IndexEntryReader {
     EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 
-    static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;
-    std::unordered_map<std::string, Entry> small_entry_cache_;
     nlohmann::json meta_json_;
 };
 
