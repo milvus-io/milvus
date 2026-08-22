@@ -299,6 +299,56 @@ func TestTiKVLoad(te *testing.T) {
 		}
 	})
 
+	te.Run("kv MultiSaveAndRemoveMixed", func(t *testing.T) {
+		rootPath := "/tikv/test/root/multi_remove_mixed"
+		kv := NewTiKV(txnClient, rootPath)
+		defer kv.Close()
+		defer kv.RemoveWithPrefix(context.TODO(), "")
+
+		prepareTests := map[string]string{
+			"mix/a-1":    "1",
+			"mix/a-1/c1": "11",
+			"mix/a-1/c2": "12",
+			"mix/a-10":   "10", // exact-remove canary: a prefix delete of "mix/a-1" would wipe it
+			"mix/b":      "b",
+		}
+		err := kv.MultiSave(context.TODO(), prepareTests)
+		require.NoError(t, err)
+
+		err = kv.MultiSaveAndRemoveMixed(context.TODO(),
+			map[string]string{"mix/a-1/c3": "new"}, nil, []string{"mix/a-1/"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// failed predicate: the whole mixed txn must be a no-op.
+		err = kv.MultiSaveAndRemoveMixed(context.TODO(),
+			map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},
+			predicates.ValueEqual("mix/b", "not-b"))
+		assert.Error(t, err)
+		keys, _, err := kv.LoadWithPrefix(context.TODO(), "mix")
+		assert.NoError(t, err)
+		assert.Equal(t, 5, len(keys))
+
+		// exact removal of "mix/a-1" plus prefix removal of "mix/a-1/" plus a
+		// save, in one txn; "mix/a-10" and "mix/b" must survive.
+		err = kv.MultiSaveAndRemoveMixed(context.TODO(),
+			map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},
+			predicates.ValueEqual("mix/b", "b"))
+		assert.NoError(t, err)
+
+		keys, vals, err := kv.LoadWithPrefix(context.TODO(), "mix")
+		assert.NoError(t, err)
+		got := make(map[string]string, len(keys))
+		for i, k := range keys {
+			got[k] = vals[i]
+		}
+		assert.Equal(t, map[string]string{
+			kv.GetPath("mix/a-10"): "10",
+			kv.GetPath("mix/b"):    "b",
+			kv.GetPath("mix/new"):  "nv",
+		}, got)
+	})
+
 	te.Run("kv failed to start txn", func(t *testing.T) {
 		origSleep := writeTxnRetrySleep
 		writeTxnRetrySleep = time.Millisecond

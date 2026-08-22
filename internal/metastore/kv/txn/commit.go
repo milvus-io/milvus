@@ -83,12 +83,12 @@ func commitAtomic(ctx context.Context, txn kv.TxnKV, b *Builder) error {
 			prefixRemovals = append(prefixRemovals, o.key)
 		}
 	}
-	// A single etcd txn cannot express exact and prefix deletes together:
 	// MultiSaveAndRemoveWithPrefix deletes EVERY listed key by prefix, so an
 	// exact Remove("coll-1") routed through it would also nuke "coll-10" and
-	// "coll-1/x". Reject the mix rather than silently widen the delete.
+	// "coll-1/x". A mixed set therefore routes through MultiSaveAndRemoveMixed,
+	// the one TxnKV call that keeps both delete shapes in a single txn.
 	if len(removals) > 0 && len(prefixRemovals) > 0 {
-		return merr.WrapErrParameterInvalidMsg("composite update cannot mix exact and prefix removals in one atomic transaction")
+		return txn.MultiSaveAndRemoveMixed(ctx, saves, removals, prefixRemovals)
 	}
 	if len(prefixRemovals) > 0 {
 		return txn.MultiSaveAndRemoveWithPrefix(ctx, saves, prefixRemovals)
