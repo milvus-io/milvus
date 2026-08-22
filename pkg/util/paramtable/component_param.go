@@ -3494,6 +3494,7 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
+	TieredMaxLoadingMemoryRatio     ParamItem `refreshable:"true"`
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
@@ -3968,6 +3969,22 @@ If set to 0, time based eviction is disabled.`,
 		Export: false,
 	}
 	p.TieredLoadingResourceFactor.Init(base.mgr)
+
+	p.TieredMaxLoadingMemoryRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.maxLoadingMemoryRatio",
+		Version:      "2.6.23",
+		DefaultValue: "1.0",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio <= 0 || ratio > 1 {
+				return "1.0"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc:    "Maximum ratio of effective memory that may be used by concurrent Tiered Storage loading. Valid range: (0.0, 1.0].",
+		Export: false,
+	}
+	p.TieredMaxLoadingMemoryRatio.Init(base.mgr)
 
 	p.TieredLoadingTimeoutMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",

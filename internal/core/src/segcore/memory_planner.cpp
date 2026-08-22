@@ -16,8 +16,8 @@
 #include "segcore/memory_planner.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
+#include <exception>
 #include <future>
 #include <memory>
 #include <numeric>
@@ -250,15 +250,14 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     }
 }
 
-std::vector<std::future<void>>
+std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority) {
+                   milvus::proto::common::LoadPriority priority,
+                   CellFinalizeFunc finalize_cell) {
     if (cell_specs.empty()) {
-        channel->close();
         return {};
     }
 
@@ -329,67 +328,86 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         memory_limit >> 20);
 
     if (batches.empty()) {
-        channel->close();
         return {};
     }
 
     auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
-    auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
     auto reader_memory_limit =
         std::max<int64_t>(memory_limit / static_cast<int64_t>(batches.size()),
                           FILE_SLICE_SIZE.load());
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
+    auto shared_finalizer =
+        std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
+    AssertInfo(static_cast<bool>(*shared_finalizer),
+               "[StorageV2] LoadCellBatchAsync requires a cell finalizer");
 
-    std::vector<std::future<void>> futures;
+    std::vector<CellLoadFuture> futures;
     futures.reserve(batches.size());
 
+    auto append_failed_future = [&futures](std::exception_ptr error) {
+        std::promise<LoadedCellBatch> promise;
+        futures.emplace_back(promise.get_future());
+        promise.set_exception(std::move(error));
+    };
+
     for (auto& batch : batches) {
-        futures.emplace_back(pool.Submit([batch = std::move(batch),
-                                          shared_factory,
-                                          reader_memory_limit,
-                                          channel,
-                                          remaining,
-                                          op_ctx]() {
-            auto task_guard = folly::makeGuard([&channel, &remaining]() {
-                if (remaining->fetch_sub(1) == 1) {
-                    channel->close();
-                }
-            });
-            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-
-            auto tables_result = (*shared_factory)(batch.file_idx,
-                                                   batch.rg_offset,
-                                                   batch.rg_count,
-                                                   reader_memory_limit);
-            AssertInfo(tables_result.ok(),
-                       "[StorageV2] Failed to read batch: " +
-                           tables_result.status().ToString());
-            auto all_tables = std::move(tables_result).ValueOrDie();
-            AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
-                       "reader returns less tables than expected, batch rg "
-                       "count: {}, result size: {}",
-                       batch.rg_count,
-                       all_tables.size());
-            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-
-            int64_t table_offset = 0;
-            for (const auto& cell : batch.cells) {
+        try {
+            futures.emplace_back(pool.Submit([batch = std::move(batch),
+                                              shared_factory,
+                                              reader_memory_limit,
+                                              shared_finalizer,
+                                              op_ctx]() mutable {
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                auto cell_result = std::make_shared<CellLoadResult>();
-                cell_result->cid = cell.cid;
-                cell_result->tables.reserve(cell.rg_count);
-                for (int64_t i = 0; i < cell.rg_count; ++i) {
-                    cell_result->tables.push_back(
-                        std::move(all_tables[table_offset + i]));
+
+                auto tables_result = (*shared_factory)(batch.file_idx,
+                                                       batch.rg_offset,
+                                                       batch.rg_count,
+                                                       reader_memory_limit);
+                AssertInfo(tables_result.ok(),
+                           "[StorageV2] Failed to read batch: " +
+                               tables_result.status().ToString());
+                auto all_tables = std::move(tables_result).ValueOrDie();
+                AssertInfo(
+                    all_tables.size() == static_cast<size_t>(batch.rg_count),
+                    "reader returns less tables than expected, batch rg "
+                    "count: {}, result size: {}",
+                    batch.rg_count,
+                    all_tables.size());
+                CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+
+                int64_t table_offset = 0;
+                LoadedCellBatch loaded_cells;
+                loaded_cells.reserve(batch.cells.size());
+                for (const auto& cell : batch.cells) {
+                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+                    std::vector<std::shared_ptr<arrow::Table>> cell_tables;
+                    cell_tables.reserve(cell.rg_count);
+                    for (int64_t i = 0; i < cell.rg_count; ++i) {
+                        cell_tables.push_back(
+                            std::move(all_tables[table_offset + i]));
+                    }
+                    table_offset += cell.rg_count;
+                    auto chunk = (*shared_finalizer)(cell_tables, cell.cid);
+                    cell_tables.clear();
+                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+                    loaded_cells.push_back({cell.cid, std::move(chunk)});
                 }
-                table_offset += cell.rg_count;
-                channel->push(std::move(cell_result));
-            }
-        }));
+                return loaded_cells;
+            }));
+        } catch (...) {
+            append_failed_future(std::current_exception());
+        }
     }
 
     return futures;
+}
+
+size_t
+GetCellBatchConcurrency(milvus::proto::common::LoadPriority load_priority) {
+    auto& pool =
+        ThreadPools::GetThreadPool(milvus::PriorityForLoad(load_priority));
+    return std::max<size_t>(1, pool.GetMaxThreadNum());
 }
 
 BatchReaderFactory

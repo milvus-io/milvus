@@ -59,8 +59,11 @@ JsonStatsTranslator::cell_id_of(milvus::cachinglayer::uid_t) const {
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-JsonStatsTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t) const {
+JsonStatsTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     if (load_info_.enable_mmap) {
         return {{0, load_info_.stats_size},
                 {load_info_.stats_size, load_info_.stats_size}};

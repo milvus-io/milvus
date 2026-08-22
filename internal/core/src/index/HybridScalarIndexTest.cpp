@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <functional>
 #include <boost/filesystem.hpp>
+#include <map>
 #include <unordered_set>
 #include <memory>
 
@@ -109,6 +110,8 @@ class HybridIndexTestV1 : public testing::Test {
             collection_id, partition_id, segment_id, field_id, field_schema};
         auto index_meta = storage::IndexMeta{
             segment_id, field_id, index_build_id, index_version};
+        field_meta_ = field_meta;
+        index_meta_ = index_meta;
 
         std::vector<T> data_gen;
         data_gen = GenerateData<T>(nb_, cardinality_);
@@ -181,6 +184,7 @@ class HybridIndexTestV1 : public testing::Test {
             ASSERT_GT(memSize, 0);
             ASSERT_GT(serializedSize, 0);
             index_files = create_index_result->GetIndexFiles();
+            index_files_ = index_files;
         }
 
         index::CreateIndexInfo index_info{};
@@ -512,6 +516,9 @@ class HybridIndexTestV1 : public testing::Test {
     boost::container::vector<T> data_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    storage::FieldDataMeta field_meta_;
+    storage::IndexMeta index_meta_;
+    std::vector<std::string> index_files_;
     bool nullable_;
     FixedVector<bool> valid_data_;
     int index_build_id_;
@@ -526,6 +533,34 @@ TYPED_TEST_SUITE_P(HybridIndexTestV1);
 TYPED_TEST_P(HybridIndexTestV1, CountFuncTest) {
     auto count = this->index_->Count();
     EXPECT_EQ(count, this->nb_);
+}
+
+TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
+    constexpr uint64_t kIndexSize = 1024;
+    const std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    const auto request =
+        index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            this->type_,
+            0,
+            kIndexSize,
+            index_params,
+            false,
+            this->nb_,
+            this->index_files_,
+            ctx,
+            this->nullable_);
+
+    EXPECT_EQ(request.final_memory_cost, kIndexSize);
+    EXPECT_EQ(request.final_disk_cost, 0);
+    EXPECT_EQ(request.max_memory_cost, 2 * kIndexSize);
+    EXPECT_EQ(request.max_disk_cost, 0);
+    EXPECT_FALSE(request.has_raw_data);
 }
 
 TYPED_TEST_P(HybridIndexTestV1, INFuncTest) {
@@ -557,6 +592,7 @@ using BitmapType =
 
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV1,
                             CountFuncTest,
+                            ResourceEstimateUsesInternalIndexType,
                             INFuncTest,
                             IsNullFuncTest,
                             IsNotNullFuncTest,

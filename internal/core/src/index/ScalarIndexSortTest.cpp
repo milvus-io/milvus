@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "bitset/bitset.h"
 #include "common/Tracer.h"
@@ -18,6 +19,7 @@
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -26,6 +28,43 @@
 #include "test_utils/storage_test_utils.h"
 using namespace milvus;
 using namespace milvus::index;
+
+namespace {
+
+class RecordingIndexEntryWriter : public storage::IndexEntryWriter {
+ public:
+    void
+    WriteEntry(const std::string& name, const void*, size_t size) override {
+        names_.insert(name);
+        total_bytes_ += size;
+    }
+
+    void
+    WriteEntry(const std::string& name, int, size_t size) override {
+        names_.insert(name);
+        total_bytes_ += size;
+    }
+
+    void
+    Finish() override {
+    }
+
+    size_t
+    GetTotalBytesWritten() const override {
+        return total_bytes_;
+    }
+
+    bool
+    HasEntry(const std::string& name) const {
+        return names_.count(name) != 0;
+    }
+
+ private:
+    std::unordered_set<std::string> names_;
+    size_t total_bytes_{0};
+};
+
+}  // namespace
 
 static storage::FileManagerContext
 CreateScalarSortTestFileManagerContext() {
@@ -152,4 +191,17 @@ TEST(StlSortIndexTest, TestIn) {
 
     test_stlsort_for_range(
         data, DataType::INT64, true, exec_expr, expected_result);
+}
+
+TEST(StlSortIndexTest, V3PersistsDirectLoadMetadata) {
+    const std::vector<int64_t> data = {10, 2, 6, 5, 9, 3, 7, 8, 4, 1};
+    auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+    index->Build(data.size(), data.data());
+    RecordingIndexEntryWriter writer;
+
+    index->WriteEntries(&writer);
+
+    EXPECT_TRUE(writer.HasEntry("index_data"));
+    EXPECT_TRUE(writer.HasEntry("idx_to_offsets"));
+    EXPECT_TRUE(writer.HasEntry("valid_bitset"));
 }

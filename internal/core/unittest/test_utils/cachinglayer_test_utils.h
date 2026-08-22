@@ -73,7 +73,7 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
     }
 
     std::pair<ResourceUsage, ResourceUsage>
-    estimated_byte_size_of_cell(cid_t cid) const override {
+    estimated_loading_usage(const std::vector<cid_t>&) const override {
         return {{0, 0}, {0, 0}};
     }
 
@@ -149,7 +149,7 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
     }
 
     std::pair<ResourceUsage, ResourceUsage>
-    estimated_byte_size_of_cell(cid_t cid) const override {
+    estimated_loading_usage(const std::vector<cid_t>&) const override {
         return {{0, 0}, {0, 0}};
     }
 
@@ -214,7 +214,7 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
     }
 
     std::pair<ResourceUsage, ResourceUsage>
-    estimated_byte_size_of_cell(cid_t cid) const override {
+    estimated_loading_usage(const std::vector<cid_t>&) const override {
         return {{0, 0}, {0, 0}};
     }
 

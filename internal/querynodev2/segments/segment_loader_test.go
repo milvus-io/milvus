@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -842,6 +843,8 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 
 		suite.NoError(err)
 		suite.EqualValues(1100000, resource.Resource.MemorySize)
+		suite.Contains(resource.SegmentAdmissionMemorySizes, loadInfo.GetSegmentID())
+		suite.Zero(resource.SegmentAdmissionMemorySizes[loadInfo.GetSegmentID()])
 	})
 
 	suite.Run("request_resource_with_timeout", func() {
@@ -921,7 +924,7 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithDiskLimit() {
 	totalMem := uint64(1024 * 1024 * 1024) // 1GB
 	localDiskUsage := int64(100 * 1024)    // 100KB
 
-	_, _, err = suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	_, _, _, err = suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
@@ -956,7 +959,7 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
 	// Set memory threshold to 80%
 	paramtable.Get().Save("queryNode.overloadedMemoryThresholdPercentage", "0.8")
 
-	_, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	_, _, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
@@ -980,6 +983,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) SetupSuite() {
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
 			{FieldID: 102, Name: "text2", DataType: schemapb.DataType_VarChar},
+			{FieldID: 103, Name: "json", DataType: schemapb.DataType_JSON},
 		},
 	}
 }
@@ -1057,6 +1061,65 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvic
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled")
 	suite.EqualValues(0, usage.DiskSize)
+	suite.EqualValues(textIndexSize, usage.AdmissionMemorySize, "sync warmup text index must participate in segment admission")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_DisabledWarmupSkippedForAdmission() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupDisable)
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: 50 * 1024 * 1024},
+	})
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    true,
+		textIndexExpansionFactor: 1.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Zero(usage.AdmissionMemorySize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_RawFieldAdmission() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+
+	const fieldSize = int64(32 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(nil)
+	loadInfo.BinlogPaths = []*datapb.FieldBinlog{{
+		FieldID: 101,
+		Binlogs: []*datapb.Binlog{{MemorySize: fieldSize, LogSize: fieldSize}},
+	}}
+	factor := resourceEstimateFactor{TieredEvictionEnabled: true}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Zero(usage.MemorySize, "cache-managed raw field must stay out of physical reservation")
+	suite.EqualValues(2*fieldSize, usage.AdmissionMemorySize, "varchar loading keeps the existing 2x peak-memory estimate")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_JSONStatsAdmission() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+
+	const jsonStatsSize = int64(20 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(nil)
+	loadInfo.JsonKeyStatsLogs = map[int64]*datapb.JsonKeyStats{
+		103: {FieldID: 103, MemorySize: jsonStatsSize},
+	}
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:       true,
+		jsonKeyStatsExpansionFactor: 1.5,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Zero(usage.MemorySize, "cache-managed JSON stats must stay out of physical reservation")
+	suite.EqualValues(uint64(float64(jsonStatsSize)*1.5), usage.AdmissionMemorySize)
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTextFields() {
@@ -1137,6 +1200,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_Tiere
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled (mmap)")
 	suite.EqualValues(0, usage.DiskSize, "text index must be skipped when tiered eviction is enabled (mmap)")
+	suite.Zero(usage.AdmissionMemorySize, "mmap text index has no loading-memory admission weight")
 }
 
 // --- estimateLogicalResourceUsageOfSegment tests ---
@@ -1385,4 +1449,30 @@ func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
 	suite.Run(t, &SegmentLoaderTextIndexEstimateSuite{})
+}
+
+func TestSegmentLoaderRunWithAdmission(t *testing.T) {
+	admission := newSegmentLoadAdmission(10)
+	loader := &segmentLoader{segmentLoadAdmission: admission}
+	releaseFirst, err := admission.acquire(context.Background(), 10, commonpb.LoadPriority_LOW)
+	require.NoError(t, err)
+
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- loader.runWithSegmentLoadAdmission(
+			context.Background(),
+			10,
+			commonpb.LoadPriority_LOW,
+			func() error {
+				close(started)
+				return nil
+			},
+		)
+	}()
+
+	requireAdmissionWaiters(t, admission, 1)
+	assert.Never(t, func() bool { return isClosed(started) }, 20*time.Millisecond, time.Millisecond)
+	releaseFirst()
+	require.NoError(t, <-result)
 }

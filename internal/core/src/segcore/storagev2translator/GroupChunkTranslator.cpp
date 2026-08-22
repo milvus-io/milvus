@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -46,7 +47,6 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -234,19 +234,14 @@ GroupChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-GroupChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    assert(cid < meta_.chunk_memory_size_.size());
-    auto cell_sz = meta_.chunk_memory_size_[cid];
-
-    if (use_mmap_) {
-        // why double the disk size for loading?
-        // during file writing, the temporary size could be larger than the final size
-        // so we need to reserve more space for the disk size.
-        return {{0, cell_sz}, {2 * cell_sz, 2 * cell_sz}};
-    } else {
-        return {{cell_sz, 0}, {2 * cell_sz, 0}};
-    }
+GroupChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    return EstimateGroupChunkLoadingUsage(
+        meta_.chunk_memory_size_,
+        cids,
+        use_mmap_,
+        GetCellBatchConcurrency(load_priority_),
+        kDefaultFieldDataLoadBatchTargetBytes);
 }
 
 const std::string&
@@ -333,22 +328,25 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
                               meta_.chunk_memory_size_[cid]});
     }
 
-    // Submit cell-batch loading tasks
-    auto& pool = milvus::ThreadPools::GetThreadPool(
-        milvus::PriorityForLoad(load_priority_));
-    auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
-        static_cast<size_t>(pool.GetMaxThreadNum() * 1.5));
+    // Submit cell-batch loading tasks. The same load-pool worker reads and
+    // finalizes every cell in its batch.
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
     auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
-    auto load_futures =
-        milvus::segcore::LoadCellBatchAsync(ctx,
-                                            std::move(cell_specs),
-                                            std::move(factory),
-                                            channel,
-                                            DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                            load_priority_);
+    auto finalize_cell =
+        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+               int64_t cid) {
+            return load_group_chunk(
+                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+        };
+    auto load_futures = milvus::segcore::LoadCellBatchAsync(
+        ctx,
+        std::move(cell_specs),
+        std::move(factory),
+        kDefaultFieldDataLoadBatchTargetBytes,
+        load_priority_,
+        std::move(finalize_cell));
 
     LOG_INFO(
         "[StorageV2] translator {} submits {} batch tasks for column group {}",
@@ -356,49 +354,44 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         load_futures.size(),
         column_group_info_.field_id);
 
-    // Pop loop — convert each cell immediately, no ArrowTable accumulation
     std::unordered_map<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>
         completed_cells;
     completed_cells.reserve(cids.size());
 
-    try {
-        std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
-        while (channel->pop(cell_data)) {
-            CheckCancellation(
-                ctx, segment_id_, "GroupChunkTranslator::get_cells()");
-            completed_cells[cell_data->cid] =
-                load_group_chunk(cell_data->tables, cell_data->cid);
-        }
-    } catch (...) {
-        // Drain the channel to unblock producers that may be stuck on push()
-        // to a full bounded channel. Without draining, producers block forever
-        // and their task_guard (which calls channel->close()) never executes.
-        std::shared_ptr<milvus::segcore::CellLoadResult> discard;
+    // Always join every task before returning so the finalizer's `this`
+    // capture cannot outlive the translator after an earlier task fails.
+    std::exception_ptr first_error = nullptr;
+    for (auto& future : load_futures) {
         try {
-            while (channel->pop(discard)) {
+            auto loaded_cells = future.get();
+            if (first_error) {
+                continue;
+            }
+            for (auto& loaded_cell : loaded_cells) {
+                try {
+                    CheckCancellation(
+                        ctx, segment_id_, "GroupChunkTranslator::get_cells()");
+                    AssertInfo(loaded_cell.chunk != nullptr,
+                               "[StorageV2] translator {} cell {} is not "
+                               "finalized by batch task",
+                               key_,
+                               loaded_cell.cid);
+                    completed_cells[loaded_cell.cid] =
+                        std::move(loaded_cell.chunk);
+                } catch (...) {
+                    first_error = std::current_exception();
+                    break;
+                }
             }
         } catch (...) {
-            LOG_WARN("drain channel exception swallowed");
+            if (!first_error) {
+                first_error = std::current_exception();
+            }
         }
-        try {
-            storage::WaitAllFutures(load_futures);
-        } catch (const std::exception& e) {
-            LOG_WARN(
-                "[StorageV2] translator {} cleanup ignored background load "
-                "exception after cancellation: {}",
-                key_,
-                e.what());
-        } catch (...) {
-            LOG_WARN(
-                "[StorageV2] translator {} cleanup ignored unknown background "
-                "load exception after cancellation",
-                key_);
-        }
-        throw;
     }
-
-    // access underlying future to get exception if any
-    storage::WaitAllFutures(load_futures);
+    if (first_error) {
+        std::rethrow_exception(first_error);
+    }
 
     for (auto cid : cids) {
         auto it = completed_cells.find(cid);

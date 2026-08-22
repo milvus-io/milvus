@@ -17,6 +17,7 @@
 #pragma once
 
 #include <marisa.h>
+#include <sys/mman.h>
 #include "index/StringIndex.h"
 #include <string>
 #include <vector>
@@ -31,6 +32,15 @@ class StringIndexMarisa : public StringIndex {
     explicit StringIndexMarisa(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
+
+    ~StringIndexMarisa() override {
+        if (str_ids_mmap_data_ != nullptr && str_ids_mmap_data_ != MAP_FAILED) {
+            munmap(str_ids_mmap_data_, str_ids_mmap_size_);
+        }
+        if (csr_mmap_data_ != nullptr && csr_mmap_data_ != MAP_FAILED) {
+            munmap(csr_mmap_data_, csr_mmap_size_);
+        }
+    }
 
     int64_t
     Size() override;
@@ -49,7 +59,7 @@ class StringIndexMarisa : public StringIndex {
 
     int64_t
     Count() override {
-        return str_ids_.size();
+        return str_ids_size_;
     }
 
     ScalarIndexType
@@ -151,8 +161,25 @@ class StringIndexMarisa : public StringIndex {
  private:
     Config config_;
     marisa::Trie trie_;
-    std::vector<int64_t> str_ids_;  // used to retrieve.
-    std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
+
+    // Maps row offset to trie key id. Memory loads own the vector; mmap loads
+    // point the accessor into the streamed side-entry file.
+    std::vector<int64_t> str_ids_;
+    const int64_t* str_ids_ptr_ = nullptr;
+    size_t str_ids_size_ = 0;
+    char* str_ids_mmap_data_ = nullptr;
+    int64_t str_ids_mmap_size_ = 0;
+    std::unique_ptr<MmapFileRAII> str_ids_mmap_raii_;
+
+    // CSR mapping from trie key id to row offsets.
+    std::vector<uint32_t> csr_index_;
+    std::vector<uint32_t> csr_offsets_;
+    const uint32_t* csr_index_ptr_ = nullptr;
+    const uint32_t* csr_offsets_ptr_ = nullptr;
+    size_t csr_num_keys_ = 0;
+    char* csr_mmap_data_ = nullptr;
+    int64_t csr_mmap_size_ = 0;
+    std::unique_ptr<MmapFileRAII> csr_mmap_raii_;
     bool built_ = false;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };

@@ -189,20 +189,25 @@ DefaultValueChunkTranslator::value_size() const {
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-DefaultValueChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
+DefaultValueChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
     // TODO: actually only the first cell is used, other cells share the same buffer,
     // but for now we estimate the same size for all cells
     auto value_size = this->value_size();
-    auto rows_begin = meta_.num_rows_until_chunk_[cid];
-    auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
-    auto rows = rows_end - rows_begin;
-    auto cell_bytes = value_size * rows;
-    if (use_mmap_) {
-        return {{0, cell_bytes}, {0, cell_bytes}};
-    } else {
-        return {{cell_bytes, 0}, {cell_bytes, 0}};
+    milvus::cachinglayer::ResourceUsage usage;
+    for (const auto cid : cids) {
+        AssertInfo(cid + 1 < meta_.num_rows_until_chunk_.size(),
+                   "cid out of range");
+        const auto rows_begin = meta_.num_rows_until_chunk_[cid];
+        const auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
+        const auto cell_bytes = value_size * (rows_end - rows_begin);
+        if (use_mmap_) {
+            usage.file_bytes += cell_bytes;
+        } else {
+            usage.memory_bytes += cell_bytes;
+        }
     }
+    return {usage, usage};
 }
 
 const std::string&
