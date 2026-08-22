@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"path"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -49,6 +51,82 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
+
+func TestCalculatePreAllocIDNum(t *testing.T) {
+	tests := []struct {
+		name             string
+		totalRows        int64
+		binlogNum        int64
+		expansion        int64
+		expectedNum      uint32
+		expectedError    error
+		errorContains    string
+		errorNotContains string
+	}{
+		{
+			name:        "normal",
+			totalRows:   100,
+			binlogNum:   11,
+			expansion:   10,
+			expectedNum: 11110,
+		},
+		{
+			name:        "expanded IDs exceed single batch",
+			totalRows:   78201209,
+			binlogNum:   11,
+			expansion:   10,
+			expectedNum: math.MaxUint32,
+		},
+		{
+			name:             "minimum required IDs exceed single batch",
+			totalRows:        math.MaxUint32 / 11,
+			binlogNum:        11,
+			expansion:        1,
+			expectedError:    merr.ErrParameterInvalid,
+			errorContains:    "required 4294967303, max 4294967295",
+			errorNotContains: "try reducing",
+		},
+		{
+			name:             "int64 rows cannot overflow calculation",
+			totalRows:        math.MaxInt64,
+			binlogNum:        11,
+			expansion:        10,
+			expectedError:    merr.ErrParameterInvalid,
+			errorContains:    "required 101457092405402533888, max 4294967295",
+			errorNotContains: "try reducing",
+		},
+		{
+			name:          "negative rows",
+			totalRows:     -1,
+			binlogNum:     11,
+			expansion:     10,
+			expectedError: merr.ErrServiceInternal,
+		},
+		{
+			name:          "non-positive expansion",
+			totalRows:     100,
+			binlogNum:     11,
+			expansion:     0,
+			expectedError: merr.ErrParameterInvalid,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			num, err := calculatePreAllocIDNum(test.totalRows, test.binlogNum, test.expansion)
+			if test.expectedError != nil {
+				require.ErrorIs(t, err, test.expectedError)
+				assert.ErrorContains(t, err, test.errorContains)
+				if test.errorNotContains != "" {
+					assert.NotContains(t, err.Error(), test.errorNotContains)
+				}
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, test.expectedNum, num)
+		})
+	}
+}
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
 	fileGroups := [][]*internalpb.ImportFile{
