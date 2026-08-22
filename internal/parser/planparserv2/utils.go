@@ -309,7 +309,12 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		"cannot cast value to %s: incompatible source type", dataType.String())
 }
 
-func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+// validateAndCastArithOperand casts operandExpr's literal value to
+// arithExprDataType (skipped for a templated operand, whose value is instead
+// validated once filled in by fill_expression_value.go) and enforces arithOp's
+// structural constraints: no division/modulus by a literal zero, and shift
+// amounts must fall in [0, 64).
+func validateAndCastArithOperand(arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, operandExpr *planpb.ValueExpr) (*planpb.GenericValue, error) {
 	var err error
 	operand := operandExpr.GetValue()
 	if !isTemplateExpr(operandExpr) {
@@ -333,6 +338,15 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 		if !IsInteger(operand) || operand.GetInt64Val() < 0 || operand.GetInt64Val() >= 64 {
 			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", operand.String())
 		}
+	}
+
+	return operand, nil
+}
+
+func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+	operand, err := validateAndCastArithOperand(arithOp, arithExprDataType, operandExpr)
+	if err != nil {
+		return nil, err
 	}
 
 	return &planpb.Expr{
@@ -366,22 +380,25 @@ func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 	}, nil
 }
 
-func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, arithExprDataType schemapb.DataType, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+// resolveArithLeaf matches arithExpr against the two supported "leaf" shapes
+// — "column op const" or "const op column" (the latter restricted to
+// Add/Mul, since arithmetic with the field on the right isn't otherwise
+// commutative-safe here) — and returns the pieces needed to build one
+// BinaryArithOpEvalRangeExpr layer. ok=false, err=nil means arithExpr isn't a
+// resolvable leaf (e.g. one operand is itself nested, or is another field):
+// the caller decides whether to attempt depth-2 nesting or reject outright.
+func resolveArithLeaf(arithExpr *planpb.BinaryArithExpr) (columnInfo *planpb.ColumnInfo, operand *planpb.ValueExpr, reverse bool, ok bool, err error) {
 	leftExpr, leftValue := arithExpr.Left.GetColumnExpr(), arithExpr.Left.GetValueExpr()
 	rightExpr, rightValue := arithExpr.Right.GetColumnExpr(), arithExpr.Right.GetValueExpr()
-	arithOp := arithExpr.GetOp()
-	if arithOp == planpb.ArithOpType_ArrayLength {
-		return combineArrayLengthExpr(op, arithOp, leftExpr.GetInfo(), valueExpr)
-	}
 
 	if leftExpr != nil && rightExpr != nil {
 		// a + b == 3
-		return nil, merr.WrapErrQueryPlanMsg("not supported to do arithmetic operations between multiple fields")
+		return nil, nil, false, false, merr.WrapErrQueryPlanMsg("not supported to do arithmetic operations between multiple fields")
 	}
 
 	if leftValue != nil && rightValue != nil {
 		// 2 + 1 == 3
-		return nil, merr.WrapErrQueryPlanMsg("unexpected, should be optimized already")
+		return nil, nil, false, false, merr.WrapErrQueryPlanMsg("unexpected, should be optimized already")
 	}
 
 	if leftExpr != nil && rightValue != nil {
@@ -390,22 +407,136 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		// a * 2 == 3
 		// a / 2 == 3
 		// a % 2 == 3
-		return combineBinaryArithExpr(op, arithOp, arithExprDataType, leftExpr.GetInfo(), rightValue, valueExpr)
-	} else if rightExpr != nil && leftValue != nil {
+		return leftExpr.GetInfo(), rightValue, false, true, nil
+	}
+
+	if rightExpr != nil && leftValue != nil {
 		// 2 + a == 3
 		// 2 - a == 3
 		// 2 * a == 3
 		// 2 / a == 3
 		// 2 % a == 3
-
 		switch arithExpr.GetOp() {
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
-			return combineBinaryArithExpr(op, arithOp, arithExprDataType, rightExpr.GetInfo(), leftValue, valueExpr)
+			return rightExpr.GetInfo(), leftValue, true, true, nil
+		default:
+			return nil, nil, false, false, merr.WrapErrQueryPlanMsg("module field is not yet supported")
+		}
+	}
+
+	// Neither side is a bare column/value pair — e.g. one side is itself a
+	// nested BinaryArithExpr. Not a leaf; not an error either.
+	return nil, nil, false, false, nil
+}
+
+// combineNestedBinaryArithExpr builds a depth-2 BinaryArithOpEvalRangeExpr:
+// ((column arithOp1 operand1) arithOp2 operand2) op value. innerArith is the
+// nested BinaryArithExpr found as one operand of the outer op; it must
+// itself resolve to a plain "column op const" leaf via resolveArithLeaf —
+// anything deeper (depth-3+), or field-to-field, falls back to the standard
+// rejection message below.
+//
+// arithExprDataType is arithOp2's cast target: identical in meaning to the
+// single-op case, since it's the fully-resolved result type of the whole
+// chain, computed once by the parser visitor (ExprWithType.dataType) and
+// threaded down unchanged regardless of nesting depth. arithOp1's own cast
+// target isn't preserved past the visitor (the inner ExprWithType is
+// discarded once its raw proto is embedded in the outer BinaryArithExpr), so
+// it's recomputed here via calcDataType exactly as the visitor would have
+// computed it for "column arithOp1 operand1" in isolation.
+func combineNestedBinaryArithExpr(
+	op planpb.OpType,
+	innerArith *planpb.BinaryArithExpr,
+	arithOp2 planpb.ArithOpType,
+	arithExprDataType schemapb.DataType,
+	operand2Expr *planpb.ValueExpr,
+	valueExpr *planpb.ValueExpr,
+) (*planpb.Expr, error) {
+	if innerArith.GetOp() == planpb.ArithOpType_ArrayLength {
+		// ArrayLength has no right_operand and doesn't fit the flat two-op
+		// shape; it stays fully separate via combineArrayLengthExpr.
+		return nil, merr.WrapErrQueryPlanMsg("complicated arithmetic operations are not supported")
+	}
+
+	columnInfo, operand1Expr, reverse, ok, err := resolveArithLeaf(innerArith)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		// The inner side is itself nested (depth-3+) or field-to-field.
+		return nil, merr.WrapErrQueryPlanMsg("complicated arithmetic operations are not supported")
+	}
+	arithOp1 := innerArith.GetOp()
+
+	arithExprDataType1 := columnInfo.GetDataType()
+	if !isTemplateExpr(operand1Expr) {
+		arithExprDataType1, err = calcDataType(toColumnExpr(columnInfo), toValueExpr(operand1Expr.GetValue()), reverse)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	operand1, err := validateAndCastArithOperand(arithOp1, arithExprDataType1, operand1Expr)
+	if err != nil {
+		return nil, err
+	}
+	operand2, err := validateAndCastArithOperand(arithOp2, arithExprDataType, operand2Expr)
+	if err != nil {
+		return nil, err
+	}
+
+	return &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
+			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
+				ColumnInfo:                   columnInfo,
+				ArithOp:                      arithOp1,
+				RightOperand:                 operand1,
+				ArithOp2:                     arithOp2,
+				RightOperand2:                operand2,
+				Op:                           op,
+				Value:                        valueExpr.GetValue(),
+				OperandTemplateVariableName:  operand1Expr.GetTemplateVariableName(),
+				Operand2TemplateVariableName: operand2Expr.GetTemplateVariableName(),
+				ValueTemplateVariableName:    valueExpr.GetTemplateVariableName(),
+			},
+		},
+		IsTemplate: isTemplateExpr(operand1Expr) || isTemplateExpr(operand2Expr) || isTemplateExpr(valueExpr),
+	}, nil
+}
+
+func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, arithExprDataType schemapb.DataType, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+	arithOp := arithExpr.GetOp()
+	if arithOp == planpb.ArithOpType_ArrayLength {
+		return combineArrayLengthExpr(op, arithOp, arithExpr.Left.GetColumnExpr().GetInfo(), valueExpr)
+	}
+
+	if columnInfo, operand, _, ok, err := resolveArithLeaf(arithExpr); err != nil {
+		return nil, err
+	} else if ok {
+		return combineBinaryArithExpr(op, arithOp, arithExprDataType, columnInfo, operand, valueExpr)
+	}
+
+	// Not a depth-1 leaf shape. Try depth-2: exactly one side of the top-level
+	// op is itself a BinaryArithExpr over a single field, the other side a
+	// constant. Anything else (depth-3+, field-to-field nested) falls through
+	// to the same rejection message depth-1 already used for these shapes.
+	leftNested, rightNested := arithExpr.Left.GetBinaryArithExpr(), arithExpr.Right.GetBinaryArithExpr()
+	leftValue, rightValue := arithExpr.Left.GetValueExpr(), arithExpr.Right.GetValueExpr()
+
+	switch {
+	case leftNested != nil && rightValue != nil:
+		// (a >> 2) & 1 == 1
+		return combineNestedBinaryArithExpr(op, leftNested, arithOp, arithExprDataType, rightValue, valueExpr)
+	case rightNested != nil && leftValue != nil:
+		// 1 & (a >> 2) == 1
+		switch arithOp {
+		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
+			return combineNestedBinaryArithExpr(op, rightNested, arithOp, arithExprDataType, leftValue, valueExpr)
 		default:
 			return nil, merr.WrapErrQueryPlanMsg("module field is not yet supported")
 		}
-	} else {
-		// (a + b) / 2 == 3
+	default:
+		// ((a >> 1) & 2) | 3 == 4, etc.
 		return nil, merr.WrapErrQueryPlanMsg("complicated arithmetic operations are not supported")
 	}
 }

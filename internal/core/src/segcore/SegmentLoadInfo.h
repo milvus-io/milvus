@@ -1092,7 +1092,6 @@ class SegmentLoadInfo {
         compact.set_flush_time(info_.flush_time());
         compact.set_num_of_rows(info_.num_of_rows());
         *compact.mutable_compactionfrom() = info_.compactionfrom();
-        compact.set_segment_size(info_.segment_size());
         compact.set_insert_channel(info_.insert_channel());
         compact.set_readableversion(info_.readableversion());
         compact.set_storageversion(info_.storageversion());

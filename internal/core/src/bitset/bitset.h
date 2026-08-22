@@ -1092,6 +1092,33 @@ class BitsetBase {
             this->data(), this->offset(), src, right_operand, value, size);
     }
 
+    // Depth-2 counterpart of inplace_arith_compare: composes two arithmetic
+    // ops before the comparison, ((src AOp1 right_operand1) AOp2
+    // right_operand2) CmpOp value. See ArithCompareOperator2 and
+    // op_arith_compare2 for the generic scalar implementation this currently
+    // always resolves to (no dedicated SIMD kernel yet).
+    template <typename T,
+              ArithOpType AOp1,
+              ArithOpType AOp2,
+              CompareOpType CmpOp>
+    void
+    inplace_arith_compare2(const T* const __restrict src,
+                           const ArithHighPrecisionType<T>& right_operand1,
+                           const ArithHighPrecisionType<T>& right_operand2,
+                           const ArithHighPrecisionType<T>& value,
+                           const size_t size) {
+        range_checker::le(size, this->size());
+
+        policy_type::template op_arith_compare2<T, AOp1, AOp2, CmpOp>(
+            this->data(),
+            this->offset(),
+            src,
+            right_operand1,
+            right_operand2,
+            value,
+            size);
+    }
+
     //
     // Inplace and. Also, counts the number of active bits.
     template <typename I, bool R>

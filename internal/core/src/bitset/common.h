@@ -184,6 +184,64 @@ struct ArithCompareOperator {
     }
 };
 
+// Applies a single arithmetic op to a value; used to compose two ops before
+// the final comparison in ArithCompareOperator2 below. Kept independent of
+// ArithCompareOperator's inlined per-op logic (rather than factoring that
+// logic out and sharing it) so the existing single-op hot path is untouched.
+template <ArithOpType AOp>
+struct ArithApplyOperator {
+    template <typename HighPrecisionType>
+    static inline HighPrecisionType
+    apply(const HighPrecisionType& left, const HighPrecisionType& right) {
+        if constexpr (AOp == ArithOpType::Add) {
+            return left + right;
+        } else if constexpr (AOp == ArithOpType::Sub) {
+            return left - right;
+        } else if constexpr (AOp == ArithOpType::Mul) {
+            return left * right;
+        } else if constexpr (AOp == ArithOpType::Div) {
+            return left / right;
+        } else if constexpr (AOp == ArithOpType::Mod) {
+            return HighPrecisionType(long(left) % long(right));
+        } else if constexpr (AOp == ArithOpType::BitAnd) {
+            return HighPrecisionType(long(left) & long(right));
+        } else if constexpr (AOp == ArithOpType::BitOr) {
+            return HighPrecisionType(long(left) | long(right));
+        } else if constexpr (AOp == ArithOpType::BitXor) {
+            return HighPrecisionType(long(left) ^ long(right));
+        } else if constexpr (AOp == ArithOpType::Shl) {
+            return HighPrecisionType(long(left) << long(right));
+        } else if constexpr (AOp == ArithOpType::Shr) {
+            return HighPrecisionType(long(left) >> long(right));
+        } else {
+            // unimplemented
+            static_assert(always_false_v<HighPrecisionType>, "unimplemented");
+        }
+    }
+};
+
+// Depth-2 counterpart of ArithCompareOperator: composes two arithmetic ops
+// before the final comparison, ((left AOp1 right1) AOp2 right2) CmpOp value.
+// This is the generic scalar path (no dedicated SIMD kernel) — see
+// BitsetBase::inplace_arith_compare2 and VectorizedT::op_arith_compare2,
+// which always falls back to this. Div/Mod-by-zero for either operand must
+// already be validated by the caller before compare() runs, matching
+// ArithCompareOperator's existing assumption for the single-op case.
+template <ArithOpType AOp1, ArithOpType AOp2, CompareOpType CmpOp>
+struct ArithCompareOperator2 {
+    template <typename T>
+    static inline bool
+    compare(const T& left,
+            const ArithHighPrecisionType<T>& right1,
+            const ArithHighPrecisionType<T>& right2,
+            const ArithHighPrecisionType<T>& value) {
+        auto intermediate = ArithApplyOperator<AOp1>::apply(
+            static_cast<ArithHighPrecisionType<T>>(left), right1);
+        auto result = ArithApplyOperator<AOp2>::apply(intermediate, right2);
+        return CompareOperator<CmpOp>::compare(result, value);
+    }
+};
+
 // This is related for a special handling of A/B vs C comparison.
 //   A multiplication operation is used instead of a division,
 //   and it is needed to invert signs and change comparison operators

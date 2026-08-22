@@ -970,6 +970,29 @@ struct ElementWiseBitsetPolicy {
                 });
     }
 
+    // Depth-2 counterpart of op_arith_compare (see ArithCompareOperator2).
+    template <typename T,
+              ArithOpType AOp1,
+              ArithOpType AOp2,
+              CompareOpType CmpOp>
+    static inline void
+    op_arith_compare2(data_type* const __restrict data,
+                      const size_t start,
+                      const T* const __restrict src,
+                      const ArithHighPrecisionType<T>& right_operand1,
+                      const ArithHighPrecisionType<T>& right_operand2,
+                      const ArithHighPrecisionType<T>& value,
+                      const size_t size) {
+        op_func(
+            data,
+            start,
+            size,
+            [src, right_operand1, right_operand2, value](const size_t bit_idx) {
+                return ArithCompareOperator2<AOp1, AOp2, CmpOp>::compare(
+                    src[bit_idx], right_operand1, right_operand2, value);
+            });
+    }
+
     //
     static inline size_t
     op_and_with_count(data_type* const left,
