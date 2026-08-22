@@ -49,7 +49,8 @@ ENV MALLOC_CONF=background_thread:true
 ENV ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     mkdir -p /var/lib/milvus && \
-    chown -R milvus:milvus /milvus /var/lib/milvus
+    chown -R milvus:milvus /milvus /var/lib/milvus && \
+    chmod -R 755 /var/lib/milvus
 ENV ASAN_OPTIONS=detect_leaks=1:detect_container_overflow=0
 USER milvus:milvus
 
