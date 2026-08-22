@@ -398,7 +398,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	for _, field := range collSchema.Fields {
-		if skipFunction && typeutil.IsBM25FunctionOutputField(field, collSchema) {
+		if skipFunction && isEmbeddingFunctionOutputField(field, collSchema) {
 			continue
 		}
 
@@ -525,6 +525,10 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	return idata, nil
+}
+
+func isEmbeddingFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	return typeutil.IsBM25FunctionOutputField(field, collSchema)
 }
 
 // ColumnBasedInsertMsgToInsertData converts an InsertMsg msg into InsertData based
@@ -883,9 +887,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 
 	handleFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
-		if typeutil.IsBM25FunctionOutputField(field, collSchema) {
-			// Newer producers may materialize BM25 output before appending to WAL.
-			// Keep the column when present, while still accepting legacy messages that omit it.
+		if isEmbeddingFunctionOutputField(field, collSchema) {
 			if _, ok := srcFields[field.GetFieldID()]; !ok {
 				return nil, nil
 			}
@@ -1759,7 +1761,8 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	for _, field := range allFields {
-		// Skip function output fields and system fields
+		// Preserve 2.6 behavior for function outputs that are materialized by
+		// other paths, while BM25 is handled before WAL append.
 		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
 			continue
 		}
